@@ -111,15 +111,6 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) override;
 
     Status
-    DeleteVector(const std::string& collection_id, IDNumber vector_id) override;
-
-    Status
-    DeleteEntity(const std::string& collection_id, IDNumber entity_id) override;
-
-    Status
-    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) override;
-
-    Status
     DeleteEntities(const std::string& collection_id, IDNumbers entity_ids) override;
 
     Status

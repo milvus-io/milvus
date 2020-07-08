@@ -101,15 +101,6 @@ class DB {
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) = 0;
 
     virtual Status
-    DeleteVector(const std::string& collection_id, IDNumber vector_id) = 0;
-
-    virtual Status
-    DeleteEntity(const std::string& collection_id, IDNumber entity_id) = 0;
-
-    virtual Status
-    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) = 0;
-
-    virtual Status
     DeleteEntities(const std::string& collection_id, IDNumbers entity_ids) = 0;
 
     virtual Status

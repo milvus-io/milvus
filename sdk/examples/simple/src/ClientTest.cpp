@@ -27,7 +27,7 @@ const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 constexpr int64_t COLLECTION_DIMENSION = 512;
 constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ENTITY_COUNT = 10000;
+constexpr int64_t BATCH_ENTITY_COUNT = 6000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
@@ -91,6 +91,8 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
     milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
     milvus::FieldPtr field_ptr3 = std::make_shared<milvus::Field>();
+    milvus::FieldPtr field_ptr4 = std::make_shared<milvus::Field>();
+
     field_ptr1->field_name = "field_1";
     field_ptr1->field_type = milvus::DataType::INT64;
     JSON index_param_1;
@@ -103,19 +105,25 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     index_param_2["name"] = "index_2";
     field_ptr2->index_params = index_param_2.dump();
 
-    field_ptr3->field_name = "field_vec";
-    field_ptr3->field_type = milvus::DataType::FLOAT_VECTOR;
+    field_ptr3->field_name = "field_3";
+    field_ptr3->field_type = milvus::DataType::INT8;
     JSON index_param_3;
     index_param_3["name"] = "index_3";
-    index_param_3["index_type"] = "IVFFLAT";
     field_ptr3->index_params = index_param_3.dump();
-    JSON extra_params_3;
-    extra_params_3["dimension"] = COLLECTION_DIMENSION;
-    field_ptr3->extra_params = extra_params_3.dump();
+
+    field_ptr4->field_name = "field_vec";
+    field_ptr4->field_type = milvus::DataType::FLOAT_VECTOR;
+    JSON index_param_4;
+    index_param_4["name"] = "index_3";
+    index_param_4["index_type"] = "IVFFLAT";
+    field_ptr4->index_params = index_param_4.dump();
+    JSON extra_params_4;
+    extra_params_4["dimension"] = COLLECTION_DIMENSION;
+    field_ptr4->extra_params = extra_params_4.dump();
 
     JSON extra_params;
     extra_params["segment_size"] = 1024;
-    milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr3}};
+    milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr3, field_ptr4}};
 
     milvus::Status stat = conn_->CreateCollection(mapping, extra_params.dump());
     std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
@@ -138,6 +146,7 @@ ClientTest::InsertEntities(const std::string& collection_name) {
                                              COLLECTION_DIMENSION);
         }
         milvus::Status status = conn_->Insert(collection_name, "", field_value, entity_ids);
+        search_id_array_.emplace_back(entity_ids[10]);
         std::cout << "InsertEntities function call status: " << status.message() << std::endl;
         std::cout << "Returned id array count: " << entity_ids.size() << std::endl;
     }
@@ -322,11 +331,8 @@ ClientTest::Test() {
     Flush(collection_name);
     GetCollectionStats(collection_name);
 
-    BuildVectors(NQ, COLLECTION_DIMENSION);
+    //    BuildVectors(NQ, COLLECTION_DIMENSION);
     GetEntityByID(collection_name, search_id_array_);
-    SearchEntities(collection_name, TOP_K, NPROBE);
-
-    //    CreateIndex(collection_name, NLIST);
     //    SearchEntities(collection_name, TOP_K, NPROBE);
     GetCollectionStats(collection_name);
 
