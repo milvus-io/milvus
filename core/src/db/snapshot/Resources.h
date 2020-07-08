@@ -34,6 +34,8 @@ static const json JEmpty = {};
 
 class MappingsField {
  public:
+    static constexpr const char * Name = "mappings";
+
     explicit MappingsField(MappingT mappings = {}) : mappings_(std::move(mappings)) {
     }
 
@@ -52,6 +54,8 @@ class MappingsField {
 
 class StateField {
  public:
+    static constexpr const char * Name = "state";
+
     explicit StateField(State state = PENDING) : state_(state) {
     }
 
@@ -94,6 +98,8 @@ class StateField {
 
 class LsnField {
  public:
+    static constexpr const char * Name = "lsn";
+
     explicit LsnField(LSN_TYPE lsn = 0) : lsn_(lsn) {
     }
 
@@ -113,6 +119,8 @@ class LsnField {
 
 class CreatedOnField {
  public:
+    static constexpr const char * Name = "created_on";
+
     explicit CreatedOnField(TS_TYPE created_on = GetMicroSecTimeStamp()) : created_on_(created_on) {
     }
 
@@ -127,6 +135,8 @@ class CreatedOnField {
 
 class UpdatedOnField {
  public:
+    static constexpr const char * Name = "updated_on";
+
     explicit UpdatedOnField(TS_TYPE updated_on = GetMicroSecTimeStamp()) : updated_on_(updated_on) {
     }
 
@@ -141,6 +151,8 @@ class UpdatedOnField {
 
 class IdField {
  public:
+    static constexpr const char * Name = "id";
+
     explicit IdField(ID_TYPE id) : id_(id) {
     }
 
@@ -163,6 +175,8 @@ class IdField {
 
 class CollectionIdField {
  public:
+    static constexpr const char * Name = "collection_id";
+
     explicit CollectionIdField(ID_TYPE id) : collection_id_(id) {
     }
 
@@ -177,6 +191,8 @@ class CollectionIdField {
 
 class SchemaIdField {
  public:
+    static constexpr const char * Name = "schema_id";
+
     explicit SchemaIdField(ID_TYPE id) : schema_id_(id) {
     }
 
@@ -195,6 +211,8 @@ class SchemaIdField {
 
 class NumField {
  public:
+    static constexpr const char * Name = "num";
+
     explicit NumField(NUM_TYPE num) : num_(num) {
     }
 
@@ -213,6 +231,8 @@ class NumField {
 
 class FtypeField {
  public:
+    static constexpr const char * Name = "ftype";
+
     explicit FtypeField(FTYPE_TYPE type) : ftype_(type) {
     }
 
@@ -227,6 +247,8 @@ class FtypeField {
 
 class FieldIdField {
  public:
+    static constexpr const char * Name = "field_id";
+
     explicit FieldIdField(ID_TYPE id) : field_id_(id) {
     }
 
@@ -241,6 +263,8 @@ class FieldIdField {
 
 class FieldElementIdField {
  public:
+    static constexpr const char * Name = "field_element_id";
+
     explicit FieldElementIdField(ID_TYPE id) : field_element_id_(id) {
     }
 
@@ -255,6 +279,8 @@ class FieldElementIdField {
 
 class PartitionIdField {
  public:
+    static constexpr const char * Name = "partition_id";
+
     explicit PartitionIdField(ID_TYPE id) : partition_id_(id) {
     }
 
@@ -269,6 +295,8 @@ class PartitionIdField {
 
 class SegmentIdField {
  public:
+    static constexpr const char * Name = "segment_id";
+
     explicit SegmentIdField(ID_TYPE id) : segment_id_(id) {
     }
 
@@ -283,6 +311,8 @@ class SegmentIdField {
 
 class NameField {
  public:
+    static constexpr const char * Name = "name";
+
     explicit NameField(std::string name) : name_(std::move(name)) {
     }
 
@@ -297,6 +327,8 @@ class NameField {
 
 class ParamsField {
  public:
+    static constexpr const char * Name = "params";
+
     explicit ParamsField(const json& params) : params_(params) {
     }
 
@@ -311,6 +343,8 @@ class ParamsField {
 
 class SizeField {
  public:
+    static constexpr const char * Name = "size";
+
     explicit SizeField(SIZE_TYPE size) : size_(size) {
     }
 
@@ -330,6 +364,8 @@ class SizeField {
 
 class RowCountField {
  public:
+    static constexpr const char * Name = "row_count";
+
     explicit RowCountField(SIZE_TYPE size) : size_(size) {
     }
 
