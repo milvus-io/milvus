@@ -14,7 +14,9 @@
 #include "db/meta/FilesHolder.h"
 #include "db/snapshot/Snapshot.h"
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 
 namespace milvus {
@@ -32,6 +34,80 @@ class SnapshotVisitor {
  protected:
     snapshot::ScopedSnapshotT ss_;
     Status status_;
+};
+
+class SegmentFileVisitor {
+ public:
+    using Ptr = std::shared_ptr<SegmentFileVisitor>;
+
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_file_id);
+
+    SegmentFileVisitor() = default;
+
+    const snapshot::SegmentFilePtr
+    GetFile() const {
+        return file_;
+    }
+    const snapshot::FieldPtr
+    GetField() const {
+        return field_;
+    }
+    const snapshot::FieldElementPtr
+    GetFieldElement() const {
+        return field_element_;
+    }
+
+    void
+    SetFile(snapshot::SegmentFilePtr file) {
+        file_ = file;
+    }
+    void
+    SetField(snapshot::FieldPtr field) {
+        field_ = field;
+    }
+    void
+    SetFieldElement(snapshot::FieldElementPtr field_element) {
+        field_element_ = field_element;
+    }
+
+ protected:
+    snapshot::SegmentFilePtr file_;
+    snapshot::FieldPtr field_;
+    snapshot::FieldElementPtr field_element_;
+};
+
+class SegmentVisitor {
+ public:
+    using Ptr = std::shared_ptr<SegmentVisitor>;
+    using FileT = typename SegmentFileVisitor::Ptr;
+    using FilesMapT = std::map<snapshot::ID_TYPE, FileT>;
+
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id);
+    SegmentVisitor() = default;
+
+    const FilesMapT&
+    GetSegmentFiles() const {
+        return files_map_;
+    }
+    const snapshot::SegmentPtr&
+    GetSegment() const {
+        return segment_;
+    }
+
+    void
+    SetSegment(snapshot::SegmentPtr segment) {
+        segment_ = segment;
+    }
+    void
+    InsertSegmentFile(FileT segment_file) {
+        files_map_[segment_file->GetFile()->GetID()] = segment_file;
+    }
+
+ protected:
+    snapshot::SegmentPtr segment_;
+    FilesMapT files_map_;
 };
 
 }  // namespace engine
