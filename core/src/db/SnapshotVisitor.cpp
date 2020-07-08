@@ -13,6 +13,7 @@
 #include "db/SnapshotHandlers.h"
 #include "db/meta/MetaTypes.h"
 #include "db/snapshot/Snapshots.h"
+#include <sstream>
 
 namespace milvus {
 namespace engine {
@@ -36,6 +37,51 @@ SnapshotVisitor::SegmentsToSearch(meta::FilesHolder& files_holder) {
     handler->Iterate();
 
     return handler->GetStatus();
+}
+
+SegmentFileVisitor::Ptr
+SegmentFileVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_file_id) {
+    if (!ss) {
+        return nullptr;
+    }
+
+    auto file = ss->GetResource<snapshot::SegmentFile>(segment_file_id);
+    if (!file) {
+        return nullptr;
+    }
+
+    auto visitor = std::make_shared<SegmentFileVisitor>();
+    visitor->SetFile(file);
+    auto field_element = ss->GetResource<snapshot::FieldElement>(file->GetFieldElementId());
+    auto field = ss->GetResource<snapshot::Field>(field_element->GetFieldId());
+    visitor->SetField(field);
+    visitor->SetFieldElement(field_element);
+    return visitor;
+}
+
+SegmentVisitor::Ptr
+SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id) {
+    if (!ss) {
+        return nullptr;
+    }
+    auto segment = ss->GetResource<snapshot::Segment>(segment_id);
+    if (!segment) {
+        return nullptr;
+    }
+
+    auto visitor = std::make_shared<SegmentVisitor>();
+    visitor->SetSegment(segment);
+
+    auto& file_ids = ss->GetSegmentFileIds(segment_id);
+    for (auto id : file_ids) {
+        auto file_visitor = SegmentFileVisitor::Build(ss, id);
+        if (!file_visitor) {
+            return nullptr;
+        }
+        visitor->InsertSegmentFile(file_visitor);
+    }
+
+    return visitor;
 }
 
 }  // namespace engine

@@ -107,6 +107,15 @@ class Snapshot : public ReferenceProxy {
         return GetResources<CollectionCommit>().cbegin()->second.Get();
     }
 
+    const std::set<ID_TYPE>&
+    GetSegmentFileIds(ID_TYPE segment_id) const {
+        auto it = seg_segfiles_map_.find(segment_id);
+        if (it == seg_segfiles_map_.end()) {
+            return empty_set_;
+        }
+        return it->second;
+    }
+
     ID_TYPE
     GetLatestSchemaCommitId() const {
         return latest_schema_commit_id_;
@@ -325,11 +334,13 @@ class Snapshot : public ReferenceProxy {
     std::map<std::string, ID_TYPE> partition_names_map_;
     std::map<std::string, std::map<std::string, ID_TYPE>> field_element_names_map_;
     std::map<ID_TYPE, std::map<ID_TYPE, ID_TYPE>> element_segfiles_map_;
+    std::map<ID_TYPE, std::set<ID_TYPE>> seg_segfiles_map_;
     std::map<ID_TYPE, ID_TYPE> seg_segc_map_;
     std::map<ID_TYPE, ID_TYPE> p_pc_map_;
     ID_TYPE latest_schema_commit_id_ = 0;
     std::map<ID_TYPE, NUM_TYPE> p_max_seg_num_;
     LSN_TYPE max_lsn_;
+    std::set<ID_TYPE> empty_set_;
 };
 
 using GCHandler = std::function<void(Snapshot::Ptr)>;
