@@ -120,22 +120,6 @@ struct PartitionCollector : public IteratePartitionHandler {
     std::vector<std::string> partition_names_;
 };
 
-using SegmentExecutorT = std::function<Status(const Segment::Ptr&, IterateSegmentHandler*)>;
-struct SegmentCollector : public IterateSegmentHandler {
-    using ResourceT = Segment;
-    using BaseT = IterateSegmentHandler;
-
-    explicit SegmentCollector(ScopedSnapshotT ss, const SegmentExecutorT& executor)
-        : BaseT(ss), executor_(executor) {}
-
-    Status
-    Handle(const typename ResourceT::Ptr& segment) override {
-        return executor_(segment, this);
-    }
-
-    SegmentExecutorT executor_;
-};
-
 using FilterT = std::function<bool(SegmentFile::Ptr)>;
 struct SegmentFileCollector : public IterateSegmentFileHandler {
     using ResourceT = SegmentFile;
