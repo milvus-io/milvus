@@ -203,7 +203,28 @@ def gen_binary_entities(nb):
     return raw_vectors, entities
 
 
+def gen_entities_by_fields(fields, nb, dimension):
+    entities = []
+    for field in fields:
+        if field["type"] in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]:
+            field_value = [1 for i in range(nb)]
+        elif field["type"] in [DataType.FLOAT, DataType.DOUBLE]:
+            field_value = [3.0 for i in range(nb)]
+        elif field["type"] == DataType.BINARY_VECTOR:
+            field_value = gen_binary_vectors(nb, dimension)[1]
+        elif field["type"] == DataType.VECTOR:
+            field_value = gen_vectors(nb, dimension)
+        field.update({"values": field_value})
+        entities.append(field)
+    return entities
+
+
+def assert_equal_entity(a, b):
+    pass
+
+
 def add_field(entities):
+    nb = len(entities[0]["values"])
     field = {
         "field": gen_unique_str(), 
         "type": DataType.INT8, 
@@ -214,6 +235,7 @@ def add_field(entities):
 
 
 def add_vector_field(entities, is_normal=False):
+    nb = len(entities[0]["values"])
     vectors = gen_vectors(nb, dimension, is_normal)
     field = {
         "field": gen_unique_str(), 
@@ -575,7 +597,9 @@ def gen_simple_index():
     ]
     index_params = []
     for i in range(len(all_index_types)):
-        index_params.append({"index_type": all_index_types[i], "params": params[i]})
+        dic = {"index_type": all_index_types[i]}
+        dic.update(params[i])
+        index_params.append(dic)
     return index_params
 
 
