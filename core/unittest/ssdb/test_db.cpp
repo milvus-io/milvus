@@ -18,6 +18,9 @@
 #include <algorithm>
 
 #include "ssdb/utils.h"
+#include "db/SnapshotVisitor.h"
+
+using SegmentVisitor = milvus::engine::SegmentVisitor;
 
 milvus::Status
 CreateCollection(std::shared_ptr<SSDBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
@@ -199,4 +202,62 @@ TEST_F(SSDBTest, IndexTest) {
             ASSERT_NE(kv.second->GetID(), field_element_id);
         }
     }
+}
+
+TEST_F(SSDBTest, VisitorTest) {
+    LSN_TYPE lsn = 0;
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
+
+    std::string c1 = "c1";
+    auto status = CreateCollection(db_, c1, next_lsn());
+    ASSERT_TRUE(status.ok());
+
+    std::stringstream p_name;
+    auto num = RandomInt(1, 3);
+    for (auto i = 0; i < num; ++i) {
+        p_name.str("");
+        p_name << "partition_" << i;
+        status = db_->CreatePartition(c1, p_name.str());
+        ASSERT_TRUE(status.ok());
+    }
+
+    ScopedSnapshotT ss;
+    status = Snapshots::GetInstance().GetSnapshot(ss, c1);
+    ASSERT_TRUE(status.ok());
+
+    SegmentFileContext sf_context;
+    SFContextBuilder(sf_context, ss);
+
+    auto new_total = 0;
+    auto& partitions = ss->GetResources<Partition>();
+    for (auto& kv : partitions) {
+        num = RandomInt(1, 3);
+        for (auto i = 0; i < num; ++i) {
+            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context).ok());
+        }
+        new_total += num;
+    }
+
+    status = Snapshots::GetInstance().GetSnapshot(ss, c1);
+    ASSERT_TRUE(status.ok());
+
+    auto executor = [&] (const Segment::Ptr& segment, IterateSegmentHandler* handler) -> Status {
+        auto visitor = SegmentVisitor::Build(ss, segment->GetID());
+        if (!visitor) {
+            return Status(milvus::SS_ERROR, "Cannot build segment visitor");
+        }
+        auto& files_map = visitor->GetSegmentFiles();
+        for (auto& kv : files_map) {
+            std::cout << "segment " << segment->GetID() << " segment_file_id " << kv.first << std::endl;
+            std::cout << "element name is " << kv.second->GetFieldElement()->GetName() << std::endl;
+        }
+        return Status::OK();
+    };
+
+    auto segment_handler = std::make_shared<SegmentCollector>(ss, executor);
+    segment_handler->Iterate();
+    std::cout << segment_handler->GetStatus().ToString() << std::endl;
+    ASSERT_TRUE(segment_handler->GetStatus().ok());
 }
