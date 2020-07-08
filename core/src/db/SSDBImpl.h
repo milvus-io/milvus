@@ -103,17 +103,6 @@ class SSDBImpl {
                 engine::QueryResult& result);
 
  private:
-    Status
-    GetPartitionsByTags(const std::string& collection_name, const std::vector<std::string>& partition_patterns,
-                        std::set<std::string>& partition_names);
-
-    Status
-    HybridQueryAsync(const server::ContextPtr& context, const std::string& collection_name,
-                     meta::FilesHolder& files_holder, query::GeneralQueryPtr general_query, query::QueryPtr query_ptr,
-                     std::vector<std::string>& field_names,
-                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                     engine::QueryResult& result);
-
     void
     InternalFlush(const std::string& collection_id = "");
 
