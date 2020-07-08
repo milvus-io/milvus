@@ -32,7 +32,8 @@ enum class DataType {
     FLOAT = 40,
     DOUBLE = 41,
 
-    VECTOR = 100,
+    FLOAT_VECTOR = 100,
+    BINARY_VECTOR = 101,
     UNKNOWN = 9999,
 };
 
@@ -41,9 +42,8 @@ struct Field {
     uint64_t field_id;              ///< read-only
     std::string field_name;
     DataType field_type;
-    std::string index_name;
-    std::string index_param;
-    std::string extram_params;
+    std::string index_params;
+    std::string extra_params;
 };
 using FieldPtr = std::shared_ptr<Field>;
 

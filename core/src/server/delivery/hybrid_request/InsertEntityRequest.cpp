@@ -139,6 +139,7 @@ InsertEntityRequest::OnExecute() {
 
         entity.attr_value_ = attr_values_;
         entity.vector_data_.insert(std::make_pair(vector_datas_it->first, vector_datas_it->second));
+        entity.id_array_ = std::move(vector_datas_it->second.id_array_);
 
         rc.RecordSection("prepare vectors data");
         status = DBWrapper::DB()->InsertEntities(collection_name_, partition_tag_, field_names_, entity, field_types);

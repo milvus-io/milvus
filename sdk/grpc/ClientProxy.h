@@ -51,7 +51,7 @@ class ClientProxy : public Connection {
     SetConfig(const std::string& node_name, const std::string& value) const override;
 
     Status
-    CreateCollection(const std::string& collection_name, std::vector<FieldPtr>& fields) override;
+    CreateCollection(const Mapping& mapping, const std::string& extra_params) override;
 
     bool
     HasCollection(const std::string& collection_name) override;
@@ -60,8 +60,7 @@ class ClientProxy : public Connection {
     DropCollection(const std::string& collection_name) override;
 
     Status
-    CreateIndex(const std::string& collection_name, const std::string& field_name, const std::string& index_name,
-                const std::string& index_params) override;
+    CreateIndex(const IndexParam& index_param) override;
 
     Status
     Insert(const std::string& collection_name, const std::string& partition_tag, const FieldValue& entity_array,
@@ -76,11 +75,15 @@ class ClientProxy : public Connection {
                     std::vector<int64_t>& id_array) override;
 
     Status
+    Search(const std::string& collection_name, const std::vector<std::string>& partition_list, const std::string& dsl,
+           const VectorParam& vector_param, TopKQueryResult& query_result) override;
+
+    Status
     SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
              BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) override;
 
     Status
-    GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) override;
+    GetCollectionInfo(const std::string& collection_name, Mapping& mapping) override;
 
     Status
     CountEntities(const std::string& collection_name, int64_t& entity_count) override;
@@ -101,7 +104,8 @@ class ClientProxy : public Connection {
     GetIndexInfo(const std::string& collection_name, IndexParam& index_param) const override;
 
     Status
-    DropIndex(const std::string& collection_name) const override;
+    DropIndex(const std::string& collection_name, const std::string& field_name,
+              const std::string& index_name) const override;
 
     Status
     CreatePartition(const PartitionParam& partition_param) override;

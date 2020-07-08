@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -62,7 +63,7 @@ class DB {
     HasNativeCollection(const std::string& collection_id, bool& has_or_not) = 0;
 
     virtual Status
-    AllCollections(std::vector<meta::CollectionSchema>& table_schema_array) = 0;
+    AllCollections(std::vector<std::string>& names) = 0;
 
     virtual Status
     GetCollectionInfo(const std::string& collection_id, std::string& collection_info) = 0;
@@ -100,10 +101,7 @@ class DB {
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) = 0;
 
     virtual Status
-    DeleteVector(const std::string& collection_id, IDNumber vector_id) = 0;
-
-    virtual Status
-    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) = 0;
+    DeleteEntities(const std::string& collection_id, IDNumbers entity_ids) = 0;
 
     virtual Status
     Flush(const std::string& collection_id) = 0;

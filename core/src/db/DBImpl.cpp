@@ -334,19 +334,20 @@ DBImpl::HasNativeCollection(const std::string& collection_id, bool& has_or_not) 
 }
 
 Status
-DBImpl::AllCollections(std::vector<meta::CollectionSchema>& collection_schema_array) {
+DBImpl::AllCollections(std::vector<std::string>& names) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
+
+    names.clear();
 
     std::vector<meta::CollectionSchema> all_collections;
     auto status = meta_ptr_->AllCollections(all_collections);
 
     // only return real collections, dont return partition collections
-    collection_schema_array.clear();
     for (auto& schema : all_collections) {
         if (schema.owner_collection_.empty()) {
-            collection_schema_array.push_back(schema);
+            names.push_back(schema.collection_id_);
         }
     }
 
@@ -788,8 +789,8 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(int8_t));
 
-                std::vector<int64_t> attr_value(row_num, 0);
-                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+                std::vector<int32_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int32_t));
 
                 std::vector<int8_t> raw_value(row_num, 0);
                 for (uint64_t i = 0; i < row_num; ++i) {
@@ -801,15 +802,15 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
 
                 attr_nbytes.insert(std::make_pair(name, sizeof(int8_t)));
                 attr_data_size.insert(std::make_pair(name, row_num * sizeof(int8_t)));
-                offset += row_num * sizeof(int64_t);
+                offset += row_num * sizeof(int32_t);
                 break;
             }
             case meta::hybrid::DataType::INT16: {
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(int16_t));
 
-                std::vector<int64_t> attr_value(row_num, 0);
-                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+                std::vector<int32_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int32_t));
 
                 std::vector<int16_t> raw_value(row_num, 0);
                 for (uint64_t i = 0; i < row_num; ++i) {
@@ -821,27 +822,22 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
 
                 attr_nbytes.insert(std::make_pair(name, sizeof(int16_t)));
                 attr_data_size.insert(std::make_pair(name, row_num * sizeof(int16_t)));
-                offset += row_num * sizeof(int64_t);
+                offset += row_num * sizeof(int32_t);
                 break;
             }
             case meta::hybrid::DataType::INT32: {
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(int32_t));
 
-                std::vector<int64_t> attr_value(row_num, 0);
-                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int64_t));
+                std::vector<int32_t> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(int32_t));
 
-                std::vector<int32_t> raw_value(row_num, 0);
-                for (uint64_t i = 0; i < row_num; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), row_num * sizeof(int32_t));
+                memcpy(data.data(), attr_value.data(), row_num * sizeof(int32_t));
                 attr_datas.insert(std::make_pair(name, data));
 
                 attr_nbytes.insert(std::make_pair(name, sizeof(int32_t)));
                 attr_data_size.insert(std::make_pair(name, row_num * sizeof(int32_t)));
-                offset += row_num * sizeof(int64_t);
+                offset += row_num * sizeof(int32_t);
                 break;
             }
             case meta::hybrid::DataType::INT64: {
@@ -862,20 +858,15 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
                 std::vector<uint8_t> data;
                 data.resize(row_num * sizeof(float));
 
-                std::vector<double> attr_value(row_num, 0);
-                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(double));
+                std::vector<float> attr_value(row_num, 0);
+                memcpy(attr_value.data(), record.data() + offset, row_num * sizeof(float));
 
-                std::vector<float> raw_value(row_num, 0);
-                for (uint64_t i = 0; i < row_num; ++i) {
-                    raw_value[i] = attr_value[i];
-                }
-
-                memcpy(data.data(), raw_value.data(), row_num * sizeof(float));
+                memcpy(data.data(), attr_value.data(), row_num * sizeof(float));
                 attr_datas.insert(std::make_pair(name, data));
 
                 attr_nbytes.insert(std::make_pair(name, sizeof(float)));
                 attr_data_size.insert(std::make_pair(name, row_num * sizeof(float)));
-                offset += row_num * sizeof(double);
+                offset += row_num * sizeof(float);
                 break;
             }
             case meta::hybrid::DataType::DOUBLE: {
@@ -973,51 +964,43 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
         record.partition_tag = partition_tag;
         record.ids = entity.id_array_.data();
         record.length = entity.entity_count_;
+        record.attr_data = attr_data;
+        record.attr_nbytes = attr_nbytes;
+        record.attr_data_size = attr_data_size;
 
         auto vector_it = entity.vector_data_.begin();
         if (vector_it->second.binary_data_.empty()) {
-            record.type = wal::MXLogType::Entity;
+            record.type = wal::MXLogType::InsertVector;
             record.data = vector_it->second.float_data_.data();
             record.data_size = vector_it->second.float_data_.size() * sizeof(float);
-            record.attr_data = attr_data;
-            record.attr_nbytes = attr_nbytes;
-            record.attr_data_size = attr_data_size;
         } else {
-            //        record.type = wal::MXLogType::InsertBinary;
-            //        record.data = entities.vector_data_[0].binary_data_.data();
-            //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
+            record.type = wal::MXLogType::InsertBinary;
+            record.data = vector_it->second.binary_data_.data();
+            record.data_size = vector_it->second.binary_data_.size() * sizeof(uint8_t);
         }
 
         status = ExecWalRecord(record);
     }
-
     return status;
 }
 
 Status
-DBImpl::DeleteVector(const std::string& collection_id, IDNumber vector_id) {
-    IDNumbers ids;
-    ids.push_back(vector_id);
-    return DeleteVectors(collection_id, ids);
-}
-
-Status
-DBImpl::DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) {
+DBImpl::DeleteEntities(const std::string& collection_id, milvus::engine::IDNumbers entity_ids) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     Status status;
     if (options_.wal_enable_) {
-        wal_mgr_->DeleteById(collection_id, vector_ids);
+        wal_mgr_->DeleteById(collection_id, entity_ids);
         swn_wal_.Notify();
     } else {
         wal::MXLogRecord record;
         record.lsn = 0;  // need to get from meta ?
         record.type = wal::MXLogType::Delete;
         record.collection_id = collection_id;
-        record.ids = vector_ids.data();
-        record.length = vector_ids.size();
+        record.ids = entity_ids.data();
+        record.length = entity_ids.size();
 
         status = ExecWalRecord(record);
     }
@@ -1050,6 +1033,10 @@ DBImpl::Flush(const std::string& collection_id) {
         if (lsn != 0) {
             swn_wal_.Notify();
             flush_req_swn_.Wait();
+        } else {
+            // no collection flushed, call merge task to cleanup files
+            std::set<std::string> merge_collection_ids;
+            StartMergeTask(merge_collection_ids);
         }
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
@@ -1077,6 +1064,10 @@ DBImpl::Flush() {
         if (lsn != 0) {
             swn_wal_.Notify();
             flush_req_swn_.Wait();
+        } else {
+            // no collection flushed, call merge task to cleanup files
+            std::set<std::string> merge_collection_ids;
+            StartMergeTask(merge_collection_ids);
         }
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
@@ -1357,7 +1348,7 @@ DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::
         return status;
     }
     std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
-    for (auto schema : fields_schema.fields_schema_) {
+    for (const auto& schema : fields_schema.fields_schema_) {
         if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::FLOAT_VECTOR ||
             schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::BINARY_VECTOR) {
             continue;
@@ -1667,27 +1658,27 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
                             size_t num_bytes;
                             switch (attr_it->second) {
                                 case engine::meta::hybrid::DataType::INT8: {
-                                    num_bytes = 1;
+                                    num_bytes = sizeof(int8_t);
                                     break;
                                 }
                                 case engine::meta::hybrid::DataType::INT16: {
-                                    num_bytes = 2;
+                                    num_bytes = sizeof(int16_t);
                                     break;
                                 }
                                 case engine::meta::hybrid::DataType::INT32: {
-                                    num_bytes = 4;
+                                    num_bytes = sizeof(int32_t);
                                     break;
                                 }
                                 case engine::meta::hybrid::DataType::INT64: {
-                                    num_bytes = 8;
+                                    num_bytes = sizeof(int64_t);
                                     break;
                                 }
                                 case engine::meta::hybrid::DataType::FLOAT: {
-                                    num_bytes = 4;
+                                    num_bytes = sizeof(float);
                                     break;
                                 }
                                 case engine::meta::hybrid::DataType::DOUBLE: {
-                                    num_bytes = 8;
+                                    num_bytes = sizeof(double);
                                     break;
                                 }
                                 default: {
@@ -1737,10 +1728,11 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
         if (data.vector_count_ > 0) {
             data.float_data_ = vector_ref.float_data_;    // copy data since there could be duplicated id
             data.binary_data_ = vector_ref.binary_data_;  // copy data since there could be duplicated id
-        }
-        vectors.emplace_back(data);
+            data.id_array_.emplace_back(id);
+            vectors.emplace_back(data);
 
-        attrs.emplace_back(map_id2attr[id]);
+            attrs.emplace_back(map_id2attr[id]);
+        }
     }
 
     if (vectors.empty()) {
@@ -3048,7 +3040,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     auto collections_flushed = [&](const std::string collection_id,
                                    const std::set<std::string>& target_collection_names) -> uint64_t {
         uint64_t max_lsn = 0;
-        if (options_.wal_enable_) {
+        if (options_.wal_enable_ && !target_collection_names.empty()) {
             uint64_t lsn = 0;
             for (auto& collection : target_collection_names) {
                 meta_ptr_->GetCollectionFlushLSN(collection, lsn);
@@ -3067,16 +3059,11 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         return max_lsn;
     };
 
-    auto partition_flushed = [&](const std::string& collection_id, const std::string& partition,
-                                 const std::string& target_collection_name) {
-        if (options_.wal_enable_) {
-            uint64_t lsn = 0;
-            meta_ptr_->GetCollectionFlushLSN(target_collection_name, lsn);
-            wal_mgr_->PartitionFlushed(collection_id, partition, lsn);
+    auto force_flush_if_mem_full = [&]() -> uint64_t {
+        if (mem_mgr_->GetCurrentMem() > options_.insert_buffer_size_) {
+            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force flush";
+            InternalFlush();
         }
-
-        std::set<std::string> merge_collection_ids = {target_collection_name};
-        StartMergeTask(merge_collection_ids);
     };
 
     Status status;
@@ -3090,15 +3077,12 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            std::set<std::string> flushed_collections;
-            status = mem_mgr_->InsertEntities(target_collection_name, record.length, record.ids,
-                                              (record.data_size / record.length / sizeof(float)),
-                                              (const float*)record.data, record.attr_nbytes, record.attr_data_size,
-                                              record.attr_data, record.lsn, flushed_collections);
-            if (!flushed_collections.empty()) {
-                partition_flushed(record.collection_id, record.partition_tag, target_collection_name);
-            }
+            status = mem_mgr_->InsertEntities(
+                target_collection_name, record.length, record.ids, (record.data_size / record.length / sizeof(float)),
+                (const float*)record.data, record.attr_nbytes, record.attr_data_size, record.attr_data, record.lsn);
+            force_flush_if_mem_full();
 
+            // metrics
             milvus::server::CollectInsertMetrics metrics(record.length, status);
             break;
         }
@@ -3110,14 +3094,17 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            std::set<std::string> flushed_collections;
-            status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
-                                             (record.data_size / record.length / sizeof(uint8_t)),
-                                             (const u_int8_t*)record.data, record.lsn, flushed_collections);
-            // even though !status.ok, run
-            if (!flushed_collections.empty()) {
-                partition_flushed(record.collection_id, record.partition_tag, target_collection_name);
-            }
+            Vectors vectors;
+            vectors.vector_type_ = Vectors::BINARY;
+            vectors.binary_vector = (const uint8_t*)record.data;
+            status = mem_mgr_->InsertEntities(target_collection_name, record.length, record.ids,
+                                              (record.data_size / record.length / sizeof(uint8_t)), vectors,
+                                              record.attr_nbytes, record.attr_data_size, record.attr_data, record.lsn);
+
+            //            status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
+            //                                             (record.data_size / record.length / sizeof(uint8_t)),
+            //                                             (const u_int8_t*)record.data, record.lsn);
+            force_flush_if_mem_full();
 
             // metrics
             milvus::server::CollectInsertMetrics metrics(record.length, status);
@@ -3132,14 +3119,17 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            std::set<std::string> flushed_collections;
-            status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
-                                             (record.data_size / record.length / sizeof(float)),
-                                             (const float*)record.data, record.lsn, flushed_collections);
-            // even though !status.ok, run
-            if (!flushed_collections.empty()) {
-                partition_flushed(record.collection_id, record.partition_tag, target_collection_name);
-            }
+            Vectors vectors;
+            vectors.vector_type_ = Vectors::FLOAT;
+            vectors.float_vector = (const float*)record.data;
+            status = mem_mgr_->InsertEntities(target_collection_name, record.length, record.ids,
+                                              (record.data_size / record.length / sizeof(float)), vectors,
+                                              record.attr_nbytes, record.attr_data_size, record.attr_data, record.lsn);
+
+            //            status = mem_mgr_->InsertVectors(target_collection_name, record.length, record.ids,
+            //                                             (record.data_size / record.length / sizeof(float)),
+            //                                             (const float*)record.data, record.lsn);
+            force_flush_if_mem_full();
 
             // metrics
             milvus::server::CollectInsertMetrics metrics(record.length, status);
@@ -3200,11 +3190,6 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                         break;
                     }
                     flushed_collections.insert(collection_id);
-
-                    //                    status = FlushAttrsIndex(collection_id);
-                    //                    if (!status.ok()) {
-                    //                        return status;
-                    //                    }
                 }
 
                 collections_flushed(record.collection_id, flushed_collections);
@@ -3253,6 +3238,7 @@ DBImpl::BackgroundWalThread() {
         next_auto_flush_time = get_next_auto_flush_time();
     }
 
+    InternalFlush();
     while (true) {
         if (options_.auto_flush_interval_ > 0) {
             if (std::chrono::system_clock::now() >= next_auto_flush_time) {

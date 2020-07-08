@@ -75,7 +75,8 @@ CreateIndexRequest::OnExecute() {
 
         int32_t index_type;
         if (json_params_.contains("index_type")) {
-            index_type = json_params_["index_type"].get<int32_t>();
+            auto index_type_str = json_params_["index_type"].get<std::string>();
+            index_type = (int32_t)engine::s_map_engine_type.at(index_type_str);
         }
 
         status = ValidateCollectionIndexType(index_type);

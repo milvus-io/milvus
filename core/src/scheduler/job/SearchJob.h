@@ -136,6 +136,11 @@ class SearchJob : public Job {
         return vector_count_;
     }
 
+    milvus::json&
+    vector_params() {
+        return extra_params_;
+    }
+
     SearchTimeStat&
     time_stat() {
         return time_stat_;

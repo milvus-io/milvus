@@ -93,17 +93,19 @@ HybridSearchRequest::OnExecute() {
                 std::make_pair(field_schema.field_name_, (engine::meta::hybrid::DataType)field_schema.field_type_));
         }
 
-        if (json_params.contains("field_names")) {
-            if (json_params["field_names"].is_array()) {
-                for (auto& name : json_params["field_names"]) {
+        if (json_params.contains("fields")) {
+            if (json_params["fields"].is_array()) {
+                for (auto& name : json_params["fields"]) {
                     field_names_.emplace_back(name.get<std::string>());
                 }
             }
-        } else {
-            for (auto& field_schema : fields_schema.fields_schema_) {
-                field_names_.emplace_back(field_schema.field_name_);
-            }
         }
+
+        //        if (field_names_.empty()) {
+        //            for (const auto& field : fields_schema.fields_schema_) {
+        //                field_names_.emplace_back(field.field_name_);
+        //            }
+        //        }
 
         status = DBWrapper::DB()->HybridQuery(context_, collection_name_, partition_list_, general_query_, query_ptr_,
                                               field_names_, attr_type, result_);

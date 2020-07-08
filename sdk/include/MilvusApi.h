@@ -61,16 +61,6 @@ struct ConnectParam {
 };
 
 /**
- * @brief Collection parameters
- */
-struct CollectionParam {
-    std::string collection_name;              ///< Collection_name name
-    int64_t dimension = 0;                    ///< Vector dimension, must be a positive value
-    int64_t index_file_size = 1024;           ///< Index file size, must be a positive value, unit: MB
-    MetricType metric_type = MetricType::L2;  ///< Index metric type
-};
-
-/**
  * @brief Attribute record
  */
 struct AttrRecord {
@@ -90,6 +80,14 @@ struct FieldValue {
     std::unordered_map<std::string, std::vector<float>> float_value;
     std::unordered_map<std::string, std::vector<double>> double_value;
     std::unordered_map<std::string, std::vector<VectorData>> vector_value;
+};
+
+/**
+ * @brief Vector parameters
+ */
+struct VectorParam {
+    std::string json_param;
+    std::vector<VectorData> vector_records;
 };
 
 /**
@@ -139,8 +137,7 @@ using PartitionTagList = std::vector<std::string>;
 
 struct Mapping {
     std::string collection_name;
-    std::vector<FieldPtr> numerica_fields;
-    std::vector<VectorFieldPtr> vector_fields;
+    std::vector<FieldPtr> fields;
 };
 
 /**
@@ -285,7 +282,7 @@ class Connection {
      * @return Indicate if collection is created successfully
      */
     virtual Status
-    CreateCollection(const std::string& collection_name, std::vector<FieldPtr>& fields) = 0;
+    CreateCollection(const Mapping& mapping, const std::string& extra_params) = 0;
 
     /**
      * @brief Test collection existence method
@@ -324,8 +321,7 @@ class Connection {
      * @return Indicate if create index successfully.
      */
     virtual Status
-    CreateIndex(const std::string& collection_name, const std::string& field_name, const std::string& index_name,
-                const std::string& index_params) = 0;
+    CreateIndex(const IndexParam& index_param) = 0;
 
     /**
      * @brief Insert entity to collection
@@ -401,7 +397,7 @@ class Connection {
      */
     virtual Status
     Search(const std::string& collection_name, const std::vector<std::string>& partition_list, const std::string& dsl,
-           const std::string& vector_param, const FieldValue& field_value, TopKQueryResult& query_result) = 0;
+           const VectorParam& vector_param, TopKQueryResult& query_result) = 0;
 
     virtual Status
     SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
@@ -418,7 +414,7 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) = 0;
+    GetCollectionInfo(const std::string& collection_name, Mapping& mapping) = 0;
 
     /**
      * @brief Get collection entity count
@@ -506,7 +502,8 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DropIndex(const std::string& collection_name) const = 0;
+    DropIndex(const std::string& collection_name, const std::string& field_name,
+              const std::string& index_name) const = 0;
 
     /**
      * @brief Create partition method

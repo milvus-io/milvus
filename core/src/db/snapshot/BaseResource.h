@@ -20,12 +20,10 @@ namespace milvus::engine::snapshot {
 
 class BaseResource : public ReferenceProxy {
  public:
-    [[nodiscard]] virtual std::string
+    virtual std::string
     ToString() const {
         return std::string();
     }
-
-    ~BaseResource() override = default;
 };
 
 using BaseResourcePtr = std::shared_ptr<BaseResource>;

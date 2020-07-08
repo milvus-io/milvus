@@ -8,11 +8,24 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2487 Remove timeout when creating collection in dev test
 -   \#2532 Fix Milvus docker image report illegal instruction
 -   \#2551 Fix test_hybrid_db and test_rpc error
--   \#2557 fix random crash of INSERT_DUPLICATE_ID case
+-   \#2557 Fix random crash of INSERT_DUPLICATE_ID case
 -   \#2578 Result count doesn't match target vectors count
 -   \#2582 CreateHybridIndex.cpp compile error
--   \#2598 fix Milvus docker image report illegal instruction
+-   \#2598 Fix Milvus docker image report illegal instruction
 -   \#2617 Fix HNSW and RNSG index files size
+-   \#2637 Suit the range of HNSW parameters
+-   \#2649 Search parameter of annoy has conflict with document
+-   \#2693 Collection create success if no dimension value provided
+-   \#2694 Collection create success if an invalid field name provided
+-   \#2695 The number of fields should be limited
+-   \#2696 Check the validity of the parameters of creating collection: segment_size
+-   \#2697 Index can not be created
+-   \#2698 Count entities got wrong result with binary vectors
+-   \#2728 Index type name should returned if index type is not supported
+-   \#2731 No entity returned with `get_entity_by_id`
+-   \#2732 Server destroyed after `delete by id`
+-   \#2733 The max value of top-k should be limited
+-   \#2765 Server crashed when calling `get_entity_by_id`
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
@@ -25,6 +38,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2544 Optimize unittest build
 -   \#2561 Clean util dependencies with other modules
 -   \#2612 Move all APIs in utils into namespace milvus 
+-   \#2675 Print out system memory size when report invalid cpu cache size 
 
 ## Task
 
@@ -51,8 +65,6 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2495 Add creating lock file failure reason.
 -   \#2516 Improve unit test coverage
 -   \#2548 Upgrade mishards for milvus v0.10.0
-
-## Task
 
 # Milvus 0.9.1 (2020-05-29)
 

@@ -293,7 +293,7 @@ class Store {
     template <class T, class F>
     inline void
     register_any_visitor(F const& f) {
-        std::cout << "Register visitor for type " << std::quoted(typeid(T).name()) << '\n';
+        /* std::cout << "Register visitor for type " << std::quoted(typeid(T).name()) << '\n'; */
         any_flush_vistors_.insert(to_any_visitor<T>(f));
     }
 
@@ -397,7 +397,7 @@ class Store {
                 std::stringstream fname;
                 fname << "f_" << fi << "_" << std::get<Index<Field::MapT, MockResourcesT>::value>(ids_) + 1;
                 FieldPtr field;
-                CreateResource<Field>(Field(fname.str(), fi), field);
+                CreateResource<Field>(Field(fname.str(), fi, FieldType::VECTOR), field);
                 all_records.push_back(field);
                 MappingT f_c_m = {};
 
@@ -435,7 +435,7 @@ class Store {
                 MappingT p_c_m;
                 for (auto si = 1; si <= random_segments; ++si) {
                     SegmentPtr s;
-                    CreateResource<Segment>(Segment(p->GetID(), si), s);
+                    CreateResource<Segment>(Segment(c->GetID(), p->GetID(), si), s);
                     all_records.push_back(s);
                     auto& schema_m = schema->GetMappings();
                     MappingT s_c_m;
@@ -444,7 +444,8 @@ class Store {
                         auto& f_c_m = field_commit->GetMappings();
                         for (auto field_element_id : f_c_m) {
                             SegmentFilePtr sf;
-                            CreateResource<SegmentFile>(SegmentFile(p->GetID(), s->GetID(), field_commit_id), sf);
+                            CreateResource<SegmentFile>(
+                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_commit_id), sf);
                             all_records.push_back(sf);
 
                             s_c_m.insert(sf->GetID());

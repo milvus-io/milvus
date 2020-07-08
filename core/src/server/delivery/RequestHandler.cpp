@@ -325,7 +325,7 @@ RequestHandler::InsertEntity(const std::shared_ptr<Context>& context, const std:
 
 Status
 RequestHandler::GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                              const std::vector<std::string>& field_names, const std::vector<int64_t>& ids,
+                              std::vector<std::string>& field_names, const std::vector<int64_t>& ids,
                               std::vector<engine::AttrsData>& attrs, std::vector<engine::VectorsData>& vectors) {
     BaseRequestPtr request_ptr =
         GetEntityByIDRequest::Create(context, collection_name, field_names, ids, attrs, vectors);

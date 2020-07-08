@@ -77,8 +77,8 @@ ConnectionImpl::SetConfig(const std::string& node_name, const std::string& value
 }
 
 Status
-ConnectionImpl::CreateCollection(const std::string& collection_name, std::vector<FieldPtr>& fields) {
-    return client_proxy_->CreateCollection(collection_name, fields);
+ConnectionImpl::CreateCollection(const Mapping& mapping, const std::string& extra_params) {
+    return client_proxy_->CreateCollection(mapping, extra_params);
 }
 
 bool
@@ -92,9 +92,8 @@ ConnectionImpl::DropCollection(const std::string& collection_name) {
 }
 
 Status
-ConnectionImpl::CreateIndex(const std::string& collection_name, const std::string& field_name,
-                            const std::string& index_name, const std::string& index_params) {
-    return client_proxy_->CreateIndex(collection_name, field_name, index_name, index_params);
+ConnectionImpl::CreateIndex(const IndexParam& index_param) {
+    return client_proxy_->CreateIndex(index_param);
 }
 
 Status
@@ -117,9 +116,8 @@ ConnectionImpl::ListIDInSegment(const std::string& collection_name, const std::s
 
 Status
 ConnectionImpl::Search(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                       const std::string& dsl, const std::string& vector_param, const FieldValue& field_value,
-                       TopKQueryResult& query_result) {
-    return client_proxy_->Search(collection_name, partition_list, dsl, vector_param, field_value, query_result);
+                       const std::string& dsl, const VectorParam& vector_param, TopKQueryResult& query_result) {
+    return client_proxy_->Search(collection_name, partition_list, dsl, vector_param, query_result);
 }
 
 Status
@@ -129,8 +127,8 @@ ConnectionImpl::SearchPB(const std::string& collection_name, const std::vector<s
 }
 
 Status
-ConnectionImpl::GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_schema) {
-    return client_proxy_->GetCollectionInfo(collection_name, collection_schema);
+ConnectionImpl::GetCollectionInfo(const std::string& collection_name, Mapping& mapping) {
+    return client_proxy_->GetCollectionInfo(collection_name, mapping);
 }
 
 Status
@@ -164,8 +162,9 @@ ConnectionImpl::GetIndexInfo(const std::string& collection_name, IndexParam& ind
 }
 
 Status
-ConnectionImpl::DropIndex(const std::string& collection_name) const {
-    return client_proxy_->DropIndex(collection_name);
+ConnectionImpl::DropIndex(const std::string& collection_name, const std::string& field_name,
+                          const std::string& index_name) const {
+    return client_proxy_->DropIndex(collection_name, field_name, index_name);
 }
 
 Status

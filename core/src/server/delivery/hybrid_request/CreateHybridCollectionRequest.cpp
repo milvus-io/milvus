@@ -36,7 +36,8 @@ CreateHybridCollectionRequest::CreateHybridCollectionRequest(
       collection_name_(collection_name),
       field_types_(field_types),
       field_index_params_(field_index_params),
-      field_params_(field_params) {
+      field_params_(field_params),
+      extra_params_(extra_params) {
 }
 
 BaseRequestPtr
@@ -75,6 +76,11 @@ CreateHybridCollectionRequest::OnExecute() {
         for (auto& field_type : field_types_) {
             engine::meta::hybrid::FieldSchema schema;
             auto field_name = field_type.first;
+            status = ValidateFieldName(field_name);
+            if (!status.ok()) {
+                return status;
+            }
+
             auto index_params = field_index_params_.at(field_name);
             schema.collection_id_ = collection_name_;
             schema.field_name_ = field_name;
@@ -93,6 +99,9 @@ CreateHybridCollectionRequest::OnExecute() {
                 vector_param = milvus::json::parse(field_param);
                 if (vector_param.contains("dimension")) {
                     dimension = vector_param["dimension"].get<uint16_t>();
+                } else {
+                    return Status{milvus::SERVER_INVALID_VECTOR_DIMENSION,
+                                  "Dimension should be defined in vector field extra_params"};
                 }
             }
         }
@@ -100,7 +109,12 @@ CreateHybridCollectionRequest::OnExecute() {
         collection_info.collection_id_ = collection_name_;
         collection_info.dimension_ = dimension;
         if (extra_params_.contains("segment_size")) {
-            collection_info.index_file_size_ = extra_params_["segment_size"].get<int64_t>();
+            auto segment_size = extra_params_["segment_size"].get<int64_t>();
+            collection_info.index_file_size_ = segment_size;
+            status = ValidateCollectionIndexFileSize(segment_size);
+            if (!status.ok()) {
+                return status;
+            }
         }
 
         if (vector_param.contains("metric_type")) {

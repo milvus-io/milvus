@@ -11,42 +11,45 @@
 
 #pragma once
 
-#include <string>
+#include <gtest/gtest.h>
+#include <random>
 #include <memory>
-#include <utility>
-#include <vector>
 
-#include <MilvusApi.h>
+#include "db/SSDBImpl.h"
 
-class ClientTest {
- public:
-    ClientTest(const std::string&, const std::string&);
-    ~ClientTest();
+inline int
+RandomInt(int start, int end) {
+    std::random_device dev;
+    std::mt19937 rng(dev());
+    std::uniform_int_distribution<std::mt19937::result_type> dist(start, end);
+    return dist(rng);
+}
+
+class BaseTest : public ::testing::Test {
+ protected:
+    void
+    InitLog();
 
     void
-    TestHybrid();
-
- private:
+    SetUp() override;
     void
-    CreateHybridCollection(const std::string& collection_name);
+    TearDown() override;
+};
+
+class SnapshotTest : public BaseTest {
+ protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+class SSDBTest : public BaseTest {
+ protected:
+    std::shared_ptr<milvus::engine::SSDBImpl> db_;
 
     void
-    Flush(const std::string&);
-
+    SetUp() override;
     void
-    InsertHybridEntities(std::string&, int64_t);
-
-    void
-    HybridSearchPB(std::string&);
-
-    void
-    HybridSearch(std::string&);
-
-    void
-    GetHEntityByID(const std::string&, const std::vector<int64_t>&);
-
- private:
-    std::shared_ptr<milvus::Connection> conn_;
-    std::vector<std::pair<int64_t, milvus::Entity>> search_entity_array_;
-    std::vector<int64_t> search_id_array_;
+    TearDown() override;
 };

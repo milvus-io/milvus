@@ -72,7 +72,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     HasNativeCollection(const std::string& collection_id, bool& has_or_not_) override;
 
     Status
-    AllCollections(std::vector<meta::CollectionSchema>& collection_schema_array) override;
+    AllCollections(std::vector<std::string>& names) override;
 
     Status
     GetCollectionInfo(const std::string& collection_id, std::string& collection_info) override;
@@ -111,10 +111,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) override;
 
     Status
-    DeleteVector(const std::string& collection_id, IDNumber vector_id) override;
-
-    Status
-    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) override;
+    DeleteEntities(const std::string& collection_id, IDNumbers entity_ids) override;
 
     Status
     Flush(const std::string& collection_id) override;
