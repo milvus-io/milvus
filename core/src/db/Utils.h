@@ -17,6 +17,7 @@
 #include "Options.h"
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
+#include "db/snapshot/Resources.h"
 
 namespace milvus {
 namespace engine {
@@ -81,6 +82,9 @@ ExitOnWriteError(Status& status);
 
 void
 EraseFromCache(const std::string& item_key);
+
+Status
+CreateSegmentPath(const snapshot::SegmentPtr& segment, const DBOptions& options, std::string& segment_path);
 
 }  // namespace utils
 }  // namespace engine

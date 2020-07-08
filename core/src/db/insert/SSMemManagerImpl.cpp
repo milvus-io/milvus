@@ -14,14 +14,14 @@
 #include <fiu-local.h>
 #include <thread>
 
-#include "VectorSource.h"
+#include "SSVectorSource.h"
 #include "db/Constants.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
 
-SSMemTablePtr
+SSMemCollectionPtr
 SSMemManagerImpl::GetMemByTable(int64_t collection_id, int64_t partition_id) {
     auto mem_collection = mem_map_.find(collection_id);
     if (mem_collection != mem_map_.end()) {
@@ -31,14 +31,14 @@ SSMemManagerImpl::GetMemByTable(int64_t collection_id, int64_t partition_id) {
         }
     }
 
-    auto mem = std::make_shared<SSMemTable>(collection_id, partition_id, options_);
+    auto mem = std::make_shared<SSMemCollection>(collection_id, partition_id, options_);
     mem_map_[collection_id][partition_id] = mem;
     return mem;
 }
 
-std::vector<SSMemTablePtr>
+std::vector<SSMemCollectionPtr>
 SSMemManagerImpl::GetMemByTable(int64_t collection_id) {
-    std::vector<SSMemTablePtr> result;
+    std::vector<SSMemCollectionPtr> result;
     auto mem_collection = mem_map_.find(collection_id);
     if (mem_collection != mem_map_.end()) {
         for (auto& pair : mem_collection->second) {
@@ -73,7 +73,7 @@ SSMemManagerImpl::InsertVectors(int64_t collection_id, int64_t partition_id, int
     memcpy(vectors_data.binary_data_.data(), vectors, length * dim * sizeof(uint8_t));
     vectors_data.id_array_.resize(length);
     memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
-    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data);
+    SSVectorSourcePtr source = std::make_shared<SSVectorSource>(vectors_data);
 
     std::unique_lock<std::mutex> lock(mutex_);
 
@@ -93,7 +93,7 @@ SSMemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, in
     vectors_data.id_array_.resize(length);
     memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
 
-    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data, attr_nbytes, attr_size, attr_data);
+    SSVectorSourcePtr source = std::make_shared<SSVectorSource>(vectors_data, attr_nbytes, attr_size, attr_data);
 
     std::unique_lock<std::mutex> lock(mutex_);
 
@@ -101,9 +101,9 @@ SSMemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, in
 }
 
 Status
-SSMemManagerImpl::InsertVectorsNoLock(int64_t collection_id, int64_t partition_id, const VectorSourcePtr& source,
+SSMemManagerImpl::InsertVectorsNoLock(int64_t collection_id, int64_t partition_id, const SSVectorSourcePtr& source,
                                       uint64_t lsn) {
-    SSMemTablePtr mem = GetMemByTable(collection_id, partition_id);
+    SSMemCollectionPtr mem = GetMemByTable(collection_id, partition_id);
     mem->SetLSN(lsn);
 
     auto status = mem->Add(source);
@@ -112,8 +112,8 @@ SSMemManagerImpl::InsertVectorsNoLock(int64_t collection_id, int64_t partition_i
 
 Status
 SSMemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id,
-                                       const milvus::engine::VectorSourcePtr& source, uint64_t lsn) {
-    SSMemTablePtr mem = GetMemByTable(collection_id, partition_id);
+                                       const milvus::engine::SSVectorSourcePtr& source, uint64_t lsn) {
+    SSMemCollectionPtr mem = GetMemByTable(collection_id, partition_id);
     mem->SetLSN(lsn);
 
     auto status = mem->AddEntities(source);
@@ -123,7 +123,7 @@ SSMemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_
 Status
 SSMemManagerImpl::DeleteVector(int64_t collection_id, IDNumber vector_id, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
-    std::vector<SSMemTablePtr> mems = GetMemByTable(collection_id);
+    std::vector<SSMemCollectionPtr> mems = GetMemByTable(collection_id);
 
     for (auto& mem : mems) {
         mem->SetLSN(lsn);
@@ -139,7 +139,7 @@ SSMemManagerImpl::DeleteVector(int64_t collection_id, IDNumber vector_id, uint64
 Status
 SSMemManagerImpl::DeleteVectors(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
-    std::vector<SSMemTablePtr> mems = GetMemByTable(collection_id);
+    std::vector<SSMemCollectionPtr> mems = GetMemByTable(collection_id);
 
     for (auto& mem : mems) {
         mem->SetLSN(lsn);

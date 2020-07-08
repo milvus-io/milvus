@@ -23,7 +23,7 @@
 #include "config/Config.h"
 #include "config/handler/CacheConfigHandler.h"
 #include "db/insert/SSMemManager.h"
-#include "db/insert/SSMemTable.h"
+#include "db/insert/SSMemCollection.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -32,9 +32,9 @@ namespace engine {
 class SSMemManagerImpl : public SSMemManager, public server::CacheConfigHandler {
  public:
     using Ptr = std::shared_ptr<SSMemManagerImpl>;
-    using MemPartitionMap = std::map<int64_t, SSMemTablePtr>;
+    using MemPartitionMap = std::map<int64_t, SSMemCollectionPtr>;
     using MemCollectionMap = std::map<int64_t, MemPartitionMap>;
-    using MemList = std::vector<SSMemTablePtr>;
+    using MemList = std::vector<SSMemCollectionPtr>;
 
     explicit SSMemManagerImpl(const DBOptions& options) : options_(options) {
         SetIdentity("SSMemManagerImpl");
@@ -87,17 +87,17 @@ class SSMemManagerImpl : public SSMemManager, public server::CacheConfigHandler 
     OnInsertBufferSizeChanged(int64_t value) override;
 
  private:
-    SSMemTablePtr
+    SSMemCollectionPtr
     GetMemByTable(int64_t collection_id, int64_t partition_id);
 
-    std::vector<SSMemTablePtr>
+    std::vector<SSMemCollectionPtr>
     GetMemByTable(int64_t collection_id);
 
     Status
-    InsertVectorsNoLock(int64_t collection_id, int64_t partition_id, const VectorSourcePtr& source, uint64_t lsn);
+    InsertVectorsNoLock(int64_t collection_id, int64_t partition_id, const SSVectorSourcePtr& source, uint64_t lsn);
 
     Status
-    InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const VectorSourcePtr& source, uint64_t lsn);
+    InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const SSVectorSourcePtr& source, uint64_t lsn);
 
     Status
     ToImmutable();

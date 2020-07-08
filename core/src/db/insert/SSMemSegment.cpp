@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/insert/SSMemTableFile.h"
+#include "db/insert/SSMemSegment.h"
 
 #include <algorithm>
 #include <cmath>
@@ -20,6 +20,9 @@
 #include "db/Constants.h"
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
+#include "db/snapshot/Operations.h"
+#include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/Snapshots.h"
 #include "metrics/Metrics.h"
 #include "segment/SegmentReader.h"
 #include "utils/Log.h"
@@ -27,16 +30,13 @@
 namespace milvus {
 namespace engine {
 
-SSMemTableFile::SSMemTableFile(int64_t collection_id, int64_t partition_id, const DBOptions& options)
+SSMemSegment::SSMemSegment(int64_t collection_id, int64_t partition_id, const DBOptions& options)
     : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
     current_mem_ = 0;
-    auto status = CreateCollectionFile();
+    auto status = CreateSegment();
     if (status.ok()) {
-        /*execution_engine_ = EngineFactory::Build(
-            table_file_schema_.dimension_, table_file_schema_.location_, (EngineType)table_file_schema_.engine_type_,
-            (MetricType)table_file_schema_.metric_type_, table_file_schema_.nlist_);*/
         std::string directory;
-        utils::GetParentPath(table_file_schema_.location_, directory);
+        utils::CreateSegmentPath(segment_, options_, directory);
         segment_writer_ptr_ = std::make_shared<segment::SegmentWriter>(directory);
     }
 
@@ -45,22 +45,30 @@ SSMemTableFile::SSMemTableFile(int64_t collection_id, int64_t partition_id, cons
 }
 
 Status
-SSMemTableFile::CreateCollectionFile() {
-    // TODO: implement this
-    //    meta::SegmentSchema table_file_schema;
-    //    table_file_schema.collection_id_ = collection_id_;
-    //    auto status = meta_->CreateCollectionFile(table_file_schema);
-    //    if (status.ok()) {
-    //        table_file_schema_ = table_file_schema;
-    //    } else {
-    //        std::string err_msg = "SSMemTableFile::CreateCollectionFile failed: " + status.ToString();
-    //        LOG_ENGINE_ERROR_ << err_msg;
-    //    }
-    //    return status;
+SSMemSegment::CreateSegment() {
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
+    if (!status.ok()) {
+        std::string err_msg = "SSMemTableFile::CreateSegment failed: " + status.ToString();
+        LOG_ENGINE_ERROR_ << err_msg;
+        return status;
+    }
+
+    snapshot::OperationContext context;
+    context.prev_partition = ss->GetResource<snapshot::Partition>(partition_id_);
+    auto op = std::make_shared<snapshot::NewSegmentOperation>(context, ss);
+    status = op->CommitNewSegment(segment_);
+    if (!status.ok()) {
+        std::string err_msg = "SSMemTableFile::CreateSegment failed: " + status.ToString();
+        LOG_ENGINE_ERROR_ << err_msg;
+        return status;
+    }
+
+    return status;
 }
 
 Status
-SSMemTableFile::Add(const VectorSourcePtr& source) {
+SSMemSegment::Add(const SSVectorSourcePtr& source) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg =
             "SSMemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
@@ -86,7 +94,7 @@ SSMemTableFile::Add(const VectorSourcePtr& source) {
 }
 
 Status
-SSMemTableFile::AddEntities(const VectorSourcePtr& source) {
+SSMemSegment::AddEntities(const SSVectorSourcePtr& source) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg =
             "SSMemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
@@ -113,7 +121,7 @@ SSMemTableFile::AddEntities(const VectorSourcePtr& source) {
 }
 
 Status
-SSMemTableFile::Delete(segment::doc_id_t doc_id) {
+SSMemSegment::Delete(segment::doc_id_t doc_id) {
     segment::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
     // Check wither the doc_id is present, if yes, delete it's corresponding buffer
@@ -128,7 +136,7 @@ SSMemTableFile::Delete(segment::doc_id_t doc_id) {
 }
 
 Status
-SSMemTableFile::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
+SSMemSegment::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
     segment::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
 
@@ -165,23 +173,23 @@ SSMemTableFile::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
 }
 
 size_t
-SSMemTableFile::GetCurrentMem() {
+SSMemSegment::GetCurrentMem() {
     return current_mem_;
 }
 
 size_t
-SSMemTableFile::GetMemLeft() {
+SSMemSegment::GetMemLeft() {
     return (MAX_TABLE_FILE_MEM - current_mem_);
 }
 
 bool
-SSMemTableFile::IsFull() {
+SSMemSegment::IsFull() {
     size_t single_vector_mem_size = table_file_schema_.dimension_ * FLOAT_TYPE_SIZE;
     return (GetMemLeft() < single_vector_mem_size);
 }
 
 Status
-SSMemTableFile::Serialize(uint64_t wal_lsn) {
+SSMemSegment::Serialize(uint64_t wal_lsn) {
     int64_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
@@ -236,17 +244,17 @@ SSMemTableFile::Serialize(uint64_t wal_lsn) {
 }
 
 const std::string&
-SSMemTableFile::GetSegmentId() const {
+SSMemSegment::GetSegmentId() const {
     return table_file_schema_.segment_id_;
 }
 
 meta::SegmentSchema
-SSMemTableFile::GetSegmentSchema() const {
+SSMemSegment::GetSegmentSchema() const {
     return table_file_schema_;
 }
 
 void
-SSMemTableFile::OnCacheInsertDataChanged(bool value) {
+SSMemSegment::OnCacheInsertDataChanged(bool value) {
     options_.insert_cache_immediately_ = value;
 }
 

@@ -11,32 +11,32 @@
 
 #pragma once
 
-#include <atomic>
 #include <memory>
-#include <mutex>
-#include <set>
 #include <string>
 #include <vector>
 
 #include "config/handler/CacheConfigHandler.h"
-#include "db/insert/SSMemTableFile.h"
-#include "db/insert/VectorSource.h"
+#include "db/engine/ExecutionEngine.h"
+#include "db/insert/SSVectorSource.h"
+#include "db/snapshot/Resources.h"
+#include "segment/SegmentWriter.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-class SSMemTable : public server::CacheConfigHandler {
+class SSMemSegment : public server::CacheConfigHandler {
  public:
-    using SSMemTableFileList = std::vector<SSMemTableFilePtr>;
+    SSMemSegment(int64_t collection_id, int64_t partition_id, const DBOptions& options);
 
-    SSMemTable(int64_t collection_id, int64_t partition_id, const DBOptions& options);
+    ~SSMemSegment() = default;
+
+ public:
+    Status
+    Add(const SSVectorSourcePtr& source);
 
     Status
-    Add(const VectorSourcePtr& source);
-
-    Status
-    AddEntities(const VectorSourcePtr& source);
+    AddEntities(const SSVectorSourcePtr& source);
 
     Status
     Delete(segment::doc_id_t doc_id);
@@ -44,32 +44,23 @@ class SSMemTable : public server::CacheConfigHandler {
     Status
     Delete(const std::vector<segment::doc_id_t>& doc_ids);
 
-    void
-    GetCurrentSSMemTableFile(SSMemTableFilePtr& mem_table_file);
+    size_t
+    GetCurrentMem();
 
     size_t
-    GetTableFileCount();
+    GetMemLeft();
+
+    bool
+    IsFull();
 
     Status
     Serialize(uint64_t wal_lsn);
 
-    bool
-    Empty();
+    const std::string&
+    GetSegmentId() const;
 
-    int64_t
-    GetCollectionId() const;
-
-    int64_t
-    GetPartitionId() const;
-
-    size_t
-    GetCurrentMem();
-
-    uint64_t
-    GetLSN();
-
-    void
-    SetLSN(uint64_t lsn);
+    meta::SegmentSchema
+    GetSegmentSchema() const;
 
  protected:
     void
@@ -77,24 +68,21 @@ class SSMemTable : public server::CacheConfigHandler {
 
  private:
     Status
-    ApplyDeletes();
+    CreateSegment();
 
  private:
     int64_t collection_id_;
     int64_t partition_id_;
 
-    SSMemTableFileList mem_table_file_list_;
-
+    snapshot::SegmentPtr segment_;
     DBOptions options_;
+    size_t current_mem_;
 
-    std::mutex mutex_;
+    //    ExecutionEnginePtr execution_engine_;
+    segment::SegmentWriterPtr segment_writer_ptr_;
+};  // SSMemTableFile
 
-    std::set<segment::doc_id_t> doc_ids_to_delete_;
-
-    std::atomic<uint64_t> lsn_;
-};  // SSMemTable
-
-using SSMemTablePtr = std::shared_ptr<SSMemTable>;
+using SSMemSegmentPtr = std::shared_ptr<SSMemSegment>;
 
 }  // namespace engine
 }  // namespace milvus

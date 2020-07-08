@@ -300,6 +300,20 @@ EraseFromCache(const std::string& item_key) {
 #endif
 }
 
+Status
+CreateSegmentPath(const snapshot::SegmentPtr& segment, const DBOptions& options, std::string& segment_path) {
+    std::string tables_path = options.meta_.path_ + TABLES_FOLDER;
+    STATUS_CHECK(CommonUtil::CreateDirectory(tables_path));
+    std::string collection_path = tables_path + "/" + std::to_string(segment->GetCollectionId());
+    STATUS_CHECK(CommonUtil::CreateDirectory(collection_path));
+    std::string partition_path = collection_path + "/" + std::to_string(segment->GetPartitionId());
+    STATUS_CHECK(CommonUtil::CreateDirectory(partition_path));
+    segment_path = partition_path + "/" + std::to_string(segment->GetID());
+    STATUS_CHECK(CommonUtil::CreateDirectory(segment_path));
+
+    return Status::OK();
+}
+
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

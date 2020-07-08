@@ -17,7 +17,7 @@
 
 #include "cache/CpuCacheMgr.h"
 #include "db/Utils.h"
-#include "db/insert/SSMemTable.h"
+#include "db/insert/SSMemCollection.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "segment/SegmentReader.h"
 #include "utils/Log.h"
@@ -26,30 +26,30 @@
 namespace milvus {
 namespace engine {
 
-SSMemTable::SSMemTable(int64_t collection_id, int64_t partition_id, const DBOptions& options)
+SSMemCollection::SSMemCollection(int64_t collection_id, int64_t partition_id, const DBOptions& options)
     : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
-    SetIdentity("SSMemTable");
+    SetIdentity("SSMemCollection");
     AddCacheInsertDataListener();
 }
 
 Status
-SSMemTable::Add(const VectorSourcePtr& source) {
+SSMemCollection::Add(const SSVectorSourcePtr& source) {
     while (!source->AllAdded()) {
-        SSMemTableFilePtr current_mem_table_file;
-        if (!mem_table_file_list_.empty()) {
-            current_mem_table_file = mem_table_file_list_.back();
+        SSMemSegmentPtr current_mem_segment;
+        if (!mem_segment_list_.empty()) {
+            current_mem_segment = mem_segment_list_.back();
         }
 
         Status status;
-        if (mem_table_file_list_.empty() || current_mem_table_file->IsFull()) {
-            SSMemTableFilePtr new_mem_table_file =
-                std::make_shared<SSMemTableFile>(collection_id_, partition_id_, options_);
-            status = new_mem_table_file->Add(source);
+        if (mem_segment_list_.empty() || current_mem_segment->IsFull()) {
+            SSMemSegmentPtr new_mem_segment =
+                std::make_shared<SSMemSegment>(collection_id_, partition_id_, options_);
+            status = new_mem_segment->Add(source);
             if (status.ok()) {
-                mem_table_file_list_.emplace_back(new_mem_table_file);
+                mem_segment_list_.emplace_back(new_mem_segment);
             }
         } else {
-            status = current_mem_table_file->Add(source);
+            status = current_mem_segment->Add(source);
         }
 
         if (!status.ok()) {
@@ -62,23 +62,23 @@ SSMemTable::Add(const VectorSourcePtr& source) {
 }
 
 Status
-SSMemTable::AddEntities(const milvus::engine::VectorSourcePtr& source) {
+SSMemCollection::AddEntities(const milvus::engine::SSVectorSourcePtr& source) {
     while (!source->AllAdded()) {
-        SSMemTableFilePtr current_mem_table_file;
-        if (!mem_table_file_list_.empty()) {
-            current_mem_table_file = mem_table_file_list_.back();
+        SSMemSegmentPtr current_mem_segment;
+        if (!mem_segment_list_.empty()) {
+            current_mem_segment = mem_segment_list_.back();
         }
 
         Status status;
-        if (mem_table_file_list_.empty() || current_mem_table_file->IsFull()) {
-            SSMemTableFilePtr new_mem_table_file =
-                std::make_shared<SSMemTableFile>(collection_id_, partition_id_, options_);
-            status = new_mem_table_file->AddEntities(source);
+        if (mem_segment_list_.empty() || current_mem_segment->IsFull()) {
+            SSMemSegmentPtr new_mem_segment =
+                std::make_shared<SSMemSegment>(collection_id_, partition_id_, options_);
+            status = new_mem_segment->AddEntities(source);
             if (status.ok()) {
-                mem_table_file_list_.emplace_back(new_mem_table_file);
+                mem_segment_list_.emplace_back(new_mem_segment);
             }
         } else {
-            status = current_mem_table_file->AddEntities(source);
+            status = current_mem_segment->AddEntities(source);
         }
 
         if (!status.ok()) {
@@ -91,10 +91,10 @@ SSMemTable::AddEntities(const milvus::engine::VectorSourcePtr& source) {
 }
 
 Status
-SSMemTable::Delete(segment::doc_id_t doc_id) {
+SSMemCollection::Delete(segment::doc_id_t doc_id) {
     // Locate which collection file the doc id lands in
-    for (auto& table_file : mem_table_file_list_) {
-        table_file->Delete(doc_id);
+    for (auto& mem_segment : mem_segment_list_) {
+        mem_segment->Delete(doc_id);
     }
     // Add the id to delete list so it can be applied to other segments on disk during the next flush
     doc_ids_to_delete_.insert(doc_id);
@@ -103,10 +103,10 @@ SSMemTable::Delete(segment::doc_id_t doc_id) {
 }
 
 Status
-SSMemTable::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
+SSMemCollection::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
     // Locate which collection file the doc id lands in
-    for (auto& table_file : mem_table_file_list_) {
-        table_file->Delete(doc_ids);
+    for (auto& mem_segment : mem_segment_list_) {
+        mem_segment->Delete(doc_ids);
     }
     // Add the id to delete list so it can be applied to other segments on disk during the next flush
     for (auto& id : doc_ids) {
@@ -117,88 +117,74 @@ SSMemTable::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
 }
 
 void
-SSMemTable::GetCurrentSSMemTableFile(SSMemTableFilePtr& mem_table_file) {
-    mem_table_file = mem_table_file_list_.back();
+SSMemCollection::GetCurrentMemSegment(SSMemSegmentPtr& mem_segment) {
+    mem_segment = mem_segment_list_.back();
 }
 
 size_t
-SSMemTable::GetTableFileCount() {
-    return mem_table_file_list_.size();
+SSMemCollection::GetTableFileCount() {
+    return mem_segment_list_.size();
 }
 
 Status
-SSMemTable::Serialize(uint64_t wal_lsn) {
-    TimeRecorder recorder("SSMemTable::Serialize collection " + collection_id_);
+SSMemCollection::Serialize(uint64_t wal_lsn) {
+    TimeRecorder recorder("SSMemCollection::Serialize collection " + collection_id_);
 
-    // TODO: implement this
-    //    if (!doc_ids_to_delete_.empty() && apply_delete) {
-    //        auto status = ApplyDeletes();
-    //        if (!status.ok()) {
-    //            return Status(DB_ERROR, status.message());
-    //        }
-    //    }
-    //
-    //    meta::SegmentsSchema update_files;
-    //    for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
-    //        auto status = (*mem_table_file)->Serialize(wal_lsn);
-    //        update_files.push_back((*mem_table_file)->GetSegmentSchema());
-    //        if (!status.ok()) {
-    //            return status;
-    //        }
-    //
-    //        LOG_ENGINE_DEBUG_ << "Flushed segment " << (*mem_table_file)->GetSegmentId();
-    //
-    //        {
-    //            std::lock_guard<std::mutex> lock(mutex_);
-    //            mem_table_file = mem_table_file_list_.erase(mem_table_file);
-    //        }
-    //    }
-    //
-    //    // Update meta files and flush lsn
-    //    auto status = meta_->UpdateCollectionFiles(update_files);
-    //    if (!status.ok()) {
-    //        return status;
-    //    }
-    //
-    //    status = meta_->UpdateCollectionFlushLSN(collection_id_, wal_lsn);
-    //    if (!status.ok()) {
-    //        std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
-    //        LOG_ENGINE_ERROR_ << err_msg;
-    //        return Status(DB_ERROR, err_msg);
-    //    }
-    //
-    //    recorder.RecordSection("Finished flushing");
+    if (!doc_ids_to_delete_.empty()) {
+        auto status = ApplyDeletes();
+        if (!status.ok()) {
+            return Status(DB_ERROR, status.message());
+        }
+    }
+
+    meta::SegmentsSchema update_files;
+    for (auto mem_segment = mem_segment_list_.begin(); mem_segment != mem_segment_list_.end();) {
+        auto status = (*mem_segment)->Serialize(wal_lsn);
+        update_files.push_back((*mem_segment)->GetSegmentSchema());
+        if (!status.ok()) {
+            return status;
+        }
+
+        LOG_ENGINE_DEBUG_ << "Flushed segment " << (*mem_segment)->GetSegmentId();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            mem_segment = mem_segment_list_.erase(mem_segment);
+        }
+    }
+
+    recorder.RecordSection("Finished flushing");
 
     return Status::OK();
 }
 
 bool
-SSMemTable::Empty() {
-    return mem_table_file_list_.empty() && doc_ids_to_delete_.empty();
+SSMemCollection::Empty() {
+    return mem_segment_list_.empty() && doc_ids_to_delete_.empty();
 }
 
 int64_t
-SSMemTable::GetCollectionId() const {
+SSMemCollection::GetCollectionId() const {
     return collection_id_;
 }
 
 int64_t
-SSMemTable::GetPartitionId() const {
+SSMemCollection::GetPartitionId() const {
     return partition_id_;
 }
 
 size_t
-SSMemTable::GetCurrentMem() {
+SSMemCollection::GetCurrentMem() {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t total_mem = 0;
-    for (auto& mem_table_file : mem_table_file_list_) {
+    for (auto& mem_table_file : mem_segment_list_) {
         total_mem += mem_table_file->GetCurrentMem();
     }
     return total_mem;
 }
 
 Status
-SSMemTable::ApplyDeletes() {
+SSMemCollection::ApplyDeletes() {
     // Applying deletes to other segments on disk and their corresponding cache:
     // For each segment in collection:
     //     Load its bloom filter
@@ -217,7 +203,7 @@ SSMemTable::ApplyDeletes() {
     // TODO: implemant this
     //    LOG_ENGINE_DEBUG_ << "Applying " << doc_ids_to_delete_.size() << " deletes in collection: " << collection_id_;
     //
-    //    TimeRecorder recorder("SSMemTable::ApplyDeletes for collection " + collection_id_);
+    //    TimeRecorder recorder("SSMemCollection::ApplyDeletes for collection " + collection_id_);
     //
     //    std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
     //                                meta::SegmentSchema::FILE_TYPE::BACKUP};
@@ -406,17 +392,17 @@ SSMemTable::ApplyDeletes() {
 }
 
 uint64_t
-SSMemTable::GetLSN() {
+SSMemCollection::GetLSN() {
     return lsn_;
 }
 
 void
-SSMemTable::SetLSN(uint64_t lsn) {
+SSMemCollection::SetLSN(uint64_t lsn) {
     lsn_ = lsn;
 }
 
 void
-SSMemTable::OnCacheInsertDataChanged(bool value) {
+SSMemCollection::OnCacheInsertDataChanged(bool value) {
     options_.insert_cache_immediately_ = value;
 }
 
