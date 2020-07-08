@@ -24,6 +24,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <set>
 #include <shared_mutex>
 #include <sstream>
 #include <string>
@@ -53,52 +54,35 @@ class Store {
         return store;
     }
 
-    template <typename... ResourceT>
-    bool
-    DoCommit(ResourceT&&... resources) {
-        auto t = std::make_tuple(std::forward<ResourceT>(resources)...);
-        auto& t_size = std::tuple_size<decltype(t)>::value;
-        if (t_size == 0) {
-            return false;
-        }
-        StartTransaction();
-        std::apply([this](auto&&... resource) { ((std::cout << CommitResource(resource) << "\n"), ...); }, t);
-        FinishTransaction();
-        return true;
-    }
-
     template <typename OpT>
     Status
-    DoCommitOperation(OpT& op) {
-        for (auto& step_v : op.GetSteps()) {
-            auto id = ProcessOperationStep(step_v);
-            op.SetStepResult(id);
-        }
+    ApplyOperation(OpT& op) {
+        std::apply(
+            [&](auto&... steps_set) {
+                std::size_t n{0};
+                ((ApplyOpStep(op, n++, steps_set)), ...);
+            },
+            op.GetStepHolders());
         return Status::OK();
+    }
+
+    template <typename T, typename OpT>
+    void
+    ApplyOpStep(OpT& op, size_t pos, std::set<std::shared_ptr<T>>& steps_set) {
+        typename T::Ptr ret;
+        for (auto& res : steps_set) {
+            CreateResource<T>(T(*res), ret);
+            res->SetID(ret->GetID());
+        }
+        if (ret && (pos == op.GetPos())) {
+            op.SetStepResult(ret->GetID());
+        }
     }
 
     template <typename OpT>
     void
     Apply(OpT& op) {
         op.ApplyToStore(*this);
-    }
-
-    void
-    StartTransaction() {
-    }
-
-    void
-    FinishTransaction() {
-    }
-
-    template <typename ResourceT>
-    bool
-    CommitResource(ResourceT&& resource) {
-        std::cout << "Commit " << resource.Name << " " << resource.GetID() << std::endl;
-        auto res = CreateResource<typename std::remove_reference<ResourceT>::type>(std::move(resource));
-        if (!res)
-            return false;
-        return true;
     }
 
     template <typename ResourceT>
@@ -280,110 +264,7 @@ class Store {
     }
 
  private:
-    ID_TYPE
-    ProcessOperationStep(const std::any& step_v) {
-        if (const auto it = any_flush_vistors_.find(std::type_index(step_v.type())); it != any_flush_vistors_.cend()) {
-            return it->second(step_v);
-        } else {
-            std::cerr << "Unregisted step type " << std::quoted(step_v.type().name());
-            return 0;
-        }
-    }
-
-    template <class T, class F>
-    inline std::pair<const std::type_index, std::function<ID_TYPE(std::any const&)>>
-    to_any_visitor(F const& f) {
-        return {std::type_index(typeid(T)), [g = f](std::any const& a) -> ID_TYPE {
-                    if constexpr (std::is_void_v<T>)
-                        return g();
-                    else
-                        return g(std::any_cast<T const&>(a));
-                }};
-    }
-
-    template <class T, class F>
-    inline void
-    register_any_visitor(F const& f) {
-        /* std::cout << "Register visitor for type " << std::quoted(typeid(T).name()) << '\n'; */
-        any_flush_vistors_.insert(to_any_visitor<T>(f));
-    }
-
     Store() {
-        register_any_visitor<Collection::Ptr>([this](auto c) {
-            CollectionPtr n;
-            CreateResource<Collection>(Collection(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<CollectionCommit::Ptr>([this](auto c) {
-            using T = CollectionCommit;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<SchemaCommit::Ptr>([this](auto c) {
-            using T = SchemaCommit;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<FieldCommit::Ptr>([this](auto c) {
-            using T = FieldCommit;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<Field::Ptr>([this](auto c) {
-            using T = Field;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<FieldElement::Ptr>([this](auto c) {
-            using T = FieldElement;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<PartitionCommit::Ptr>([this](auto c) {
-            using T = PartitionCommit;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<Partition::Ptr>([this](auto c) {
-            using T = Partition;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<Segment::Ptr>([this](auto c) {
-            using T = Segment;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<SegmentCommit::Ptr>([this](auto c) {
-            using T = SegmentCommit;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<SegmentFile::Ptr>([this](auto c) {
-            using T = SegmentFile;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
     }
 
     void
@@ -408,7 +289,7 @@ class Store {
                 std::stringstream fname;
                 fname << "f_" << fi << "_" << std::get<Index<Field::MapT, MockResourcesT>::value>(ids_) + 1;
                 FieldPtr field;
-                Field temp_f(fname.str(), fi, FieldType::VECTOR);
+                Field temp_f(fname.str(), fi, FieldType::VECTOR_FLOAT);
                 temp_f.Activate();
                 CreateResource<Field>(std::move(temp_f), field);
                 all_records.push_back(field);

@@ -171,7 +171,7 @@ SSMemManagerImpl::Flush(int64_t collection_id) {
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
         LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetCollectionId();
-        auto status = mem->Serialize(max_lsn, true);
+        auto status = mem->Serialize(max_lsn);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetCollectionId() << " failed";
             return status;
@@ -197,7 +197,7 @@ SSMemManagerImpl::Flush(std::set<int64_t>& collection_ids) {
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
         LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetCollectionId();
-        auto status = mem->Serialize(max_lsn, true);
+        auto status = mem->Serialize(max_lsn);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetCollectionId() << " failed";
             return status;

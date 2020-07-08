@@ -51,7 +51,7 @@ class SSMemTable : public server::CacheConfigHandler {
     GetTableFileCount();
 
     Status
-    Serialize(uint64_t wal_lsn, bool apply_delete = true);
+    Serialize(uint64_t wal_lsn);
 
     bool
     Empty();

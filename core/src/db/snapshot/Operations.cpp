@@ -12,6 +12,8 @@
 #include "db/snapshot/Operations.h"
 #include <chrono>
 #include <sstream>
+#include "db/snapshot/Event.h"
+#include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
 
@@ -100,6 +102,13 @@ Operations::Done(Store& store) {
             Snapshots::GetInstance().LoadSnapshot(store, context_.latest_ss,
                                                   context_.new_collection_commit->GetCollectionId(), ids_.back());
         }
+        /* if (!context_.latest_ss && context_.new_collection_commit) { */
+        /*     auto& holder = std::get<ConstPos(last_pos_)>(holders_); */
+        /*     if (holder.size() > 0) */
+        /*         Snapshots::GetInstance().LoadSnapshot(store, context_.latest_ss, */
+        /*                 context_.new_collection_commit->GetCollectionId(), holder.rbegin()->GetID()); */
+        /*     } */
+        /* } */
         std::cout << ToString() << std::endl;
     }
     finish_cond_.notify_all();
@@ -230,24 +239,28 @@ Operations::DoExecute(Store& store) {
 
 Status
 Operations::PostExecute(Store& store) {
-    return store.DoCommitOperation(*this);
+    return store.ApplyOperation(*this);
 }
 
-Status
+template <typename ResourceT>
+void
+ApplyRollBack(std::set<std::shared_ptr<ResourceT>>& steps_set) {
+    for (auto& res : steps_set) {
+        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(res);
+        EventExecutor::GetInstance().Submit(evt_ptr);
+        std::cout << "Rollback " << typeid(ResourceT).name() << ": " << res->GetID() << std::endl;
+    }
+}
+
+void
 Operations::RollBack() {
-    // TODO: Implement here
-    // Spwarn a rollback operation or re-use this operation
-    return Status::OK();
-}
-
-Status
-Operations::ApplyRollBack(Store& store) {
-    // TODO: Implement rollback to remove all resources in steps_
-    return Status::OK();
+    std::apply([&](auto&... steps_set) { ((ApplyRollBack(steps_set)), ...); }, GetStepHolders());
 }
 
 Operations::~Operations() {
-    // TODO: Prefer to submit a rollback operation if status is not ok
+    if (!status_.ok()) {
+        RollBack();
+    }
 }
 
 }  // namespace snapshot

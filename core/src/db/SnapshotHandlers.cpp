@@ -30,7 +30,8 @@ LoadVectorFieldElementHandler::LoadVectorFieldElementHandler(const std::shared_p
 
 Status
 LoadVectorFieldElementHandler::Handle(const snapshot::FieldElementPtr& field_element) {
-    if (field_->GetFtype() != snapshot::FieldType::VECTOR) {
+    if (field_->GetFtype() != snapshot::FieldType::VECTOR_FLOAT &&
+        field_->GetFtype() != snapshot::FieldType::VECTOR_BINARY) {
         return Status(DB_ERROR, "Should be VECTOR field");
     }
     if (field_->GetID() != field_element->GetFieldId()) {
@@ -47,7 +48,8 @@ LoadVectorFieldHandler::LoadVectorFieldHandler(const std::shared_ptr<server::Con
 
 Status
 LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
-    if (field->GetFtype() != snapshot::FieldType::VECTOR) {
+    if (field->GetFtype() != snapshot::FieldType::VECTOR_FLOAT &&
+        field->GetFtype() != snapshot::FieldType::VECTOR_BINARY) {
         return Status::OK();
     }
     if (context_ && context_->IsConnectionBroken()) {
@@ -106,6 +108,11 @@ GetEntityByIdSegmentHandler::GetEntityByIdSegmentHandler(const std::shared_ptr<m
                                                          engine::snapshot::ScopedSnapshotT ss, const IDNumbers& ids,
                                                          const std::vector<std::string>& field_names)
     : BaseT(ss), context_(context), ids_(ids), field_names_(field_names), vector_data_(), attr_type_(), attr_data_() {
+    for (auto& field_name : field_names_) {
+        auto field_ptr = ss_->GetField(field_name);
+        auto field_type = field_ptr->GetFtype();
+        attr_type_.push_back((meta::hybrid::DataType)field_type);
+    }
 }
 
 Status
@@ -151,20 +158,24 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
         }
 
         std::unordered_map<std::string, std::vector<uint8_t>> raw_attrs;
-        for (auto& field_name : field_names_) {
+        for (size_t i = 0; i < field_names_.size(); i++) {
+            auto& field_name = field_names_[i];
             auto field_ptr = ss_->GetField(field_name);
-            auto field_params = field_ptr->GetParams();
-            auto dim = field_params[knowhere::meta::DIM].get<int64_t>();
-            auto field_type = field_ptr->GetFtype();
 
-            if (field_ptr->GetFtype() == (int64_t)meta::hybrid::DataType::VECTOR_BINARY) {
+            auto field_type = attr_type_[i];
+
+            if (field_type == meta::hybrid::DataType::VECTOR_BINARY) {
+                auto field_params = field_ptr->GetParams();
+                auto dim = field_params[knowhere::meta::DIM].get<int64_t>();
                 size_t vector_size = dim / 8;
                 std::vector<uint8_t> raw_vector;
                 STATUS_CHECK(segment_reader.LoadVectors(offset * vector_size, vector_size, raw_vector));
 
                 vector_ref.vector_count_ = 1;
                 vector_ref.binary_data_.swap(raw_vector);
-            } else if (field_ptr->GetFtype() == (int64_t)meta::hybrid::DataType::VECTOR_FLOAT) {
+            } else if (field_type == meta::hybrid::DataType::VECTOR_FLOAT) {
+                auto field_params = field_ptr->GetParams();
+                auto dim = field_params[knowhere::meta::DIM].get<int64_t>();
                 size_t vector_size = dim * sizeof(float);
                 std::vector<uint8_t> raw_vector;
                 STATUS_CHECK(segment_reader.LoadVectors(offset * vector_size, vector_size, raw_vector));
@@ -177,30 +188,20 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
             } else {
                 size_t num_bytes;
                 switch (field_type) {
-                    case (int64_t)meta::hybrid::DataType::INT8: {
-                        num_bytes = sizeof(int8_t);
+                    case meta::hybrid::DataType::INT8:
+                        num_bytes = 1;
                         break;
-                    }
-                    case (int64_t)meta::hybrid::DataType::INT16: {
-                        num_bytes = sizeof(int16_t);
+                    case meta::hybrid::DataType::INT16:
+                        num_bytes = 2;
                         break;
-                    }
-                    case (int64_t)meta::hybrid::DataType::INT32: {
-                        num_bytes = sizeof(int32_t);
+                    case meta::hybrid::DataType::INT32:
+                    case meta::hybrid::DataType::FLOAT:
+                        num_bytes = 4;
                         break;
-                    }
-                    case (int64_t)meta::hybrid::DataType::INT64: {
-                        num_bytes = sizeof(int64_t);
+                    case meta::hybrid::DataType::INT64:
+                    case meta::hybrid::DataType::DOUBLE:
+                        num_bytes = 8;
                         break;
-                    }
-                    case (int64_t)meta::hybrid::DataType::FLOAT: {
-                        num_bytes = sizeof(float);
-                        break;
-                    }
-                    case (int64_t)meta::hybrid::DataType::DOUBLE: {
-                        num_bytes = sizeof(double);
-                        break;
-                    }
                     default: {
                         std::string msg = "Field type of " + field_name + " not supported";
                         return Status(DB_ERROR, msg);

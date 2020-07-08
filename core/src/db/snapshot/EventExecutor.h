@@ -70,13 +70,17 @@ class EventExecutor {
  private:
     void
     ThreadMain() {
+        Status status;
         while (true) {
             EventPtr evt = queue_.Take();
             if (evt == nullptr) {
                 break;
             }
             /* std::cout << std::this_thread::get_id() << " Dequeue Event " << std::endl; */
-            evt->Process();
+            status = evt->Process();
+            if (!status.ok()) {
+                std::cout << "EventExecutor Handle Event Error: " << status.ToString() << std::endl;
+            }
         }
     }
 

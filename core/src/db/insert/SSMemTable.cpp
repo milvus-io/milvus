@@ -127,7 +127,7 @@ SSMemTable::GetTableFileCount() {
 }
 
 Status
-SSMemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
+SSMemTable::Serialize(uint64_t wal_lsn) {
     TimeRecorder recorder("SSMemTable::Serialize collection " + collection_id_);
 
     // TODO: implement this
