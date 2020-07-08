@@ -14,7 +14,9 @@
 #include "db/meta/FilesHolder.h"
 #include "db/snapshot/Snapshot.h"
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 
 namespace milvus {
@@ -38,7 +40,8 @@ class SegmentFileVisitor {
  public:
     using Ptr = std::shared_ptr<SegmentFileVisitor>;
 
-    static Ptr Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_file_id);
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_file_id);
 
     SegmentFileVisitor() = default;
 
@@ -80,12 +83,13 @@ class SegmentVisitor {
     using FileT = typename SegmentFileVisitor::Ptr;
     using FilesMapT = std::map<snapshot::ID_TYPE, FileT>;
 
-    static Ptr Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id);
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id);
     SegmentVisitor() = default;
 
     const FilesMapT&
     GetSegmentFiles() const {
-       return files_map_;
+        return files_map_;
     }
     const snapshot::SegmentPtr&
     GetSegment() const {

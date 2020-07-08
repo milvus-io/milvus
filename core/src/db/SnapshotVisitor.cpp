@@ -10,10 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/SnapshotVisitor.h"
+#include <sstream>
 #include "db/SnapshotHandlers.h"
 #include "db/meta/MetaTypes.h"
 #include "db/snapshot/Snapshots.h"
-#include <sstream>
 
 namespace milvus {
 namespace engine {
