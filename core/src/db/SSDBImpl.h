@@ -26,6 +26,7 @@
 #include "db/SimpleWaitNotify.h"
 #include "db/SnapshotHandlers.h"
 #include "db/insert/SSMemManager.h"
+#include "db/merge/MergeManager.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
@@ -174,6 +175,7 @@ class SSDBImpl {
     std::atomic<bool> initialized_;
 
     SSMemManagerPtr mem_mgr_;
+    MergeManagerPtr merge_mgr_ptr_;
 
     std::shared_ptr<wal::WalManager> wal_mgr_;
     std::thread bg_wal_thread_;

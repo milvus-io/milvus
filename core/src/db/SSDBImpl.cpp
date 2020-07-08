@@ -1042,9 +1042,20 @@ SSDBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_mer
 
     Status status;
     for (auto& collection_name : collection_names) {
-        std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+        const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-        // TODO: merge files
+        auto old_strategy = merge_mgr_ptr_->Strategy();
+        if (force_merge_all) {
+            merge_mgr_ptr_->UseStrategy(MergeStrategyType::ADAPTIVE);
+        }
+
+        auto status = merge_mgr_ptr_->MergeFiles(collection_name);
+        merge_mgr_ptr_->UseStrategy(old_strategy);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_name
+                              << " reason:" << status.message();
+        }
+
         if (!initialized_.load(std::memory_order_acquire)) {
             LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection: " << collection_name;
             break;
