@@ -319,6 +319,11 @@ class SizeField {
         return size_;
     }
 
+    void
+    SetSize(SIZE_TYPE size) {
+        size_ = size;
+    }
+
  protected:
     SIZE_TYPE size_;
 };

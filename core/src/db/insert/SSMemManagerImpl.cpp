@@ -57,7 +57,7 @@ SSMemManagerImpl::InsertVectors(int64_t collection_id, int64_t partition_id, int
     memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(float));
     vectors_data.id_array_.resize(length);
     memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
-    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data);
+    SSVectorSourcePtr source = std::make_shared<SSVectorSource>(vectors_data);
 
     std::unique_lock<std::mutex> lock(mutex_);
 

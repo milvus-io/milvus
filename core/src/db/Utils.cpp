@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "cache/CpuCacheMgr.h"
+#include "db/snapshot/Resources.h"
 #ifdef MILVUS_GPU_VERSION
 #include "cache/GpuCacheMgr.h"
 #endif
@@ -301,15 +302,37 @@ EraseFromCache(const std::string& item_key) {
 }
 
 Status
-CreateSegmentPath(const snapshot::SegmentPtr& segment, const DBOptions& options, std::string& segment_path) {
+CreatePath(const snapshot::Segment* segment, const DBOptions& options, std::string& path) {
     std::string tables_path = options.meta_.path_ + TABLES_FOLDER;
     STATUS_CHECK(CommonUtil::CreateDirectory(tables_path));
     std::string collection_path = tables_path + "/" + std::to_string(segment->GetCollectionId());
     STATUS_CHECK(CommonUtil::CreateDirectory(collection_path));
     std::string partition_path = collection_path + "/" + std::to_string(segment->GetPartitionId());
     STATUS_CHECK(CommonUtil::CreateDirectory(partition_path));
-    segment_path = partition_path + "/" + std::to_string(segment->GetID());
-    STATUS_CHECK(CommonUtil::CreateDirectory(segment_path));
+    path = partition_path + "/" + std::to_string(segment->GetID());
+    STATUS_CHECK(CommonUtil::CreateDirectory(path));
+
+    return Status::OK();
+}
+
+Status
+CreatePath(const snapshot::Partition* partition, const DBOptions& options, std::string& path) {
+    std::string tables_path = options.meta_.path_ + TABLES_FOLDER;
+    STATUS_CHECK(CommonUtil::CreateDirectory(tables_path));
+    std::string collection_path = tables_path + "/" + std::to_string(partition->GetCollectionId());
+    STATUS_CHECK(CommonUtil::CreateDirectory(collection_path));
+    path = collection_path + "/" + std::to_string(partition->GetID());
+    STATUS_CHECK(CommonUtil::CreateDirectory(path));
+
+    return Status::OK();
+}
+
+Status
+CreatePath(const snapshot::Collection* collection, const DBOptions& options, std::string& path) {
+    std::string tables_path = options.meta_.path_ + TABLES_FOLDER;
+    STATUS_CHECK(CommonUtil::CreateDirectory(tables_path));
+    path = tables_path + "/" + std::to_string(collection->GetID());
+    STATUS_CHECK(CommonUtil::CreateDirectory(path));
 
     return Status::OK();
 }

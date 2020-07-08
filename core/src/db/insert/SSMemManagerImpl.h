@@ -22,8 +22,8 @@
 
 #include "config/Config.h"
 #include "config/handler/CacheConfigHandler.h"
-#include "db/insert/SSMemManager.h"
 #include "db/insert/SSMemCollection.h"
+#include "db/insert/SSMemManager.h"
 #include "utils/Status.h"
 
 namespace milvus {

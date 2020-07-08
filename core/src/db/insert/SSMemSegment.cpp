@@ -21,7 +21,6 @@
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
 #include "db/snapshot/Operations.h"
-#include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Snapshots.h"
 #include "metrics/Metrics.h"
 #include "segment/SegmentReader.h"
@@ -36,11 +35,11 @@ SSMemSegment::SSMemSegment(int64_t collection_id, int64_t partition_id, const DB
     auto status = CreateSegment();
     if (status.ok()) {
         std::string directory;
-        utils::CreateSegmentPath(segment_, options_, directory);
+        utils::CreatePath(segment_.get(), options_, directory);
         segment_writer_ptr_ = std::make_shared<segment::SegmentWriter>(directory);
     }
 
-    SetIdentity("SSMemTableFile");
+    SetIdentity("SSMemSegment");
     AddCacheInsertDataListener();
 }
 
@@ -49,17 +48,17 @@ SSMemSegment::CreateSegment() {
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
     if (!status.ok()) {
-        std::string err_msg = "SSMemTableFile::CreateSegment failed: " + status.ToString();
+        std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
 
     snapshot::OperationContext context;
     context.prev_partition = ss->GetResource<snapshot::Partition>(partition_id_);
-    auto op = std::make_shared<snapshot::NewSegmentOperation>(context, ss);
-    status = op->CommitNewSegment(segment_);
+    operation_ = std::make_shared<snapshot::NewSegmentOperation>(context, ss);
+    status = operation_->CommitNewSegment(segment_);
     if (!status.ok()) {
-        std::string err_msg = "SSMemTableFile::CreateSegment failed: " + status.ToString();
+        std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
@@ -67,24 +66,48 @@ SSMemSegment::CreateSegment() {
     return status;
 }
 
+int64_t
+SSMemSegment::GetDimension() {
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
+    if (!status.ok()) {
+        std::string err_msg = "SSMemSegment::GetDimension failed: " + status.ToString();
+        LOG_ENGINE_ERROR_ << err_msg;
+        return 0;
+    }
+
+    const std::string hard_code_vector_field = "vector";
+    const std::string hard_code_dimension = "dimension";
+    snapshot::FieldPtr field = ss->GetField(hard_code_vector_field);
+    json params = field->GetParams();
+    if (params.find(hard_code_dimension) == params.end()) {
+        std::string msg = "Vector field params must contain: dimension";
+        LOG_SERVER_ERROR_ << msg;
+        return 0;
+    }
+
+    int64_t dimension = params[hard_code_dimension];
+    return dimension;
+}
+
 Status
 SSMemSegment::Add(const SSVectorSourcePtr& source) {
-    if (table_file_schema_.dimension_ <= 0) {
-        std::string err_msg =
-            "SSMemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
-            ", collection_id = " + table_file_schema_.collection_id_;
+    int64_t dimension = GetDimension();
+    if (dimension <= 0) {
+        std::string err_msg = "SSMemSegment::Add: table_file_schema dimension = " + std::to_string(dimension) +
+                              ", collection_id = " + std::to_string(collection_id_);
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << err_msg;
         return Status(DB_ERROR, "Not able to create collection file");
     }
 
-    size_t single_vector_mem_size = source->SingleVectorSize(table_file_schema_.dimension_);
+    size_t single_vector_mem_size = source->SingleVectorSize(dimension);
     size_t mem_left = GetMemLeft();
     if (mem_left >= single_vector_mem_size) {
         size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
         size_t num_vectors_added;
 
-        auto status = source->Add(/*execution_engine_,*/ segment_writer_ptr_, table_file_schema_, num_vectors_to_add,
-                                  num_vectors_added);
+        auto status =
+            source->Add(/*execution_engine_,*/ segment_writer_ptr_, dimension, num_vectors_to_add, num_vectors_added);
         if (status.ok()) {
             current_mem_ += (num_vectors_added * single_vector_mem_size);
         }
@@ -95,22 +118,21 @@ SSMemSegment::Add(const SSVectorSourcePtr& source) {
 
 Status
 SSMemSegment::AddEntities(const SSVectorSourcePtr& source) {
-    if (table_file_schema_.dimension_ <= 0) {
-        std::string err_msg =
-            "SSMemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
-            ", collection_id = " + table_file_schema_.collection_id_;
+    int64_t dimension = GetDimension();
+    if (dimension <= 0) {
+        std::string err_msg = "SSMemSegment::Add: table_file_schema dimension = " + std::to_string(dimension) +
+                              ", collection_id = " + std::to_string(collection_id_);
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << err_msg;
         return Status(DB_ERROR, "Not able to create collection file");
     }
 
-    size_t single_entity_mem_size = source->SingleEntitySize(table_file_schema_.dimension_);
+    size_t single_entity_mem_size = source->SingleEntitySize(dimension);
     size_t mem_left = GetMemLeft();
     if (mem_left >= single_entity_mem_size) {
         size_t num_entities_to_add = std::ceil(mem_left / single_entity_mem_size);
         size_t num_entities_added;
 
-        auto status =
-            source->AddEntities(segment_writer_ptr_, table_file_schema_, num_entities_to_add, num_entities_added);
+        auto status = source->AddEntities(segment_writer_ptr_, dimension, num_entities_to_add, num_entities_added);
 
         if (status.ok()) {
             current_mem_ += (num_entities_added * single_entity_mem_size);
@@ -184,7 +206,7 @@ SSMemSegment::GetMemLeft() {
 
 bool
 SSMemSegment::IsFull() {
-    size_t single_vector_mem_size = table_file_schema_.dimension_ * FLOAT_TYPE_SIZE;
+    size_t single_vector_mem_size = GetDimension() * FLOAT_TYPE_SIZE;
     return (GetMemLeft() < single_vector_mem_size);
 }
 
@@ -193,64 +215,36 @@ SSMemSegment::Serialize(uint64_t wal_lsn) {
     int64_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
-    auto status = segment_writer_ptr_->Serialize();
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to serialize segment: " << table_file_schema_.segment_id_;
+    snapshot::SegmentFileContext sf_context;
+    sf_context.field_name = "vector";
+    sf_context.field_element_name = "raw";
+    sf_context.collection_id = segment_->GetCollectionId();
+    sf_context.partition_id = segment_->GetPartitionId();
+    sf_context.segment_id = segment_->GetID();
+    snapshot::SegmentFilePtr seg_file;
+    auto status = operation_->CommitNewSegmentFile(sf_context, seg_file);
 
-        /* Can't mark it as to_delete because data is stored in this mem collection file. Any further flush
-         * will try to serialize the same mem collection file and it won't be able to find the directory
-         * to write to or update the associated collection file in meta.
-         *
-        table_file_schema_.file_type_ = meta::SegmentSchema::TO_DELETE;
-        meta_->UpdateCollectionFile(table_file_schema_);
-        LOG_ENGINE_DEBUG_ << "Failed to serialize segment, mark file: " << table_file_schema_.file_id_
-                         << " to to_delete";
-        */
+    segment_writer_ptr_->SetSegmentName(std::to_string(segment_->GetID()));
+    status = segment_writer_ptr_->Serialize();
+    if (!status.ok()) {
+        LOG_ENGINE_ERROR_ << "Failed to serialize segment: " << segment_->GetID();
         return status;
     }
 
-    //    execution_engine_->Serialize();
+    seg_file->SetSize(segment_writer_ptr_->Size());
+    seg_file->SetRowCount(segment_writer_ptr_->VectorCount());
 
-    // TODO(zhiru):
-    //    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
-    //    table_file_schema_.row_count_ = execution_engine_->Count();
-    table_file_schema_.file_size_ = segment_writer_ptr_->Size();
-    table_file_schema_.row_count_ = segment_writer_ptr_->VectorCount();
+    status = operation_->Push();
 
-    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
-    // else set file type to RAW, no need to build index
-    if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP &&
-        table_file_schema_.engine_type_ != (int)EngineType::FAISS_BIN_IDMAP) {
-        table_file_schema_.file_type_ =
-            (size >= table_file_schema_.index_file_size_) ? meta::SegmentSchema::TO_INDEX : meta::SegmentSchema::RAW;
-    } else {
-        table_file_schema_.file_type_ = meta::SegmentSchema::RAW;
-    }
-
-    LOG_ENGINE_DEBUG_ << "New " << ((table_file_schema_.file_type_ == meta::SegmentSchema::RAW) ? "raw" : "to_index")
-                      << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes, lsn = " << wal_lsn;
-
-    // TODO(zhiru): cache
-    /*
-        if (options_.insert_cache_immediately_) {
-            execution_engine_->Cache();
-        }
-    */
-    if (options_.insert_cache_immediately_) {
-        segment_writer_ptr_->Cache();
-    }
+    LOG_ENGINE_DEBUG_ << "New file " << seg_file->GetID() << " of size " << seg_file->GetSize()
+                      << " bytes, lsn = " << wal_lsn;
 
     return status;
 }
 
-const std::string&
+int64_t
 SSMemSegment::GetSegmentId() const {
-    return table_file_schema_.segment_id_;
-}
-
-meta::SegmentSchema
-SSMemSegment::GetSegmentSchema() const {
-    return table_file_schema_;
+    return segment_->GetID();
 }
 
 void

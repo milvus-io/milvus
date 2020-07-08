@@ -17,10 +17,14 @@
 #include "Options.h"
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
-#include "db/snapshot/Resources.h"
 
 namespace milvus {
 namespace engine {
+namespace snapshot {
+class Segment;
+class Partition;
+class Collection;
+}  // namespace snapshot
 namespace utils {
 
 int64_t
@@ -84,8 +88,13 @@ void
 EraseFromCache(const std::string& item_key);
 
 Status
-CreateSegmentPath(const snapshot::SegmentPtr& segment, const DBOptions& options, std::string& segment_path);
+CreatePath(const snapshot::Segment* segment, const DBOptions& options, std::string& path);
 
+Status
+CreatePath(const snapshot::Partition* partition, const DBOptions& options, std::string& path);
+
+Status
+CreatePath(const snapshot::Collection* collection, const DBOptions& options, std::string& path);
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

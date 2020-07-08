@@ -42,8 +42,7 @@ SSMemCollection::Add(const SSVectorSourcePtr& source) {
 
         Status status;
         if (mem_segment_list_.empty() || current_mem_segment->IsFull()) {
-            SSMemSegmentPtr new_mem_segment =
-                std::make_shared<SSMemSegment>(collection_id_, partition_id_, options_);
+            SSMemSegmentPtr new_mem_segment = std::make_shared<SSMemSegment>(collection_id_, partition_id_, options_);
             status = new_mem_segment->Add(source);
             if (status.ok()) {
                 mem_segment_list_.emplace_back(new_mem_segment);
@@ -71,8 +70,7 @@ SSMemCollection::AddEntities(const milvus::engine::SSVectorSourcePtr& source) {
 
         Status status;
         if (mem_segment_list_.empty() || current_mem_segment->IsFull()) {
-            SSMemSegmentPtr new_mem_segment =
-                std::make_shared<SSMemSegment>(collection_id_, partition_id_, options_);
+            SSMemSegmentPtr new_mem_segment = std::make_shared<SSMemSegment>(collection_id_, partition_id_, options_);
             status = new_mem_segment->AddEntities(source);
             if (status.ok()) {
                 mem_segment_list_.emplace_back(new_mem_segment);
@@ -137,10 +135,8 @@ SSMemCollection::Serialize(uint64_t wal_lsn) {
         }
     }
 
-    meta::SegmentsSchema update_files;
     for (auto mem_segment = mem_segment_list_.begin(); mem_segment != mem_segment_list_.end();) {
         auto status = (*mem_segment)->Serialize(wal_lsn);
-        update_files.push_back((*mem_segment)->GetSegmentSchema());
         if (!status.ok()) {
             return status;
         }
@@ -200,7 +196,6 @@ SSMemCollection::ApplyDeletes() {
     //     Serialize segment's deletedDoc TODO(zhiru): append directly to previous file for now, may have duplicates
     //     Serialize bloom filter
 
-    // TODO: implemant this
     //    LOG_ENGINE_DEBUG_ << "Applying " << doc_ids_to_delete_.size() << " deletes in collection: " << collection_id_;
     //
     //    TimeRecorder recorder("SSMemCollection::ApplyDeletes for collection " + collection_id_);

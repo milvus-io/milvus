@@ -18,6 +18,7 @@
 #include "config/handler/CacheConfigHandler.h"
 #include "db/engine/ExecutionEngine.h"
 #include "db/insert/SSVectorSource.h"
+#include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Resources.h"
 #include "segment/SegmentWriter.h"
 #include "utils/Status.h"
@@ -56,11 +57,8 @@ class SSMemSegment : public server::CacheConfigHandler {
     Status
     Serialize(uint64_t wal_lsn);
 
-    const std::string&
+    int64_t
     GetSegmentId() const;
-
-    meta::SegmentSchema
-    GetSegmentSchema() const;
 
  protected:
     void
@@ -70,10 +68,14 @@ class SSMemSegment : public server::CacheConfigHandler {
     Status
     CreateSegment();
 
+    int64_t
+    GetDimension();
+
  private:
     int64_t collection_id_;
     int64_t partition_id_;
 
+    std::shared_ptr<snapshot::NewSegmentOperation> operation_;
     snapshot::SegmentPtr segment_;
     DBOptions options_;
     size_t current_mem_;
