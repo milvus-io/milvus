@@ -27,7 +27,7 @@ class TestLoadCollection:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("sq8h not support in cpu mode")
         return request.param
@@ -40,6 +40,7 @@ class TestLoadCollection:
         ''' 
         connect.insert(collection, entities)
         connect.flush([collection])
+        logging.getLogger().info(get_simple_index)
         connect.create_index(collection, field_name, index_name, get_simple_index)
         connect.load_collection(collection)
 

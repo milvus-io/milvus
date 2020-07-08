@@ -138,7 +138,8 @@ def jac_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "JACCARD"}}
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dimension": dimension, "metric_type": "JACCARD"}}
+    logging.getLogger().info(fields)
     try:
         connect.create_collection(collection_name, fields)
     except Exception as e:
@@ -157,7 +158,7 @@ def ham_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "HAMMING"}}
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dimension": dimension, "metric_type": "HAMMING"}}
     try:
         connect.create_collection(collection_name, fields)
     except Exception as e:
@@ -176,7 +177,7 @@ def tanimoto_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "TANIMOTO"}}
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dimension": dimension, "metric_type": "TANIMOTO"}}
     try:
         connect.create_collection(collection_name, fields)
     except Exception as e:
@@ -195,7 +196,7 @@ def substructure_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": "SUBSTRUCTURE"}}
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dimension": dimension, "metric_type": "SUBSTRUCTURE"}}
     try:
         connect.create_collection(collection_name, fields)
     except Exception as e:
@@ -215,7 +216,7 @@ def superstructure_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "dimension": dimension, "params": {"metric_type": MetricType.SUPERSTRUCTURE}}
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dimension": dimension, "metric_type": MetricType.SUPERSTRUCTURE}}
     try:
         connect.create_collection(collection_name, fields)
     except Exception as e:

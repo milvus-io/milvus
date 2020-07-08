@@ -25,7 +25,7 @@ bianry_entities = gen_binary_entities(nb)
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {field_name: {"topk": 10, "query": gen_single_entity(dim), "params": {"nprobe": 10}}}}
+            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim), "params": {"nprobe": 10}}}}
         ]
     }
 }
@@ -41,10 +41,10 @@ class TestGetBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "GPU":
+        if str(connect._cmd("mode")) == "GPU":
             if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVFSQ8H]:
                 pytest.skip("Only support index_type: idmap/ivf")
-        elif str(connect._cmd("mode")[1]) == "CPU":
+        elif str(connect._cmd("mode")) == "CPU":
             if request.param["index_type"] in [IndexType.IVFSQ8H]:
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
@@ -69,9 +69,14 @@ class TestGetBase:
         '''
         ids = connect.insert(collection, entities)
         connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == nb
         get_ids = [ids[get_pos]]
         res = connect.get_entity_by_id(collection, get_ids)
-        assert_equal_entity(res[get_pos], entities[get_pos])
+        logging.getLogger().info(res)
+        pdb.set_trace()
+        logging.getLogger().info(dict(res))
+        assert_equal_entity(dict(res), entities[get_pos])
 
     def test_get_entity_multi_ids(self, connect, collection, get_pos):
         '''
