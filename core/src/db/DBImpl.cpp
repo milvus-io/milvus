@@ -1340,6 +1340,10 @@ DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::
         return status;
     }
 
+    if (field_names.empty()) {
+        return Status::OK();
+    }
+
     engine::meta::CollectionSchema collection_schema;
     engine::meta::hybrid::FieldsSchema fields_schema;
     collection_schema.collection_id_ = collection_id;
