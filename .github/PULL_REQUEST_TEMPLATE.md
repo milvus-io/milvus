@@ -1,6 +1,6 @@
 **What type of PR is this?**
 
-API-change / bug / improvement / documentation / feature
+API-change / BUG / Improvement / Documentation / Feature
 
 **Which branch you want to cherry-pick to?**
 
