@@ -497,7 +497,8 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
         auto json = milvus::json::parse(file.index_params_);
         ExecutionEnginePtr engine =
             EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
-        LOG_ENGINE_DEBUG_ << "linxj dim:" + file.dimension_ + ", location_:" + file.location_ + ", engine_type:" + int32_t(engine_type);
+        LOG_ENGINE_DEBUG_ << "linxj dim:" + file.dimension_ + ", location_:" + file.location_ +
+                                 ", engine_type:" + int32_t(engine_type);
         fiu_do_on("DBImpl.PreloadCollection.null_engine", engine = nullptr);
         if (engine == nullptr) {
             LOG_ENGINE_ERROR_ << "Invalid engine type";
