@@ -90,7 +90,7 @@ class TestSearchBase:
         params=gen_index()
     )
     def get_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("sq8h not support in CPU mode")
         return request.param
@@ -100,7 +100,7 @@ class TestSearchBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("sq8h not support in CPU mode")
         return request.param
@@ -1159,10 +1159,10 @@ class TestSearchParamsInvalid(object):
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
+        if str(connect._cmd("mode")) == "GPU":
             if request.param["index_type"] == IndexType.IVF_PQ:
                 pytest.skip("ivfpq not support in GPU mode")
         return request.param
@@ -1191,10 +1191,10 @@ class TestSearchParamsInvalid(object):
         params=gen_invaild_search_params()
     )
     def get_invalid_search_param(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
+        if str(connect._cmd("mode")) == "GPU":
             if request.param["index_type"] == IndexType.IVF_PQ:
                 pytest.skip("ivfpq not support in GPU mode")
         return request.param

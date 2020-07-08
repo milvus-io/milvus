@@ -21,10 +21,11 @@ entity = gen_entities(1)
 binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
 raw_vectors, binary_entities = gen_binary_entities(nb)
+default_fields = gen_default_fields() 
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {field_name: {"topk": 10, "query": gen_single_vector(dim), "params": {"index_name": default_index_name, "nprobe": 10}}}}
+            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim), "params": {"index_name": default_index_name, "nprobe": 10}}}}
         ]
     }
 }
@@ -41,9 +42,9 @@ class TestInsertBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             if request.param["index_type"] == "IVFSQ8H":
-                pytest.skip("sq8h not support in cpu mode")
+                pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
     @pytest.fixture(
@@ -104,7 +105,7 @@ class TestInsertBase:
         ids = connect.insert(collection, entities)
         assert len(ids) == nb
         connect.flush([collection])
-        connect.create_index(collection, field_name, index_name, get_simple_index)
+        connect.create_index(collection, field_name, default_index_name, get_simple_index)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
@@ -113,7 +114,7 @@ class TestInsertBase:
         method: insert vector and build index
         expected: no error raised
         '''
-        connect.create_index(collection, field_name, index_name, get_simple_index)
+        connect.create_index(collection, field_name, default_index_name, get_simple_index)
         ids = connect.insert(collection, entities)
         assert len(ids) == nb
 
@@ -128,7 +129,7 @@ class TestInsertBase:
         connect.flush([collection])
         res = connect.search(collection, default_single_query)
         logging.getLogger().debug(res)
-        assert not res
+        assert res
 
     @pytest.fixture(
         scope="function",
@@ -153,10 +154,10 @@ class TestInsertBase:
         connect.flush([collection])
         assert len(res_ids) == nb
         assert res_ids == ids
-        res_count = connect.count_collection(collection)
+        res_count = connect.count_entities(collection)
         assert res_count == nb
  
-     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_the_same_ids(self, connect, collection, insert_count):
         '''
         target: test insert vectors in collection, use customize the same ids
@@ -169,7 +170,7 @@ class TestInsertBase:
         connect.flush([collection])
         assert len(res_ids) == nb
         assert res_ids == ids
-        res_count = connect.count_collection(collection)
+        res_count = connect.count_entities(collection)
         assert res_count == nb
 
     # TODO
@@ -190,10 +191,11 @@ class TestInsertBase:
         }
         connect.create_collection(collection_name, fields)
         ids = [i for i in range(nb)]
-        entities = gen_entities_by_fields(fields)
+        entities = gen_entities_by_fields(fields["fields"], nb, dim)
         res_ids = connect.insert(collection_name, entities, ids)
         assert res_ids == ids
-        res_count = connect.count_collection(collection)
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
         assert res_count == nb
 
     # TODO: assert exception
@@ -229,6 +231,7 @@ class TestInsertBase:
         expected: raise an exception
         '''
         ids = [i for i in range(1, nb)]
+        logging.getLogger().info(len(ids))
         with pytest.raises(Exception) as e:
             res_ids = connect.insert(collection, entities, ids)
 
@@ -249,9 +252,10 @@ class TestInsertBase:
                 "segment_size": segment_size
         }
         connect.create_collection(collection_name, fields)
-        entities = gen_entities_by_fields(fields)
+        entities = gen_entities_by_fields(fields["fields"], nb, dim)
         res_ids = connect.insert(collection_name, entities)
-        res_count = connect.count_collection(collection)
+        connect.flush([collection_name])
+        res_count = connect.count_entities(collection_name)
         assert res_count == nb
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -286,8 +290,9 @@ class TestInsertBase:
         '''
         connect.create_partition(collection, tag)
         ids = connect.insert(collection, entities)
+        connect.flush([collection])
         assert len(ids) == nb
-        res_count = connect.count_collection(collection)
+        res_count = connect.count_entities(collection)
         assert res_count == nb
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -311,7 +316,8 @@ class TestInsertBase:
         connect.create_partition(collection, tag)
         ids = connect.insert(collection, entities, partition_tag=tag)
         ids = connect.insert(collection, entities, partition_tag=tag)
-        res_count = connect.count_collection(collection)
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
         assert res_count == 2*nb
 
     @pytest.mark.level(2)
@@ -607,7 +613,6 @@ class TestInsertMultiCollections:
         expected: row count
         '''
         collection_num = 10
-        vectors = gen_vectors(nq, dim)
         collection_list = []
         for i in range(collection_num):
             collection_name = gen_unique_str(collection_id)
@@ -642,7 +647,7 @@ class TestInsertMultiCollections:
         '''
         collection_name = gen_unique_str(collection_id)
         connect.create_collection(collection_name, default_fields)
-        connect.create_index(collection, field_name, index_name, get_simple_index)
+        connect.create_index(collection, field_name, default_index_name, get_simple_index)
         ids = connect.insert(collection, entity)
         connect.drop_collection(collection_name)
 
@@ -656,7 +661,7 @@ class TestInsertMultiCollections:
         collection_name = gen_unique_str(collection_id)
         connect.create_collection(collection_name, default_fields)
         ids = connect.insert(collection, entity)
-        connect.create_index(collection_name, field_name, index_name, get_simple_index)
+        connect.create_index(collection_name, field_name, default_index_name, get_simple_index)
         count = connect.count_entities(collection_name)
         assert count == 1
 
@@ -671,7 +676,7 @@ class TestInsertMultiCollections:
         connect.create_collection(collection_name, default_fields)
         ids = connect.insert(collection, entity)
         connect.flush([collection])
-        connect.create_index(collection_name, field_name, index_name, get_simple_index)
+        connect.create_index(collection_name, field_name, default_index_name, get_simple_index)
         count = connect.count_entities(collection_name)
         assert count == 1
 
@@ -723,28 +728,28 @@ class TestInsertInvalid(object):
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_tag_name(self, request):
         yield request.param
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_field_name(self, request):
         yield request.param
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_field_int_value(self, request):
         yield request.param
@@ -817,28 +822,28 @@ class TestInsertInvalidIP(object):
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_tag_name(self, request):
         yield request.param
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_field_name(self, request):
         yield request.param
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_field_int_value(self, request):
         yield request.param
@@ -912,28 +917,28 @@ class TestInsertInvalidBinary(object):
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_tag_name(self, request):
         yield request.param
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_field_name(self, request):
         yield request.param
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strings()
+        params=gen_invalid_strs()
     )
     def get_field_int_value(self, request):
         yield request.param
