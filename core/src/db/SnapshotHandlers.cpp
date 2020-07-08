@@ -235,8 +235,8 @@ HybridQueryHelperSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     } else {
         auto p_id = segment->GetPartitionId();
         auto p_ptr = ss_->GetResource<snapshot::Partition>(p_id);
-        auto &p_name = p_ptr->GetName();
-        for (auto &pattern : partition_patterns_) {
+        auto& p_name = p_ptr->GetName();
+        for (auto& pattern : partition_patterns_) {
             if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
                 segments_.push_back(segment);
                 break;
