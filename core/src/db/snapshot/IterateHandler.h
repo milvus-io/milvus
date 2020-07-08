@@ -63,10 +63,11 @@ struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
     mutable std::mutex mtx_;
 };
 
-using SegmentExecutorT = std::function<Status(const Segment::Ptr&, IterateHandler<Segment>*)>;
-struct SegmentCollector : public IterateHandler<Segment> {
+using IterateSegmentHandler = IterateHandler<Segment>;
+using SegmentExecutorT = std::function<Status(const Segment::Ptr&, IterateSegmentHandler*)>;
+struct SegmentCollector : public IterateSegmentHandler {
     using ResourceT = Segment;
-    using BaseT = IterateHandler<Segment>;
+    using BaseT = IterateSegmentHandler;
 
     explicit SegmentCollector(ScopedSnapshotT ss, const SegmentExecutorT& executor) : BaseT(ss), executor_(executor) {
     }
