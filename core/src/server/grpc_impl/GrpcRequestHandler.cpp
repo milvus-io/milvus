@@ -347,7 +347,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
                 if (!int32_data.empty()) {
                     grpc_attr_data->mutable_int32_value()->Resize(static_cast<int>(int32_data.size()), 0);
                     memcpy(grpc_attr_data->mutable_int32_value()->mutable_data(), int32_data.data(),
-                           int32_data.size() * sizeof(int32_data));
+                           int32_data.size() * sizeof(int32_t));
                 } else if (!int64_data.empty()) {
                     grpc_attr_data->mutable_int64_value()->Resize(static_cast<int>(int64_data.size()), 0);
                     memcpy(grpc_attr_data->mutable_int64_value()->mutable_data(), int64_data.data(),
@@ -1188,7 +1188,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     std::vector<std::string> field_names;
 
     std::vector<int64_t> offsets;
-    std::vector<std::vector<uint8_t>> attr_datas(field_size);
+    std::vector<std::vector<uint8_t>> attr_datas;
     uint64_t row_num;
     for (int i = 0; i < field_size; i++) {
         auto grpc_int32_size = request->fields(i).attr_record().int32_value_size();

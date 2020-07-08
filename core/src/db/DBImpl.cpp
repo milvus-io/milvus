@@ -802,7 +802,7 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
 
                 attr_nbytes.insert(std::make_pair(name, sizeof(int8_t)));
                 attr_data_size.insert(std::make_pair(name, row_num * sizeof(int8_t)));
-                offset += row_num * sizeof(int64_t);
+                offset += row_num * sizeof(int32_t);
                 break;
             }
             case meta::hybrid::DataType::INT16: {
@@ -822,7 +822,7 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
 
                 attr_nbytes.insert(std::make_pair(name, sizeof(int16_t)));
                 attr_data_size.insert(std::make_pair(name, row_num * sizeof(int16_t)));
-                offset += row_num * sizeof(int64_t);
+                offset += row_num * sizeof(int32_t);
                 break;
             }
             case meta::hybrid::DataType::INT32: {
@@ -837,7 +837,7 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
 
                 attr_nbytes.insert(std::make_pair(name, sizeof(int32_t)));
                 attr_data_size.insert(std::make_pair(name, row_num * sizeof(int32_t)));
-                offset += row_num * sizeof(int64_t);
+                offset += row_num * sizeof(int32_t);
                 break;
             }
             case meta::hybrid::DataType::INT64: {
@@ -866,7 +866,7 @@ CopyToAttr(const std::vector<uint8_t>& record, int64_t row_num, const std::vecto
 
                 attr_nbytes.insert(std::make_pair(name, sizeof(float)));
                 attr_data_size.insert(std::make_pair(name, row_num * sizeof(float)));
-                offset += row_num * sizeof(double);
+                offset += row_num * sizeof(float);
                 break;
             }
             case meta::hybrid::DataType::DOUBLE: {
@@ -981,43 +981,6 @@ DBImpl::InsertEntities(const std::string& collection_id, const std::string& part
 
         status = ExecWalRecord(record);
     }
-    return status;
-}
-
-Status
-DBImpl::DeleteVector(const std::string& collection_id, IDNumber vector_id) {
-    IDNumbers ids;
-    ids.push_back(vector_id);
-    return DeleteVectors(collection_id, ids);
-}
-
-Status
-DBImpl::DeleteEntity(const std::string& collection_id, milvus::engine::IDNumber entity_id) {
-    IDNumbers ids;
-    ids.push_back(entity_id);
-}
-
-Status
-DBImpl::DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    Status status;
-    if (options_.wal_enable_) {
-        wal_mgr_->DeleteById(collection_id, vector_ids);
-        swn_wal_.Notify();
-    } else {
-        wal::MXLogRecord record;
-        record.lsn = 0;  // need to get from meta ?
-        record.type = wal::MXLogType::Delete;
-        record.collection_id = collection_id;
-        record.ids = vector_ids.data();
-        record.length = vector_ids.size();
-
-        status = ExecWalRecord(record);
-    }
-
     return status;
 }
 
