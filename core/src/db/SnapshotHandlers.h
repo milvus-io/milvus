@@ -13,6 +13,7 @@
 
 #include "db/Types.h"
 #include "db/meta/FilesHolder.h"
+#include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/Snapshot.h"
 #include "server/context/Context.h"
 #include "utils/Log.h"
@@ -75,6 +76,21 @@ struct GetEntityByIdSegmentHandler : public snapshot::IterateHandler<snapshot::S
     std::vector<engine::VectorsData> vector_data_;
     std::vector<meta::hybrid::DataType> attr_type_;
     std::vector<engine::AttrsData> attr_data_;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+struct HybridQueryHelperSegmentHandler : public snapshot::IterateHandler<snapshot::Segment> {
+    using ResourceT = snapshot::Segment;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
+    HybridQueryHelperSegmentHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
+                                    const std::vector<std::string>& partition_patterns);
+
+    Status
+    Handle(const typename ResourceT::Ptr&) override;
+
+    const server::ContextPtr context_;
+    const std::vector<std::string> partition_patterns_;
+    std::vector<snapshot::SegmentPtr> segments_;
 };
 
 }  // namespace engine

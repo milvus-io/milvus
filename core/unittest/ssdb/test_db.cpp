@@ -19,6 +19,7 @@
 
 #include "ssdb/utils.h"
 #include "db/SnapshotVisitor.h"
+#include "db/snapshot/IterateHandler.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
 
@@ -256,7 +257,7 @@ TEST_F(SSDBTest, VisitorTest) {
         return Status::OK();
     };
 
-    auto segment_handler = std::make_shared<SegmentCollector>(ss, executor);
+    auto segment_handler = std::make_shared<milvus::engine::snapshot::SegmentCollector>(ss, executor);
     segment_handler->Iterate();
     std::cout << segment_handler->GetStatus().ToString() << std::endl;
     ASSERT_TRUE(segment_handler->GetStatus().ok());
