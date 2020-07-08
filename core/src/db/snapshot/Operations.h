@@ -33,9 +33,9 @@ namespace engine {
 namespace snapshot {
 
 using CheckStaleFunc = std::function<Status(ScopedSnapshotT&)>;
-using StepsHolderT = std::tuple<CollectionCommit::SetT, Collection::SetT, SchemaCommit::SetT, FieldCommit::SetT,
-                                Field::SetT, FieldElement::SetT, PartitionCommit::SetT, Partition::SetT,
-                                SegmentCommit::SetT, Segment::SetT, SegmentFile::SetT>;
+using StepsHolderT = std::tuple<SegmentFile::SetT, SegmentCommit::SetT, Segment::SetT, PartitionCommit::SetT,
+                                Partition::SetT, FieldElement::SetT, FieldCommit::SetT, Field::SetT, SchemaCommit::SetT,
+                                CollectionCommit::SetT, Collection::SetT>;
 
 enum OperationsType { Invalid, W_Leaf, O_Leaf, W_Compound, O_Compound };
 

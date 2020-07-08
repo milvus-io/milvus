@@ -95,6 +95,7 @@ Snapshot::Snapshot(ID_TYPE ss_id) {
                 AddResource<FieldElement>(field_element);
                 AddResource<SegmentFile>(segment_file);
                 element_segfiles_map_[field_element_id][segment_id] = segment_file_id;
+                seg_segfiles_map_[segment_id].insert(segment_file_id);
             }
         }
     }
