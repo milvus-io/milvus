@@ -1037,16 +1037,16 @@ SSDBImpl::StartMergeTask(const std::set<std::string>& merge_collection_ids, bool
 }
 
 void
-SSDBImpl::BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all) {
+SSDBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all) {
     // LOG_ENGINE_TRACE_ << " Background merge thread start";
 
     Status status;
-    for (auto& collection_id : collection_ids) {
+    for (auto& collection_name : collection_names) {
         std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
         // TODO: merge files
         if (!initialized_.load(std::memory_order_acquire)) {
-            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection: " << collection_id;
+            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection: " << collection_name;
             break;
         }
     }
@@ -1112,13 +1112,13 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         snapshot::ScopedSnapshotT ss;
         auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
         if (!status.ok()) {
-            LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get snapshot fail: " << status.message();
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get snapshot fail: " << status.message();
             return status;
         }
         col_id = ss->GetCollectionId();
         snapshot::PartitionPtr part = ss->GetPartition(record.partition_tag);
         if (part == nullptr) {
-            LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
             return status;
         }
         part_id = part->GetID();
