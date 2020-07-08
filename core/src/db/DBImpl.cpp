@@ -497,6 +497,7 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
         auto json = milvus::json::parse(file.index_params_);
         ExecutionEnginePtr engine =
             EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
+        LOG_ENGINE_DEBUG_ << "linxj dim:" + file.dimension_ + ", location_:" + file.location_ + ", engine_type:" + int32_t(engine_type);
         fiu_do_on("DBImpl.PreloadCollection.null_engine", engine = nullptr);
         if (engine == nullptr) {
             LOG_ENGINE_ERROR_ << "Invalid engine type";
@@ -521,6 +522,10 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
             }
         } catch (std::exception& ex) {
             std::string msg = "Pre-load collection encounter exception: " + std::string(ex.what());
+            LOG_ENGINE_ERROR_ << msg;
+            return Status(DB_ERROR, msg);
+        } catch (...) {
+            std::string msg = "linxj Pre-load collection encounter exception.";
             LOG_ENGINE_ERROR_ << msg;
             return Status(DB_ERROR, msg);
         }

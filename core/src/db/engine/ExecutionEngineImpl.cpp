@@ -387,6 +387,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
         utils::GetParentPath(location_, segment_dir);
         auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
         knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
+        LOG_ENGINE_DEBUG_ << "lxj_crash_1";
 
         if (utils::IsRawIndexType((int32_t)index_type_)) {
             if (index_type_ == EngineType::FAISS_IDMAP) {
@@ -401,6 +402,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
             if (!adapter->CheckTrain(conf, index_->index_mode())) {
                 throw Exception(DB_ERROR, "Illegal index params");
             }
+            LOG_ENGINE_DEBUG_ << "lxj_crash_2";
 
             auto status = segment_reader_ptr->Load();
             if (!status.ok()) {
@@ -408,15 +410,18 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 LOG_ENGINE_ERROR_ << msg;
                 return Status(DB_ERROR, msg);
             }
+            LOG_ENGINE_DEBUG_ << "lxj_crash_3";
 
             segment::SegmentPtr segment_ptr;
             segment_reader_ptr->GetSegment(segment_ptr);
             auto& vectors = segment_ptr->vectors_ptr_;
             auto& deleted_docs = segment_ptr->deleted_docs_ptr_->GetDeletedDocs();
+            LOG_ENGINE_DEBUG_ << "lxj_crash_4";
 
             auto& vectors_uids = vectors->GetMutableUids();
             auto count = vectors_uids.size();
             index_->SetUids(vectors_uids);
+            LOG_ENGINE_DEBUG_ << "lxj_crash_5";
             LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids().size() << " for index " << location_;
 
             auto& vectors_data = vectors->GetData();
@@ -428,6 +433,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 attr_data_.insert(std::pair(attrs_it->first, attrs_it->second->GetData()));
                 attr_size_.insert(std::pair(attrs_it->first, attrs_it->second->GetNbytes()));
             }
+            LOG_ENGINE_DEBUG_ << "lxj_crash_6";
 
             vector_count_ = count;
 
@@ -435,6 +441,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
             for (auto& offset : deleted_docs) {
                 concurrent_bitset_ptr->set(offset);
             }
+            LOG_ENGINE_DEBUG_ << "lxj_crash_7";
 
             auto dataset = knowhere::GenDataset(count, this->dim_, vectors_data.data());
             if (index_type_ == EngineType::FAISS_IDMAP) {
