@@ -230,13 +230,17 @@ HybridQueryHelperSegmentHandler::HybridQueryHelperSegmentHandler(const server::C
 
 Status
 HybridQueryHelperSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
-    auto p_id = segment->GetPartitionId();
-    auto p_ptr = ss_->GetResource<snapshot::Partition>(p_id);
-    auto& p_name = p_ptr->GetName();
-    for (auto& pattern : partition_patterns_) {
-        if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
-            segments_.push_back(segment);
-            break;
+    if (partition_patterns_.empty()) {
+        segments_.push_back(segment);
+    } else {
+        auto p_id = segment->GetPartitionId();
+        auto p_ptr = ss_->GetResource<snapshot::Partition>(p_id);
+        auto &p_name = p_ptr->GetName();
+        for (auto &pattern : partition_patterns_) {
+            if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
+                segments_.push_back(segment);
+                break;
+            }
         }
     }
     return Status::OK();
