@@ -28,8 +28,7 @@ struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
     using Ptr = std::shared_ptr<ThisT>;
     using ExecutorT = std::function<Status(const typename T::Ptr&, ThisT*)>;
 
-    explicit IterateHandler(ScopedSnapshotT ss, const ExecutorT& executor = {})
-        : ss_(ss), executor_(executor) {
+    explicit IterateHandler(ScopedSnapshotT ss, const ExecutorT& executor = {}) : ss_(ss), executor_(executor) {
     }
 
     virtual Status

@@ -39,9 +39,9 @@ SnapshotVisitor::SegmentsToSearch(meta::FilesHolder& files_holder) {
     return handler->GetStatus();
 }
 
-FieldElementVisitor::Ptr
-FieldElementVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id,
-                           snapshot::ID_TYPE field_element_id) {
+SegmentFieldElementVisitor::Ptr
+SegmentFieldElementVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id,
+                                  snapshot::ID_TYPE field_element_id) {
     if (!ss) {
         return nullptr;
     }
@@ -51,7 +51,7 @@ FieldElementVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segme
         return nullptr;
     }
 
-    auto visitor = std::make_shared<FieldElementVisitor>();
+    auto visitor = std::make_shared<SegmentFieldElementVisitor>();
     visitor->SetFieldElement(element);
     auto segment = ss->GetResource<snapshot::Segment>(segment_id);
     if (!segment) {
@@ -81,12 +81,12 @@ SegmentFieldVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segme
     auto visitor = std::make_shared<SegmentFieldVisitor>();
     visitor->SetField(field);
 
-    auto executor = [&] (const snapshot::FieldElement::Ptr& field_element,
-            snapshot::FieldElementIterator* itr) -> Status {
+    auto executor = [&](const snapshot::FieldElement::Ptr& field_element,
+                        snapshot::FieldElementIterator* itr) -> Status {
         if (field_element->GetFieldId() != field_id) {
             return Status::OK();
         }
-        auto element_visitor = FieldElementVisitor::Build(ss, segment_id, field_element->GetID());
+        auto element_visitor = SegmentFieldElementVisitor::Build(ss, segment_id, field_element->GetID());
         if (!element_visitor) {
             return Status::OK();
         }
@@ -113,8 +113,7 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id
     auto visitor = std::make_shared<SegmentVisitor>();
     visitor->SetSegment(segment);
 
-    auto executor = [&] (const snapshot::Field::Ptr& field,
-            snapshot::FieldIterator* itr) -> Status {
+    auto executor = [&](const snapshot::Field::Ptr& field, snapshot::FieldIterator* itr) -> Status {
         auto field_visitor = SegmentFieldVisitor::Build(ss, segment_id, field->GetID());
         if (!field_visitor) {
             return Status::OK();

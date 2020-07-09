@@ -71,6 +71,7 @@ using SoftDeleteCollectionOperation = milvus::engine::snapshot::SoftDeleteOperat
 using ParamsField = milvus::engine::snapshot::ParamsField;
 using IteratePartitionHandler = milvus::engine::snapshot::IterateHandler<Partition>;
 using IterateSegmentFileHandler = milvus::engine::snapshot::IterateHandler<SegmentFile>;
+using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
 using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
 using SSDBImpl = milvus::engine::SSDBImpl;
 using Status = milvus::Status;
