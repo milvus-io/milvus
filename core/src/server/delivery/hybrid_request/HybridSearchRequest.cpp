@@ -101,12 +101,7 @@ HybridSearchRequest::OnExecute() {
             }
         }
 
-        //        if (field_names_.empty()) {
-        //            for (const auto& field : fields_schema.fields_schema_) {
-        //                field_names_.emplace_back(field.field_name_);
-        //            }
-        //        }
-
+        result_.row_num_ = 0;
         status = DBWrapper::DB()->HybridQuery(context_, collection_name_, partition_list_, general_query_, query_ptr_,
                                               field_names_, attr_type, result_);
 

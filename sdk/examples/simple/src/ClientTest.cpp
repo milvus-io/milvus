@@ -35,6 +35,7 @@ constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value,
 constexpr int64_t ADD_ENTITY_LOOP = 1;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
 constexpr int32_t NLIST = 16384;
+constexpr char* PARTITION_TAG = "part";
 
 void
 PrintEntity(const std::string& tag, const milvus::VectorData& entity) {
@@ -209,7 +210,7 @@ ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int
 
     std::vector<std::string> partition_tags;
     milvus::TopKQueryResult topk_query_result;
-    auto status = conn_->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
+    status = conn_->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
 
     std::cout << "Search function call result: " << std::endl;
     milvus_sdk::Utils::PrintTopKQueryResult(topk_query_result);
