@@ -17,6 +17,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2690 Remove body parser in show-partitions endpoints
 -   \#2692 Milvus hangs during multi-thread concurrent search
 -   \#2739 Fix mishards start failed
+-   \#2776 Fix too many data copies during creating IVF index
 
 ## Feature
 
