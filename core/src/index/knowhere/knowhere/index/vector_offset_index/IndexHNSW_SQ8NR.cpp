@@ -83,9 +83,9 @@ IndexHNSW_SQ8NR::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         }
         index_ = std::make_shared<hnswlib_nm::HierarchicalNSW_NM<float>>(
             space, rows, config[IndexParams::M].get<int64_t>(), config[IndexParams::efConstruction].get<int64_t>());
-        auto data_space = new uint8_t[dim * (rows +  2 * sizeof(float))];
+        auto data_space = new uint8_t[dim * (rows + 2 * sizeof(float))];
         index_->SetSq8(true);
-        index_->sq_train(rows, (const float*) p_data, data_space);
+        index_->sq_train(rows, (const float*)p_data, data_space);
         data_ = std::shared_ptr<uint8_t[]>(data_space);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());

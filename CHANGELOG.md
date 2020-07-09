@@ -26,6 +26,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2572 Support structured data index
 -   \#2585 Support IVF_PQ on GPU with using metric_type IP
 -   \#2689 Construct Knowhere Index Without Data
+-   \#2798 hnsw-sq8 support
 
 ## Improvement
 -   \#2543 Remove secondary_path related code

@@ -468,7 +468,8 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 segment_reader_ptr->GetSegment(segment_ptr);
 
                 auto external_data = GetIndexDataType(index_type_);
-                auto status = segment_reader_ptr->LoadVectorIndex(location_, external_data, segment_ptr->vector_index_ptr_);
+                auto status =
+                    segment_reader_ptr->LoadVectorIndex(location_, external_data, segment_ptr->vector_index_ptr_);
                 index_ = segment_ptr->vector_index_ptr_->GetVectorIndex();
 
                 if (index_ == nullptr) {

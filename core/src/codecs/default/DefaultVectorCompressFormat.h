@@ -44,7 +44,7 @@ class DefaultVectorCompressFormat : public VectorCompressFormat {
     DefaultVectorCompressFormat&
     operator=(DefaultVectorCompressFormat&&) = delete;
 
-private:
+ private:
     const std::string sq8_vector_extension_ = ".sq8";
 };
 

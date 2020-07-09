@@ -109,8 +109,8 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
 }
 
 void
-DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, ExternalData externalData,
-                               segment::VectorIndexPtr& vector_index) {
+DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                               ExternalData externalData, segment::VectorIndexPtr& vector_index) {
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";

@@ -26,11 +26,7 @@
 namespace milvus {
 namespace codec {
 
-enum ExternalData {
-    ExternalData_None,
-    ExternalData_RawData,
-    ExternalData_SQ8
-};
+enum ExternalData { ExternalData_None, ExternalData_RawData, ExternalData_SQ8 };
 
 class VectorIndexFormat {
  public:

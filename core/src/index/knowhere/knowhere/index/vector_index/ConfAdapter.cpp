@@ -260,7 +260,7 @@ HNSWConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMo
 }
 
 bool
-HNSWSQ8NRConfAdapter::CheckTrain(Config &oricfg, const IndexMode mode) {
+HNSWSQ8NRConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     static int64_t MIN_EFCONSTRUCTION = 8;
     static int64_t MAX_EFCONSTRUCTION = 512;
     static int64_t MIN_M = 4;
@@ -274,7 +274,7 @@ HNSWSQ8NRConfAdapter::CheckTrain(Config &oricfg, const IndexMode mode) {
 }
 
 bool
-HNSWSQ8NRConfAdapter::CheckSearch(Config &oricfg, const IndexType type, const IndexMode mode) {
+HNSWSQ8NRConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
     static int64_t MAX_EF = 4096;
 
     CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], MAX_EF);
