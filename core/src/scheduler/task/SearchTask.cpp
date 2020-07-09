@@ -317,6 +317,9 @@ XSearchTask::Execute() {
                 std::unique_lock<std::mutex> lock(search_job->mutex());
                 XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                   search_job->GetResultIds(), search_job->GetResultDistances());
+                LOG_ENGINE_DEBUG_ << "Merged result: "
+                                  << "nq = " << nq << ", topk = " << topk << ", len of ids = " << output_ids.size()
+                                  << ", len of distance = " << output_distance.size();
             }
 
             // span = rc.RecordSection(hdr + ", reduce topk");
