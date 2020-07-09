@@ -14,8 +14,11 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include "faiss/gpu/utils/DeviceUtils.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+
+#ifdef MILVUS_GPU_VERSION
+#include "faiss/gpu/utils/DeviceUtils.h"
+#endif
 
 namespace milvus {
 namespace knowhere {
@@ -109,7 +112,9 @@ IVFConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMod
     static int64_t MAX_NPROBE = 999999;  // todo(linxj): [1, nlist]
 
     if (mode == IndexMode::MODE_GPU) {
+#ifdef MILVUS_GPU_VERSION
         CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, faiss::gpu::getMaxKSelection());
+#endif
     } else {
         CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
     }
