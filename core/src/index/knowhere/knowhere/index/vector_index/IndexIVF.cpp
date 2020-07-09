@@ -66,13 +66,11 @@ void
 IVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
 
-    faiss::Index* coarse_quantizer = new faiss::IndexFlatL2(dim);
-    int64_t nlist = config[IndexParams::nlist].get<int64_t>();
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, nlist, metric_type);
-    index->train(rows, (float*)p_data);
-
-    index_.reset(faiss::clone_index(index.get()));
+    faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
+    int64_t nlist = config[IndexParams::nlist].get<int64_t>();
+    index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFFlat(coarse_quantizer, dim, nlist, metric_type));
+    index_->train(rows, (float*)p_data);
 }
 
 void

@@ -139,9 +139,7 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     b_params.out_degree = config[IndexParams::out_degree];
     b_params.search_length = config[IndexParams::search_length];
 
-    auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
-
-    GETTENSOR(dataset_ptr)
+    GETTENSORWITHIDS(dataset_ptr)
     index_ = std::make_shared<impl::NsgIndex>(dim, rows, config[Metric::TYPE].get<std::string>());
     index_->SetKnnGraph(knng);
     index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);
