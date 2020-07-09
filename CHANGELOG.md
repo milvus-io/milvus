@@ -6,6 +6,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 -   \#2487 Enlarge timeout value for creating collection
+
 -   \#2557 Fix random crash of INSERT_DUPLICATE_ID case
 -   \#2578 Result count doesn't match target vectors count
 -   \#2585 IVF_PQ on GPU with using metric_type IP
