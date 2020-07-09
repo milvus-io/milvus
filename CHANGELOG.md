@@ -17,7 +17,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2690 Remove body parser in show-partitions endpoints
 -   \#2692 Milvus hangs during multi-thread concurrent search
 -   \#2739 Fix mishards start failed
--   \#2752 Milvus format vector data to double-precision and return to http client
+-   \#2752 Milvus format vectors data to double-precision and return to http client
 -   \#2776 Fix too many data copies during creating IVF index
 
 ## Feature
