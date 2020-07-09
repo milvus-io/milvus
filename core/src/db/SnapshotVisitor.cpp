@@ -41,7 +41,7 @@ SnapshotVisitor::SegmentsToSearch(meta::FilesHolder& files_holder) {
 
 FieldElementVisitor::Ptr
 FieldElementVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id,
-        snapshot::ID_TYPE field_element_id) {
+                           snapshot::ID_TYPE field_element_id) {
     if (!ss) {
         return nullptr;
     }
@@ -68,8 +68,7 @@ FieldElementVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segme
 }
 
 SegmentFieldVisitor::Ptr
-SegmentFieldVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id,
-            snapshot::ID_TYPE field_id) {
+SegmentFieldVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id, snapshot::ID_TYPE field_id) {
     if (!ss) {
         return nullptr;
     }
