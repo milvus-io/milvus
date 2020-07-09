@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "db/impl/DBImp.h"
+#include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Utils.h"
@@ -58,9 +60,9 @@ class Store {
     Status
     ApplyOperation(OpT& op) {
         std::apply(
-            [&](auto&... steps_set) {
+            [&](auto&... step_context_set) {
                 std::size_t n{0};
-                ((ApplyOpStep(op, n++, steps_set)), ...);
+                ((ApplyOpStep(op, n++, step_context_set)), ...);
             },
             op.GetStepHolders());
         return Status::OK();
@@ -68,9 +70,11 @@ class Store {
 
     template <typename T, typename OpT>
     void
-    ApplyOpStep(OpT& op, size_t pos, std::set<std::shared_ptr<T>>& steps_set) {
+    ApplyOpStep(OpT& op, size_t pos, std::set<std::shared_ptr<ResourceContext<T>>>& step_context_set) {
         typename T::Ptr ret;
-        for (auto& res : steps_set) {
+        for (auto& step_context : step_context_set) {
+//            CreateResource<T>(T(*res), ret);
+            auto res = step_context->Resource();
             CreateResource<T>(T(*res), ret);
             res->SetID(ret->GetID());
         }
@@ -195,18 +199,15 @@ class Store {
 
     Status
     CreateCollection(Collection&& collection, CollectionPtr& return_v) {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-        auto& resources = std::get<Collection::MapT>(resources_);
-        auto c = std::make_shared<Collection>(collection);
-        auto& id = std::get<Index<Collection::MapT, MockResourcesT>::value>(ids_);
-        c->SetID(++id);
-        c->ResetCnt();
-        resources[c->GetID()] = c;
-        name_ids_[c->GetName()] = c->GetID();
-        lock.unlock();
-        GetResource<Collection>(c->GetID(), return_v);
-        /* std::cout << ">>> [Create] " << Collection::Name << " " << id; */
-        /* std::cout << " " << std::boolalpha << c->IsActive() << std::endl; */
+        auto status = CreateResource<Collection>(std::move(collection), return_v);
+
+        if (!status.ok()) {
+            return status;
+        }
+//        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+//        name_ids_[return_v->GetName()] = return_v->GetID();
+//        lock.unlock();
+
         return Status::OK();
     }
 
@@ -229,18 +230,24 @@ class Store {
     template <typename ResourceT>
     Status
     CreateResource(ResourceT&& resource, typename ResourceT::Ptr& return_v) {
-        if (resource.HasAssigned()) {
-            return UpdateResource<ResourceT>(std::move(resource), return_v);
-        }
         std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-        auto& resources = std::get<typename ResourceT::MapT>(resources_);
-        auto res = std::make_shared<ResourceT>(resource);
-        auto& id = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(ids_);
-        res->SetID(++id);
-        res->ResetCnt();
-        resources[res->GetID()] = res;
+        auto res_p = std::make_shared<ResourceT>(resource);
+        auto builder = ResourceContextBuilder<ResourceT>();
+        builder.SetOp(oAdd).SetResource(res_p);
+        auto res_ctx_p = builder.CreatePtr();
+
+        int64_t result_id;
+        auto status = DBImp::GetInstance().Apply<ResourceT>(res_ctx_p, result_id);
+        if (!status.ok()) {
+            return status;
+        }
+
+        return_v = std::make_shared<ResourceT>(resource);
+        return_v->SetID(result_id);
+        return_v->ResetCnt();
+
         lock.unlock();
-        auto status = GetResource<ResourceT>(res->GetID(), return_v);
+//        auto status = GetResource<ResourceT>(res->GetID(), return_v);
         /* std::cout << ">>> [Create] " << ResourceT::Name << " " << id; */
         /* std::cout << " " << std::boolalpha << res->IsActive() << std::endl; */
         return Status::OK();

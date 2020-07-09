@@ -10,11 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/CompoundOperations.h"
+
 #include <map>
 #include <memory>
 #include <sstream>
 #include <vector>
+
+#include "db/impl/DBImp.h"
 #include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Snapshots.h"
 #include "utils/Status.h"
 
@@ -534,9 +538,11 @@ CreateCollectionOperation::DoExecute(Store& store) {
         std::cerr << status.ToString() << std::endl;
         return status;
     }
-    AddStepWithLsn(*collection, c_context_.lsn);
+    auto c_ctx_p = ResourceContextBuilder<Collection>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*collection, c_context_.lsn, c_ctx_p);
     context_.new_collection = collection;
     MappingT field_commit_ids = {};
+    ID_TYPE result_id;
     auto field_idx = 0;
     for (auto& field_kv : c_context_.fields_schema) {
         field_idx++;
@@ -545,13 +551,15 @@ CreateCollectionOperation::DoExecute(Store& store) {
         FieldPtr field;
         status =
             store.CreateResource<Field>(Field(field_schema->GetName(), field_idx, field_schema->GetFtype()), field);
-        AddStepWithLsn(*field, c_context_.lsn);
+        auto f_ctx_p = ResourceContextBuilder<Field>().SetOp(oUpdate).CreatePtr();
+        AddStepWithLsn(*field, c_context_.lsn, f_ctx_p);
         MappingT element_ids = {};
         FieldElementPtr raw_element;
         status = store.CreateResource<FieldElement>(
             FieldElement(collection->GetID(), field->GetID(), DEFAULT_RAW_DATA_NAME, FieldElementType::FET_RAW),
             raw_element);
-        AddStepWithLsn(*raw_element, c_context_.lsn);
+        auto fe_ctx_p = ResourceContextBuilder<FieldElement>().SetOp(oUpdate).CreatePtr();
+        AddStepWithLsn(*raw_element, c_context_.lsn, fe_ctx_p);
         element_ids.insert(raw_element->GetID());
         for (auto& element_schema : field_elements) {
             FieldElementPtr element;
@@ -559,31 +567,37 @@ CreateCollectionOperation::DoExecute(Store& store) {
                 store.CreateResource<FieldElement>(FieldElement(collection->GetID(), field->GetID(),
                                                                 element_schema->GetName(), element_schema->GetFtype()),
                                                    element);
-            AddStepWithLsn(*element, c_context_.lsn);
+            auto t_fe_ctx_p = ResourceContextBuilder<FieldElement>().SetOp(oUpdate).CreatePtr();
+            AddStepWithLsn(*element, c_context_.lsn, t_fe_ctx_p);
             element_ids.insert(element->GetID());
         }
         FieldCommitPtr field_commit;
         status = store.CreateResource<FieldCommit>(FieldCommit(collection->GetID(), field->GetID(), element_ids),
                                                    field_commit);
-        AddStepWithLsn(*field_commit, c_context_.lsn);
+        auto fc_ctx_p = ResourceContextBuilder<FieldCommit>().SetOp(oUpdate).CreatePtr();
+        AddStepWithLsn(*field_commit, c_context_.lsn, fc_ctx_p);
         field_commit_ids.insert(field_commit->GetID());
     }
     SchemaCommitPtr schema_commit;
     status = store.CreateResource<SchemaCommit>(SchemaCommit(collection->GetID(), field_commit_ids), schema_commit);
-    AddStepWithLsn(*schema_commit, c_context_.lsn);
+    auto sc_ctx_p = ResourceContextBuilder<SchemaCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*schema_commit, c_context_.lsn, sc_ctx_p);
     PartitionPtr partition;
     status = store.CreateResource<Partition>(Partition("_default", collection->GetID()), partition);
-    AddStepWithLsn(*partition, c_context_.lsn);
+    auto p_ctx_p = ResourceContextBuilder<Partition>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*partition, c_context_.lsn, p_ctx_p);
     context_.new_partition = partition;
     PartitionCommitPtr partition_commit;
     status = store.CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()),
                                                    partition_commit);
-    AddStepWithLsn(*partition_commit, c_context_.lsn);
+    auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*partition_commit, c_context_.lsn, pc_ctx_p);
     context_.new_partition_commit = partition_commit;
     CollectionCommitPtr collection_commit;
     status = store.CreateResource<CollectionCommit>(
         CollectionCommit(collection->GetID(), schema_commit->GetID(), {partition_commit->GetID()}), collection_commit);
-    AddStepWithLsn(*collection_commit, c_context_.lsn);
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*collection_commit, c_context_.lsn, cc_ctx_p);
     context_.new_collection_commit = collection_commit;
     c_context_.collection_commit = collection_commit;
     context_.new_collection_commit = collection_commit;
@@ -612,7 +626,7 @@ DropCollectionOperation::DoExecute(Store& store) {
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     context_.collection->Deactivate();
-    AddStepWithLsn(*context_.collection, context_.lsn, false);
+    AddStepWithLsn(*context_.collection, context_.lsn, nullptr, false);
     return Status::OK();
 }
 
