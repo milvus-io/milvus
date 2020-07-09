@@ -9,24 +9,30 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/merge/MergeManagerFactory.h"
-#include "db/merge/MergeManagerImpl.h"
-#include "db/merge/SSMergeManagerImpl.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
+#pragma once
+
+#include <string>
+
+#include "db/merge/MergeManager.h"
+#include "db/meta/MetaTypes.h"
+#include "db/snapshot/ResourceTypes.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-MergeManagerPtr
-MergeManagerFactory::Build(const meta::MetaPtr& meta_ptr, const DBOptions& options) {
-    return std::make_shared<MergeManagerImpl>(meta_ptr, options, MergeStrategyType::LAYERED);
-}
+class SSMergeTask {
+ public:
+    SSMergeTask(const DBOptions& options, const std::string& collection_name, const snapshot::IDS_TYPE& segments);
 
-MergeManagerPtr
-MergeManagerFactory::SSBuild(const DBOptions& options) {
-    return std::make_shared<SSMergeManagerImpl>(options, MergeStrategyType::SIMPLE);
-}
+    Status
+    Execute();
+
+ private:
+    DBOptions options_;
+    std::string collection_name_;
+    snapshot::IDS_TYPE segments_;
+};  // SSMergeTask
 
 }  // namespace engine
 }  // namespace milvus

@@ -9,24 +9,32 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/merge/MergeManagerFactory.h"
-#include "db/merge/MergeManagerImpl.h"
-#include "db/merge/SSMergeManagerImpl.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
+#pragma once
+
+#include <map>
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "db/Types.h"
+#include "db/snapshot/ResourceTypes.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-MergeManagerPtr
-MergeManagerFactory::Build(const meta::MetaPtr& meta_ptr, const DBOptions& options) {
-    return std::make_shared<MergeManagerImpl>(meta_ptr, options, MergeStrategyType::LAYERED);
-}
+using Partition2SegmentsMap = std::map<snapshot::ID_TYPE, snapshot::IDS_TYPE>;
+using SegmentGroups = std::vector<snapshot::IDS_TYPE>;
 
-MergeManagerPtr
-MergeManagerFactory::SSBuild(const DBOptions& options) {
-    return std::make_shared<SSMergeManagerImpl>(options, MergeStrategyType::SIMPLE);
-}
+class SSMergeStrategy {
+ public:
+    virtual Status
+    RegroupSegments(const std::string& collection_name, const Partition2SegmentsMap& part2segment,
+                    SegmentGroups& groups) = 0;
+};  // MergeStrategy
+
+using SSMergeStrategyPtr = std::shared_ptr<SSMergeStrategy>;
 
 }  // namespace engine
 }  // namespace milvus
