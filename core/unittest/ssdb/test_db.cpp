@@ -244,7 +244,7 @@ TEST_F(SSDBTest, VisitorTest) {
     status = Snapshots::GetInstance().GetSnapshot(ss, c1);
     ASSERT_TRUE(status.ok());
 
-    auto executor = [&] (const Segment::Ptr& segment, IterateSegmentHandler* handler) -> Status {
+    auto executor = [&] (const Segment::Ptr& segment, SegmentIterator* handler) -> Status {
         auto visitor = SegmentVisitor::Build(ss, segment->GetID());
         if (!visitor) {
             return Status(milvus::SS_ERROR, "Cannot build segment visitor");
@@ -253,9 +253,8 @@ TEST_F(SSDBTest, VisitorTest) {
         return Status::OK();
     };
 
-    auto segment_handler = std::make_shared<milvus::engine::snapshot::SegmentCollector>(ss, executor);
+    auto segment_handler = std::make_shared<SegmentIterator>(ss, executor);
     segment_handler->Iterate();
     std::cout << segment_handler->GetStatus().ToString() << std::endl;
     ASSERT_TRUE(segment_handler->GetStatus().ok());
-    /* std::cout << ss->ToString() << std::endl; */
 }

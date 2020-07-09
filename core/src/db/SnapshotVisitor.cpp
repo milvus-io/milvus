@@ -81,17 +81,21 @@ SegmentFieldVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segme
     auto visitor = std::make_shared<SegmentFieldVisitor>();
     visitor->SetField(field);
 
-    auto& field_elements = ss->GetResources<snapshot::FieldElement>();
-    for (auto& kv : field_elements) {
-        if (kv.second->GetFieldId() != field_id) {
-            continue;
+    auto executor = [&] (const snapshot::FieldElement::Ptr& field_element,
+            snapshot::FieldElementIterator* itr) -> Status {
+        if (field_element->GetFieldId() != field_id) {
+            return Status::OK();
         }
-        auto element_visitor = FieldElementVisitor::Build(ss, segment_id, kv.first);
+        auto element_visitor = FieldElementVisitor::Build(ss, segment_id, field_element->GetID());
         if (!element_visitor) {
-            continue;
+            return Status::OK();
         }
         visitor->InsertElement(element_visitor);
-    }
+        return Status::OK();
+    };
+
+    auto iterator = std::make_shared<snapshot::FieldElementIterator>(ss, executor);
+    iterator->Iterate();
 
     return visitor;
 }
@@ -109,14 +113,19 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id
     auto visitor = std::make_shared<SegmentVisitor>();
     visitor->SetSegment(segment);
 
-    auto& fields = ss->GetResources<snapshot::Field>();
-    for (auto& kv : fields) {
-        auto field_visitor = SegmentFieldVisitor::Build(ss, segment_id, kv.first);
+    auto executor = [&] (const snapshot::Field::Ptr& field,
+            snapshot::FieldIterator* itr) -> Status {
+        auto field_visitor = SegmentFieldVisitor::Build(ss, segment_id, field->GetID());
         if (!field_visitor) {
-            continue;
+            return Status::OK();
         }
         visitor->InsertField(field_visitor);
-    }
+
+        return Status::OK();
+    };
+
+    auto iterator = std::make_shared<snapshot::FieldIterator>(ss, executor);
+    iterator->Iterate();
 
     return visitor;
 }
