@@ -164,6 +164,21 @@ Snapshot::GetFieldElement(const std::string& field_name, const std::string& fiel
     return Status::OK();
 }
 
+SegmentFilePtr
+Snapshot::GetSegmentFile(ID_TYPE segment_id, ID_TYPE field_element_id) const {
+    auto it = element_segfiles_map_.find(field_element_id);
+    if (it == element_segfiles_map_.end()) {
+        return nullptr;
+    }
+
+    auto its = it->second.find(segment_id);
+    if (its == it->second.end()) {
+        return nullptr;
+    }
+
+    return GetResource<SegmentFile>(its->second);
+}
+
 const std::string
 Snapshot::ToString() const {
     auto to_matrix_string = [](const MappingT& mappings, int line_length, size_t ident = 0) -> std::string {

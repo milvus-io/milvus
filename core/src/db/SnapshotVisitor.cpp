@@ -39,23 +39,61 @@ SnapshotVisitor::SegmentsToSearch(meta::FilesHolder& files_holder) {
     return handler->GetStatus();
 }
 
-SegmentFileVisitor::Ptr
-SegmentFileVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_file_id) {
+FieldElementVisitor::Ptr
+FieldElementVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id,
+        snapshot::ID_TYPE field_element_id) {
     if (!ss) {
         return nullptr;
     }
 
-    auto file = ss->GetResource<snapshot::SegmentFile>(segment_file_id);
+    auto element = ss->GetResource<snapshot::FieldElement>(field_element_id);
+    if (!element) {
+        return nullptr;
+    }
+
+    auto visitor = std::make_shared<FieldElementVisitor>();
+    visitor->SetFieldElement(element);
+    auto segment = ss->GetResource<snapshot::Segment>(segment_id);
+    if (!segment) {
+        return nullptr;
+    }
+
+    auto file = ss->GetSegmentFile(segment_id, field_element_id);
     if (!file) {
         return nullptr;
     }
 
-    auto visitor = std::make_shared<SegmentFileVisitor>();
     visitor->SetFile(file);
-    auto field_element = ss->GetResource<snapshot::FieldElement>(file->GetFieldElementId());
-    auto field = ss->GetResource<snapshot::Field>(field_element->GetFieldId());
+    return visitor;
+}
+
+SegmentFieldVisitor::Ptr
+SegmentFieldVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id,
+            snapshot::ID_TYPE field_id) {
+    if (!ss) {
+        return nullptr;
+    }
+
+    auto field = ss->GetResource<snapshot::Field>(field_id);
+    if (!field) {
+        return nullptr;
+    }
+
+    auto visitor = std::make_shared<SegmentFieldVisitor>();
     visitor->SetField(field);
-    visitor->SetFieldElement(field_element);
+
+    auto& field_elements = ss->GetResources<snapshot::FieldElement>();
+    for (auto& kv : field_elements) {
+        if (kv.second->GetFieldId() != field_id) {
+            continue;
+        }
+        auto element_visitor = FieldElementVisitor::Build(ss, segment_id, kv.first);
+        if (!element_visitor) {
+            continue;
+        }
+        visitor->InsertElement(element_visitor);
+    }
+
     return visitor;
 }
 
@@ -72,16 +110,33 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id
     auto visitor = std::make_shared<SegmentVisitor>();
     visitor->SetSegment(segment);
 
-    auto& file_ids = ss->GetSegmentFileIds(segment_id);
-    for (auto id : file_ids) {
-        auto file_visitor = SegmentFileVisitor::Build(ss, id);
-        if (!file_visitor) {
-            return nullptr;
+    auto& fields = ss->GetResources<snapshot::Field>();
+    for (auto& kv : fields) {
+        auto field_visitor = SegmentFieldVisitor::Build(ss, segment_id, kv.first);
+        if (!field_visitor) {
+            continue;
         }
-        visitor->InsertSegmentFile(file_visitor);
+        visitor->InsertField(field_visitor);
     }
 
     return visitor;
+}
+
+std::string
+SegmentVisitor::ToString() const {
+    std::stringstream ss;
+    ss << "SegmentVisitor[" << GetSegment()->GetID() << "]: \n";
+    auto& field_visitors = GetFieldVisitors();
+    for (auto& fkv : field_visitors) {
+        ss << "  Field[" << fkv.first << "]\n";
+        auto& fe_visitors = fkv.second->GetElementVistors();
+        for (auto& fekv : fe_visitors) {
+            ss << "    FieldElement[" << fekv.first << "] ";
+            ss << "SegmentFile [" << fekv.second->GetFile()->GetID() << "]\n";
+        }
+    }
+
+    return ss.str();
 }
 
 }  // namespace engine

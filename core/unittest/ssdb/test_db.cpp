@@ -249,11 +249,7 @@ TEST_F(SSDBTest, VisitorTest) {
         if (!visitor) {
             return Status(milvus::SS_ERROR, "Cannot build segment visitor");
         }
-        auto& files_map = visitor->GetSegmentFiles();
-        for (auto& kv : files_map) {
-            std::cout << "segment " << segment->GetID() << " segment_file_id " << kv.first << std::endl;
-            std::cout << "element name is " << kv.second->GetFieldElement()->GetName() << std::endl;
-        }
+        std::cout << visitor->ToString() << std::endl;
         return Status::OK();
     };
 
@@ -261,4 +257,5 @@ TEST_F(SSDBTest, VisitorTest) {
     segment_handler->Iterate();
     std::cout << segment_handler->GetStatus().ToString() << std::endl;
     ASSERT_TRUE(segment_handler->GetStatus().ok());
+    /* std::cout << ss->ToString() << std::endl; */
 }
