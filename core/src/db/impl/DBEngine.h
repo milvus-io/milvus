@@ -27,6 +27,8 @@ using AttrsMapList = std::vector<AttrsMap>;
 
 class DBEngine {
  public:
+//    DBEngine() = default;
+//    ~DBEngine() = default;
 
     virtual Status
     Query(const std::string& query_sql, AttrsMapList& attrs) = 0;

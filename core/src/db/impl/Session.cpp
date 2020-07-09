@@ -28,9 +28,7 @@ namespace milvus::engine::snapshot {
         return Status(SERVER_UNSUPPORTED_ERROR, "Convert pointer failed."); \
     }
 
-
 ///////////////////////////////////////////////////////////////////////
-
 namespace {
 class MockDB {
  private:
@@ -188,10 +186,10 @@ class MockDB {
 }
 
 
-Status
-Session::Commit(std::vector<int64_t>& result_ids) {
-    return db_engine_->ExecuteTransaction(sql_context_, result_ids);
-}
+//Status
+//Session::Commit(std::vector<int64_t>& result_ids) {
+//    return db_engine_->ExecuteTransaction(sql_context_, result_ids);
+//}
 
 
 ///////////////////////////////////////// Mock ///////////////////////////////////////////////
@@ -206,7 +204,7 @@ Session::Commit(std::vector<int64_t>& result_ids) {
 //    delete_resources_.clear();
 //    transcation_enable_ = true;
 //}
-
+#if 0
 template<typename T>
 Status
 MockSession::Select(const std::string& table, int64_t id, typename T::Ptr& resource) {
@@ -421,5 +419,6 @@ MockSession::Commit(std::vector<int64_t>& result_ids) {
 //        }
 //    }
 //}
+#endif
 
 }  // namespace milvus::engine::snapshot

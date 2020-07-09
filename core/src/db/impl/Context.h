@@ -25,7 +25,7 @@ enum ResourceContextOp {
 
 struct SqlContext {
     std::string sql_;
-    SourceContextOp op_;
+    ResourceContextOp op_;
     snapshot::ID_TYPE id_;
 };
 

@@ -20,61 +20,7 @@ template <typename ResourceT>
 class ResourceContext {
  public:
     using ResPtr = typename ResourceT::Ptr;
-    using Ptr = std::shared_ptr<ResourceContext>;
-
-    class Builder {
-     public:
-        Builder&
-        SetResource(typename ResourceT::Ptr res) {
-            table_ = ResourceT::Name;
-            id_ = res->GetID();
-            resource_ = std::shared_ptr<ResourceT>(std::move(res));
-            return *this;
-        }
-
-        Builder&
-        SetOp(ResourceContextOp op) {
-            op_ = op;
-            return *this;
-        }
-
-        Builder&
-        SetID(ID_TYPE id) {
-            id_ = id;
-            return *this;
-        }
-
-        Builder&
-        SetTable(const std::string& table) {
-            table_ = table;
-            return *this;
-        }
-
-        Builder&
-        AddAttr(const std::string& attr) {
-            attrs_.insert(attr);
-            return *this;
-        }
-
-        Builder&
-        AddAttrs(const std::set<std::string>& attrs) {
-            attrs_.insert(attrs.begin(), attrs.end());
-            return *this;
-        }
-
-     public:
-        ResourceContext::Ptr
-        CreatePtr() {
-            return std::make_shared<ResourceContext<ResourceT>>(table_, id_, op_, resource_, attrs_);
-        }
-
-     private:
-        std::string table_;
-        ResPtr resource_;
-        ID_TYPE id_;
-        SourceContextOp op_;
-        std::set<std::string> attrs_;
-    };
+    using Ptr = std::shared_ptr<ResourceContext<ResourceT>>;
 
  public:
     ResourceContext(const std::string& table, ID_TYPE id, ResourceContextOp op, ResPtr res, std::set<std::string> attrs)
@@ -87,7 +33,7 @@ class ResourceContext {
 
     void
     AddResource(ResPtr res) {
-        table_ = SourceT::Name;
+        table_ = ResourceT::Name;
         resource_ = std::shared_ptr<ResourceT>(std::move(res));
     }
 
@@ -102,16 +48,16 @@ class ResourceContext {
     }
 
     void
-    UpdateOp(const SourceContextOp op) {
+    UpdateOp(const ResourceContextOp op) {
         op_ = op;
     }
 
-    SrcPtr
+    ResPtr
     Resource() {
         return resource_;
     }
 
-    SourceContextOp
+    ResourceContextOp
     Op() {
         return op_;
     }
@@ -136,11 +82,69 @@ class ResourceContext {
     std::string table_;
     ID_TYPE id_;
     ResPtr resource_;
-    SourceContextOp op_;
+    ResourceContextOp op_;
+    std::set<std::string> attrs_;
+};
+
+template <typename T>
+class ResourceContextBuilder {
+ public:
+    ResourceContextBuilder() = default;
+
+    ResourceContextBuilder<T>&
+    SetResource(typename T::Ptr res) {
+        table_ = T::Name;
+        id_ = res->GetID();
+//        resource_ = std::shared_ptr<T>(std::move(res));
+        resource_ = std::move(res);
+        return *this;
+    }
+
+    ResourceContextBuilder<T>&
+    SetOp(ResourceContextOp op) {
+        op_ = op;
+        return *this;
+    }
+
+    ResourceContextBuilder<T>&
+    SetID(ID_TYPE id) {
+        id_ = id;
+        return *this;
+    }
+
+    ResourceContextBuilder<T>&
+    SetTable(const std::string& table) {
+        table_ = table;
+        return *this;
+    }
+
+    ResourceContextBuilder<T>&
+    AddAttr(const std::string& attr) {
+        attrs_.insert(attr);
+        return *this;
+    }
+
+    ResourceContextBuilder<T>&
+    AddAttrs(const std::set<std::string>& attrs) {
+        attrs_.insert(attrs.begin(), attrs.end());
+        return *this;
+    }
+
+ public:
+    typename ResourceContext<T>::Ptr
+    CreatePtr() {
+        return std::make_shared<ResourceContext<T>>(table_, id_, op_, resource_, attrs_);
+    }
+
+ private:
+    std::string table_;
+    typename ResourceContext<T>::ResPtr resource_;
+    ID_TYPE id_{};
+    ResourceContextOp op_;
     std::set<std::string> attrs_;
 };
 
 template <typename ResourceT>
-using ResourceContextPtr = ResourceContext<ResourceT>::Ptr;
+using ResourceContextPtr = typename ResourceContext<ResourceT>::Ptr;
 
 }  // namespace milvus::engine::snapshot

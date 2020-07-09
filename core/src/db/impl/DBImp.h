@@ -70,10 +70,11 @@ class DBImp {
         return Status::OK();
     }
 
+    template <typename ResourceT>
     Status
-    Apply(ResourceContextPtr resp, int64_t& result_id) {
+    Apply(ResourceContextPtr<ResourceT> resp, int64_t& result_id) {
         auto session = CreateSession();
-        session->Apply(resp);
+        session->Apply<ResourceT>(resp);
 
         std::vector<int64_t> result_ids;
         auto status = session->Commit(result_ids);

@@ -145,6 +145,7 @@ set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
         ${cache_files}
         ${db_main_files}
+        ${db_imp_files}
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}

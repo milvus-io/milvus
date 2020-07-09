@@ -15,23 +15,23 @@ namespace milvus::engine {
 
 using namespace snapshot;
 
-constexpr const char* F_MAPPINGS = MappingsField::Name;
-constexpr const char* F_STATE = StateField::Name;
-constexpr const char* F_LSN = LsnField::Name;
-constexpr const char* F_CREATED_ON = CreatedOnField::Name;
-constexpr const char* F_UPDATED_ON = UpdatedOnField::Name;
-constexpr const char* F_ID = IdField::Name;
-constexpr const char* F_COLLECTON_ID = CollectionIdField::Name;
-constexpr const char* F_SCHEMA_ID = SchemaIdField::Name;
-constexpr const char* F_NUM = NumField::Name;
-constexpr const char* F_FTYPE = FtypeField::Name;
-constexpr const char* F_FIELD_ID = FieldIdField::Name;
-constexpr const char* F_FIELD_ELEMENT_ID = FieldElementIdField::Name;
-constexpr const char* F_PARTITION_ID = PartitionIdField::Name;
-constexpr const char* F_SEGMENT_ID = SegmentIdField::Name;
-constexpr const char* F_NAME = NameField::Name;
-constexpr const char* F_PARAMS = ParamsField::Name;
-constexpr const char* F_SIZE = SizeField::Name;
-constexpr const char* F_ROW_COUNT = RowCountField::Name;
+#define F_MAPPINGS MappingsField::Name
+#define F_STATE StateField::Name
+#define F_LSN LsnField::Name
+#define F_CREATED_ON CreatedOnField::Name
+#define F_UPDATED_ON UpdatedOnField::Name
+#define F_ID IdField::Name
+#define F_COLLECTON_ID CollectionIdField::Name
+#define F_SCHEMA_ID SchemaIdField::Name
+#define F_NUM NumField::Name
+#define F_FTYPE FtypeField::Name
+#define F_FIELD_ID FieldIdField::Name
+#define F_FIELD_ELEMENT_ID FieldElementIdField::Name
+#define F_PARTITION_ID PartitionIdField::Name
+#define F_SEGMENT_ID SegmentIdField::Name
+#define F_NAME NameField::Name
+#define F_PARAMS ParamsField::Name
+#define F_SIZE SizeField::Name
+#define F_ROW_COUNT RowCountField::Name
 
 }

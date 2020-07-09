@@ -29,20 +29,20 @@ namespace engine {
 namespace snapshot {
 
 ///////////////////////////////////////////////////////////////////////////////////////
-class AbstractSession {
- public:
-//    template <typename T>
+//class AbstractSession {
+// public:
+////    template <typename T>
+////    virtual Status
+////    Select(const std::string& table, int64_t id, typename T::Ptr& resource) = 0;
+//
 //    virtual Status
-//    Select(const std::string& table, int64_t id, typename T::Ptr& resource) = 0;
+//    Apply(ResourceContextPtr resp) = 0;
+//
+//    virtual Status
+//    Commit(std::vector<int64_t>& result_ids) = 0;
+//};
 
-    virtual Status
-    Apply(ResourceContextPtr resp) = 0;
-
-    virtual Status
-    Commit(std::vector<int64_t>& result_ids) = 0;
-};
-
-class Session: AbstractSession {
+class Session {
  public:
     explicit
     Session(DBEnginePtr engine): db_engine_(engine) {
@@ -57,10 +57,12 @@ class Session: AbstractSession {
 
     template<typename ResourceT>
     Status
-    Apply(ResourceContextPtr<ResourceT> resp) override;
+    Apply(ResourceContextPtr<ResourceT> resp);
 
     Status
-    Commit(std::vector<int64_t>& result_ids) override;
+    Commit(std::vector<int64_t>& result_ids) {
+        return db_engine_->ExecuteTransaction(sql_context_, result_ids);
+    }
 
  private:
     std::vector<std::string> sql_statements;
@@ -68,37 +70,37 @@ class Session: AbstractSession {
     DBEnginePtr db_engine_;
 };
 
-class MockSession: AbstractSession {
-
- public:
-    explicit
-    MockSession(DBEnginePtr engine): db_engine_(std::move(engine)) {
-    }
-//    MockSession() : transcation_enable_(false) {
+//class MockSession: AbstractSession {
+//
+// public:
+//    explicit
+//    MockSession(DBEnginePtr engine): db_engine_(std::move(engine)) {
 //    }
-
-    ~MockSession() = default;
-
- public:
-
-    template <typename T>
-    Status
-    Select(const std::string& table, int64_t id, typename T::Ptr& resource);
-
-    Status
-    Apply(ResourceContextPtr resp) override;
-
-    Status
-    Commit(std::vector<int64_t>& result_ids) override;
-
- private:
-    std::unordered_map<std::string, std::vector<int64_t> > add_resources_;
-    std::unordered_map<std::string, std::vector<std::map<std::string, std::string>> > update_resources_;
-    std::unordered_map<std::string, std::vector<std::map<std::string, std::string>> > delete_resources_;
-    std::vector<int64_t> result_ids_;
-
-    DBEnginePtr db_engine_;
-};
+////    MockSession() : transcation_enable_(false) {
+////    }
+//
+//    ~MockSession() = default;
+//
+// public:
+//
+//    template <typename T>
+//    Status
+//    Select(const std::string& table, int64_t id, typename T::Ptr& resource);
+//
+//    Status
+//    Apply(ResourceContextPtr resp) override;
+//
+//    Status
+//    Commit(std::vector<int64_t>& result_ids) override;
+//
+// private:
+//    std::unordered_map<std::string, std::vector<int64_t> > add_resources_;
+//    std::unordered_map<std::string, std::vector<std::map<std::string, std::string>> > update_resources_;
+//    std::unordered_map<std::string, std::vector<std::map<std::string, std::string>> > delete_resources_;
+//    std::vector<int64_t> result_ids_;
+//
+//    DBEnginePtr db_engine_;
+//};
 
 template <typename T>
 Status
@@ -134,7 +136,7 @@ Session::Select(const std::string& table, int64_t id, typename T::Ptr& resource)
 
     auto sf_p = std::dynamic_pointer_cast<StateField>(resource);
     if (sf_p != nullptr) {
-        auto status_str = raw[F_STATUS];
+        auto status_str = raw[F_STATE];
         auto status_int = std::stol(status_str);
         switch (static_cast<State>(status_int)) {
             case PENDING: {
@@ -276,20 +278,21 @@ Session::Apply(ResourceContextPtr<ResourceT> resp) {
         return status;
     }
 
-    ID_TYPE id;
-    IntValueOfAttr<ResourceT>(resp->Resource(), F_ID, id);
+    std::string id;
+    AttrValue2Str<ResourceT>(resp->Resource(), F_ID, id);
+//    IntValueOfAttr<ResourceT>(resp->Resource(), F_ID, id);
 //    sql_statements.push_back(sql);
     SqlContext context;
     context.sql_ = sql;
     context.op_ = resp->Op();
-    context.id_ = id;
+    context.id_ = std::stol(id);
     sql_context_.push_back(context);
 
     return Status::OK();
 }
 
 using SessionPtr = std::shared_ptr<Session>;
-using MockSessionPtr = std::shared_ptr<MockSession>;
+//using MockSessionPtr = std::shared_ptr<MockSession>;
 
 }  // namespace snapshot
 }  // namespace engine

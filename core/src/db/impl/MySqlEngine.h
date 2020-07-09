@@ -26,6 +26,8 @@ class MySqlEngine: public DBEngine {
         Initialize();
     }
 
+    ~MySqlEngine() = default;
+
     Status
     Query(const std::string& query_sql, AttrsMapList& attrs) override;
 

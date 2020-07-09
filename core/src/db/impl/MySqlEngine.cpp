@@ -125,7 +125,7 @@ static const MetaField MetaMappingsField = MetaField(F_MAPPINGS, "JSON", "NOT NU
 static const MetaField MetaNumField = MetaField(F_NUM, "BIGINT", "NOT NULL");
 static const MetaField MetaLSNField = MetaField(F_LSN, "BIGINT", "NOT NULL");
 static const MetaField MetaFtypeField = MetaField(F_FTYPE, "BIGINT", "NOT NULL");
-static const MetaField MetaStateField = MetaField(F_STATUS, "TINYINT", "NOT NULL");
+static const MetaField MetaStateField = MetaField(F_STATE, "TINYINT", "NOT NULL");
 static const MetaField MetaCreatedOnField = MetaField(F_CREATED_ON, "BIGINT", "NOT NULL");
 static const MetaField MetaUpdatedOnField = MetaField(F_UPDATED_ON, "BIGINT", "NOT NULL");
 static const MetaField MetaParamsField = MetaField(F_PARAMS, "JSON", "NOT NULL");
@@ -282,7 +282,6 @@ MySqlEngine::Initialize() {
 //            throw Exception(DB_META_TRANSACTION_FAILED, msg);
 //        }
 //    }
-
     std::string uri = options_.backend_uri_;
 
     // step 2: parse and check meta uri
