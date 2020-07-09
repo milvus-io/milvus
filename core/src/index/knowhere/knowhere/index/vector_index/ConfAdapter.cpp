@@ -10,22 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "knowhere/index/vector_index/ConfAdapter.h"
-
 #include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
-
+#include "faiss/gpu/utils/DeviceUtils.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace milvus {
 namespace knowhere {
-
-#if CUDA_VERSION > 9000
-#define GPU_MAX_NRPOBE 2048
-#else
-#define GPU_MAX_NRPOBE 1024
-#endif
 
 #define DEFAULT_MAX_DIM 32768
 #define DEFAULT_MIN_DIM 1
@@ -116,7 +109,7 @@ IVFConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMod
     static int64_t MAX_NPROBE = 999999;  // todo(linxj): [1, nlist]
 
     if (mode == IndexMode::MODE_GPU) {
-        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, GPU_MAX_NRPOBE);
+        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, faiss::gpu::getMaxKSelection());
     } else {
         CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
     }
