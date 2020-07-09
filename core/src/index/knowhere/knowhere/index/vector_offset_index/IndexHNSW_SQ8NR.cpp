@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "knowhere/index/vector_offset_index/IndexHNSW_NM.h"
+#include "knowhere/index/vector_offset_index/IndexHNSW_SQ8NR.h"
 
 #include <algorithm>
 #include <cassert>
@@ -28,16 +28,8 @@
 namespace milvus {
 namespace knowhere {
 
-// void
-// normalize_vector(float* data, float* norm_array, size_t dim) {
-//     float norm = 0.0f;
-//     for (int i = 0; i < dim; i++) norm += data[i] * data[i];
-//     norm = 1.0f / (sqrtf(norm) + 1e-30f);
-//     for (int i = 0; i < dim; i++) norm_array[i] = data[i] * norm;
-// }
-
 BinarySet
-IndexHNSW_NM::Serialize(const Config& config) {
+IndexHNSW_SQ8NR::Serialize(const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -48,7 +40,8 @@ IndexHNSW_NM::Serialize(const Config& config) {
         std::shared_ptr<uint8_t[]> data(writer.data_);
 
         BinarySet res_set;
-        res_set.Append("HNSW", data, writer.rp);
+        res_set.Append("HNSW_SQ8", data, writer.rp);
+        res_set.Append(SQ8_DATA, data_, Dim() * (2 * sizeof(float) + Count()));
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -56,9 +49,9 @@ IndexHNSW_NM::Serialize(const Config& config) {
 }
 
 void
-IndexHNSW_NM::Load(const BinarySet& index_binary) {
+IndexHNSW_SQ8NR::Load(const BinarySet& index_binary) {
     try {
-        auto binary = index_binary.GetByName("HNSW");
+        auto binary = index_binary.GetByName("HNSW_SQ8");
 
         MemoryIOReader reader;
         reader.total = binary->size;
@@ -70,14 +63,14 @@ IndexHNSW_NM::Load(const BinarySet& index_binary) {
 
         normalize = (index_->metric_type_ == 1);  // 1 == InnerProduct
 
-        data_ = index_binary.GetByName(RAW_DATA)->data;
+        data_ = index_binary.GetByName(SQ8_DATA)->data;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
 }
 
 void
-IndexHNSW_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexHNSW_SQ8NR::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
         GETTENSOR(dataset_ptr)
 
@@ -90,13 +83,17 @@ IndexHNSW_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         }
         index_ = std::make_shared<hnswlib_nm::HierarchicalNSW_NM<float>>(
             space, rows, config[IndexParams::M].get<int64_t>(), config[IndexParams::efConstruction].get<int64_t>());
+        auto data_space = new uint8_t[dim * (rows +  2 * sizeof(float))];
+        index_->SetSq8(true);
+        index_->sq_train(rows, (const float*) p_data, data_space);
+        data_ = std::shared_ptr<uint8_t[]>(data_space);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
 }
 
 void
-IndexHNSW_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexHNSW_SQ8NR::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     // It will not call Query() just after Add()
     // So, not to set 'data_' is allowed.
 
@@ -119,7 +116,7 @@ IndexHNSW_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IndexHNSW_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexHNSW_SQ8NR::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -171,7 +168,7 @@ IndexHNSW_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 int64_t
-IndexHNSW_NM::Count() {
+IndexHNSW_SQ8NR::Count() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -179,7 +176,7 @@ IndexHNSW_NM::Count() {
 }
 
 int64_t
-IndexHNSW_NM::Dim() {
+IndexHNSW_SQ8NR::Dim() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }

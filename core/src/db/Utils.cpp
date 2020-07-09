@@ -257,6 +257,8 @@ GetIndexName(int32_t index_type) {
         {(int32_t)engine::EngineType::SPTAG_BKT, "BKT"},
         {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, "IDMAP"},
         {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "IVFFLAT"},
+        {(int32_t)engine::EngineType::HNSW_SQ8NR, "HNSW_SQ8NR"},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8NR, "FAISS_IVFSQ8NR"},
         {(int32_t)engine::EngineType::HNSW, "HNSW"},
         {(int32_t)engine::EngineType::ANNOY, "ANNOY"}};
 
