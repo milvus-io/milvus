@@ -48,9 +48,12 @@ class ReferenceProxy {
     }
 
     [[nodiscard]] int64_t
-    ref_count() const { return ref_count_; }
+    ref_count() const {
+        return ref_count_;
+    }
 
-    void ResetCnt() {
+    void
+    ResetCnt() {
         ref_count_ = 0;
     }
 
