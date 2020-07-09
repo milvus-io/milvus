@@ -12,6 +12,7 @@
 #pragma once
 
 #include "MemManager.h"
+#include "SSMemManager.h"
 #include "db/meta/Meta.h"
 
 #include <memory>
@@ -23,6 +24,9 @@ class MemManagerFactory {
  public:
     static MemManagerPtr
     Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options);
+
+    static SSMemManagerPtr
+    SSBuild(const DBOptions& options);
 };
 
 }  // namespace engine
