@@ -668,36 +668,7 @@ SSDBImpl::DeleteEntities(const std::string& collection_name, engine::IDNumbers e
 }
 
 Status
-SSDBImpl::GetPartitionsByTags(const std::string& collection_name, const std::vector<std::string>& partition_patterns,
-                              std::set<std::string>& partition_names) {
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    std::vector<std::string> partition_array;
-    STATUS_CHECK(ShowPartitions(collection_name, partition_array));
-
-    for (auto& pattern : partition_patterns) {
-        if (pattern == milvus::engine::DEFAULT_PARTITON_TAG) {
-            partition_names.insert(collection_name);
-            return Status::OK();
-        }
-
-        for (auto& p_name : partition_array) {
-            if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
-                partition_names.insert(p_name);
-            }
-        }
-    }
-
-    if (partition_names.empty()) {
-        return Status(DB_PARTITION_NOT_FOUND, "Specified partition does not exist");
-    }
-
-    return Status::OK();
-}
-
-Status
-SSDBImpl::HybridQuery(const server::ContextPtr& context, const std::string& collection_id,
+SSDBImpl::HybridQuery(const server::ContextPtr& context, const std::string& collection_name,
                       const std::vector<std::string>& partition_patterns, query::GeneralQueryPtr general_query,
                       query::QueryPtr query_ptr, std::vector<std::string>& field_names,
                       std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
@@ -706,87 +677,28 @@ SSDBImpl::HybridQuery(const server::ContextPtr& context, const std::string& coll
 
     auto query_ctx = context->Child("Query");
 
-    Status status;
-    meta::FilesHolder files_holder;
-#if 0
-    if (partition_patterns.empty()) {
-        // no partition tag specified, means search in whole table
-        // get all table files from parent table
-        STATUS_CHECK(meta_ptr_->FilesToSearch(collection_id, files_holder));
+    TimeRecorder rc("HybridQuery");
 
-        std::vector<meta::CollectionSchema> partition_array;
-        STATUS_CHECK(meta_ptr_->ShowPartitions(collection_id, partition_array));
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-        for (auto& schema : partition_array) {
-            status = meta_ptr_->FilesToSearch(schema.collection_id_, files_holder);
-            if (!status.ok()) {
-                return Status(DB_ERROR, "get files to search failed in HybridQuery");
-            }
-        }
+    auto handler = std::make_shared<HybridQueryHelperSegmentHandler>(nullptr, ss, partition_patterns);
+    handler->Iterate();
+    STATUS_CHECK(handler->GetStatus());
 
-        if (files_holder.HoldFiles().empty()) {
-            return Status::OK();  // no files to search
-        }
-    } else {
-        // get files from specified partitions
-        std::set<std::string> partition_name_array;
-        GetPartitionsByTags(collection_id, partition_patterns, partition_name_array);
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", handler->segments_.size());
 
-        for (auto& partition_name : partition_name_array) {
-            status = meta_ptr_->FilesToSearch(partition_name, files_holder);
-            if (!status.ok()) {
-                return Status(DB_ERROR, "get files to search failed in HybridQuery");
-            }
-        }
-
-        if (files_holder.HoldFiles().empty()) {
-            return Status::OK();
-        }
-    }
-#endif
-
-    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = HybridQueryAsync(query_ctx, collection_id, files_holder, general_query, query_ptr, field_names, attr_type,
-                              result);
-    if (!status.ok()) {
-        return status;
-    }
-    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
-
-    query_ctx->GetTraceContext()->GetSpan()->Finish();
-
-    return status;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Internal APIs
-////////////////////////////////////////////////////////////////////////////////
-Status
-SSDBImpl::HybridQueryAsync(const server::ContextPtr& context, const std::string& collection_name,
-                           meta::FilesHolder& files_holder, query::GeneralQueryPtr general_query,
-                           query::QueryPtr query_ptr, std::vector<std::string>& field_names,
-                           std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                           engine::QueryResult& result) {
-    auto query_async_ctx = context->Child("Query Async");
-
-    TimeRecorder rc("");
-
-    // step 1: construct search job
     VectorsData vectors;
-    milvus::engine::meta::SegmentsSchema& files = files_holder.HoldFiles();
-    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, index file count: %ld", files_holder.HoldFiles().size());
     scheduler::SearchJobPtr job =
-        std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, query_ptr, attr_type, vectors);
-    for (auto& file : files) {
-        scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
-        job->AddIndexFile(file_ptr);
+        std::make_shared<scheduler::SearchJob>(query_ctx, general_query, query_ptr, attr_type, vectors);
+    for (auto& segment : handler->segments_) {
+        // job->AddSegment(segment);
     }
 
     // step 2: put search job to scheduler and wait result
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitResult();
 
-    files_holder.ReleaseFiles();
     if (!job->GetStatus().ok()) {
         return job->GetStatus();
     }
@@ -797,11 +709,7 @@ SSDBImpl::HybridQueryAsync(const server::ContextPtr& context, const std::string&
     result.result_distances_ = job->GetResultDistances();
 
     // step 4: get entities by result ids
-    auto status = GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_);
-    if (!status.ok()) {
-        query_async_ctx->GetTraceContext()->GetSpan()->Finish();
-        return status;
-    }
+    STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));
 
     // step 5: filter entities by field names
     //    std::vector<engine::AttrsData> filter_attrs;
@@ -822,11 +730,14 @@ SSDBImpl::HybridQueryAsync(const server::ContextPtr& context, const std::string&
 
     rc.ElapseFromBegin("Engine query totally cost");
 
-    query_async_ctx->GetTraceContext()->GetSpan()->Finish();
+    query_ctx->GetTraceContext()->GetSpan()->Finish();
 
     return Status::OK();
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Internal APIs
+////////////////////////////////////////////////////////////////////////////////
 void
 SSDBImpl::InternalFlush(const std::string& collection_id) {
     wal::MXLogRecord record;
