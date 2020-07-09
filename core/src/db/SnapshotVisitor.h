@@ -76,6 +76,7 @@ class SegmentFileVisitor {
     snapshot::FieldPtr field_;
     snapshot::FieldElementPtr field_element_;
 };
+using SegmentFileVisitorPtr = SegmentFileVisitor::Ptr;
 
 class SegmentVisitor {
  public:
@@ -91,6 +92,7 @@ class SegmentVisitor {
     GetSegmentFiles() const {
         return files_map_;
     }
+
     const snapshot::SegmentPtr&
     GetSegment() const {
         return segment_;
@@ -109,6 +111,7 @@ class SegmentVisitor {
     snapshot::SegmentPtr segment_;
     FilesMapT files_map_;
 };
+using SegmentVisitorPtr = SegmentVisitor::Ptr;
 
 }  // namespace engine
 }  // namespace milvus

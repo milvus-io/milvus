@@ -30,7 +30,17 @@ using SIZE_TYPE = uint64_t;
 using MappingT = std::set<ID_TYPE>;
 
 using FieldType = meta::hybrid::DataType;
-enum FieldElementType { RAW, IVFSQ8 };
+
+enum FieldElementType {
+    FET_NONE = 0,
+    FET_UIDS = 1,
+    FET_BLOOMFILTER = 2,
+    FET_DELETED_DOCS = 3,
+    FET_VECTOR_RAW = 4,
+    FET_VECTOR_INDEX = 5,
+    FET_ATTR_RAW = 6,
+    FET_ATTR_INDEX = 7,
+};
 
 using IDS_TYPE = std::vector<ID_TYPE>;
 
