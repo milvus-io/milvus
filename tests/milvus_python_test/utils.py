@@ -31,6 +31,14 @@ all_index_types = [
 ]
 
 
+def l2(x, y):
+    return np.linalg.norm(np.array(x) - np.array(y))
+
+
+def ip(x, y):
+    return np.inner(np.array(x), np.array(y))
+
+
 def jaccard(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
@@ -221,6 +229,32 @@ def gen_entities_by_fields(fields, nb, dimension):
 
 def assert_equal_entity(a, b):
     pass
+
+
+def gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10}):
+    query_vectors = entities[-1]["values"][:nq]
+    query = {
+        "bool": {
+            "must": [
+                {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
+            ]
+        }
+    }
+    return query, query_vectors
+
+
+def gen_query_vectors_rand_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10}):
+    dimension = len(entities[-1]["values"][0])
+    query_vectors = gen_vectors(nq, dimension)
+    query = {
+        "bool": {
+            "must": [
+                {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
+            ]
+        }
+    }
+    return query, query_vectors
+
 
 
 def add_field(entities):
@@ -480,25 +514,25 @@ def gen_invaild_search_params():
     for index_type in all_index_types:
         if index_type == "FLAT":
             continue
-        search_params.append({"index_type": index_type, "search_param": {"invalid_key": invalid_search_key}})
+        search_params.append({"index_type": index_type, "search_params": {"invalid_key": invalid_search_key}})
         if index_type in ["IVFFLAT", "IVFSQ8", "IVFSQ8H", "IVFPQ"]:
             for nprobe in gen_invalid_params():
-                ivf_search_params = {"index_type": index_type, "search_param": {"nprobe": nprobe}}
+                ivf_search_params = {"index_type": index_type, "search_params": {"nprobe": nprobe}}
                 search_params.append(ivf_search_params)
         elif index_type == "HNSW":
             for ef in gen_invalid_params():
-                hnsw_search_param = {"index_type": index_type, "search_param": {"ef": ef}}
+                hnsw_search_param = {"index_type": index_type, "search_params": {"ef": ef}}
                 search_params.append(hnsw_search_param)
         elif index_type == "RNSG":
             for search_length in gen_invalid_params():
-                nsg_search_param = {"index_type": index_type, "search_param": {"search_length": search_length}}
+                nsg_search_param = {"index_type": index_type, "search_params": {"search_length": search_length}}
                 search_params.append(nsg_search_param)
-            search_params.append({"index_type": index_type, "search_param": {"invalid_key": 100}})
+            search_params.append({"index_type": index_type, "search_params": {"invalid_key": 100}})
         elif index_type == "ANNOY":
             for search_k in gen_invalid_params():
                 if isinstance(search_k, int):
                     continue
-                annoy_search_param = {"index_type": index_type, "search_param": {"search_k": search_k}}
+                annoy_search_param = {"index_type": index_type, "search_params": {"search_k": search_k}}
                 search_params.append(annoy_search_param)
     return search_params
 
