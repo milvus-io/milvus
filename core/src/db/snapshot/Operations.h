@@ -344,6 +344,7 @@ class SoftDeleteOperation : public Operations {
 
     Status
     DoExecute(Store& store) override {
+        std::cout << "== Soft delete resource " << ResourceT::Name << " , id = " << id_  << std::endl;
         auto status = store.GetResource<ResourceT>(id_, resource_);
         if (!status.ok()) {
             return status;
@@ -354,7 +355,9 @@ class SoftDeleteOperation : public Operations {
             return Status(SS_NOT_FOUND_ERROR, emsg.str());
         }
         resource_->Deactivate();
-        AddStep(*resource_, nullptr, false);
+        auto r_ctx_p = ResourceContextBuilder<ResourceT>().SetResource(resource_).SetOp(oUpdate).CreatePtr();
+        r_ctx_p->AddAttr(StateField::Name);
+        AddStep(*resource_, r_ctx_p, false);
         return status;
     }
 
@@ -372,6 +375,7 @@ class HardDeleteOperation : public Operations {
 
     const Status&
     ApplyToStore(Store& store) override {
+        std::cout << "Hard delete resource " << ResourceT::Name << ", id = " << id_ << std::endl;
         if (done_)
             return status_;
         auto status = store.RemoveResource<ResourceT>(id_);

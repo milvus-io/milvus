@@ -54,8 +54,13 @@ class DBImp {
     }
 
     Status
-    SelectResourceIDs(const std::string& table, std::vector<int64_t>& ids) {
-        std::string sql = "SELECT id FROM " + table + ";";
+    SelectResourceIDs(const std::string& table, std::vector<int64_t>& ids, const std::string& filter_field, const std::string& filter_value) {
+        std::string sql = "SELECT id FROM " + table;
+        //+ " WHERE " + filter_field + " = " + filter_value + ";";
+        if (!filter_field.empty()) {
+            sql += " WHERE " + filter_field + " = " + filter_value;
+        }
+        sql += ";";
 
         AttrsMapList attrs;
         auto status = engine_->Query(sql, attrs);

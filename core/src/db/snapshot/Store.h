@@ -99,7 +99,18 @@ class Store {
     Status
     GetResource(ID_TYPE id, typename ResourceT::Ptr& return_v) {
         std::shared_lock<std::shared_timed_mutex> lock(mutex_);
-        return DBImp::GetInstance().Select<ResourceT>(id, return_v);
+        auto status = DBImp::GetInstance().Select<ResourceT>(id, return_v);
+
+        if (!status.ok()) {
+            return status;
+        }
+
+        if (return_v == nullptr) {
+            std::string err = "Cannot select resource " + std::string(ResourceT::Name) + " from DB: No resource which id = " + std::to_string(id);
+            return Status(SERVER_UNEXPECTED_ERROR, err);
+        }
+
+        return Status::OK();
     }
 
     Status
@@ -140,7 +151,7 @@ class Store {
         std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         IDS_TYPE ids;
         IDS_TYPE selected_ids;
-        DBImp::GetInstance().SelectResourceIDs(Collection::Name, selected_ids);
+        DBImp::GetInstance().SelectResourceIDs(Collection::Name, selected_ids, "", "");
 
         if (!reversed) {
             ids = selected_ids;
@@ -157,7 +168,7 @@ class Store {
     AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
         std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         IDS_TYPE ids, selected_ids;
-        DBImp::GetInstance().SelectResourceIDs(CollectionCommit::Name, selected_ids);
+        DBImp::GetInstance().SelectResourceIDs(CollectionCommit::Name, selected_ids, F_COLLECTON_ID, std::to_string(collection_id));
 
         if (!reversed) {
             ids = selected_ids;

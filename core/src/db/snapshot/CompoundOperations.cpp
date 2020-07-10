@@ -37,21 +37,27 @@ BuildOperation::DoExecute(Store& store) {
     SegmentCommitOperation sc_op(context_, GetAdjustedSS());
     STATUS_CHECK(sc_op(store));
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
-    AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
+    auto seg_commit_ctx_p = ResourceContextBuilder<SegmentCommit>()
+        .SetResource(context_.new_segment_commit).SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_segment_commit, context_.lsn, seg_commit_ctx_p);
 
     PartitionCommitOperation pc_op(context_, GetAdjustedSS());
     STATUS_CHECK(pc_op(store));
     OperationContext cc_context;
     STATUS_CHECK(pc_op.GetResource(cc_context.new_partition_commit));
-    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
+    auto par_commit_ctx_p = ResourceContextBuilder<PartitionCommit>()
+        .SetResource(cc_context.new_partition_commit).SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn, par_commit_ctx_p);
 
     context_.new_partition_commit = cc_context.new_partition_commit;
-    STATUS_CHECK(pc_op.GetResource(context_.new_partition_commit));
-    AddStepWithLsn(*context_.new_partition_commit, context_.lsn);
+//    STATUS_CHECK(pc_op.GetResource(context_.new_partition_commit));
+//    AddStepWithLsn(*context_.new_partition_commit, context_.lsn);
 
     CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
     STATUS_CHECK(cc_op(store));
     STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
+    auto c_commit_ctx_p = ResourceContextBuilder<CollectionCommit>()
+        .SetResource(context_.new_collection_commit).SetOp(oUpdate).CreatePtr();
     AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
 
     return Status::OK();
@@ -432,7 +438,9 @@ DropPartitionOperation::DoExecute(Store& store) {
     auto cc_op = CollectionCommitOperation(op_ctx, GetAdjustedSS());
     STATUS_CHECK(cc_op(store));
     STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
-    AddStepWithLsn(*context_.new_collection_commit, c_context_.lsn);
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>()
+        .SetResource(context_.new_collection_commit).SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_collection_commit, c_context_.lsn, cc_ctx_p);
     return Status::OK();
 }
 
@@ -626,7 +634,9 @@ DropCollectionOperation::DoExecute(Store& store) {
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     context_.collection->Deactivate();
-    AddStepWithLsn(*context_.collection, context_.lsn, nullptr, false);
+    auto c_ctx_p = ResourceContextBuilder<Collection>().SetResource(context_.collection).SetOp(oUpdate).CreatePtr();
+    c_ctx_p->AddAttr(StateField::Name);
+    AddStepWithLsn(*context_.collection, context_.lsn, c_ctx_p, false);
     return Status::OK();
 }
 

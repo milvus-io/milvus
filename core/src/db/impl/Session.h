@@ -143,6 +143,10 @@ Session::Select(const std::string& table, int64_t id, typename T::Ptr& resource)
         return status;
     }
 
+    if (attrs.empty()) {
+        return Status::OK();
+    }
+
     if (attrs.size() != 1) {
         throw Exception(1, "Attrs size should be not larger than 1");
     }
@@ -308,14 +312,18 @@ Session::Apply(ResourceContextPtr<ResourceT> resp) {
         return status;
     }
 
-    std::string id;
-    AttrValue2Str<ResourceT>(resp->Resource(), F_ID, id);
+    SqlContext context;
+    context.op_ = resp->Op();
+    if (resp->Op() == oDelete) {
+        context.id_ = resp->ID();
+    } else {
+        std::string id;
+        AttrValue2Str<ResourceT>(resp->Resource(), F_ID, id);
+        context.id_ = std::stol(id);
+    }
 //    IntValueOfAttr<ResourceT>(resp->Resource(), F_ID, id);
 //    sql_statements.push_back(sql);
-    SqlContext context;
     context.sql_ = sql;
-    context.op_ = resp->Op();
-    context.id_ = std::stol(id);
     sql_context_.push_back(context);
 
     return Status::OK();
