@@ -26,8 +26,9 @@ struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
     using ResourceT = T;
     using ThisT = IterateHandler<ResourceT>;
     using Ptr = std::shared_ptr<ThisT>;
+    using ExecutorT = std::function<Status(const typename T::Ptr&, ThisT*)>;
 
-    explicit IterateHandler(ScopedSnapshotT ss) : ss_(ss) {
+    explicit IterateHandler(ScopedSnapshotT ss, const ExecutorT& executor = {}) : ss_(ss), executor_(executor) {
     }
 
     virtual Status
@@ -35,7 +36,12 @@ struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
         return Status::OK();
     }
     virtual Status
-    Handle(const typename ResourceT::Ptr& resource) = 0;
+    Handle(const typename ResourceT::Ptr& resource) {
+        if (executor_) {
+            return executor_(resource, this);
+        }
+        return Status::OK();
+    }
 
     virtual Status
     PostIterate() {
@@ -59,26 +65,17 @@ struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
     }
 
     ScopedSnapshotT ss_;
+    ExecutorT executor_;
     Status status_;
     mutable std::mutex mtx_;
 };
 
-using IterateSegmentHandler = IterateHandler<Segment>;
-using SegmentExecutorT = std::function<Status(const Segment::Ptr&, IterateSegmentHandler*)>;
-struct SegmentCollector : public IterateSegmentHandler {
-    using ResourceT = Segment;
-    using BaseT = IterateSegmentHandler;
-
-    explicit SegmentCollector(ScopedSnapshotT ss, const SegmentExecutorT& executor) : BaseT(ss), executor_(executor) {
-    }
-
-    Status
-    Handle(const typename ResourceT::Ptr& segment) override {
-        return executor_(segment, this);
-    }
-
-    SegmentExecutorT executor_;
-};
+using CollectionIterator = IterateHandler<Collection>;
+using PartitionIterator = IterateHandler<Partition>;
+using SegmentIterator = IterateHandler<Segment>;
+using SegmentFileIterator = IterateHandler<SegmentFile>;
+using FieldIterator = IterateHandler<Field>;
+using FieldElementIterator = IterateHandler<FieldElement>;
 
 }  // namespace snapshot
 }  // namespace engine

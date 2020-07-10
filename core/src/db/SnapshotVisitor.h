@@ -36,61 +36,106 @@ class SnapshotVisitor {
     Status status_;
 };
 
-class SegmentFileVisitor {
+class SegmentFieldElementVisitor {
  public:
-    using Ptr = std::shared_ptr<SegmentFileVisitor>;
+    using Ptr = std::shared_ptr<SegmentFieldElementVisitor>;
 
     static Ptr
-    Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_file_id);
+    Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id, snapshot::ID_TYPE field_element_id);
 
-    SegmentFileVisitor() = default;
+    SegmentFieldElementVisitor() = default;
 
-    const snapshot::SegmentFilePtr
-    GetFile() const {
-        return file_;
-    }
-    const snapshot::FieldPtr
-    GetField() const {
-        return field_;
-    }
-    const snapshot::FieldElementPtr
-    GetFieldElement() const {
-        return field_element_;
-    }
-
-    void
-    SetFile(snapshot::SegmentFilePtr file) {
-        file_ = file;
-    }
-    void
-    SetField(snapshot::FieldPtr field) {
-        field_ = field;
-    }
     void
     SetFieldElement(snapshot::FieldElementPtr field_element) {
         field_element_ = field_element;
     }
+    void
+    SetFile(snapshot::SegmentFilePtr file) {
+        file_ = file;
+    }
+
+    const snapshot::FieldElementPtr
+    GetElement() const {
+        return field_element_;
+    }
+    const snapshot::SegmentFilePtr
+    GetFile() const {
+        return file_;
+    }
 
  protected:
-    snapshot::SegmentFilePtr file_;
-    snapshot::FieldPtr field_;
     snapshot::FieldElementPtr field_element_;
+    snapshot::SegmentFilePtr file_;
+};
+
+class SegmentFieldVisitor {
+ public:
+    using Ptr = std::shared_ptr<SegmentFieldVisitor>;
+    using ElementT = typename SegmentFieldElementVisitor::Ptr;
+    using ElementsMapT = std::map<snapshot::ID_TYPE, ElementT>;
+
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id, snapshot::ID_TYPE field_id);
+
+    SegmentFieldVisitor() = default;
+
+    const ElementsMapT&
+    GetElementVistors() const {
+        return elements_map_;
+    }
+    const snapshot::FieldPtr&
+    GetField() const {
+        return field_;
+    }
+
+    void
+    SetField(snapshot::FieldPtr field) {
+        field_ = field;
+    }
+
+    void
+    InsertElement(ElementT element) {
+        elements_map_[element->GetElement()->GetID()] = element;
+    }
+
+ protected:
+    ElementsMapT elements_map_;
+    snapshot::FieldPtr field_;
 };
 
 class SegmentVisitor {
  public:
     using Ptr = std::shared_ptr<SegmentVisitor>;
-    using FileT = typename SegmentFileVisitor::Ptr;
-    using FilesMapT = std::map<snapshot::ID_TYPE, FileT>;
+    using FieldVisitorT = typename SegmentFieldVisitor::Ptr;
+    using IdMapT = std::map<snapshot::ID_TYPE, FieldVisitorT>;
+    using NameMapT = std::map<std::string, FieldVisitorT>;
 
     static Ptr
     Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id);
     SegmentVisitor() = default;
 
-    const FilesMapT&
-    GetSegmentFiles() const {
-        return files_map_;
+    const IdMapT&
+    GetFieldVisitors() const {
+        return id_map_;
     }
+
+    FieldVisitorT
+    GetFieldVisitor(snapshot::ID_TYPE field_id) const {
+        auto it = id_map_.find(field_id);
+        if (it == id_map_.end()) {
+            return nullptr;
+        }
+        return it->second;
+    }
+    FieldVisitorT
+    GetFieldVisitor(const std::string& field_name) const {
+        auto it = name_map_.find(field_name);
+        if (it == name_map_.end()) {
+            return nullptr;
+        }
+        return it->second;
+    }
+
     const snapshot::SegmentPtr&
     GetSegment() const {
         return segment_;
@@ -101,13 +146,18 @@ class SegmentVisitor {
         segment_ = segment;
     }
     void
-    InsertSegmentFile(FileT segment_file) {
-        files_map_[segment_file->GetFile()->GetID()] = segment_file;
+    InsertField(FieldVisitorT field_visitor) {
+        id_map_[field_visitor->GetField()->GetID()] = field_visitor;
+        name_map_[field_visitor->GetField()->GetName()] = field_visitor;
     }
+
+    std::string
+    ToString() const;
 
  protected:
     snapshot::SegmentPtr segment_;
-    FilesMapT files_map_;
+    IdMapT id_map_;
+    NameMapT name_map_;
 };
 
 }  // namespace engine
