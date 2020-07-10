@@ -117,6 +117,9 @@ class Snapshot : public ReferenceProxy {
         return it->second;
     }
 
+    SegmentFilePtr
+    GetSegmentFile(ID_TYPE segment_id, ID_TYPE field_element_id) const;
+
     ID_TYPE
     GetLatestSchemaCommitId() const {
         return latest_schema_commit_id_;
