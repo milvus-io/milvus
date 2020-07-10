@@ -519,6 +519,9 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     Status status = request_handler_.Search(GetContext(context), request->collection_name(), vectors, request->topk(),
                                             json_params, partitions, file_ids, result);
 
+    LOG_SERVER_DEBUG_C << "row num = " << result.row_num_ << ", id list length = " << result.id_list_.size()
+                       << ", distance list length = " << result.distance_list_.size();
+
     // step 5: construct and return result
     ConstructResults(result, response);
 
