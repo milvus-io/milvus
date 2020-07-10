@@ -29,12 +29,8 @@ class DefaultVectorIndexFormat : public VectorIndexFormat {
     DefaultVectorIndexFormat() = default;
 
     void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, ExternalData externalData,
          segment::VectorIndexPtr& vector_index) override;
-
-    void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, const std::string& extern_key,
-         const knowhere::BinaryPtr& extern_data, segment::VectorIndexPtr& vector_index) override;
 
     void
     write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,

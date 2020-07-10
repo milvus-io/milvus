@@ -17,29 +17,36 @@
 
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "segment/VectorIndex.h"
-#include "storage/FSHandler.h"
+#include "codecs/VectorCompressFormat.h"
 
 namespace milvus {
 namespace codec {
 
-enum ExternalData { ExternalData_None, ExternalData_RawData, ExternalData_SQ8 };
-
-class VectorIndexFormat {
+class DefaultVectorCompressFormat : public VectorCompressFormat {
  public:
-    virtual void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, ExternalData external_data,
-         segment::VectorIndexPtr& vector_index) = 0;
+    DefaultVectorCompressFormat() = default;
 
-    virtual void
+    void
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr& compress) override;
+
+    void
     write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-          const segment::VectorIndexPtr& vector_index) = 0;
-};
+          const knowhere::BinaryPtr& compress) override;
 
-using VectorIndexFormatPtr = std::shared_ptr<VectorIndexFormat>;
+    // No copy and move
+    DefaultVectorCompressFormat(const DefaultVectorCompressFormat&) = delete;
+    DefaultVectorCompressFormat(DefaultVectorCompressFormat&&) = delete;
+
+    DefaultVectorCompressFormat&
+    operator=(const DefaultVectorCompressFormat&) = delete;
+    DefaultVectorCompressFormat&
+    operator=(DefaultVectorCompressFormat&&) = delete;
+
+ private:
+    const std::string sq8_vector_extension_ = ".sq8";
+};
 
 }  // namespace codec
 }  // namespace milvus

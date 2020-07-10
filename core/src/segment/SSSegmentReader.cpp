@@ -55,31 +55,35 @@ SSSegmentReader::Load() {
     try {
         auto& default_codec = codec::DefaultCodec::instance();
 
-        auto& files_map = segment_visitor_->GetSegmentFiles();
-        for (auto& kv : files_map) {
-            auto& segment_file_visitor = kv.second;
-            auto& segment_file = segment_file_visitor->GetFile();
-            auto file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_file);
-            auto& field_element = segment_file_visitor->GetFieldElement();
+        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+        for (auto& f_kv : field_visitors_map) {
+            auto& field_visitor = f_kv.second;
+            for (auto& file_kv : field_visitor->GetElementVistors()) {
+                auto &field_element_visitor = file_kv.second;
 
-            switch (field_element->GetFtype()) {
-                case engine::snapshot::FieldElementType::FET_VECTOR_RAW:
-                    default_codec.GetVectorsFormat()->read(fs_ptr_, segment_ptr_->vectors_ptr_);
-                    break;
-                // case engine::snapshot::FieldElementType::FET_VECTOR_INDEX:
-                //     default_codec.GetVectorIndexFormat()->read(fs_ptr_, segment_ptr_->vector_index_ptr_);
-                //     break;
-                case engine::snapshot::FieldElementType::FET_ATTR_RAW:
-                    default_codec.GetAttrsFormat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
-                    break;
-                case engine::snapshot::FieldElementType::FET_ATTR_INDEX:
-                    default_codec.GetAttrsIndexFormat()->read(fs_ptr_, segment_ptr_->attrs_index_ptr_);
-                    break;
-                case engine::snapshot::FieldElementType::FET_DELETED_DOCS:
-                    default_codec.GetDeletedDocsFormat()->read(fs_ptr_, segment_ptr_->deleted_docs_ptr_);
-                    break;
-                default:
-                    break;
+                auto &segment_file = field_element_visitor->GetFile();
+                auto file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_file);
+                auto &field_element = field_element_visitor->GetElement();
+
+                switch (field_element->GetFtype()) {
+                    case engine::snapshot::FieldElementType::FET_VECTOR_RAW:
+                        default_codec.GetVectorsFormat()->read(fs_ptr_, segment_ptr_->vectors_ptr_);
+                        break;
+                        // case engine::snapshot::FieldElementType::FET_VECTOR_INDEX:
+                        //     default_codec.GetVectorIndexFormat()->read(fs_ptr_, segment_ptr_->vector_index_ptr_);
+                        //     break;
+                    case engine::snapshot::FieldElementType::FET_ATTR_RAW:
+                        default_codec.GetAttrsFormat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
+                        break;
+                    case engine::snapshot::FieldElementType::FET_ATTR_INDEX:
+                        default_codec.GetAttrsIndexFormat()->read(fs_ptr_, segment_ptr_->attrs_index_ptr_);
+                        break;
+                    case engine::snapshot::FieldElementType::FET_DELETED_DOCS:
+                        default_codec.GetDeletedDocsFormat()->read(fs_ptr_, segment_ptr_->deleted_docs_ptr_);
+                        break;
+                    default:
+                        break;
+                }
             }
         }
     } catch (std::exception& e) {
@@ -138,29 +142,14 @@ SSSegmentReader::GetSegment(SegmentPtr& segment_ptr) {
 }
 
 Status
-SSSegmentReader::LoadVectorIndex(const std::string& location, segment::VectorIndexPtr& vector_index_ptr) {
+SSSegmentReader::LoadVectorIndex(const std::string& location, codec::ExternalData external_data,
+                                 segment::VectorIndexPtr& vector_index_ptr) {
     try {
         auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
-        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, vector_index_ptr);
+        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, external_data, vector_index_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
-        LOG_ENGINE_ERROR_ << err_msg;
-        return Status(DB_ERROR, err_msg);
-    }
-    return Status::OK();
-}
-
-Status
-SSSegmentReader::LoadVectorIndexWithRawData(const std::string& location, segment::VectorIndexPtr& vector_index_ptr) {
-    try {
-        auto& default_codec = codec::DefaultCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
-        knowhere::BinaryPtr raw_data = nullptr;
-        default_codec.GetVectorsFormat()->read_vectors(fs_ptr_, raw_data);
-        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, RAW_DATA, raw_data, vector_index_ptr);
-    } catch (std::exception& e) {
-        std::string err_msg = "Failed to load vector index with row data: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }

@@ -47,7 +47,9 @@ enum class EngineType {
     FAISS_BIN_IVFFLAT,
     HNSW,
     ANNOY,
-    MAX_VALUE = ANNOY,
+    FAISS_IVFSQ8NR,
+    HNSW_SQ8NR,
+    MAX_VALUE = HNSW_SQ8NR,
 };
 
 static std::map<std::string, EngineType> s_map_engine_type = {
