@@ -12,9 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
-#include <thread>
-#include <assert.h>
 
 #include "db/snapshot/Event.h"
 
@@ -32,7 +29,6 @@ class IEventHandler {
     }
 };
 
-/* class IEventHandlerRegistrar : public std::enable_shared_from_this<IEventHandlerRegistrar> { */
 class IEventHandlerRegistrar {
  public:
     using Ptr = std::shared_ptr<IEventHandlerRegistrar>;
