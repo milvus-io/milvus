@@ -124,9 +124,9 @@ namespace hnswlib_nm {
         size_t maxM0_;
         size_t ef_construction_;
 
-        bool is_sq8_;
-        faiss::ScalarQuantizer *sq_;
-        faiss::SQDistanceComputer *sqdc_;
+        bool is_sq8_ = false;
+        faiss::ScalarQuantizer *sq_ = nullptr;
+        faiss::SQDistanceComputer *sqdc_ = nullptr;
 
         double mult_, revSize_;
         int maxlevel_;
