@@ -20,26 +20,22 @@
 #include <memory>
 #include <string>
 
-#include "segment/VectorIndex.h"
+#include "knowhere/common/BinarySet.h"
 #include "storage/FSHandler.h"
 
 namespace milvus {
 namespace codec {
 
-enum ExternalData { ExternalData_None, ExternalData_RawData, ExternalData_SQ8 };
-
-class VectorIndexFormat {
+class VectorCompressFormat {
  public:
     virtual void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, ExternalData external_data,
-         segment::VectorIndexPtr& vector_index) = 0;
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr& compress) = 0;
 
     virtual void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-          const segment::VectorIndexPtr& vector_index) = 0;
+    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location, const knowhere::BinaryPtr& compress) = 0;
 };
 
-using VectorIndexFormatPtr = std::shared_ptr<VectorIndexFormat>;
+using VectorCompressFormatPtr = std::shared_ptr<VectorCompressFormat>;
 
 }  // namespace codec
 }  // namespace milvus

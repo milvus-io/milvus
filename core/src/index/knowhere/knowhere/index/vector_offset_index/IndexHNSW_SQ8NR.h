@@ -15,7 +15,6 @@
 #include <mutex>
 
 #include "hnswlib/hnswalg_nm.h"
-#include "hnswlib/hnswlib_nm.h"
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/VecIndex.h"
@@ -23,9 +22,9 @@
 namespace milvus {
 namespace knowhere {
 
-class IndexHNSW_NM : public VecIndex {
+class IndexHNSW_SQ8NR : public VecIndex {
  public:
-    IndexHNSW_NM() {
+    IndexHNSW_SQ8NR() {
         index_type_ = IndexEnum::INDEX_HNSW;
     }
 

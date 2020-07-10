@@ -18,9 +18,6 @@
 #include <utility>
 #include <vector>
 
-#include "hnswlib/hnswalg.h"
-#include "hnswlib/space_ip.h"
-#include "hnswlib/space_l2.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
