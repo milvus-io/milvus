@@ -70,7 +70,10 @@ using MetaFields = std::vector<MetaField>;
 
 class MetaSchema {
  public:
-    MetaSchema(const std::string& name, const MetaFields& fields) : name_(name), fields_(fields) {
+    MetaSchema(const std::string& name, const MetaFields& fields) : name_(name), fields_(fields), constraint_fields_() {
+    }
+
+    MetaSchema(const std::string& name, const MetaFields& fields, const MetaFields& constraints) : name_(name), fields_(fields), constraint_fields_(constraints) {
     }
 
     std::string
@@ -87,6 +90,19 @@ class MetaSchema {
             }
             result += field.ToString();
         }
+
+        std::string constraints;
+        for (auto& constraint : constraint_fields_) {
+            if (!constraints.empty()) {
+                constraints += ",";
+            }
+            constraints += constraint.name();
+        }
+
+        if (!constraints.empty()) {
+            result += ",constraint uq unique(" + constraints + ")";
+        }
+
         return result;
     }
 
@@ -110,6 +126,7 @@ class MetaSchema {
  private:
     std::string name_;
     MetaFields fields_;
+    MetaFields constraint_fields_;
 };
 
 static const MetaField MetaIdField = MetaField(F_ID, "BIGINT", "PRIMARY KEY AUTO_INCREMENT");
@@ -119,7 +136,6 @@ static const MetaField MetaSchemaIdField = MetaField(F_SCHEMA_ID, "BIGINT", "NOT
 static const MetaField MetaSegmentIdField = MetaField(F_SEGMENT_ID, "BIGINT", "NOT NULL");
 static const MetaField MetaFieldElementIdField = MetaField(F_FIELD_ELEMENT_ID, "BIGINT", "NOT NULL");
 static const MetaField MetaFieldIdField = MetaField(F_FIELD_ID, "BIGINT", "NOT NULL");
-static const MetaField MetaUniqueNameField = MetaField(F_NAME, "VARCHAR(255)", "UNIQUE NOT NULL");
 static const MetaField MetaNameField = MetaField(F_NAME, "VARCHAR(255)", "NOT NULL");
 static const MetaField MetaMappingsField = MetaField(F_MAPPINGS, "JSON", "NOT NULL");
 static const MetaField MetaNumField = MetaField(F_NUM, "BIGINT", "NOT NULL");
@@ -133,54 +149,27 @@ static const MetaField MetaSizeField = MetaField(F_SIZE, "BIGINT", "NOT NULL");
 static const MetaField MetaRowCountField = MetaField(F_ROW_COUNT, "BIGINT", "NOT NULL");
 
 // Environment schema
-static const MetaSchema COLLECTION_SCHEMA(snapshot::Collection::Name, {
-    MetaIdField,
-    MetaUniqueNameField,
-    MetaLSNField,
-    MetaParamsField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField
-});
+static const MetaSchema COLLECTION_SCHEMA(snapshot::Collection::Name,
+    {MetaIdField, MetaNameField,MetaLSNField,MetaParamsField,MetaStateField,MetaCreatedOnField,MetaUpdatedOnField},
+                                          {MetaNameField, MetaStateField});
 
 // Tables schema
-static const MetaSchema COLLECTIONCOMMIT_SCHEMA(snapshot::CollectionCommit::Name, {
-    MetaIdField,
-    MetaCollectionIdField,
-    MetaSchemaIdField,
-    MetaMappingsField,
-    MetaRowCountField,
-    MetaSizeField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField,
-});
+static const MetaSchema COLLECTIONCOMMIT_SCHEMA(snapshot::CollectionCommit::Name,
+    {MetaIdField, MetaCollectionIdField, MetaSchemaIdField, MetaMappingsField, MetaRowCountField,
+     MetaSizeField, MetaLSNField, MetaStateField, MetaCreatedOnField, MetaUpdatedOnField,}
+);
 
 // TableFiles schema
-static const MetaSchema PARTITION_SCHEMA(snapshot::Partition::Name, {
-    MetaIdField,
-    MetaUniqueNameField,
-    MetaCollectionIdField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField,
-});
+static const MetaSchema PARTITION_SCHEMA(snapshot::Partition::Name,
+    {MetaIdField, MetaNameField, MetaCollectionIdField, MetaLSNField,
+     MetaStateField, MetaCreatedOnField, MetaUpdatedOnField,},
+    {MetaNameField, MetaCollectionIdField, MetaStateField}
+);
 
 // Fields schema
-static const MetaSchema PARTITIONCOMMIT_SCHEMA(snapshot::PartitionCommit::Name, {
-    MetaIdField,
-    MetaCollectionIdField,
-    MetaPartitionIdField,
-    MetaMappingsField,
-    MetaRowCountField,
-    MetaSizeField,
-    MetaStateField,
-    MetaLSNField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField
-});
+static const MetaSchema PARTITIONCOMMIT_SCHEMA(snapshot::PartitionCommit::Name,
+    {MetaIdField, MetaCollectionIdField, MetaPartitionIdField, MetaMappingsField, MetaRowCountField,
+     MetaSizeField, MetaStateField, MetaLSNField, MetaCreatedOnField,MetaUpdatedOnField});
 
 static const MetaSchema SEGMENT_SCHEMA(snapshot::Segment::Name, {
     MetaIdField,
@@ -413,7 +402,9 @@ MySqlEngine::ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std
         mysqlpp::Transaction trans(*connectionPtr, mysqlpp::Transaction::serializable, mysqlpp::Transaction::session);
 
 //        mysqlpp::Query query = connectionPtr->query();
+        std::cout << "[DB] " << "<" << std::this_thread::get_id() << ">" << "Transaction start: " << std::endl;
         for (auto & context : sql_contexts) {
+            std::cout << "\t" << context.sql_ << std::endl;
             auto query = connectionPtr->query(context.sql_);
             auto res = query.execute();
             if (context.op_ == oAdd) {
@@ -425,10 +416,12 @@ MySqlEngine::ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std
         }
 
         trans.commit();
+        std::cout << "[DB] Transaction commit " << std::endl;
     } catch (const mysqlpp::BadQuery& er) {
         // Handle any query errors
 //        cerr << "Query error: " << er.what() << endl;
 //        return -1;
+        std::cout << "[DB] Error: " << er.what() << std::endl;
         return Status(SERVER_UNSUPPORTED_ERROR, er.what());
     } catch (const mysqlpp::BadConversion& er) {
         // Handle bad conversions
@@ -436,11 +429,13 @@ MySqlEngine::ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std
 //             "\tretrieved data size: " << er.retrieved <<
 //             ", actual size: " << er.actual_size << endl;
 //        return -1;
+        std::cout << "[DB] Error: " << er.what() << std::endl;
         return Status(SERVER_UNSUPPORTED_ERROR, er.what());
     } catch (const mysqlpp::Exception& er) {
         // Catch-all for any other MySQL++ exceptions
 //        cerr << "Error: " << er.what() << endl;
 //        return -1;
+        std::cout << "[DB] Error: " << er.what() << std::endl;
         return Status(SERVER_UNSUPPORTED_ERROR, er.what());
     }
 

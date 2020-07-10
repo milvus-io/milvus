@@ -259,6 +259,7 @@ TEST_F(SnapshotTest, DropCollectionTest) {
 
     auto ss_2 = CreateCollection(collection_name, ++lsn);
     status = Snapshots::GetInstance().GetSnapshot(lss, collection_name);
+//    EXPECT_DEATH({assert(1 == 2);}, "nullptr")
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(ss_2->GetID(), lss->GetID());
     ASSERT_NE(prev_ss_id, ss_2->GetID());
@@ -273,8 +274,10 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
     std::string collection_name("c1");
     LSN_TYPE lsn = 1;
 
+    std::cout << "========= Test ==========" << "\n\n\n\n" << std::endl;
     ID_TYPE stale_ss_id;
     auto worker1 = [&]() {
+        std::cout << "Thread 1 <" << std::this_thread::get_id() << ">" << std::endl;
         Status status;
         auto ss = CreateCollection(collection_name, ++lsn);
         ASSERT_TRUE(ss);
@@ -293,6 +296,7 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
         ASSERT_EQ(c_c->GetID(), stale_ss_id);
     };
     auto worker2 = [&] {
+        std::cout << "Thread 2 <" << std::this_thread::get_id() << ">" << std::endl;
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         auto status = Snapshots::GetInstance().DropCollection(collection_name, ++lsn);
         ASSERT_TRUE(status.ok());
@@ -301,6 +305,7 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
         ASSERT_FALSE(status.ok());
     };
     auto worker3 = [&] {
+        std::cout << "Thread 3 <" << std::this_thread::get_id() << ">" << std::endl;
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         auto ss = CreateCollection(collection_name, ++lsn);
         ASSERT_FALSE(ss);

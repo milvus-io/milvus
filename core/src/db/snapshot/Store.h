@@ -184,13 +184,9 @@ class Store {
     Status
     CreateCollection(Collection&& collection, CollectionPtr& return_v) {
         auto status = CreateResource<Collection>(std::move(collection), return_v);
-
         if (!status.ok()) {
             return status;
         }
-//        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-//        name_ids_[return_v->GetName()] = return_v->GetID();
-//        lock.unlock();
 
         return Status::OK();
     }
