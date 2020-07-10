@@ -245,13 +245,12 @@ Operations::PostExecute(Store& store) {
 template <typename ResourceT>
 void
 ApplyRollBack(std::set<std::shared_ptr<ResourceContext<ResourceT>>>& step_context_set) {
-//ApplyRollBack(std::set<typename ResourceContext<ResourceT>::Ptr>& step_context_set) {
-//    for (auto& step_context : step_context_set) {
-//        auto res = step_context->Resource();
-//        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(res);
-//        EventExecutor::GetInstance().Submit(evt_ptr);
-//        std::cout << "Rollback " << typeid(ResourceT).name() << ": " << res->GetID() << std::endl;
-//    }
+    for (auto& step_context : step_context_set) {
+        auto res = step_context->Resource();
+        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(res);
+        EventExecutor::GetInstance().Submit(evt_ptr);
+        std::cout << "Rollback " << typeid(ResourceT).name() << ": " << res->GetID() << std::endl;
+    }
 }
 
 void

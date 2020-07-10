@@ -45,7 +45,7 @@ namespace snapshot {
 class Session {
  public:
     explicit
-    Session(DBEnginePtr engine): db_engine_(engine) {
+    Session(DBEnginePtr engine): db_engine_(engine), pos_(-1) {
     }
 
     ~Session() = default;
@@ -60,13 +60,43 @@ class Session {
     Apply(ResourceContextPtr<ResourceT> resp);
 
     Status
+    ResultPos() {
+        if (sql_context_.empty()) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Session is empty");
+        }
+        pos_ = sql_context_.size() - 1;
+
+        return Status::OK();
+    }
+
+    Status
     Commit(std::vector<int64_t>& result_ids) {
         return db_engine_->ExecuteTransaction(sql_context_, result_ids);
     }
 
+    Status
+    Commit(int64_t& result_id) {
+        if (sql_context_.empty()) {
+            return Status::OK();
+        }
+
+        if (pos_ < 0) {
+            throw Exception(1, "Result pos is small than 0");
+//            return Status(SERVER_UNEXPECTED_ERROR, "Result pos is small than 0");
+        }
+        std::vector<int64_t> result_ids;
+        auto status = db_engine_->ExecuteTransaction(sql_context_, result_ids);
+        if (!status.ok()) {
+            return status;
+        }
+
+        result_id = result_ids.at(pos_);
+        return Status::OK();
+    }
+
  private:
-    std::vector<std::string> sql_statements;
     std::vector<SqlContext> sql_context_;
+    int64_t pos_;
     DBEnginePtr db_engine_;
 };
 

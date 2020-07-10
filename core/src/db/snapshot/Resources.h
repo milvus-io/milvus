@@ -129,6 +129,11 @@ class CreatedOnField {
         return created_on_;
     }
 
+    void
+    SetCreatedTime(const TS_TYPE& time) {
+        created_on_ = time;
+    }
+
  protected:
     TS_TYPE created_on_;
 };
@@ -143,6 +148,11 @@ class UpdatedOnField {
     TS_TYPE
     GetUpdatedTime() const {
         return updated_on_;
+    }
+
+    void
+    SetUpdatedTime(const TS_TYPE& time) {
+        updated_on_ = time;
     }
 
  protected:
@@ -183,6 +193,11 @@ class CollectionIdField {
     ID_TYPE
     GetCollectionId() const {
         return collection_id_;
+    }
+
+    void
+    SetCollectionId(ID_TYPE id) {
+        collection_id_ = id;
     }
 
  protected:
@@ -241,6 +256,11 @@ class FtypeField {
         return ftype_;
     }
 
+    void
+    SetFtype(FTYPE_TYPE type) {
+        ftype_ = type;
+    }
+
  protected:
     FTYPE_TYPE ftype_;
 };
@@ -255,6 +275,11 @@ class FieldIdField {
     ID_TYPE
     GetFieldId() const {
         return field_id_;
+    }
+
+    void
+    SetFieldId(ID_TYPE id) {
+        field_id_ = id;
     }
 
  protected:
@@ -273,6 +298,11 @@ class FieldElementIdField {
         return field_element_id_;
     }
 
+    void
+    SetFieldElementId(ID_TYPE id) {
+        field_element_id_ = id;
+    }
+
  protected:
     ID_TYPE field_element_id_;
 };
@@ -287,6 +317,11 @@ class PartitionIdField {
     ID_TYPE
     GetPartitionId() const {
         return partition_id_;
+    }
+
+    void
+    SetPartitionId(ID_TYPE id) {
+        partition_id_ = id;
     }
 
  protected:
@@ -305,6 +340,11 @@ class SegmentIdField {
         return segment_id_;
     }
 
+    void
+    SetSegmentId(ID_TYPE id) {
+        segment_id_ = id;
+    }
+
  protected:
     ID_TYPE segment_id_;
 };
@@ -321,6 +361,11 @@ class NameField {
         return name_;
     }
 
+    void
+    SetName(const std::string& name) {
+        name_ = name;
+    }
+
  protected:
     std::string name_;
 };
@@ -335,6 +380,11 @@ class ParamsField {
     const json&
     GetParams() const {
         return params_;
+    }
+
+    void
+    SetParams(const json& params) {
+        params_ = params;
     }
 
  protected:
@@ -449,7 +499,7 @@ class Partition : public BaseResource,
     using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<Partition>>;
     using VecT = std::vector<Ptr>;
-    static constexpr const char* Name = "Partition";
+    static constexpr const char* Name = "Partitions";
 
     Partition(const std::string& name, ID_TYPE collection_id, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
               TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
