@@ -21,9 +21,6 @@
 namespace milvus {
 namespace engine {
 
-const char* ROW_COUNT_PER_SEGMENT = "row_count_per_segment";
-const int64_t DEFAULT_ROW_COUNT_PER_SEGMENT = 500000;
-
 SSMergeManagerImpl::SSMergeManagerImpl(const DBOptions& options, MergeStrategyType type)
     : options_(options), strategy_type_(type) {
     UseStrategy(type);
@@ -62,19 +59,10 @@ SSMergeManagerImpl::MergeFiles(const std::string& collection_name) {
         snapshot::ScopedSnapshotT latest_ss;
         STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
 
-        auto collection = latest_ss->GetCollection();
-        const json params = collection->GetParams();
-        if (params.find(ROW_COUNT_PER_SEGMENT) != params.end()) {
-            row_count_per_segment = params[ROW_COUNT_PER_SEGMENT];
-        }
-
         Partition2SegmentsMap part2seg;
         auto& segments = latest_ss->GetResources<snapshot::Segment>();
         for (auto& kv : segments) {
             auto segment_commit = latest_ss->GetSegmentCommitBySegmentId(kv.second->GetID());
-            if (segment_commit->GetRowCount() >= row_count_per_segment) {
-                continue;
-            }
             part2seg[kv.second->GetPartitionId()].push_back(kv.second->GetID());
         }
 
@@ -90,7 +78,7 @@ SSMergeManagerImpl::MergeFiles(const std::string& collection_name) {
         }
 
         SegmentGroups segment_groups;
-        auto status = strategy_->RegroupSegments(collection_name, part2seg, segment_groups);
+        auto status = strategy_->RegroupSegments(latest_ss, part2seg, segment_groups);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to regroup segments for: " << collection_name
                               << ", continue to merge all files into one";
@@ -98,7 +86,7 @@ SSMergeManagerImpl::MergeFiles(const std::string& collection_name) {
         }
 
         for (auto& segments : segment_groups) {
-            SSMergeTask task(options_, collection_name, segments);
+            SSMergeTask task(options_, latest_ss, segments);
             task.Execute();
         }
     }

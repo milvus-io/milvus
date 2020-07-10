@@ -23,7 +23,7 @@ namespace engine {
 class SSMergeSimpleStrategy : public SSMergeStrategy {
  public:
     Status
-    RegroupSegments(const std::string& collection_name, const Partition2SegmentsMap& part2segment,
+    RegroupSegments(const snapshot::ScopedSnapshotT& ss, const Partition2SegmentsMap& part2segment,
                     SegmentGroups& groups) override;
 };  // MergeSimpleStrategy
 

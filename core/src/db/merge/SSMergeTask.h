@@ -16,6 +16,7 @@
 #include "db/merge/MergeManager.h"
 #include "db/meta/MetaTypes.h"
 #include "db/snapshot/ResourceTypes.h"
+#include "db/snapshot/Snapshot.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -23,14 +24,14 @@ namespace engine {
 
 class SSMergeTask {
  public:
-    SSMergeTask(const DBOptions& options, const std::string& collection_name, const snapshot::IDS_TYPE& segments);
+    SSMergeTask(const DBOptions& options, const snapshot::ScopedSnapshotT& ss, const snapshot::IDS_TYPE& segments);
 
     Status
     Execute();
 
  private:
     DBOptions options_;
-    std::string collection_name_;
+    snapshot::ScopedSnapshotT snapshot_;
     snapshot::IDS_TYPE segments_;
 };  // SSMergeTask
 
