@@ -110,29 +110,14 @@ SegmentReader::GetSegment(SegmentPtr& segment_ptr) {
 }
 
 Status
-SegmentReader::LoadVectorIndex(const std::string& location, segment::VectorIndexPtr& vector_index_ptr) {
+SegmentReader::LoadVectorIndex(const std::string& location, codec::ExternalData external_data,
+                               segment::VectorIndexPtr& vector_index_ptr) {
     try {
         auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
-        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, vector_index_ptr);
+        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, external_data, vector_index_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
-        LOG_ENGINE_ERROR_ << err_msg;
-        return Status(DB_ERROR, err_msg);
-    }
-    return Status::OK();
-}
-
-Status
-SegmentReader::LoadVectorIndexWithRawData(const std::string& location, segment::VectorIndexPtr& vector_index_ptr) {
-    try {
-        auto& default_codec = codec::DefaultCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
-        knowhere::BinaryPtr raw_data = nullptr;
-        default_codec.GetVectorsFormat()->read_vectors(fs_ptr_, raw_data);
-        default_codec.GetVectorIndexFormat()->read(fs_ptr_, location, RAW_DATA, raw_data, vector_index_ptr);
-    } catch (std::exception& e) {
-        std::string err_msg = "Failed to load vector index with row data: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }

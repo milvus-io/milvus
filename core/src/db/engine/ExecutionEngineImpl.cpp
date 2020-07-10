@@ -92,9 +92,22 @@ IsBinaryIndexType(knowhere::IndexType type) {
     return type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP || type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
 }
 
-bool
-IndexSupportOffset(EngineType type) {
-    return type == EngineType::FAISS_IVFFLAT || type == EngineType::HNSW || type == EngineType::NSG_MIX;
+codec::ExternalData
+GetIndexDataType(EngineType type) {
+    switch (type) {
+        case EngineType::FAISS_IVFFLAT:
+        case EngineType::HNSW:
+        case EngineType::NSG_MIX:
+            return codec::ExternalData::ExternalData_RawData;
+
+        case EngineType::FAISS_IVFSQ8:
+        case EngineType::HNSW_SQ8NR:
+        case EngineType::FAISS_IVFSQ8NR:
+            return codec::ExternalData::ExternalData_SQ8;
+
+        default:
+            return codec::ExternalData::ExternalData_None;
+    }
 }
 
 }  // namespace
@@ -453,12 +466,10 @@ ExecutionEngineImpl::Load(bool to_cache) {
             try {
                 segment::SegmentPtr segment_ptr;
                 segment_reader_ptr->GetSegment(segment_ptr);
-                if (IndexSupportOffset(index_type_)) {
-                    auto status =
-                        segment_reader_ptr->LoadVectorIndexWithRawData(location_, segment_ptr->vector_index_ptr_);
-                } else {
-                    auto status = segment_reader_ptr->LoadVectorIndex(location_, segment_ptr->vector_index_ptr_);
-                }
+
+                auto external_data = GetIndexDataType(index_type_);
+                auto status =
+                    segment_reader_ptr->LoadVectorIndex(location_, external_data, segment_ptr->vector_index_ptr_);
                 index_ = segment_ptr->vector_index_ptr_->GetVectorIndex();
 
                 if (index_ == nullptr) {

@@ -1,8 +1,8 @@
 #pragma once
-#include "hnswlib.h"
+#include "hnswlib_nm.h"
 #include <faiss/FaissHook.h>
 
-namespace hnswlib {
+namespace hnswlib_nm {
 
 static float
 L2Sqr(const void *pVect1, const void *pVect2, const void *qty_ptr) {
