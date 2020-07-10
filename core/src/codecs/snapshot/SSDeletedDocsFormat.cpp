@@ -35,9 +35,9 @@ namespace milvus {
 namespace codec {
 
 void
-SSDeletedDocsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::DeletedDocsPtr& deleted_docs) {
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-    const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
+SSDeletedDocsFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                          segment::DeletedDocsPtr& deleted_docs) {
+    const std::string del_file_path = file_path;
 
     int del_fd = open(del_file_path.c_str(), O_RDONLY, 00664);
     if (del_fd == -1) {

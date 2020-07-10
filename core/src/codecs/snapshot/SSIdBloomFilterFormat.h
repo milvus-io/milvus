@@ -31,7 +31,8 @@ class SSIdBloomFilterFormat {
     SSIdBloomFilterFormat() = default;
 
     void
-    read(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr);
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+         segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     void
     write(const storage::FSHandlerPtr& fs_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr);

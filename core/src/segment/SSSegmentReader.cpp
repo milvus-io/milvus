@@ -53,7 +53,7 @@ SSSegmentReader::LoadCache(bool& in_cache) {
 Status
 SSSegmentReader::Load() {
     try {
-        auto& ss_codec = codec::SSCodec::instance();
+//        auto& ss_codec = codec::SSCodec::instance();
 
         auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
         for (auto& f_kv : field_visitors_map) {
@@ -67,19 +67,19 @@ SSSegmentReader::Load() {
 
                 switch (field_element->GetFtype()) {
                     case engine::snapshot::FieldElementType::FET_UIDS:
-                        LoadUids(segment_ptr_->vectors_ptr_->GetMutableUids());
+                        LoadUids(file_path, segment_ptr_->vectors_ptr_->GetMutableUids());
                         break;
                     case engine::snapshot::FieldElementType::FET_VECTOR_RAW:
-                        LoadVectors(0, INT64_MAX, segment_ptr_->vectors_ptr_->GetMutableData());
+                        LoadVectors(file_path, 0, INT64_MAX, segment_ptr_->vectors_ptr_->GetMutableData());
                         break;
-                    case engine::snapshot::FieldElementType::FET_ATTR_RAW:
-                        ss_codec.GetAttrsFormat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
-                        break;
-                    case engine::snapshot::FieldElementType::FET_ATTR_INDEX:
-                        ss_codec.GetAttrsIndexFormat()->read(fs_ptr_, segment_ptr_->attrs_index_ptr_);
-                        break;
+//                    case engine::snapshot::fieldelementtype::fet_attr_raw:
+//                        ss_codec.getattrsformat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
+//                        break;
+//                    case engine::snapshot::fieldelementtype::fet_attr_index:
+//                        ss_codec.getattrsindexformat()->read(fs_ptr_, segment_ptr_->attrs_index_ptr_);
+//                        break;
                     case engine::snapshot::FieldElementType::FET_DELETED_DOCS:
-                        ss_codec.GetDeletedDocsFormat()->read(fs_ptr_, segment_ptr_->deleted_docs_ptr_);
+                        LoadDeletedDocs(file_path, segment_ptr_->deleted_docs_ptr_);
                         break;
                     default:
                         break;
@@ -93,11 +93,11 @@ SSSegmentReader::Load() {
 }
 
 Status
-SSSegmentReader::LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors) {
+SSSegmentReader::LoadVectors(const std::string& file_path, off_t offset, size_t num_bytes,
+                             std::vector<uint8_t>& raw_vectors) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
-        ss_codec.GetVectorsFormat()->read_vectors(fs_ptr_, offset, num_bytes, raw_vectors);
+        ss_codec.GetVectorsFormat()->read_vectors(fs_ptr_, file_path, offset, num_bytes, raw_vectors);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -111,7 +111,6 @@ SSSegmentReader::LoadAttrs(const std::string& field_name, off_t offset, size_t n
                          std::vector<uint8_t>& raw_attrs) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
         ss_codec.GetAttrsFormat()->read_attrs(fs_ptr_, field_name, offset, num_bytes, raw_attrs);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw attributes: " + std::string(e.what());
@@ -122,11 +121,10 @@ SSSegmentReader::LoadAttrs(const std::string& field_name, off_t offset, size_t n
 }
 
 Status
-SSSegmentReader::LoadUids(std::vector<doc_id_t>& uids) {
+SSSegmentReader::LoadUids(const std::string& file_path, std::vector<doc_id_t>& uids) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
-        ss_codec.GetVectorsFormat()->read_uids(fs_ptr_, uids);
+        ss_codec.GetVectorsFormat()->read_uids(fs_ptr_, file_path, uids);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load uids: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -146,7 +144,6 @@ SSSegmentReader::LoadVectorIndex(const std::string& location, codec::ExternalDat
                                  segment::VectorIndexPtr& vector_index_ptr) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
         ss_codec.GetVectorIndexFormat()->read(fs_ptr_, location, external_data, vector_index_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
@@ -157,11 +154,10 @@ SSSegmentReader::LoadVectorIndex(const std::string& location, codec::ExternalDat
 }
 
 Status
-SSSegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+SSSegmentReader::LoadBloomFilter(const std::string file_path, segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
-        ss_codec.GetIdBloomFilterFormat()->read(fs_ptr_, id_bloom_filter_ptr);
+        ss_codec.GetIdBloomFilterFormat()->read(fs_ptr_, file_path, id_bloom_filter_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -171,11 +167,10 @@ SSSegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr)
 }
 
 Status
-SSSegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
+SSSegmentReader::LoadDeletedDocs(const std::string& file_path, segment::DeletedDocsPtr& deleted_docs_ptr) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
-        ss_codec.GetDeletedDocsFormat()->read(fs_ptr_, deleted_docs_ptr);
+        ss_codec.GetDeletedDocsFormat()->read(fs_ptr_, file_path, deleted_docs_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load deleted docs: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -188,7 +183,6 @@ Status
 SSSegmentReader::ReadDeletedDocsSize(size_t& size) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
         ss_codec.GetDeletedDocsFormat()->readSize(fs_ptr_, size);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to read deleted docs size: " + std::string(e.what());

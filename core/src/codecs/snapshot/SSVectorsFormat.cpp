@@ -159,26 +159,9 @@ SSVectorsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::Vecto
 }
 
 void
-SSVectorsFormat::read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector<segment::doc_id_t>& uids) {
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-    if (!boost::filesystem::is_directory(dir_path)) {
-        std::string err_msg = "Directory: " + dir_path + "does not exist";
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
-    }
-
-    boost::filesystem::path target_path(dir_path);
-    typedef boost::filesystem::directory_iterator d_it;
-    d_it it_end;
-    d_it it(target_path);
-    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
-    for (; it != it_end; ++it) {
-        const auto& path = it->path();
-        if (path.extension().string() == user_id_extension_) {
-            read_uids_internal(fs_ptr, path.string(), uids);
-            break;
-        }
-    }
+SSVectorsFormat::read_uids(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                           std::vector<segment::doc_id_t>& uids) {
+    read_uids_internal(fs_ptr, file_path, uids);
 }
 
 void
@@ -205,27 +188,9 @@ SSVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, knowhere::Bin
 }
 
 void
-SSVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t offset, size_t num_bytes,
-                                   std::vector<uint8_t>& raw_vectors) {
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-    if (!boost::filesystem::is_directory(dir_path)) {
-        std::string err_msg = "Directory: " + dir_path + "does not exist";
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
-    }
-
-    boost::filesystem::path target_path(dir_path);
-    typedef boost::filesystem::directory_iterator d_it;
-    d_it it_end;
-    d_it it(target_path);
-    //    for (auto& it : boost::filesystem::directory_iterator(dir_path)) {
-    for (; it != it_end; ++it) {
-        const auto& path = it->path();
-        if (path.extension().string() == raw_vector_extension_) {
-            read_vectors_internal(fs_ptr, path.string(), offset, num_bytes, raw_vectors);
-            break;
-        }
-    }
+SSVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, off_t offset,
+                              size_t num_bytes, std::vector<uint8_t>& raw_vectors) {
+    read_vectors_internal(fs_ptr, file_path, offset, num_bytes, raw_vectors);
 }
 
 }  // namespace codec

@@ -31,9 +31,9 @@ constexpr unsigned int bloom_filter_capacity = 500000;
 constexpr double bloom_filter_error_rate = 0.01;
 
 void
-SSIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-    const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
+SSIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                            segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+    const std::string bloom_filter_file_path = file_path;
     scaling_bloom_t* bloom_filter =
         new_scaling_bloom_from_file(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
     fiu_do_on("bloom_filter_nullptr", bloom_filter = nullptr);

@@ -42,23 +42,23 @@ class SSSegmentReader {
     Load();
 
     Status
-    LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors);
+    LoadVectors(const std::string& file_path, off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors);
 
     Status
     LoadAttrs(const std::string& field_name, off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_attrs);
 
     Status
-    LoadUids(std::vector<doc_id_t>& uids);
+    LoadUids(const std::string& file_path, std::vector<doc_id_t>& uids);
 
     Status
     LoadVectorIndex(const std::string& location, codec::ExternalData external_data,
                     segment::VectorIndexPtr& vector_index_ptr);
 
     Status
-    LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
+    LoadBloomFilter(const std::string file_path, segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     Status
-    LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr);
+    LoadDeletedDocs(const std::string& file_path, segment::DeletedDocsPtr& deleted_docs_ptr);
 
     Status
     GetSegment(SegmentPtr& segment_ptr);

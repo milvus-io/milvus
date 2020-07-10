@@ -31,7 +31,7 @@ class SSDeletedDocsFormat {
     SSDeletedDocsFormat() = default;
 
     void
-    read(const storage::FSHandlerPtr& fs_ptr, segment::DeletedDocsPtr& deleted_docs);
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, segment::DeletedDocsPtr& deleted_docs);
 
     void
     write(const storage::FSHandlerPtr& fs_ptr, const segment::DeletedDocsPtr& deleted_docs);

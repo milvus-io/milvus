@@ -39,13 +39,13 @@ class SSVectorsFormat {
     write(const storage::FSHandlerPtr& fs_ptr, const segment::VectorsPtr& vectors);
 
     void
-    read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector<segment::doc_id_t>& uids);
+    read_uids(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, std::vector<segment::doc_id_t>& uids);
 
     void
     read_vectors(const storage::FSHandlerPtr& fs_ptr, knowhere::BinaryPtr& raw_vectors);
 
     void
-    read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t offset, size_t num_bytes,
+    read_vectors(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, off_t offset, size_t num_bytes,
                  std::vector<uint8_t>& raw_vectors);
 
     // No copy and move
