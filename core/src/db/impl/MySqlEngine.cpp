@@ -402,9 +402,9 @@ MySqlEngine::ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std
         mysqlpp::Transaction trans(*connectionPtr, mysqlpp::Transaction::serializable, mysqlpp::Transaction::session);
 
 //        mysqlpp::Query query = connectionPtr->query();
-        std::cout << "[DB] " << "<" << std::this_thread::get_id() << ">" << "Transaction start: " << std::endl;
+//        std::cout << "[DB] " << "<" << std::this_thread::get_id() << ">" << "Transaction start: " << std::endl;
         for (auto & context : sql_contexts) {
-            std::cout << "\t" << context.sql_ << std::endl;
+//            std::cout << "\t" << context.sql_ << std::endl;
             auto query = connectionPtr->query(context.sql_);
             auto res = query.execute();
             if (context.op_ == oAdd) {
@@ -416,12 +416,12 @@ MySqlEngine::ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std
         }
 
         trans.commit();
-        std::cout << "[DB] Transaction commit " << std::endl;
+//        std::cout << "[DB] Transaction commit " << std::endl;
     } catch (const mysqlpp::BadQuery& er) {
         // Handle any query errors
 //        cerr << "Query error: " << er.what() << endl;
 //        return -1;
-        std::cout << "[DB] Error: " << er.what() << std::endl;
+//        std::cout << "[DB] Error: " << er.what() << std::endl;
         return Status(SERVER_UNSUPPORTED_ERROR, er.what());
     } catch (const mysqlpp::BadConversion& er) {
         // Handle bad conversions
@@ -429,13 +429,13 @@ MySqlEngine::ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std
 //             "\tretrieved data size: " << er.retrieved <<
 //             ", actual size: " << er.actual_size << endl;
 //        return -1;
-        std::cout << "[DB] Error: " << er.what() << std::endl;
+//        std::cout << "[DB] Error: " << er.what() << std::endl;
         return Status(SERVER_UNSUPPORTED_ERROR, er.what());
     } catch (const mysqlpp::Exception& er) {
         // Catch-all for any other MySQL++ exceptions
 //        cerr << "Error: " << er.what() << endl;
 //        return -1;
-        std::cout << "[DB] Error: " << er.what() << std::endl;
+//        std::cout << "[DB] Error: " << er.what() << std::endl;
         return Status(SERVER_UNSUPPORTED_ERROR, er.what());
     }
 

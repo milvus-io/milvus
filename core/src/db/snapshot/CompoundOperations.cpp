@@ -92,7 +92,8 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
     STATUS_CHECK(new_sf_op->Push());
     STATUS_CHECK(new_sf_op->GetResource(created));
     context_.new_segment_files.push_back(created);
-    AddStepWithLsn(*created, context_.lsn);
+    auto sf_ctx_p = ResourceContextBuilder<SegmentFile>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, sf_ctx_p);
 
     return Status::OK();
 }
@@ -132,7 +133,8 @@ DropAllIndexOperation::DoExecute(Store& store) {
         STATUS_CHECK(fc_op(store));
         FieldCommitPtr new_field_commit;
         STATUS_CHECK(fc_op.GetResource(new_field_commit));
-        AddStepWithLsn(*new_field_commit, context.lsn);
+        auto fc_ctx_p = ResourceContextBuilder<FieldCommit>().SetOp(oUpdate).CreatePtr();
+        AddStepWithLsn(*new_field_commit, context.lsn, fc_ctx_p);
         context.new_field_commits.push_back(new_field_commit);
         for (auto& kv : GetAdjustedSS()->GetResources<FieldCommit>()) {
             if (kv.second->GetFieldId() == new_field_commit->GetFieldId()) {
@@ -144,7 +146,8 @@ DropAllIndexOperation::DoExecute(Store& store) {
 
         STATUS_CHECK(sc_op(store));
         STATUS_CHECK(sc_op.GetResource(cc_context.new_schema_commit));
-        AddStepWithLsn(*cc_context.new_schema_commit, context.lsn);
+        auto sc_ctx_p = ResourceContextBuilder<SchemaCommit>().SetOp(oUpdate).CreatePtr();
+        AddStepWithLsn(*cc_context.new_schema_commit, context.lsn, sc_ctx_p);
     }
 
     std::map<ID_TYPE, std::vector<SegmentCommitPtr>> p_sc_map;
@@ -158,7 +161,8 @@ DropAllIndexOperation::DoExecute(Store& store) {
         SegmentCommitOperation sc_op(context, GetAdjustedSS());
         STATUS_CHECK(sc_op(store));
         STATUS_CHECK(sc_op.GetResource(context.new_segment_commit));
-        AddStepWithLsn(*context.new_segment_commit, context.lsn);
+        auto segc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(oUpdate).CreatePtr();
+        AddStepWithLsn(*context.new_segment_commit, context.lsn, segc_ctx_p);
         p_sc_map[context.new_segment_commit->GetPartitionId()].push_back(context.new_segment_commit);
     }
 
@@ -169,14 +173,16 @@ DropAllIndexOperation::DoExecute(Store& store) {
         PartitionCommitOperation pc_op(context, GetAdjustedSS());
         STATUS_CHECK(pc_op(store));
         STATUS_CHECK(pc_op.GetResource(context.new_partition_commit));
-        AddStepWithLsn(*context.new_partition_commit, context.lsn);
+        auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(oUpdate).CreatePtr();
+        AddStepWithLsn(*context.new_partition_commit, context.lsn, pc_ctx_p);
         cc_context.new_partition_commits.push_back(context.new_partition_commit);
     }
 
     CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
     STATUS_CHECK(cc_op(store));
     STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
-    AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn, cc_ctx_p);
 
     return Status::OK();
 }
@@ -202,19 +208,22 @@ DropIndexOperation::DoExecute(Store& store) {
     SegmentCommitOperation sc_op(context_, GetAdjustedSS());
     STATUS_CHECK(sc_op(store));
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
-    AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
+    auto sc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_segment_commit, context_.lsn, sc_ctx_p);
 
     OperationContext cc_context;
     PartitionCommitOperation pc_op(context_, GetAdjustedSS());
     STATUS_CHECK(pc_op(store));
     STATUS_CHECK(pc_op.GetResource(cc_context.new_partition_commit));
-    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
+    auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn, pc_ctx_p);
     context_.new_partition_commit = cc_context.new_partition_commit;
 
     CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
     STATUS_CHECK(cc_op(store));
     STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
-    AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn, cc_ctx_p);
 
     return Status::OK();
 }
@@ -234,7 +243,8 @@ NewSegmentOperation::DoExecute(Store& store) {
     SegmentCommitOperation sc_op(context_, GetAdjustedSS());
     STATUS_CHECK(sc_op(store));
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
-    AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
+    auto sc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_segment_commit, context_.lsn, sc_ctx_p);
     /* std::cout << GetRepr() << " POST_SC_MAP=("; */
     /* for (auto id : context_.new_segment_commit->GetMappings()) { */
     /*     std::cout << id << ","; */
@@ -245,7 +255,8 @@ NewSegmentOperation::DoExecute(Store& store) {
     PartitionCommitOperation pc_op(context_, GetAdjustedSS());
     STATUS_CHECK(pc_op(store));
     STATUS_CHECK(pc_op.GetResource(cc_context.new_partition_commit));
-    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
+    auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn, pc_ctx_p);
     context_.new_partition_commit = cc_context.new_partition_commit;
     /* std::cout << GetRepr() << " POST_PC_MAP=("; */
     /* for (auto id : cc_context.new_partition_commit->GetMappings()) { */
@@ -256,7 +267,8 @@ NewSegmentOperation::DoExecute(Store& store) {
     CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
     STATUS_CHECK(cc_op(store));
     STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
-    AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn, cc_ctx_p);
 
     return Status::OK();
 }
@@ -267,7 +279,8 @@ NewSegmentOperation::CommitNewSegment(SegmentPtr& created) {
     STATUS_CHECK(op->Push());
     STATUS_CHECK(op->GetResource(context_.new_segment));
     created = context_.new_segment;
-    AddStepWithLsn(*created, context_.lsn);
+    auto s_ctx_p = ResourceContextBuilder<Segment>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, s_ctx_p);
     return Status::OK();
 }
 
@@ -279,7 +292,8 @@ NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context, Seg
     auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
     STATUS_CHECK(new_sf_op->Push());
     STATUS_CHECK(new_sf_op->GetResource(created));
-    AddStepWithLsn(*created, context_.lsn);
+    auto sf_ctx_p = ResourceContextBuilder<SegmentFile>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, sf_ctx_p);
     context_.new_segment_files.push_back(created);
     return Status::OK();
 }
@@ -465,7 +479,8 @@ CreatePartitionOperation::CommitNewPartition(const PartitionContext& context, Pa
     STATUS_CHECK(op->Push());
     STATUS_CHECK(op->GetResource(partition));
     context_.new_partition = partition;
-    AddStepWithLsn(*partition, context_.lsn);
+    auto par_ctx_p = ResourceContextBuilder<Partition>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*partition, context_.lsn, par_ctx_p);
     return Status::OK();
 }
 
@@ -490,7 +505,8 @@ CreatePartitionOperation::DoExecute(Store& store) {
     auto pc_op = PartitionCommitOperation(pc_context, GetAdjustedSS());
     STATUS_CHECK(pc_op(store));
     STATUS_CHECK(pc_op.GetResource(pc));
-    AddStepWithLsn(*pc, context_.lsn);
+    auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*pc, context_.lsn, pc_ctx_p);
 
     OperationContext cc_context;
     cc_context.new_partition_commit = pc;
@@ -499,7 +515,8 @@ CreatePartitionOperation::DoExecute(Store& store) {
     STATUS_CHECK(cc_op(store));
     CollectionCommitPtr cc;
     STATUS_CHECK(cc_op.GetResource(cc));
-    AddStepWithLsn(*cc, context_.lsn);
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*cc, context_.lsn, cc_ctx_p);
     context_.new_collection_commit = cc;
 
     return Status::OK();

@@ -478,11 +478,8 @@ TEST_F(SnapshotTest, IndexTest) {
     ASSERT_TRUE(status.ok());
 
     auto filter = [&](SegmentFile::Ptr segment_file) -> bool {
-        if (segment_file->GetSegmentId() == seg_file->GetSegmentId()) {
-            return true;
-        }
+        return segment_file->GetSegmentId() == seg_file->GetSegmentId();
 
-        return false;
     };
 
     auto filter2 = [&](SegmentFile::Ptr segment_file) -> bool {
@@ -554,10 +551,7 @@ TEST_F(SnapshotTest, IndexTest) {
     ASSERT_NE(field_element_id, 0);
 
     auto filter3 = [&](SegmentFile::Ptr segment_file) -> bool {
-        if (segment_file->GetFieldElementId() == field_element_id) {
-            return true;
-        }
-        return false;
+        return segment_file->GetFieldElementId() == field_element_id;
     };
     sf_collector = std::make_shared<SegmentFileCollector>(ss, filter3);
     sf_collector->Iterate();
