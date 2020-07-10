@@ -50,9 +50,9 @@ class ResourceGCEvent : public Event {
 
         /* TODO: physically clean resource */
         std::string res_path = GetResPath<ResourceT>(res_);
-        if (!boost::filesystem::exists(res_path)) {
-            return Status::OK();
-        }
+        /* if (!boost::filesystem::exists(res_path)) { */
+        /*     return Status::OK(); */
+        /* } */
         if (boost::filesystem::is_directory(res_path)) {
             boost::filesystem::remove_all(res_path);
         } else {

@@ -18,6 +18,7 @@
 #include <algorithm>
 
 #include "ssdb/utils.h"
+#include "db/snapshot/HandlerFactory.h"
 
 TEST_F(SnapshotTest, ResourcesTest) {
     int nprobe = 16;
@@ -1549,4 +1550,48 @@ TEST_F(SnapshotTest, CompoundTest2) {
     }
     ASSERT_EQ(final_segments, expect_segments);
     // TODO: Check Total Segment Files Cnt
+}
+
+struct GCSchedule {
+    static constexpr const char* Name = "GCSchedule";
+};
+
+struct FlushSchedule {
+    static constexpr const char* Name = "FlushSchedule";
+};
+
+using IEventHandler = milvus::engine::snapshot::IEventHandler;
+struct SampleHandler : public IEventHandler {
+    static constexpr const char* EventName = "SampleHandler";
+    const char*
+    GetEventName() const override {
+        return EventName;
+    }
+};
+
+REGISTER_HANDLER(GCSchedule, IEventHandler);
+REGISTER_HANDLER(GCSchedule, SampleHandler);
+REGISTER_HANDLER(FlushSchedule, IEventHandler);
+REGISTER_HANDLER(FlushSchedule, SampleHandler);
+
+using GCScheduleFactory = milvus::engine::snapshot::HandlerFactory<GCSchedule>;
+using FlushScheduleFactory = milvus::engine::snapshot::HandlerFactory<GCSchedule>;
+
+TEST_F(SnapshotTest, RegistryTest) {
+    {
+        auto& factory = GCScheduleFactory::GetInstance();
+        auto ihandler = factory.GetHandler(IEventHandler::EventName);
+        ASSERT_TRUE(ihandler);
+        auto sihandler = factory.GetHandler(SampleHandler::EventName);
+        ASSERT_TRUE(sihandler);
+        ASSERT_EQ(SampleHandler::EventName, sihandler->GetEventName());
+    }
+    {
+        auto& factory = FlushScheduleFactory::GetInstance();
+        auto ihandler = factory.GetHandler(IEventHandler::EventName);
+        ASSERT_TRUE(ihandler);
+        auto sihandler = factory.GetHandler(SampleHandler::EventName);
+        ASSERT_TRUE(sihandler);
+        ASSERT_EQ(SampleHandler::EventName, sihandler->GetEventName());
+    }
 }
