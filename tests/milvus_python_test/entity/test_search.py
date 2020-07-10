@@ -80,9 +80,6 @@ class TestSearchBase:
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     @pytest.fixture(
@@ -167,9 +164,6 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type == IndexType.IVF_PQ:
-            pytest.skip("Skip PQ")
-
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
         query_vec = [vectors[0]]
@@ -412,9 +406,6 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type in [IndexType.RNSG, IndexType.IVF_PQ]:
-            pytest.skip("rnsg not support in ip, skip pq")
-
         vectors, ids = self.init_data(connect, ip_collection)
         status = connect.create_index(ip_collection, index_type, index_param)
         query_vec = [vectors[0]]
