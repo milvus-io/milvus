@@ -12,6 +12,7 @@
 #include "db/SSDBImpl.h"
 #include "cache/CpuCacheMgr.h"
 #include "db/IDGenerator.h"
+#include "db/merge/MergeManagerFactory.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
@@ -51,6 +52,7 @@ static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown
 SSDBImpl::SSDBImpl(const DBOptions& options)
     : options_(options), initialized_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     mem_mgr_ = MemManagerFactory::SSBuild(options_);
+    merge_mgr_ptr_ = MergeManagerFactory::SSBuild(options_);
 
     if (options_.wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
