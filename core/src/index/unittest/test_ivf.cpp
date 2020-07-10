@@ -25,6 +25,7 @@
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQNR.h"
 #include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
@@ -32,6 +33,7 @@
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFPQ.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIVFSQNR.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
@@ -84,11 +86,13 @@ INSTANTIATE_TEST_CASE_P(
         // std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_GPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_GPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_GPU),
+        std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, milvus::knowhere::IndexMode::MODE_GPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, milvus::knowhere::IndexMode::MODE_GPU),
 #endif
         // std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_CPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_CPU),
-        std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_CPU)));
+        std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_CPU),
+        std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, milvus::knowhere::IndexMode::MODE_CPU)));
 
 TEST_P(IVFTest, ivf_basic_cpu) {
     assert(!xb.empty());
