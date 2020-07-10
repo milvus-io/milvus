@@ -20,41 +20,34 @@
 #include <memory>
 #include <string>
 
-#include "codecs/VectorIndexFormat.h"
-#include "segment/VectorIndex.h"
-#include "storage/FSHandler.h"
-
 namespace milvus {
 namespace codec {
 
-class SSVectorIndexFormat {
+class SSVectorCompressFormat {
  public:
-    SSVectorIndexFormat() = default;
+    SSVectorCompressFormat() = default;
 
     void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, ExternalData externalData,
-         segment::VectorIndexPtr& vector_index);
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr& compress);
 
     void
     write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-          const segment::VectorIndexPtr& vector_index);
+          const knowhere::BinaryPtr& compress);
 
     // No copy and move
-    SSVectorIndexFormat(const SSVectorIndexFormat&) = delete;
-    SSVectorIndexFormat(SSVectorIndexFormat&&) = delete;
+    SSVectorCompressFormat(const SSVectorCompressFormat&) = delete;
+    SSVectorCompressFormat(SSVectorCompressFormat&&) = delete;
 
-    SSVectorIndexFormat&
-    operator=(const SSVectorIndexFormat&) = delete;
-    SSVectorIndexFormat&
-    operator=(SSVectorIndexFormat&&) = delete;
+    SSVectorCompressFormat&
+    operator=(const SSVectorCompressFormat&) = delete;
+    SSVectorCompressFormat&
+    operator=(SSVectorCompressFormat&&) = delete;
 
  private:
-    knowhere::VecIndexPtr
-    read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path, const std::string& extern_key = "",
-                  const knowhere::BinaryPtr& extern_data = nullptr);
+    const std::string sq8_vector_extension_ = ".sq8";
 };
 
-using SSVectorIndexFormatPtr = std::shared_ptr<SSVectorIndexFormat>;
+using SSVectorCompressFormatPtr = std::shared_ptr<SSVectorCompressFormat>;
 
 }  // namespace codec
 }  // namespace milvus

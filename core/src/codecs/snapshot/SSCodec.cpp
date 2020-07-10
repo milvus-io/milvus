@@ -42,6 +42,7 @@ SSCodec::SSCodec() {
     attrs_index_format_ptr_ = std::make_shared<SSAttrsIndexFormat>();
     deleted_docs_format_ptr_ = std::make_shared<SSDeletedDocsFormat>();
     id_bloom_filter_format_ptr_ = std::make_shared<SSIdBloomFilterFormat>();
+    vector_compress_format_ptr_ = std::make_shared<SSVectorCompressFormat>();
 }
 
 SSVectorsFormatPtr
@@ -74,5 +75,9 @@ SSCodec::GetIdBloomFilterFormat() {
     return id_bloom_filter_format_ptr_;
 }
 
+SSVectorCompressFormatPtr
+SSCodec::GetVectorCompressFormat() {
+    return vector_compress_format_ptr_;
+}
 }  // namespace codec
 }  // namespace milvus

@@ -22,6 +22,7 @@
 #include "codecs/snapshot/SSDeletedDocsFormat.h"
 #include "codecs/snapshot/SSIdBloomFilterFormat.h"
 #include "codecs/snapshot/SSVectorsFormat.h"
+#include "codecs/snapshot/SSVectorCompressFormat.h"
 #include "codecs/snapshot/SSVectorIndexFormat.h"
 
 namespace milvus {
@@ -50,6 +51,9 @@ class SSCodec {
     SSIdBloomFilterFormatPtr
     GetIdBloomFilterFormat();
 
+    SSVectorCompressFormatPtr
+    GetVectorCompressFormat();
+
  private:
     SSCodec();
 
@@ -60,6 +64,7 @@ class SSCodec {
     SSAttrsIndexFormatPtr attrs_index_format_ptr_;
     SSDeletedDocsFormatPtr deleted_docs_format_ptr_;
     SSIdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
+    SSVectorCompressFormatPtr vector_compress_format_ptr_;
 };
 
 }  // namespace codec
