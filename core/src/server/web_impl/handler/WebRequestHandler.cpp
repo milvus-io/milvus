@@ -78,6 +78,8 @@ WebErrorMap(ErrorCode code) {
     }
 }
 
+using FloatJson = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t, float>;
+
 /////////////////////////////////// Private methods ///////////////////////////////////////
 void
 WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg) {
@@ -1690,8 +1692,9 @@ WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams&
             ASSIGN_RETURN_STATUS_DTO(status)
         }
 
-        nlohmann::json json;
-        AddStatusToJson(json, status.code(), status.message());
+        FloatJson json;
+        json["code"] = (int64_t)status.code();
+        json["message"] = status.message();
         if (vectors_json.empty()) {
             json["vectors"] = std::vector<int64_t>();
         } else {
