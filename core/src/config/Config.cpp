@@ -1333,6 +1333,15 @@ Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
 
         int64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+
+        int64_t cgroup_limit_mem = 0;
+        CommonUtil::GetSysCgroupMemLimit(cgroup_limit_mem);
+        if (cgroup_limit_mem < total_mem && cache_size >= cgroup_limit_mem) {
+            std::string msg = "Invalid cpu cahche size: " + value +
+                              ". Possible reason: cache.cache_size  exceeds system cgroup memory.";
+            return Status{SERVER_INVALID_ARGUMENT, msg};
+        }
+
         if (cache_size >= total_mem) {
             std::string msg =
                 "Invalid cpu cache size: " + value + ". Possible reason: cache.cache_size exceeds system memory.";
