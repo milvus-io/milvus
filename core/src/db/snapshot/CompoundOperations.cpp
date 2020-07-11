@@ -58,7 +58,7 @@ BuildOperation::DoExecute(Store& store) {
     STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
     auto c_commit_ctx_p = ResourceContextBuilder<CollectionCommit>()
         .SetResource(context_.new_collection_commit).SetOp(oUpdate).CreatePtr();
-    AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn, c_commit_ctx_p);
 
     return Status::OK();
 }

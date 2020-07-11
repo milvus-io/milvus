@@ -79,16 +79,11 @@ class Store {
     template <typename T, typename OpT>
     void
     ApplyOpStep(OpT& op, size_t pos, std::set<std::shared_ptr<ResourceContext<T>>>& step_context_set, const SessionPtr& session) {
-//        typename T::Ptr ret;
         for (auto& step_context : step_context_set) {
-//            auto res = step_context->Resource();
-//            CreateResource<T>(T(*res), ret);
-//            res->SetID(ret->GetID());
             session->Apply<T>(step_context);
         }
         if (pos == op.GetPos()) {
             session->ResultPos();
-//            op.SetStepResult(ret->GetID());
         }
     }
 
@@ -101,7 +96,6 @@ class Store {
     template <typename ResourceT>
     Status
     GetResource(ID_TYPE id, typename ResourceT::Ptr& return_v) {
-//        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         auto status = DBImp::GetInstance().Select<ResourceT>(id, return_v);
 
         if (!status.ok()) {
@@ -110,7 +104,7 @@ class Store {
 
         if (return_v == nullptr) {
             std::string err = "Cannot select resource " + std::string(ResourceT::Name) + " from DB: No resource which id = " + std::to_string(id);
-            return Status(SERVER_UNEXPECTED_ERROR, err);
+            return Status(SS_NOT_FOUND_ERROR, err);
         }
 
         return Status::OK();
@@ -118,20 +112,25 @@ class Store {
 
     Status
     GetCollection(const std::string& name, CollectionPtr& return_v) {
-
-//        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
-        auto it = name_ids_.find(name);
-        if (it == name_ids_.end()) {
-            return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
+        // TODO: Get active collection
+        std::vector<CollectionPtr> resources;
+        auto status = DBImp::GetInstance().SelectBy<Collection>(NameField::Name, name, resources);
+        if (!status.ok()) {
+            return status;
         }
-        auto& id = it->second;
-//        lock.unlock();
-        return GetResource<Collection>(id, return_v);
+
+        for (auto& res : resources) {
+            if (res->IsActive()) {
+                return_v = res;
+                return Status::OK();
+            }
+        }
+
+        return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
     }
 
     Status
     RemoveCollection(ID_TYPE id) {
-//        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto rc_ctx_p = ResourceContextBuilder<Collection>().SetTable(Collection::Name)
             .SetOp(oDelete).SetID(id).CreatePtr();
 
@@ -142,7 +141,6 @@ class Store {
     template <typename ResourceT>
     Status
     RemoveResource(ID_TYPE id) {
-//        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto rc_ctx_p = ResourceContextBuilder<ResourceT>().SetTable(ResourceT::Name)
             .SetOp(oDelete).SetID(id).CreatePtr();
 
@@ -152,7 +150,6 @@ class Store {
 
     IDS_TYPE
     AllActiveCollectionIds(bool reversed = true) const {
-//        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         IDS_TYPE ids;
         IDS_TYPE selected_ids;
         DBImp::GetInstance().SelectResourceIDs(Collection::Name, selected_ids, "", "");

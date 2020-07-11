@@ -41,7 +41,6 @@ class DBImp {
 
     SessionPtr
     CreateSession() {
-//        return std::make_shared<MockSession>(engine_);
         return std::make_shared<Session>(engine_);
     }
 
@@ -50,7 +49,27 @@ class DBImp {
     Select(int64_t id, typename T::Ptr& resource) {
         // TODO move select logic to here
         auto session = CreateSession();
-        return session->Select<T>(T::Name, id, resource);
+        std::vector<typename T::Ptr> resources;
+        auto status = session->Select<T>(IdField::Name, std::to_string(id), resources);
+        if (status.ok() && !resources.empty()) {
+            // TODO: may need to check num of resources
+            resource = resources.at(0);
+        }
+
+        return status;
+    }
+
+    template<typename ResourceT>
+    Status
+    SelectBy(const std::string field, const std::string& value, std::vector<typename ResourceT::Ptr>& resources) {
+        auto session = CreateSession();
+        return session->Select<ResourceT>(field, value, resources);
+//
+//        if (status.ok() && resources.empty()) {
+//            return Status(SERVER_UNEXPECTED_ERROR, "Cannot find target resource in DB");
+//        }
+//
+//        return status;
     }
 
     Status

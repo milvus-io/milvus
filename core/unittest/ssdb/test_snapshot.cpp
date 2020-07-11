@@ -451,9 +451,15 @@ TEST_F(SnapshotTest, IndexTest) {
         return ++lsn;
     };
 
+    std::vector<ID_TYPE> ids;
+    auto status = Snapshots::GetInstance().GetCollectionIds(ids);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    auto collection_id = ids.at(0);
+
     ScopedSnapshotT ss;
-    auto status = Snapshots::GetInstance().GetSnapshot(ss, 1);
-    ASSERT_TRUE(status.ok());
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_id);
+    ASSERT_TRUE(status.ok()) << status.message();
 
     SegmentFileContext sf_context;
     SFContextBuilder(sf_context, ss);
@@ -471,7 +477,7 @@ TEST_F(SnapshotTest, IndexTest) {
 
     build_op->Push();
     status = build_op->GetSnapshot(ss);
-    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(status.ok()) << status.message();
 
     auto filter = [&](SegmentFile::Ptr segment_file) -> bool {
         return segment_file->GetSegmentId() == seg_file->GetSegmentId();
@@ -488,8 +494,8 @@ TEST_F(SnapshotTest, IndexTest) {
     auto it_found = sf_collector->segment_files_.find(seg_file->GetID());
     ASSERT_NE(it_found, sf_collector->segment_files_.end());
 
-    status = Snapshots::GetInstance().GetSnapshot(ss, 1);
-    ASSERT_TRUE(status.ok());
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
 
     OperationContext drop_ctx;
     drop_ctx.lsn = next_lsn();
