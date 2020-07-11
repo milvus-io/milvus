@@ -166,7 +166,7 @@ class TestSearchBase:
         logging.getLogger().info(get_simple_index)
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
-        query_vec = [vectors[0]]
+        query_vec = [vectors[0], vectors[1]]
         search_param = get_search_param(index_type)
         status, result = connect.search(collection, top_k, query_vec, params=search_param)
         logging.getLogger().info(result)
@@ -174,7 +174,8 @@ class TestSearchBase:
             assert status.OK()
             assert len(result[0]) == min(len(vectors), top_k)
             assert check_result(result[0], ids[0])
-            assert result[0][0].distance <= epsilon
+            assert result[0][0].distance < result[0][1].distance
+            assert result[1][0].distance < result[1][1].distance
         else:
             assert not status.OK()
 
@@ -415,7 +416,7 @@ class TestSearchBase:
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
-        assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
+        assert result[0][0].distance >= result[0][1].distance
 
     def test_search_ip_large_nq_index_params(self, connect, ip_collection, get_simple_index):
         '''
