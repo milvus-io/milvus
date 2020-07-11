@@ -1,18 +1,24 @@
 #pragma once
 
 #include "visited_list_pool.h"
-#include "hnswlib.h"
+#include "hnswlib_nm.h"
 #include <random>
 #include <stdlib.h>
 #include <unordered_set>
 #include <list>
 
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
+#include "faiss/impl/ScalarQuantizer.h"
+#include "faiss/impl/ScalarQuantizerCodec.h"
 
-namespace hnswlib {
+namespace hnswlib_nm {
 
     typedef unsigned int tableint;
     typedef unsigned int linklistsizeint;
+
+    using QuantizerClass = faiss::QuantizerTemplate<faiss::Codec8bit, false, 1>;
+    using DCClassIP = faiss::DCTemplate<QuantizerClass, faiss::SimilarityIP<1>, 1>;
+    using DCClassL2 = faiss::DCTemplate<QuantizerClass, faiss::SimilarityL2<1>, 1>;
 
     template<typename dist_t>
     class HierarchicalNSW_NM : public AlgorithmInterface<dist_t> {
@@ -28,7 +34,7 @@ namespace hnswlib {
                 link_list_locks_(max_elements), element_levels_(max_elements) {
             // linxj
             space = s;
-            if (auto x = dynamic_cast<L2Space*>(s)) {
+            if (auto x = dynamic_cast<hnswlib_nm::L2Space*>(s)) {
                 metric_type_ = 0;
             } else if (auto x = dynamic_cast<InnerProductSpace*>(s)) {
                 metric_type_ = 1;
@@ -37,8 +43,6 @@ namespace hnswlib {
             }
 
             max_elements_ = max_elements;
-            mem_stats_ += max_elements * sizeof(int);
-            mem_stats_ += max_elements * sizeof(std::mutex);
 
             has_deletions_=false;
             data_size_ = s->get_data_size();
@@ -50,6 +54,10 @@ namespace hnswlib {
             ef_construction_ = std::max(ef_construction,M_);
             ef_ = 10;
 
+            is_sq8_ = false;
+            sq_ = nullptr;
+            sqdc_ = nullptr;
+
             level_generator_.seed(random_seed);
 
             size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
@@ -57,14 +65,12 @@ namespace hnswlib {
 //            label_offset_ = size_links_level0_;
 
             data_level0_memory_ = (char *) malloc(max_elements_ * size_data_per_element_);
-            mem_stats_ += max_elements_ * size_data_per_element_;
             if (data_level0_memory_ == nullptr)
                 throw std::runtime_error("Not enough memory");
 
             cur_element_count = 0;
 
-            visited_list_pool_ = new VisitedListPool(1, max_elements);
-            mem_stats_ += (max_elements + 2) * sizeof(short int);
+            visited_list_pool_ = new hnswlib_nm::VisitedListPool(1, max_elements);
 
 
 
@@ -73,13 +79,11 @@ namespace hnswlib {
             maxlevel_ = -1;
 
             linkLists_ = (char **) malloc(sizeof(void *) * max_elements_);
-            mem_stats_ += sizeof(void *) * max_elements_;
             if (linkLists_ == nullptr)
                 throw std::runtime_error("Not enough memory: HierarchicalNSW_NM failed to allocate linklists");
             size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
             mult_ = 1 / log(1.0 * M_);
             revSize_ = 1.0 / mult_;
-            level_stats_.resize(10);
         }
 
         struct CompareByFirst {
@@ -99,6 +103,9 @@ namespace hnswlib {
             free(linkLists_);
             delete visited_list_pool_;
 
+            if (sq_) delete sq_;
+            if (sqdc_) delete sqdc_;
+
             // linxj: delete
             delete space;
         }
@@ -106,12 +113,6 @@ namespace hnswlib {
         // linxj: use for free resource
         SpaceInterface<dist_t> *space;
         size_t metric_type_; // 0:l2, 1:ip
-
-        // cmli: statistics of memory usage
-        long long int mem_stats_ = 0;
-        // cmli: statistics of levels
-        std::vector<int> level_stats_;
-
 
         size_t max_elements_;
         size_t cur_element_count;
@@ -122,6 +123,10 @@ namespace hnswlib {
         size_t maxM_;
         size_t maxM0_;
         size_t ef_construction_;
+
+        bool is_sq8_ = false;
+        faiss::ScalarQuantizer *sq_ = nullptr;
+        faiss::SQDistanceComputer *sqdc_ = nullptr;
 
         double mult_, revSize_;
         int maxlevel_;
@@ -148,32 +153,38 @@ namespace hnswlib {
 
         DISTFUNC<dist_t> fstdistfunc_;
         void *dist_func_param_;
-//    std::unordered_map<labeltype, tableint> label_lookup_;
 
         std::default_random_engine level_generator_;
 
-        /*
-        inline labeltype getExternalLabel(tableint internal_id) const {
-            labeltype return_label;
-            memcpy(&return_label,(data_level0_memory_ + internal_id * size_data_per_element_ + label_offset_), sizeof(labeltype));
-            return return_label;
-        }
-
-        inline void setExternalLabel(tableint internal_id, labeltype label) const {
-            memcpy((data_level0_memory_ + internal_id * size_data_per_element_ + label_offset_), &label, sizeof(labeltype));
-        }
-
-        inline labeltype *getExternalLabeLp(tableint internal_id) const {
-            return (labeltype *) (data_level0_memory_ + internal_id * size_data_per_element_ + label_offset_);
-        }
-
-        inline char *getDataByInternalId(tableint internal_id) const {
-            return (data_level0_memory_ + internal_id * size_data_per_element_ + offsetData_);
-        }
-        */
-
         inline char *getDataByInternalId(void *pdata, tableint offset) const {
             return ((char*)pdata + offset * data_size_);
+        }
+
+        void SetSq8(bool set_sq8) {
+            is_sq8_ = set_sq8;
+            if (is_sq8_) {
+                sq_ = new faiss::ScalarQuantizer(*(size_t*)dist_func_param_, faiss::QuantizerType::QT_8bit); // hard code
+            }
+        }
+
+        void sq_train(size_t nb, const float *xb, uint8_t *p_codes) {
+            if (!is_sq8_) {
+                throw std::runtime_error("is_sq8 should be set true by interface SetSq8(true) before you  invoke sq_train!");
+            }
+            if (!sq_) {
+                sq_ = new faiss::ScalarQuantizer(*(size_t*)dist_func_param_, faiss::QuantizerType::QT_8bit); // hard code
+            }
+            sq_->train(nb, xb);
+            sq_->compute_codes(xb, p_codes, nb);
+            memcpy(p_codes + *(size_t*)dist_func_param_ * nb, sq_->trained.data(), *(size_t*)dist_func_param_ * sizeof(float) * 2);
+            if (metric_type_ == 0) { // L2
+                sqdc_ = new DCClassL2(sq_->d, sq_->trained);
+            } else if (metric_type_ == 1) { // IP
+                sqdc_ = new DCClassIP(sq_->d, sq_->trained);
+            } else {
+                throw std::runtime_error("unsupported metric_type, it must be 0(L2) or 1(IP)!");
+            }
+            sqdc_->code_size = sq_->code_size;
         }
 
         int getRandomLevel(double reverse_size) {
@@ -271,13 +282,23 @@ namespace hnswlib {
             vl_type *visited_array = vl->mass;
             vl_type visited_array_tag = vl->curV;
 
+            if (is_sq8_) {
+                sqdc_->codes = (uint8_t*)pdata;
+                sqdc_->set_query((const float*)data_point);
+            }
+
             std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates;
             std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> candidate_set;
 
             dist_t lowerBound;
 //        if (!has_deletions || !isMarkedDeleted(ep_id)) {
             if (!has_deletions || !bitset->test((faiss::ConcurrentBitset::id_type_t)(ep_id))) {
-                dist_t dist = fstdistfunc_(data_point, getDataByInternalId(pdata, ep_id), dist_func_param_);
+                dist_t dist;
+                if (is_sq8_) {
+                    dist = (*sqdc_)(ep_id);
+                } else {
+                    dist = fstdistfunc_(data_point, getDataByInternalId(pdata, ep_id), dist_func_param_);
+                }
                 lowerBound = dist;
                 top_candidates.emplace(dist, ep_id);
                 candidate_set.emplace(-dist, ep_id);
@@ -322,8 +343,13 @@ namespace hnswlib {
 
                         visited_array[candidate_id] = visited_array_tag;
 
-                        char *currObj1 = (getDataByInternalId(pdata, candidate_id));
-                        dist_t dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
+                        dist_t dist;
+                        if (is_sq8_) {
+                            dist = (*sqdc_)(candidate_id);
+                        } else {
+                            char *currObj1 = (getDataByInternalId(pdata, candidate_id));
+                            dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
+                        }
 
                         if (top_candidates.size() < ef || lowerBound > dist) {
                             candidate_set.emplace(-dist, candidate_id);
@@ -577,22 +603,14 @@ namespace hnswlib {
 
 
             delete visited_list_pool_;
-            mem_stats_ = 0;
             visited_list_pool_ = new VisitedListPool(1, new_max_elements);
-            mem_stats_ += (new_max_elements + 2) * sizeof(short int);
-
-
 
             element_levels_.resize(new_max_elements);
-            mem_stats_ += new_max_elements * sizeof(int);
 
             std::vector<std::mutex>(new_max_elements).swap(link_list_locks_);
-            mem_stats_ += new_max_elements * sizeof(link_list_locks_[0]);
-
 
             // Reallocate base layer
             char * data_level0_memory_new = (char *) malloc(new_max_elements * size_data_per_element_);
-            mem_stats_ += new_max_elements * size_data_per_element_;
             if (data_level0_memory_new == nullptr)
                 throw std::runtime_error("Not enough memory: resizeIndex failed to allocate base layer");
             memcpy(data_level0_memory_new, data_level0_memory_,cur_element_count * size_data_per_element_);
@@ -601,7 +619,6 @@ namespace hnswlib {
 
             // Reallocate all other layers
             char ** linkLists_new = (char **) malloc(sizeof(void *) * new_max_elements);
-            mem_stats_ += sizeof(void *) * new_max_elements;
             if (linkLists_new == nullptr)
                 throw std::runtime_error("Not enough memory: resizeIndex failed to allocate other layers");
             memcpy(linkLists_new, linkLists_,cur_element_count * sizeof(void *));
@@ -651,9 +668,9 @@ namespace hnswlib {
             readBinaryPOD(input, data_size_);
             readBinaryPOD(input, dim);
             if (metric_type_ == 0) {
-                space = new hnswlib::L2Space(dim);
+                space = new L2Space(dim);
             } else if (metric_type_ == 1) {
-                space = new hnswlib::InnerProductSpace(dim);
+                space = new InnerProductSpace(dim);
             } else {
                 // throw exception
             }
@@ -715,7 +732,6 @@ namespace hnswlib {
 
 
             data_level0_memory_ = (char *) malloc(max_elements * size_data_per_element_);
-            mem_stats_ += max_elements * size_data_per_element_;
             if (data_level0_memory_ == nullptr)
                 throw std::runtime_error("Not enough memory: loadIndex failed to allocate level0");
             input.read(data_level0_memory_, cur_element_count * size_data_per_element_);
@@ -734,7 +750,6 @@ namespace hnswlib {
 
 
             linkLists_ = (char **) malloc(sizeof(void *) * max_elements);
-            mem_stats_ += sizeof(void *) * max_elements;
             if (linkLists_ == nullptr)
                 throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
             element_levels_ = std::vector<int>(max_elements);
@@ -751,7 +766,6 @@ namespace hnswlib {
                 } else {
                     element_levels_[i] = linkListSize / size_links_per_element_;
                     linkLists_[i] = (char *) malloc(linkListSize);
-                    mem_stats_ += linkListSize;
                     if (linkLists_[i] == nullptr)
                         throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklist");
                     input.read(linkLists_[i], linkListSize);
@@ -861,7 +875,6 @@ namespace hnswlib {
             input.seekg(pos,input.beg);
 
             data_level0_memory_ = (char *) malloc(max_elements * size_data_per_element_);
-            mem_stats_ += max_elements * size_data_per_element_;
             if (data_level0_memory_ == nullptr)
                 throw std::runtime_error("Not enough memory: loadIndex failed to allocate level0");
             input.read(data_level0_memory_, cur_element_count * size_data_per_element_);
@@ -874,7 +887,6 @@ namespace hnswlib {
             visited_list_pool_ = new VisitedListPool(1, max_elements);
 
             linkLists_ = (char **) malloc(sizeof(void *) * max_elements);
-            mem_stats_ += sizeof(void *) * max_elements;
             if (linkLists_ == nullptr)
                 throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
             element_levels_ = std::vector<int>(max_elements);
@@ -890,7 +902,6 @@ namespace hnswlib {
                 } else {
                     element_levels_[i] = linkListSize / size_links_per_element_;
                     linkLists_[i] = (char *) malloc(linkListSize);
-                    mem_stats_ += linkListSize;
                     if (linkLists_[i] == nullptr)
                         throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklist");
                     input.read(linkLists_[i], linkListSize);
@@ -1038,16 +1049,6 @@ namespace hnswlib {
                 templock.unlock();
             tableint currObj = enterpoint_node_;
             tableint enterpoint_copy = enterpoint_node_;
-            if (curlevel >= level_stats_.size()) {
-                level_stats_.resize(curlevel << 1);
-            }
-            level_stats_[curlevel] ++;
-
-            // Initialisation of the data and label
-
-            if (curlevel) {
-                mem_stats_ += size_links_per_element_ * curlevel + 1;
-            }
 
             if ((signed)currObj != -1) {
 
@@ -1115,7 +1116,14 @@ namespace hnswlib {
             if (cur_element_count == 0) return result;
 
             tableint currObj = enterpoint_node_;
-            dist_t curdist = fstdistfunc_(query_data, getDataByInternalId(pdata, enterpoint_node_), dist_func_param_);
+            dist_t curdist;
+            if (is_sq8_) {
+                sqdc_->set_query((const float*)query_data);
+                sqdc_->codes = (uint8_t*)pdata;
+                curdist = (*sqdc_)(currObj);
+            } else {
+                curdist = fstdistfunc_(query_data, getDataByInternalId(pdata, enterpoint_node_), dist_func_param_);
+            }
 
             for (int level = maxlevel_; level > 0; level--) {
                 bool changed = true;
@@ -1130,7 +1138,12 @@ namespace hnswlib {
                         tableint cand = datal[i];
                         if (cand < 0 || cand > max_elements_)
                             throw std::runtime_error("cand error");
-                        dist_t d = fstdistfunc_(query_data, getDataByInternalId(pdata, cand), dist_func_param_);
+                        dist_t d;
+                        if (is_sq8_) {
+                            d = (*sqdc_)(cand);
+                        } else {
+                            d = fstdistfunc_(query_data, getDataByInternalId(pdata, cand), dist_func_param_);
+                        }
 
                         if (d < curdist) {
                             curdist = d;
@@ -1182,14 +1195,6 @@ namespace hnswlib {
             return result;
         }
 
-        void addPoint(const void *datapoint, labeltype label) {
-            return;
-        }
-
-        std::priority_queue<std::pair<dist_t, labeltype >> searchKnn(const void *query_data, size_t k, faiss::ConcurrentBitsetPtr bitset) const {
-            std::priority_queue<std::pair<dist_t, labeltype >> ret;
-            return ret;
-        }
     };
 
 }

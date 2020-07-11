@@ -28,9 +28,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             link_list_locks_(max_elements), element_levels_(max_elements) {
         // linxj
         space = s;
-        if (auto x = dynamic_cast<L2Space*>(s)) {
+        if (auto x = dynamic_cast<hnswlib_nm::L2Space*>(s)) {
             metric_type_ = 0;
-        } else if (auto x = dynamic_cast<InnerProductSpace*>(s)) {
+        } else if (auto x = dynamic_cast<hnswlib_nm::InnerProductSpace*>(s)) {
             metric_type_ = 1;
         } else {
             metric_type_ = 100;
@@ -62,7 +62,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         cur_element_count = 0;
 
-        visited_list_pool_ = new VisitedListPool(1, max_elements);
+        visited_list_pool_ = new hnswlib_nm::VisitedListPool(1, max_elements);
 
 
 
@@ -117,7 +117,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     int maxlevel_;
 
 
-    VisitedListPool *visited_list_pool_;
+    hnswlib_nm::VisitedListPool *visited_list_pool_;
     std::mutex cur_element_count_guard_;
 
     std::vector<std::mutex> link_list_locks_;
@@ -170,9 +170,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
     searchBaseLayer(tableint ep_id, const void *data_point, int layer) {
-        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
-        vl_type *visited_array = vl->mass;
-        vl_type visited_array_tag = vl->curV;
+        hnswlib_nm::VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        hnswlib_nm::vl_type *visited_array = vl->mass;
+        hnswlib_nm::vl_type visited_array_tag = vl->curV;
 
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates;
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> candidateSet;
@@ -253,9 +253,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     template <bool has_deletions>
     std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
     searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, faiss::ConcurrentBitsetPtr bitset) const {
-        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
-        vl_type *visited_array = vl->mass;
-        vl_type visited_array_tag = vl->curV;
+        hnswlib_nm::VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        hnswlib_nm::vl_type *visited_array = vl->mass;
+        hnswlib_nm::vl_type visited_array_tag = vl->curV;
 
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates;
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> candidate_set;
@@ -556,7 +556,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
 
         delete visited_list_pool_;
-        visited_list_pool_ = new VisitedListPool(1, new_max_elements);
+        visited_list_pool_ = new hnswlib_nm::VisitedListPool(1, new_max_elements);
 
 
 
@@ -624,9 +624,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         readBinaryPOD(input, data_size_);
         readBinaryPOD(input, dim);
         if (metric_type_ == 0) {
-            space = new hnswlib::L2Space(dim);
+            space = new hnswlib_nm::L2Space(dim);
         } else if (metric_type_ == 1) {
-            space = new hnswlib::InnerProductSpace(dim);
+            space = new hnswlib_nm::InnerProductSpace(dim);
         } else {
             // throw exception
         }
@@ -702,7 +702,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         std::vector<std::mutex>(max_elements).swap(link_list_locks_);
 
 
-        visited_list_pool_ = new VisitedListPool(1, max_elements);
+        visited_list_pool_ = new hnswlib_nm::VisitedListPool(1, max_elements);
 
 
         linkLists_ = (char **) malloc(sizeof(void *) * max_elements);
@@ -840,7 +840,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
         std::vector<std::mutex>(max_elements).swap(link_list_locks_);
 
-        visited_list_pool_ = new VisitedListPool(1, max_elements);
+        visited_list_pool_ = new hnswlib_nm::VisitedListPool(1, max_elements);
 
         linkLists_ = (char **) malloc(sizeof(void *) * max_elements);
         if (linkLists_ == nullptr)

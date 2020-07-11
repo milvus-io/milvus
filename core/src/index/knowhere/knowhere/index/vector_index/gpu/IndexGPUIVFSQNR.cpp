@@ -18,16 +18,16 @@
 #include <string>
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQNR.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIVFSQNR.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace milvus {
 namespace knowhere {
 
 void
-GPUIVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+GPUIVFSQNR::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
     gpu_id_ = config[knowhere::meta::DEVICEID];
 
@@ -39,8 +39,9 @@ GPUIVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
-    auto build_index = new faiss::IndexIVFScalarQuantizer(
-        coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), faiss::QuantizerType::QT_8bit, metric_type);
+    auto build_index =
+        new faiss::IndexIVFScalarQuantizer(coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(),
+                                           faiss::QuantizerType::QT_8bit, metric_type, false);
 
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (gpu_res != nullptr) {
@@ -56,7 +57,7 @@ GPUIVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 VecIndexPtr
-GPUIVFSQ::CopyGpuToCpu(const Config& config) {
+GPUIVFSQNR::CopyGpuToCpu(const Config& config) {
     std::lock_guard<std::mutex> lk(mutex_);
 
     faiss::Index* device_index = index_.get();
@@ -64,7 +65,7 @@ GPUIVFSQ::CopyGpuToCpu(const Config& config) {
 
     std::shared_ptr<faiss::Index> new_index;
     new_index.reset(host_index);
-    return std::make_shared<IVFSQ>(new_index);
+    return std::make_shared<IVFSQNR>(new_index);
 }
 
 }  // namespace knowhere

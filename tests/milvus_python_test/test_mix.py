@@ -13,7 +13,7 @@ from utils import *
 dim = 128
 index_file_size = 10
 collection_id = "test_mix"
-add_interval_time = 2
+add_interval_time = 5
 vectors = gen_vectors(10000, dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()

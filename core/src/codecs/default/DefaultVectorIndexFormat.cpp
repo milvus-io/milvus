@@ -18,6 +18,7 @@
 #include <boost/filesystem.hpp>
 #include <memory>
 
+#include "codecs/default/DefaultCodec.h"
 #include "codecs/default/DefaultVectorIndexFormat.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/index/vector_index/VecIndex.h"
@@ -109,7 +110,7 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
 
 void
 DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                               segment::VectorIndexPtr& vector_index) {
+                               ExternalData externalData, segment::VectorIndexPtr& vector_index) {
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
@@ -117,22 +118,30 @@ DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::s
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    knowhere::VecIndexPtr index = read_internal(fs_ptr, location);
-    vector_index->SetVectorIndex(index);
-}
+    knowhere::VecIndexPtr index = nullptr;
+    switch (externalData) {
+        case ExternalData_None: {
+            index = read_internal(fs_ptr, location);
+            break;
+        }
+        case ExternalData_RawData: {
+            auto& default_codec = codec::DefaultCodec::instance();
+            knowhere::BinaryPtr raw_data = nullptr;
+            default_codec.GetVectorsFormat()->read_vectors(fs_ptr, raw_data);
 
-void
-DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                               const std::string& extern_key, const knowhere::BinaryPtr& extern_data,
-                               segment::VectorIndexPtr& vector_index) {
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-    if (!boost::filesystem::is_directory(dir_path)) {
-        std::string err_msg = "Directory: " + dir_path + "does not exist";
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
+            index = read_internal(fs_ptr, location, RAW_DATA, raw_data);
+            break;
+        }
+        case ExternalData_SQ8: {
+            auto& default_codec = codec::DefaultCodec::instance();
+            knowhere::BinaryPtr sq8_data = nullptr;
+            default_codec.GetVectorCompressFormat()->read(fs_ptr, location, sq8_data);
+
+            index = read_internal(fs_ptr, location, SQ8_DATA, sq8_data);
+            break;
+        }
     }
 
-    knowhere::VecIndexPtr index = read_internal(fs_ptr, location, extern_key, extern_data);
     vector_index->SetVectorIndex(index);
 }
 
@@ -145,6 +154,12 @@ DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::
 
     auto binaryset = index->Serialize(knowhere::Config());
     int32_t index_type = knowhere::StrToOldIndexType(index->index_type());
+
+    auto sq8_data = binaryset.Erase(SQ8_DATA);
+    if (sq8_data != nullptr) {
+        auto& default_codec = codec::DefaultCodec::instance();
+        default_codec.GetVectorCompressFormat()->write(fs_ptr, location, sq8_data);
+    }
 
     recorder.RecordSection("Start");
     if (!fs_ptr->writer_ptr_->open(location)) {

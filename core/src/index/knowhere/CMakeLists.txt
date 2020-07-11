@@ -60,6 +60,7 @@ set(vector_index_srcs
         knowhere/index/vector_index/IndexIVF.cpp
         knowhere/index/vector_index/IndexIVFPQ.cpp
         knowhere/index/vector_index/IndexIVFSQ.cpp
+        knowhere/index/vector_index/IndexIVFSQNR.cpp
         knowhere/index/vector_index/IndexType.cpp
         knowhere/index/vector_index/VecIndexFactory.cpp
         knowhere/index/vector_index/IndexAnnoy.cpp
@@ -70,6 +71,7 @@ set(vector_offset_index_srcs
         knowhere/index/vector_offset_index/IndexIVF_NM.cpp
         knowhere/index/vector_offset_index/IndexHNSW_NM.cpp
         knowhere/index/vector_offset_index/IndexNSG_NM.cpp
+        knowhere/index/vector_offset_index/IndexHNSW_SQ8NR.cpp
         )
 
 if (MILVUS_SUPPORT_SPTAG)
@@ -127,6 +129,7 @@ if (MILVUS_GPU_VERSION)
             knowhere/index/vector_index/gpu/IndexGPUIVF.cpp
             knowhere/index/vector_index/gpu/IndexGPUIVFPQ.cpp
             knowhere/index/vector_index/gpu/IndexGPUIVFSQ.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIVFSQNR.cpp
             knowhere/index/vector_index/gpu/IndexIVFSQHybrid.cpp
             knowhere/index/vector_index/helpers/Cloner.cpp
             knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp

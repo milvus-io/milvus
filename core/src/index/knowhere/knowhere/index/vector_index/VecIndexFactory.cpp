@@ -20,7 +20,9 @@
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQNR.h"
 #include "knowhere/index/vector_offset_index/IndexHNSW_NM.h"
+#include "knowhere/index/vector_offset_index/IndexHNSW_SQ8NR.h"
 #include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 #include "knowhere/index/vector_offset_index/IndexNSG_NM.h"
 #ifdef MILVUS_SUPPORT_SPTAG
@@ -33,6 +35,7 @@
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFPQ.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIVFSQNR.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
@@ -87,6 +90,10 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
         return std::make_shared<knowhere::IndexHNSW_NM>();
     } else if (type == IndexEnum::INDEX_ANNOY) {
         return std::make_shared<knowhere::IndexAnnoy>();
+    } else if (type == IndexEnum::INDEX_FAISS_IVFSQ8NR) {
+        return std::make_shared<knowhere::IVFSQNR>();
+    } else if (type == IndexEnum::INDEX_HNSW_SQ8NR) {
+        return std::make_shared<knowhere::IndexHNSW_SQ8NR>();
     } else {
         return nullptr;
     }
