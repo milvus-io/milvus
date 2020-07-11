@@ -325,7 +325,8 @@ MergeOperation::CommitNewSegment(SegmentPtr& created) {
     STATUS_CHECK(op->Push());
     STATUS_CHECK(op->GetResource(context_.new_segment));
     created = context_.new_segment;
-    AddStepWithLsn(*created, context_.lsn);
+    auto seg_ctx_p = ResourceContextBuilder<Segment>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, seg_ctx_p);
     return Status::OK();
 }
 
@@ -341,7 +342,8 @@ MergeOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
     STATUS_CHECK(new_sf_op->Push());
     STATUS_CHECK(new_sf_op->GetResource(created));
     context_.new_segment_files.push_back(created);
-    AddStepWithLsn(*created, context_.lsn);
+    auto sf_ctx_p = ResourceContextBuilder<SegmentFile>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, sf_ctx_p);
     return Status::OK();
 }
 
@@ -353,7 +355,8 @@ MergeOperation::DoExecute(Store& store) {
     SegmentCommitOperation sc_op(context_, GetAdjustedSS());
     STATUS_CHECK(sc_op(store));
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
-    AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
+    auto sc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_segment_commit, context_.lsn, sc_ctx_p);
     /* std::cout << GetRepr() << " POST_SC_MAP=("; */
     /* for (auto id : context_.new_segment_commit->GetMappings()) { */
     /*     std::cout << id << ","; */
@@ -364,7 +367,8 @@ MergeOperation::DoExecute(Store& store) {
     STATUS_CHECK(pc_op(store));
     OperationContext cc_context;
     STATUS_CHECK(pc_op.GetResource(cc_context.new_partition_commit));
-    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn);
+    auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*cc_context.new_partition_commit, context_.lsn, pc_ctx_p);
     context_.new_partition_commit = cc_context.new_partition_commit;
 
     /* std::cout << GetRepr() << " POST_PC_MAP=("; */
@@ -376,7 +380,8 @@ MergeOperation::DoExecute(Store& store) {
     CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
     STATUS_CHECK(cc_op(store));
     STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
-    AddStepWithLsn(*context_.new_collection_commit, context_.lsn);
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn, cc_ctx_p);
 
     return Status::OK();
 }
