@@ -121,20 +121,17 @@ SSSegmentWriter::Serialize() {
 
     /* write UID's raw data */
     auto uid_raw_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
-    std::string uid_raw_path =
-        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_raw_visitor->GetFile());
+    std::string uid_raw_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_raw_visitor->GetFile());
     STATUS_CHECK(WriteUids(uid_raw_path, segment_ptr_->vectors_ptr_->GetUids()));
 
     /* write UID's deleted docs */
     auto uid_del_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
-    std::string uid_del_path =
-        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_del_visitor->GetFile());
+    std::string uid_del_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_del_visitor->GetFile());
     STATUS_CHECK(WriteDeletedDocs(uid_del_path, segment_ptr_->deleted_docs_ptr_));
 
     /* write UID's bloom filter */
     auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
-    std::string uid_blf_path =
-        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_blf_visitor->GetFile());
+    std::string uid_blf_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_blf_visitor->GetFile());
     STATUS_CHECK(WriteBloomFilter(uid_blf_path, segment_ptr_->id_bloom_filter_ptr_));
 
     /* write other data */
@@ -158,7 +155,6 @@ SSSegmentWriter::Serialize() {
             }
 
             /* SS TODO: write attr data ? */
-
         }
     }
 

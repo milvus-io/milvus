@@ -11,20 +11,7 @@
 
 #pragma once
 
-#include <faiss/Index.h>
-
-#include <cstdint>
-#include <map>
-#include <set>
-#include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
-#include "db/engine/ExecutionEngine.h"
-#include "db/meta/MetaTypes.h"
-#include "segment/Types.h"
-#include "utils/Json.h"
+#include "db/Types.h"
 
 namespace milvus {
 namespace engine {

@@ -93,7 +93,6 @@ SSSegmentReader::Load() {
                 }
 
                 /* SS TODO: load attr data ? */
-
             }
         }
     } catch (std::exception& e) {

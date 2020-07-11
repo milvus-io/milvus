@@ -104,7 +104,7 @@ class SegmentFieldVisitor {
     const ElementT
     GetElementVisitor(const FieldElementType elem_type) const {
         for (auto& kv : elements_map_) {
-            auto &ev = kv.second;
+            auto& ev = kv.second;
             if (ev->GetElement()->GetFtype() == elem_type) {
                 return ev;
             }
