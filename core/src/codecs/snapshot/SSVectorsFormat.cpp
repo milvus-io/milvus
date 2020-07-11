@@ -32,8 +32,8 @@ namespace milvus {
 namespace codec {
 
 void
-SSVectorsFormat::read_vectors_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                                            off_t offset, size_t num, std::vector<uint8_t>& raw_vectors) {
+SSVectorsFormat::read_vectors_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, off_t offset,
+                                       size_t num, std::vector<uint8_t>& raw_vectors) {
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
@@ -56,7 +56,7 @@ SSVectorsFormat::read_vectors_internal(const storage::FSHandlerPtr& fs_ptr, cons
 
 void
 SSVectorsFormat::read_vectors_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                                            knowhere::BinaryPtr& raw_vectors) {
+                                       knowhere::BinaryPtr& raw_vectors) {
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;

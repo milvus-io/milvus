@@ -33,7 +33,7 @@ namespace codec {
 
 knowhere::VecIndexPtr
 SSVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path,
-                                        const std::string& extern_key, const knowhere::BinaryPtr& extern_data) {
+                                   const std::string& extern_key, const knowhere::BinaryPtr& extern_data) {
     milvus::TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
@@ -109,8 +109,8 @@ SSVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, const st
 }
 
 void
-SSVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                          ExternalData externalData, segment::VectorIndexPtr& vector_index) {
+SSVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, ExternalData externalData,
+                          segment::VectorIndexPtr& vector_index) {
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
@@ -147,7 +147,7 @@ SSVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string
 
 void
 SSVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                                const segment::VectorIndexPtr& vector_index) {
+                           const segment::VectorIndexPtr& vector_index) {
     milvus::TimeRecorder recorder("write_index");
 
     knowhere::VecIndexPtr index = vector_index->GetVectorIndex();

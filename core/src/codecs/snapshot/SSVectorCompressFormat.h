@@ -34,8 +34,7 @@ class SSVectorCompressFormat {
     read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr& compress);
 
     void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-          const knowhere::BinaryPtr& compress);
+    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location, const knowhere::BinaryPtr& compress);
 
     // No copy and move
     SSVectorCompressFormat(const SSVectorCompressFormat&) = delete;

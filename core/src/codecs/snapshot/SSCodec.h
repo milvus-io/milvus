@@ -21,9 +21,9 @@
 #include "codecs/snapshot/SSAttrsIndexFormat.h"
 #include "codecs/snapshot/SSDeletedDocsFormat.h"
 #include "codecs/snapshot/SSIdBloomFilterFormat.h"
-#include "codecs/snapshot/SSVectorsFormat.h"
 #include "codecs/snapshot/SSVectorCompressFormat.h"
 #include "codecs/snapshot/SSVectorIndexFormat.h"
+#include "codecs/snapshot/SSVectorsFormat.h"
 
 namespace milvus {
 namespace codec {

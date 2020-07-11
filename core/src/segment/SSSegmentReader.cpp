@@ -31,8 +31,7 @@
 namespace milvus {
 namespace segment {
 
-SSSegmentReader::SSSegmentReader(const engine::SegmentVisitorPtr& segment_visitor)
-    : segment_visitor_(segment_visitor) {
+SSSegmentReader::SSSegmentReader(const engine::SegmentVisitorPtr& segment_visitor) : segment_visitor_(segment_visitor) {
     auto& segment_ptr = segment_visitor_->GetSegment();
     std::string directory = engine::snapshot::GetResPath<engine::snapshot::Segment>(segment_ptr);
 
@@ -53,20 +52,20 @@ SSSegmentReader::LoadCache(bool& in_cache) {
 Status
 SSSegmentReader::Load() {
     try {
-//        auto& ss_codec = codec::SSCodec::instance();
+        //        auto& ss_codec = codec::SSCodec::instance();
 
         auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
         for (auto& f_kv : field_visitors_map) {
             auto& field_visitor = f_kv.second;
             for (auto& file_kv : field_visitor->GetElementVistors()) {
-                auto &field_element_visitor = file_kv.second;
+                auto& field_element_visitor = file_kv.second;
 
-                auto &segment_file = field_element_visitor->GetFile();
+                auto& segment_file = field_element_visitor->GetFile();
                 if (segment_file == nullptr) {
                     continue;
                 }
                 auto file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_file);
-                auto &field_element = field_element_visitor->GetElement();
+                auto& field_element = field_element_visitor->GetElement();
 
                 switch (field_element->GetFtype()) {
                     case engine::snapshot::FieldElementType::FET_UIDS:
@@ -78,12 +77,12 @@ SSSegmentReader::Load() {
                     case engine::snapshot::FieldElementType::FET_VECTOR_RAW:
                         LoadVectors(file_path, 0, INT64_MAX, segment_ptr_->vectors_ptr_->GetMutableData());
                         break;
-//                    case engine::snapshot::FieldElementType::FET_ATTR_RAW:
-//                        ss_codec.GetAttrsFormat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
-//                        break;
-//                    case engine::snapshot::FieldElementType::FET_ATTR_INDEX:
-//                        ss_codec.GetAttrsIndexFormat()->read(fs_ptr_, segment_ptr_->attrs_index_ptr_);
-//                        break;
+                        //                    case engine::snapshot::FieldElementType::FET_ATTR_RAW:
+                        //                        ss_codec.GetAttrsFormat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
+                        //                        break;
+                        //                    case engine::snapshot::FieldElementType::FET_ATTR_INDEX:
+                        //                        ss_codec.GetAttrsIndexFormat()->read(fs_ptr_,
+                        //                        segment_ptr_->attrs_index_ptr_); break;
                     default:
                         break;
                 }
@@ -111,7 +110,7 @@ SSSegmentReader::LoadVectors(const std::string& file_path, off_t offset, size_t 
 
 Status
 SSSegmentReader::LoadAttrs(const std::string& field_name, off_t offset, size_t num_bytes,
-                         std::vector<uint8_t>& raw_attrs) {
+                           std::vector<uint8_t>& raw_attrs) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
         ss_codec.GetAttrsFormat()->read_attrs(fs_ptr_, field_name, offset, num_bytes, raw_attrs);

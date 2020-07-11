@@ -34,7 +34,7 @@ namespace codec {
 
 void
 SSAttrsFormat::read_attrs_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, off_t offset,
-                                        size_t num, std::vector<uint8_t>& raw_attrs, size_t& nbytes) {
+                                   size_t num, std::vector<uint8_t>& raw_attrs, size_t& nbytes) {
     auto open_res = fs_ptr->reader_ptr_->open(file_path.c_str());
     fiu_do_on("read_attrs_internal_open_file_fail", open_res = false);
     if (!open_res) {
@@ -58,7 +58,7 @@ SSAttrsFormat::read_attrs_internal(const storage::FSHandlerPtr& fs_ptr, const st
 
 void
 SSAttrsFormat::read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                                       std::vector<int64_t>& uids) {
+                                  std::vector<int64_t>& uids) {
     auto open_res = fs_ptr->reader_ptr_->open(file_path.c_str());
     fiu_do_on("read_uids_internal_open_file_fail", open_res = false);
     if (!open_res) {
@@ -190,7 +190,7 @@ SSAttrsFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const milvus::
 
 void
 SSAttrsFormat::read_attrs(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& field_name, off_t offset,
-                               size_t num_bytes, std::vector<uint8_t>& raw_attrs) {
+                          size_t num_bytes, std::vector<uint8_t>& raw_attrs) {
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";

@@ -72,7 +72,7 @@ SSAttrsIndexFormat::create_structured_index(const milvus::engine::meta::hybrid::
 
 void
 SSAttrsIndexFormat::read_internal(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& path,
-                                       knowhere::IndexPtr& index, engine::meta::hybrid::DataType& attr_type) {
+                                  knowhere::IndexPtr& index, engine::meta::hybrid::DataType& attr_type) {
     milvus::TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
@@ -137,8 +137,7 @@ SSAttrsIndexFormat::read_internal(const milvus::storage::FSHandlerPtr& fs_ptr, c
 }
 
 void
-SSAttrsIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr,
-                              milvus::segment::AttrsIndexPtr& attrs_index) {
+SSAttrsIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::segment::AttrsIndexPtr& attrs_index) {
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
@@ -167,7 +166,7 @@ SSAttrsIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr,
 
 void
 SSAttrsIndexFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr,
-                               const milvus::segment::AttrsIndexPtr& attrs_index) {
+                          const milvus::segment::AttrsIndexPtr& attrs_index) {
     milvus::TimeRecorder recorder("write_index");
     recorder.RecordSection("Start");
 

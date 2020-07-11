@@ -59,8 +59,7 @@ SSIdBloomFilterFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::str
 }
 
 void
-SSIdBloomFilterFormat::create(const storage::FSHandlerPtr& fs_ptr,
-                                   segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+SSIdBloomFilterFormat::create(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     scaling_bloom_t* bloom_filter =

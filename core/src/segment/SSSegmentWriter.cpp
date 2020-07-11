@@ -24,8 +24,8 @@
 #include "SSSegmentReader.h"
 #include "Vectors.h"
 #include "codecs/snapshot/SSCodec.h"
-#include "db/snapshot/ResourceHelper.h"
 #include "db/Utils.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
@@ -35,8 +35,7 @@
 namespace milvus {
 namespace segment {
 
-SSSegmentWriter::SSSegmentWriter(const engine::SegmentVisitorPtr& segment_visitor)
-    : segment_visitor_(segment_visitor) {
+SSSegmentWriter::SSSegmentWriter(const engine::SegmentVisitorPtr& segment_visitor) : segment_visitor_(segment_visitor) {
     auto& segment_ptr = segment_visitor_->GetSegment();
     std::string directory = engine::snapshot::GetResPath<engine::snapshot::Segment>(segment_ptr);
 
@@ -128,7 +127,7 @@ SSSegmentWriter::Serialize() {
                 continue;
             }
             auto file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_file);
-            auto &field_element = field_element_visitor->GetElement();
+            auto& field_element = field_element_visitor->GetElement();
 
             switch (field_element->GetFtype()) {
                 case engine::snapshot::FieldElementType::FET_UIDS:
@@ -339,62 +338,63 @@ SSSegmentWriter::GetSegment(SegmentPtr& segment_ptr) {
 
 Status
 SSSegmentWriter::Merge(const std::string& dir_to_merge, const std::string& name) {
-//    if (dir_to_merge == fs_ptr_->operation_ptr_->GetDirectory()) {
-//        return Status(DB_ERROR, "Cannot Merge Self");
-//    }
-//
-//    LOG_ENGINE_DEBUG_ << "Merging from " << dir_to_merge << " to " << fs_ptr_->operation_ptr_->GetDirectory();
-//
-//    TimeRecorder recorder("SSSegmentWriter::Merge");
-//
-//    SSSegmentReader segment_reader_to_merge(dir_to_merge);
-//    bool in_cache;
-//    auto status = segment_reader_to_merge.LoadCache(in_cache);
-//    if (!in_cache) {
-//        status = segment_reader_to_merge.Load();
-//        if (!status.ok()) {
-//            std::string msg = "Failed to load segment from " + dir_to_merge;
-//            LOG_ENGINE_ERROR_ << msg;
-//            return Status(DB_ERROR, msg);
-//        }
-//    }
-//    SegmentPtr segment_to_merge;
-//    segment_reader_to_merge.GetSegment(segment_to_merge);
-//    // auto& uids = segment_to_merge->vectors_ptr_->GetUids();
-//
-//    recorder.RecordSection("Loading segment");
-//
-//    if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
-//        auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
-//
-//        // Erase from raw data
-//        segment_to_merge->vectors_ptr_->Erase(offsets_to_delete);
-//    }
-//
-//    recorder.RecordSection("erase");
-//
-//    AddVectors(name, segment_to_merge->vectors_ptr_->GetData(), segment_to_merge->vectors_ptr_->GetUids());
-//
-//    auto rows = segment_to_merge->vectors_ptr_->GetCount();
-//    recorder.RecordSection("Adding " + std::to_string(rows) + " vectors and uids");
-//
-//    std::unordered_map<std::string, uint64_t> attr_nbytes;
-//    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
-//    auto attr_it = segment_to_merge->attrs_ptr_->attrs.begin();
-//    for (; attr_it != segment_to_merge->attrs_ptr_->attrs.end(); attr_it++) {
-//        attr_nbytes.insert(std::make_pair(attr_it->first, attr_it->second->GetNbytes()));
-//        attr_data.insert(std::make_pair(attr_it->first, attr_it->second->GetData()));
-//
-//        if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
-//            auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
-//
-//            // Erase from field data
-//            attr_it->second->Erase(offsets_to_delete);
-//        }
-//    }
-//    AddAttrs(name, attr_nbytes, attr_data, segment_to_merge->vectors_ptr_->GetUids());
-//
-//    LOG_ENGINE_DEBUG_ << "Merging completed from " << dir_to_merge << " to " << fs_ptr_->operation_ptr_->GetDirectory();
+    //    if (dir_to_merge == fs_ptr_->operation_ptr_->GetDirectory()) {
+    //        return Status(DB_ERROR, "Cannot Merge Self");
+    //    }
+    //
+    //    LOG_ENGINE_DEBUG_ << "Merging from " << dir_to_merge << " to " << fs_ptr_->operation_ptr_->GetDirectory();
+    //
+    //    TimeRecorder recorder("SSSegmentWriter::Merge");
+    //
+    //    SSSegmentReader segment_reader_to_merge(dir_to_merge);
+    //    bool in_cache;
+    //    auto status = segment_reader_to_merge.LoadCache(in_cache);
+    //    if (!in_cache) {
+    //        status = segment_reader_to_merge.Load();
+    //        if (!status.ok()) {
+    //            std::string msg = "Failed to load segment from " + dir_to_merge;
+    //            LOG_ENGINE_ERROR_ << msg;
+    //            return Status(DB_ERROR, msg);
+    //        }
+    //    }
+    //    SegmentPtr segment_to_merge;
+    //    segment_reader_to_merge.GetSegment(segment_to_merge);
+    //    // auto& uids = segment_to_merge->vectors_ptr_->GetUids();
+    //
+    //    recorder.RecordSection("Loading segment");
+    //
+    //    if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
+    //        auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
+    //
+    //        // Erase from raw data
+    //        segment_to_merge->vectors_ptr_->Erase(offsets_to_delete);
+    //    }
+    //
+    //    recorder.RecordSection("erase");
+    //
+    //    AddVectors(name, segment_to_merge->vectors_ptr_->GetData(), segment_to_merge->vectors_ptr_->GetUids());
+    //
+    //    auto rows = segment_to_merge->vectors_ptr_->GetCount();
+    //    recorder.RecordSection("Adding " + std::to_string(rows) + " vectors and uids");
+    //
+    //    std::unordered_map<std::string, uint64_t> attr_nbytes;
+    //    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
+    //    auto attr_it = segment_to_merge->attrs_ptr_->attrs.begin();
+    //    for (; attr_it != segment_to_merge->attrs_ptr_->attrs.end(); attr_it++) {
+    //        attr_nbytes.insert(std::make_pair(attr_it->first, attr_it->second->GetNbytes()));
+    //        attr_data.insert(std::make_pair(attr_it->first, attr_it->second->GetData()));
+    //
+    //        if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
+    //            auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
+    //
+    //            // Erase from field data
+    //            attr_it->second->Erase(offsets_to_delete);
+    //        }
+    //    }
+    //    AddAttrs(name, attr_nbytes, attr_data, segment_to_merge->vectors_ptr_->GetUids());
+    //
+    //  LOG_ENGINE_DEBUG_ << "Merging completed from " << dir_to_merge << " to " <<
+    //  fs_ptr_->operation_ptr_->GetDirectory();
 
     return Status::OK();
 }

@@ -29,7 +29,7 @@ namespace codec {
 
 void
 SSVectorCompressFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                                  knowhere::BinaryPtr& compress) {
+                             knowhere::BinaryPtr& compress) {
     const std::string compress_file_path = location + sq8_vector_extension_;
 
     milvus::TimeRecorder recorder("read_index");
@@ -60,7 +60,7 @@ SSVectorCompressFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::str
 
 void
 SSVectorCompressFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                                   const knowhere::BinaryPtr& compress) {
+                              const knowhere::BinaryPtr& compress) {
     const std::string compress_file_path = location + sq8_vector_extension_;
 
     milvus::TimeRecorder recorder("write_index");
