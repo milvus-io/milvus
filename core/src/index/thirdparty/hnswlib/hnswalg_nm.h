@@ -157,7 +157,6 @@ namespace hnswlib_nm {
             return ((char*)pdata + offset * data_size_);
         }
 
-
         void SetSq8(const float *trained) {
             if (!trained)
                 throw std::runtime_error("trained sq8 data cannot be null in SetSq8!");

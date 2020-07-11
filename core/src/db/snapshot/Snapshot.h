@@ -117,6 +117,9 @@ class Snapshot : public ReferenceProxy {
         return it->second;
     }
 
+    SegmentFilePtr
+    GetSegmentFile(ID_TYPE segment_id, ID_TYPE field_element_id) const;
+
     ID_TYPE
     GetLatestSchemaCommitId() const {
         return latest_schema_commit_id_;
@@ -346,47 +349,6 @@ class Snapshot : public ReferenceProxy {
 
 using GCHandler = std::function<void(Snapshot::Ptr)>;
 using ScopedSnapshotT = ScopedResource<Snapshot>;
-
-template <typename T>
-struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
-    using ResourceT = T;
-    using ThisT = IterateHandler<ResourceT>;
-    using Ptr = std::shared_ptr<ThisT>;
-
-    explicit IterateHandler(ScopedSnapshotT ss) : ss_(ss) {
-    }
-
-    virtual Status
-    PreIterate() {
-        return Status::OK();
-    }
-    virtual Status
-    Handle(const typename ResourceT::Ptr& resource) = 0;
-    virtual Status
-    PostIterate() {
-        return Status::OK();
-    }
-
-    void
-    SetStatus(Status status) {
-        std::unique_lock<std::mutex> lock(mtx_);
-        status_ = status;
-    }
-    Status
-    GetStatus() const {
-        std::unique_lock<std::mutex> lock(mtx_);
-        return status_;
-    }
-
-    virtual void
-    Iterate() {
-        ss_->IterateResources<ThisT>(this->shared_from_this());
-    }
-
-    ScopedSnapshotT ss_;
-    Status status_;
-    mutable std::mutex mtx_;
-};
 
 }  // namespace snapshot
 }  // namespace engine

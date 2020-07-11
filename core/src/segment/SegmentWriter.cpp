@@ -390,5 +390,10 @@ SegmentWriter::VectorCount() {
     return segment_ptr_->vectors_ptr_->GetCount();
 }
 
+void
+SegmentWriter::SetSegmentName(const std::string& name) {
+    segment_ptr_->vectors_ptr_->SetName(name);
+}
+
 }  // namespace segment
 }  // namespace milvus

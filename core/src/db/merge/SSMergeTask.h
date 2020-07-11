@@ -11,23 +11,29 @@
 
 #pragma once
 
-#include "MemManager.h"
-#include "SSMemManager.h"
-#include "db/meta/Meta.h"
+#include <string>
 
-#include <memory>
+#include "db/merge/MergeManager.h"
+#include "db/meta/MetaTypes.h"
+#include "db/snapshot/ResourceTypes.h"
+#include "db/snapshot/Snapshot.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-class MemManagerFactory {
+class SSMergeTask {
  public:
-    static MemManagerPtr
-    Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options);
+    SSMergeTask(const DBOptions& options, const snapshot::ScopedSnapshotT& ss, const snapshot::IDS_TYPE& segments);
 
-    static SSMemManagerPtr
-    SSBuild(const DBOptions& options);
-};
+    Status
+    Execute();
+
+ private:
+    DBOptions options_;
+    snapshot::ScopedSnapshotT snapshot_;
+    snapshot::IDS_TYPE segments_;
+};  // SSMergeTask
 
 }  // namespace engine
 }  // namespace milvus

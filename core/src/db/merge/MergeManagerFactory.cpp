@@ -11,6 +11,7 @@
 
 #include "db/merge/MergeManagerFactory.h"
 #include "db/merge/MergeManagerImpl.h"
+#include "db/merge/SSMergeManagerImpl.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -20,6 +21,11 @@ namespace engine {
 MergeManagerPtr
 MergeManagerFactory::Build(const meta::MetaPtr& meta_ptr, const DBOptions& options) {
     return std::make_shared<MergeManagerImpl>(meta_ptr, options, MergeStrategyType::LAYERED);
+}
+
+MergeManagerPtr
+MergeManagerFactory::SSBuild(const DBOptions& options) {
+    return std::make_shared<SSMergeManagerImpl>(options, MergeStrategyType::SIMPLE);
 }
 
 }  // namespace engine

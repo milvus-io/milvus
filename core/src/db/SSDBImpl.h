@@ -25,7 +25,8 @@
 #include "db/Options.h"
 #include "db/SimpleWaitNotify.h"
 #include "db/SnapshotHandlers.h"
-#include "db/insert/MemManager.h"
+#include "db/insert/SSMemManager.h"
+#include "db/merge/MergeManager.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
@@ -83,6 +84,16 @@ class SSDBImpl {
     DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& field_element_name);
 
     Status
+    Flush(const std::string& collection_name);
+
+    Status
+    Flush();
+
+    Status
+    Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
+            double threshold = 0.0);
+
+    Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
                   const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vector_data,
                   /*std::vector<meta::hybrid::DataType>& attr_type,*/ std::vector<engine::AttrsData>& attr_data);
@@ -93,7 +104,7 @@ class SSDBImpl {
                    std::unordered_map<std::string, meta::hybrid::DataType>& attr_types);
 
     Status
-    DeleteEntities(const std::string& collection_id, engine::IDNumbers entity_ids);
+    DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids);
 
     Status
     HybridQuery(const server::ContextPtr& context, const std::string& collection_name,
@@ -103,19 +114,8 @@ class SSDBImpl {
                 engine::QueryResult& result);
 
  private:
-    Status
-    GetPartitionsByTags(const std::string& collection_name, const std::vector<std::string>& partition_patterns,
-                        std::set<std::string>& partition_names);
-
-    Status
-    HybridQueryAsync(const server::ContextPtr& context, const std::string& collection_name,
-                     meta::FilesHolder& files_holder, query::GeneralQueryPtr general_query, query::QueryPtr query_ptr,
-                     std::vector<std::string>& field_names,
-                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                     engine::QueryResult& result);
-
     void
-    InternalFlush(const std::string& collection_id = "");
+    InternalFlush(const std::string& collection_name = "");
 
     void
     BackgroundFlushThread();
@@ -142,10 +142,10 @@ class SSDBImpl {
     BackgroundWalThread();
 
     void
-    StartMergeTask(const std::set<std::string>& merge_collection_ids, bool force_merge_all = false);
+    StartMergeTask(const std::set<std::string>& merge_collection_names, bool force_merge_all = false);
 
     void
-    BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all);
+    BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all);
 
     void
     WaitMergeFileFinish();
@@ -163,7 +163,8 @@ class SSDBImpl {
     DBOptions options_;
     std::atomic<bool> initialized_;
 
-    MemManagerPtr mem_mgr_;
+    SSMemManagerPtr mem_mgr_;
+    MergeManagerPtr merge_mgr_ptr_;
 
     std::shared_ptr<wal::WalManager> wal_mgr_;
     std::thread bg_wal_thread_;
@@ -187,6 +188,10 @@ class SSDBImpl {
     ThreadPool index_thread_pool_;
     std::mutex index_result_mutex_;
     std::list<std::future<void>> index_thread_results_;
+
+    std::mutex build_index_mutex_;
+
+    std::mutex flush_merge_compact_mutex_;
 
     int64_t live_search_num_ = 0;
     std::mutex suspend_build_mutex_;

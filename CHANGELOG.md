@@ -19,6 +19,10 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2649 Search parameter of annoy has conflict with document
 -   \#2690 Remove body parser in show-partitions endpoints
 -   \#2692 Milvus hangs during multi-thread concurrent search
+-   \#2739 Fix mishards start failed
+-   \#2752 Milvus formats vectors data to double-precision and return to http client
+-   \#2767 fix a bug of getting wrong nprobe limitation in knowhere on GPU version
+-   \#2776 Fix too many data copies during creating IVF index
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
@@ -27,6 +31,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2585 Support IVF_PQ on GPU with using metric_type IP
 -   \#2689 Construct Knowhere Index Without Data
 -   \#2798 hnsw-sq8 support
+-   \#2802 Add new index: IVFSQ8NR
 
 ## Improvement
 -   \#2543 Remove secondary_path related code

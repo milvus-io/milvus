@@ -12,10 +12,12 @@
 #include "db/SSDBImpl.h"
 #include "cache/CpuCacheMgr.h"
 #include "db/IDGenerator.h"
+#include "db/merge/MergeManagerFactory.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
+#include "insert/MemManagerFactory.h"
 #include "knowhere/index/vector_index/helpers/BuilderSuspend.h"
 #include "metrics/Metrics.h"
 #include "metrics/SystemInfo.h"
@@ -49,6 +51,9 @@ static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown
 
 SSDBImpl::SSDBImpl(const DBOptions& options)
     : options_(options), initialized_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1) {
+    mem_mgr_ = MemManagerFactory::SSBuild(options_);
+    merge_mgr_ptr_ = MergeManagerFactory::SSBuild(options_);
+
     if (options_.wal_enable_) {
         wal::MXLogConfiguration mxlog_config;
         mxlog_config.recovery_error_ignore = options_.recovery_error_ignore_;
@@ -212,6 +217,8 @@ SSDBImpl::DropCollection(const std::string& name) {
         /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
     }
 
+    auto status = mem_mgr_->EraseMemVector(ss->GetCollectionId());  // not allow insert
+
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
 
@@ -320,6 +327,105 @@ SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field
     /* std::set<std::string> merge_collection_ids = {collection_id}; */
     /* StartMergeTask(merge_collection_ids, true); */
     return Status::OK();
+}
+
+Status
+SSDBImpl::Flush(const std::string& collection_name) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    Status status;
+    bool has_collection;
+    status = HasCollection(collection_name, has_collection);
+    if (!status.ok()) {
+        return status;
+    }
+    if (!has_collection) {
+        LOG_ENGINE_ERROR_ << "Collection to flush does not exist: " << collection_name;
+        return Status(DB_NOT_FOUND, "Collection to flush does not exist");
+    }
+
+    LOG_ENGINE_DEBUG_ << "Begin flush collection: " << collection_name;
+
+    if (options_.wal_enable_) {
+        LOG_ENGINE_DEBUG_ << "WAL flush";
+        auto lsn = wal_mgr_->Flush(collection_name);
+        if (lsn != 0) {
+            swn_wal_.Notify();
+            flush_req_swn_.Wait();
+        } else {
+            // no collection flushed, call merge task to cleanup files
+            std::set<std::string> merge_collection_ids;
+            StartMergeTask(merge_collection_ids);
+        }
+    } else {
+        LOG_ENGINE_DEBUG_ << "MemTable flush";
+        InternalFlush(collection_name);
+    }
+
+    LOG_ENGINE_DEBUG_ << "End flush collection: " << collection_name;
+
+    return status;
+}
+
+Status
+SSDBImpl::Flush() {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    LOG_ENGINE_DEBUG_ << "Begin flush all collections";
+
+    Status status;
+    fiu_do_on("options_wal_enable_false", options_.wal_enable_ = false);
+    if (options_.wal_enable_) {
+        LOG_ENGINE_DEBUG_ << "WAL flush";
+        auto lsn = wal_mgr_->Flush();
+        if (lsn != 0) {
+            swn_wal_.Notify();
+            flush_req_swn_.Wait();
+        } else {
+            // no collection flushed, call merge task to cleanup files
+            std::set<std::string> merge_collection_ids;
+            StartMergeTask(merge_collection_ids);
+        }
+    } else {
+        LOG_ENGINE_DEBUG_ << "MemTable flush";
+        InternalFlush();
+    }
+
+    LOG_ENGINE_DEBUG_ << "End flush all collections";
+
+    return status;
+}
+
+Status
+SSDBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
+                  double threshold) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    Status status;
+    bool has_collection;
+    status = HasCollection(collection_name, has_collection);
+    if (!status.ok()) {
+        return status;
+    }
+    if (!has_collection) {
+        LOG_ENGINE_ERROR_ << "Collection to compact does not exist: " << collection_name;
+        return Status(DB_NOT_FOUND, "Collection to compact does not exist");
+    }
+
+    LOG_ENGINE_DEBUG_ << "Before compacting, wait for build index thread to finish...";
+
+    snapshot::ScopedSnapshotT ss;
+    status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+
+    std::vector<std::string> part_names = ss->GetPartitionNames();
+
+    return status;
 }
 
 Status
@@ -542,18 +648,18 @@ SSDBImpl::InsertEntities(const std::string& collection_name, const std::string& 
 }
 
 Status
-SSDBImpl::DeleteEntities(const std::string& collection_id, engine::IDNumbers entity_ids) {
+SSDBImpl::DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids) {
     CHECK_INITIALIZED;
 
     Status status;
     if (options_.wal_enable_) {
-        wal_mgr_->DeleteById(collection_id, entity_ids);
+        wal_mgr_->DeleteById(collection_name, entity_ids);
         swn_wal_.Notify();
     } else {
         wal::MXLogRecord record;
         record.lsn = 0;  // need to get from meta ?
         record.type = wal::MXLogType::Delete;
-        record.collection_id = collection_id;
+        record.collection_id = collection_name;
         record.ids = entity_ids.data();
         record.length = entity_ids.size();
 
@@ -564,36 +670,7 @@ SSDBImpl::DeleteEntities(const std::string& collection_id, engine::IDNumbers ent
 }
 
 Status
-SSDBImpl::GetPartitionsByTags(const std::string& collection_name, const std::vector<std::string>& partition_patterns,
-                              std::set<std::string>& partition_names) {
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    std::vector<std::string> partition_array;
-    STATUS_CHECK(ShowPartitions(collection_name, partition_array));
-
-    for (auto& pattern : partition_patterns) {
-        if (pattern == milvus::engine::DEFAULT_PARTITON_TAG) {
-            partition_names.insert(collection_name);
-            return Status::OK();
-        }
-
-        for (auto& p_name : partition_array) {
-            if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
-                partition_names.insert(p_name);
-            }
-        }
-    }
-
-    if (partition_names.empty()) {
-        return Status(DB_PARTITION_NOT_FOUND, "Specified partition does not exist");
-    }
-
-    return Status::OK();
-}
-
-Status
-SSDBImpl::HybridQuery(const server::ContextPtr& context, const std::string& collection_id,
+SSDBImpl::HybridQuery(const server::ContextPtr& context, const std::string& collection_name,
                       const std::vector<std::string>& partition_patterns, query::GeneralQueryPtr general_query,
                       query::QueryPtr query_ptr, std::vector<std::string>& field_names,
                       std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
@@ -602,87 +679,28 @@ SSDBImpl::HybridQuery(const server::ContextPtr& context, const std::string& coll
 
     auto query_ctx = context->Child("Query");
 
-    Status status;
-    meta::FilesHolder files_holder;
-#if 0
-    if (partition_patterns.empty()) {
-        // no partition tag specified, means search in whole table
-        // get all table files from parent table
-        STATUS_CHECK(meta_ptr_->FilesToSearch(collection_id, files_holder));
+    TimeRecorder rc("HybridQuery");
 
-        std::vector<meta::CollectionSchema> partition_array;
-        STATUS_CHECK(meta_ptr_->ShowPartitions(collection_id, partition_array));
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-        for (auto& schema : partition_array) {
-            status = meta_ptr_->FilesToSearch(schema.collection_id_, files_holder);
-            if (!status.ok()) {
-                return Status(DB_ERROR, "get files to search failed in HybridQuery");
-            }
-        }
+    auto handler = std::make_shared<HybridQueryHelperSegmentHandler>(nullptr, ss, partition_patterns);
+    handler->Iterate();
+    STATUS_CHECK(handler->GetStatus());
 
-        if (files_holder.HoldFiles().empty()) {
-            return Status::OK();  // no files to search
-        }
-    } else {
-        // get files from specified partitions
-        std::set<std::string> partition_name_array;
-        GetPartitionsByTags(collection_id, partition_patterns, partition_name_array);
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", handler->segments_.size());
 
-        for (auto& partition_name : partition_name_array) {
-            status = meta_ptr_->FilesToSearch(partition_name, files_holder);
-            if (!status.ok()) {
-                return Status(DB_ERROR, "get files to search failed in HybridQuery");
-            }
-        }
-
-        if (files_holder.HoldFiles().empty()) {
-            return Status::OK();
-        }
-    }
-#endif
-
-    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info before query
-    status = HybridQueryAsync(query_ctx, collection_id, files_holder, general_query, query_ptr, field_names, attr_type,
-                              result);
-    if (!status.ok()) {
-        return status;
-    }
-    cache::CpuCacheMgr::GetInstance()->PrintInfo();  // print cache info after query
-
-    query_ctx->GetTraceContext()->GetSpan()->Finish();
-
-    return status;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Internal APIs
-////////////////////////////////////////////////////////////////////////////////
-Status
-SSDBImpl::HybridQueryAsync(const server::ContextPtr& context, const std::string& collection_name,
-                           meta::FilesHolder& files_holder, query::GeneralQueryPtr general_query,
-                           query::QueryPtr query_ptr, std::vector<std::string>& field_names,
-                           std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                           engine::QueryResult& result) {
-    auto query_async_ctx = context->Child("Query Async");
-
-    TimeRecorder rc("");
-
-    // step 1: construct search job
     VectorsData vectors;
-    milvus::engine::meta::SegmentsSchema& files = files_holder.HoldFiles();
-    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, index file count: %ld", files_holder.HoldFiles().size());
     scheduler::SearchJobPtr job =
-        std::make_shared<scheduler::SearchJob>(query_async_ctx, general_query, query_ptr, attr_type, vectors);
-    for (auto& file : files) {
-        scheduler::SegmentSchemaPtr file_ptr = std::make_shared<meta::SegmentSchema>(file);
-        job->AddIndexFile(file_ptr);
+        std::make_shared<scheduler::SearchJob>(query_ctx, general_query, query_ptr, attr_type, vectors);
+    for (auto& segment : handler->segments_) {
+        // job->AddSegment(segment);
     }
 
     // step 2: put search job to scheduler and wait result
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitResult();
 
-    files_holder.ReleaseFiles();
     if (!job->GetStatus().ok()) {
         return job->GetStatus();
     }
@@ -693,11 +711,7 @@ SSDBImpl::HybridQueryAsync(const server::ContextPtr& context, const std::string&
     result.result_distances_ = job->GetResultDistances();
 
     // step 4: get entities by result ids
-    auto status = GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_);
-    if (!status.ok()) {
-        query_async_ctx->GetTraceContext()->GetSpan()->Finish();
-        return status;
-    }
+    STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));
 
     // step 5: filter entities by field names
     //    std::vector<engine::AttrsData> filter_attrs;
@@ -718,11 +732,14 @@ SSDBImpl::HybridQueryAsync(const server::ContextPtr& context, const std::string&
 
     rc.ElapseFromBegin("Engine query totally cost");
 
-    query_async_ctx->GetTraceContext()->GetSpan()->Finish();
+    query_ctx->GetTraceContext()->GetSpan()->Finish();
 
     return Status::OK();
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Internal APIs
+////////////////////////////////////////////////////////////////////////////////
 void
 SSDBImpl::InternalFlush(const std::string& collection_id) {
     wal::MXLogRecord record;
@@ -933,14 +950,27 @@ SSDBImpl::StartMergeTask(const std::set<std::string>& merge_collection_ids, bool
 }
 
 void
-SSDBImpl::BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all) {
+SSDBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all) {
     // LOG_ENGINE_TRACE_ << " Background merge thread start";
 
     Status status;
-    for (auto& collection_id : collection_ids) {
-        // TODO: merge files
+    for (auto& collection_name : collection_names) {
+        const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+
+        auto old_strategy = merge_mgr_ptr_->Strategy();
+        if (force_merge_all) {
+            merge_mgr_ptr_->UseStrategy(MergeStrategyType::ADAPTIVE);
+        }
+
+        auto status = merge_mgr_ptr_->MergeFiles(collection_name);
+        merge_mgr_ptr_->UseStrategy(old_strategy);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_name
+                              << " reason:" << status.message();
+        }
+
         if (!initialized_.load(std::memory_order_acquire)) {
-            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection: " << collection_id;
+            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection: " << collection_name;
             break;
         }
     }
@@ -970,8 +1000,190 @@ SSDBImpl::WaitBuildIndexFinish() {
 
 Status
 SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
-    // TODO:
-    return Status::OK();
+    auto collections_flushed = [&](const std::string collection_id,
+                                   const std::set<std::string>& target_collection_names) -> uint64_t {
+        uint64_t max_lsn = 0;
+        if (options_.wal_enable_ && !target_collection_names.empty()) {
+            uint64_t lsn = 0;
+            for (auto& collection_name : target_collection_names) {
+                snapshot::ScopedSnapshotT ss;
+                snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+                lsn = ss->GetMaxLsn();
+                if (lsn > max_lsn) {
+                    max_lsn = lsn;
+                }
+            }
+            wal_mgr_->CollectionFlushed(collection_id, lsn);
+        }
+
+        std::set<std::string> merge_collection_ids;
+        for (auto& collection : target_collection_names) {
+            merge_collection_ids.insert(collection);
+        }
+        StartMergeTask(merge_collection_ids);
+        return max_lsn;
+    };
+
+    auto force_flush_if_mem_full = [&]() -> uint64_t {
+        if (mem_mgr_->GetCurrentMem() > options_.insert_buffer_size_) {
+            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force flush";
+            InternalFlush();
+        }
+    };
+
+    auto get_collection_partition_id = [&](const wal::MXLogRecord& record, int64_t& col_id,
+                                           int64_t& part_id) -> Status {
+        snapshot::ScopedSnapshotT ss;
+        auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get snapshot fail: " << status.message();
+            return status;
+        }
+        col_id = ss->GetCollectionId();
+        snapshot::PartitionPtr part = ss->GetPartition(record.partition_tag);
+        if (part == nullptr) {
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
+            return status;
+        }
+        part_id = part->GetID();
+
+        return Status::OK();
+    };
+
+    Status status;
+
+    switch (record.type) {
+        case wal::MXLogType::Entity: {
+            int64_t collection_id = 0, partition_id = 0;
+            auto status = get_collection_partition_id(record, collection_id, partition_id);
+            if (!status.ok()) {
+                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << status.message();
+                return status;
+            }
+
+            status =
+                mem_mgr_->InsertEntities(collection_id, partition_id, record.length, record.ids,
+                                         (record.data_size / record.length / sizeof(float)), (const float*)record.data,
+                                         record.attr_nbytes, record.attr_data_size, record.attr_data, record.lsn);
+            force_flush_if_mem_full();
+
+            // metrics
+            milvus::server::CollectInsertMetrics metrics(record.length, status);
+            break;
+        }
+        case wal::MXLogType::InsertBinary: {
+            int64_t collection_id = 0, partition_id = 0;
+            auto status = get_collection_partition_id(record, collection_id, partition_id);
+            if (!status.ok()) {
+                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0)
+                               << "Get collection/partition id fail: " << status.message();
+                return status;
+            }
+
+            status = mem_mgr_->InsertVectors(collection_id, partition_id, record.length, record.ids,
+                                             (record.data_size / record.length / sizeof(uint8_t)),
+                                             (const u_int8_t*)record.data, record.lsn);
+            force_flush_if_mem_full();
+
+            // metrics
+            milvus::server::CollectInsertMetrics metrics(record.length, status);
+            break;
+        }
+
+        case wal::MXLogType::InsertVector: {
+            int64_t collection_id = 0, partition_id = 0;
+            auto status = get_collection_partition_id(record, collection_id, partition_id);
+            if (!status.ok()) {
+                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0)
+                               << "Get collection/partition id fail: " << status.message();
+                return status;
+            }
+
+            status = mem_mgr_->InsertVectors(collection_id, partition_id, record.length, record.ids,
+                                             (record.data_size / record.length / sizeof(float)),
+                                             (const float*)record.data, record.lsn);
+            force_flush_if_mem_full();
+
+            // metrics
+            milvus::server::CollectInsertMetrics metrics(record.length, status);
+            break;
+        }
+
+        case wal::MXLogType::Delete: {
+            snapshot::ScopedSnapshotT ss;
+            auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
+            if (!status.ok()) {
+                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "delete", 0) << "Get snapshot fail: " << status.message();
+                return status;
+            }
+
+            if (record.length == 1) {
+                status = mem_mgr_->DeleteVector(ss->GetCollectionId(), *record.ids, record.lsn);
+                if (!status.ok()) {
+                    return status;
+                }
+            } else {
+                status = mem_mgr_->DeleteVectors(ss->GetCollectionId(), record.length, record.ids, record.lsn);
+                if (!status.ok()) {
+                    return status;
+                }
+            }
+            break;
+        }
+
+        case wal::MXLogType::Flush: {
+            if (!record.collection_id.empty()) {
+                // flush one collection
+                snapshot::ScopedSnapshotT ss;
+                auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
+                if (!status.ok()) {
+                    LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
+                    return status;
+                }
+
+                const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                int64_t collection_id = ss->GetCollectionId();
+                status = mem_mgr_->Flush(collection_id);
+                if (!status.ok()) {
+                    return status;
+                }
+
+                std::set<std::string> flushed_collections;
+                collections_flushed(record.collection_id, flushed_collections);
+
+            } else {
+                // flush all collections
+                std::set<int64_t> collection_ids;
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    status = mem_mgr_->Flush(collection_ids);
+                }
+
+                std::set<std::string> flushed_collections;
+                for (auto id : collection_ids) {
+                    snapshot::ScopedSnapshotT ss;
+                    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
+                    if (!status.ok()) {
+                        LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
+                        return status;
+                    }
+
+                    flushed_collections.insert(ss->GetName());
+                }
+
+                uint64_t lsn = collections_flushed("", flushed_collections);
+                if (options_.wal_enable_) {
+                    wal_mgr_->RemoveOldFiles(lsn);
+                }
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    return status;
 }
 
 void

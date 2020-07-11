@@ -70,8 +70,9 @@ using TQueue = milvus::BlockingQueue<std::tuple<ID_TYPE, ID_TYPE>>;
 using SoftDeleteCollectionOperation = milvus::engine::snapshot::SoftDeleteOperation<Collection>;
 using ParamsField = milvus::engine::snapshot::ParamsField;
 using IteratePartitionHandler = milvus::engine::snapshot::IterateHandler<Partition>;
-using IterateSegmentHandler = milvus::engine::snapshot::IterateHandler<Segment>;
 using IterateSegmentFileHandler = milvus::engine::snapshot::IterateHandler<SegmentFile>;
+using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
+using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
 using SSDBImpl = milvus::engine::SSDBImpl;
 using Status = milvus::Status;
 
@@ -118,22 +119,6 @@ struct PartitionCollector : public IteratePartitionHandler {
     }
 
     std::vector<std::string> partition_names_;
-};
-
-using SegmentExecutorT = std::function<Status(const Segment::Ptr&, IterateSegmentHandler*)>;
-struct SegmentCollector : public IterateSegmentHandler {
-    using ResourceT = Segment;
-    using BaseT = IterateSegmentHandler;
-
-    explicit SegmentCollector(ScopedSnapshotT ss, const SegmentExecutorT& executor)
-        : BaseT(ss), executor_(executor) {}
-
-    Status
-    Handle(const typename ResourceT::Ptr& segment) override {
-        return executor_(segment, this);
-    }
-
-    SegmentExecutorT executor_;
 };
 
 using FilterT = std::function<bool(SegmentFile::Ptr)>;
