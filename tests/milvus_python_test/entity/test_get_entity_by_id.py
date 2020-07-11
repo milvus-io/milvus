@@ -5,6 +5,7 @@ import copy
 import threading
 import logging
 from multiprocessing import Pool, Process
+import concurrent.futures
 import pytest
 from milvus import IndexType, MetricType
 from utils import *
@@ -21,7 +22,7 @@ default_index_name = "insert_index"
 entity = gen_entities(1)
 binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
-bianry_entities = gen_binary_entities(nb)
+raw_vectors, binary_entities = gen_binary_entities(nb)
 default_single_query = {
     "bool": {
         "must": [
@@ -41,12 +42,12 @@ class TestGetBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")) == "GPU":
-            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVFSQ8H]:
-                pytest.skip("Only support index_type: idmap/ivf")
-        elif str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] in [IndexType.IVFSQ8H]:
-                pytest.skip("CPU not support index_type: ivf_sq8h")
+        # if str(connect._cmd("mode")) == "GPU":
+        #     if request.param["index_type"] not in ["IVFSQ8", "IVFFLAT", "FLAT", "IVFPQ", "IVFSQ8H"]:
+        #         pytest.skip("Only support index_type: idmap/ivf")
+        if str(connect._cmd("mode")) == "CPU":
+            if request.param["index_type"] == "IVFSQ8H":
+                pytest.skip("sq8h not support in CPU mode")
         return request.param
 
     @pytest.fixture(
@@ -73,10 +74,7 @@ class TestGetBase:
         assert res_count == nb
         get_ids = [ids[get_pos]]
         res = connect.get_entity_by_id(collection, get_ids)
-        logging.getLogger().info(res)
-        pdb.set_trace()
-        logging.getLogger().info(dict(res))
-        assert_equal_entity(dict(res), entities[get_pos])
+        assert_equal_vector(res[0].get("vector"), entities[-1]["values"][get_pos])
 
     def test_get_entity_multi_ids(self, connect, collection, get_pos):
         '''
@@ -89,7 +87,7 @@ class TestGetBase:
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_entity(res[i], entities[i])
+            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
 
     def test_get_entity_parts_ids(self, connect, collection):
         '''
@@ -101,9 +99,9 @@ class TestGetBase:
         connect.flush([collection])
         get_ids = [ids[0], 1, ids[-1]]
         res = connect.get_entity_by_id(collection, get_ids)
-        assert_equal_entity(res[0], entities[0])
-        assert_equal_entity(res[-1], entities[-1])
-        assert not len(res[1])
+        assert_equal_vector(res[0].get("vector"), entities[-1]["values"][0])
+        assert_equal_vector(res[-1].get("vector"), entities[-1]["values"][-1])
+        assert not len(res[1].get("vector"))
 
     def test_get_entity_limit(self, connect, collection, args):
         '''
@@ -131,7 +129,7 @@ class TestGetBase:
         get_ids = [ids[0]]
         res = connect.get_entity_by_id(collection, get_ids)
         assert len(res) == 1
-        assert_equal_entity(res[0], entities[0])
+        assert_equal_vector(res[0].get("vector"), entities[-1]["values"][0])
 
     def test_get_entity_params_same_ids(self, connect, collection):
         '''
@@ -146,7 +144,8 @@ class TestGetBase:
         res = connect.get_entity_by_id(collection, get_ids)
         assert len(res) == len(get_ids)
         for i in range(len(get_ids)):
-            assert_equal_entity(res[i], entity)
+            logging.getLogger().info(i)
+            assert_equal_vector(res[i].get("vector"), entity[-1]["values"][0])
 
     def test_get_entities_params_same_ids(self, connect, collection):
         '''
@@ -160,7 +159,7 @@ class TestGetBase:
         res = connect.get_entity_by_id(collection, get_ids)
         assert len(res) == len(get_ids)
         for i in range(len(get_ids)):
-            assert_equal_entity(res[i], entities[0])   
+            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][0])
 
     """
     ******************************************************************
@@ -178,9 +177,9 @@ class TestGetBase:
         connect.flush([ip_collection])
         get_ids = [ids[0], 1, ids[-1]]
         res = connect.get_entity_by_id(ip_collection, get_ids)
-        assert_equal_entity(res[0], entities[0])
-        assert_equal_entity(res[-1], entities[-1])
-        assert not len(res[1])
+        assert_equal_vector(res[0].get("vector"), entities[-1]["values"][0])
+        assert_equal_vector(res[-1].get("vector"), entities[-1]["values"][-1])
+        assert not len(res[1].get("vector"))
 
     def test_get_entity_parts_ids_jac(self, connect, jac_collection):
         '''
@@ -192,9 +191,9 @@ class TestGetBase:
         connect.flush([jac_collection])
         get_ids = [ids[0], 1, ids[-1]]
         res = connect.get_entity_by_id(jac_collection, get_ids)
-        assert_equal_entity(res[0], binary_entities[0])
-        assert_equal_entity(res[-1], binary_entities[-1])
-        assert not len(res[1])
+        assert_equal_vector(res[0].get("binary_vector"), binary_entities[-1]["values"][0])
+        assert_equal_vector(res[-1].get("binary_vector"), binary_entities[-1]["values"][-1])
+        assert not len(res[1].get("binary_vector"))
 
     """
     ******************************************************************
@@ -213,7 +212,7 @@ class TestGetBase:
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_entity(res[i], entities[i])
+            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
 
     def test_get_entities_tag_default(self, connect, collection, get_pos):
         '''
@@ -227,7 +226,7 @@ class TestGetBase:
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_entity(res[i], entities[i])
+            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
 
     def test_get_entities_tags_default(self, connect, collection, get_pos):
         '''
@@ -243,7 +242,7 @@ class TestGetBase:
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_entity(res[i], entities[i])
+            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
 
     def test_get_entities_tags_A(self, connect, collection, get_pos):
         '''
@@ -259,7 +258,7 @@ class TestGetBase:
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_entity(res[i], entities[i])
+            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
 
     def test_get_entities_tags_B(self, connect, collection, get_pos):
         '''
@@ -270,16 +269,17 @@ class TestGetBase:
         tag_new = "tag_new"
         connect.create_partition(collection, tag)
         connect.create_partition(collection, tag_new)
+        new_entities = gen_entities(nb+1)
         ids = connect.insert(collection, entities, partition_tag=tag)
-        ids_new = connect.insert(collection, entities, partition_tag=tag_new)
+        ids_new = connect.insert(collection, new_entities, partition_tag=tag_new)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         get_ids.extend(ids_new[:get_pos])
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_entity(res[i], entities[i])
+            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
         for i in range(get_pos, get_pos*2):
-            assert_equal_entity(res[i], entities[i])
+            assert_equal_vector(res[i].get("vector"), new_entities[-1]["values"][i-get_pos])
 
     def test_get_entities_indexed_tag(self, connect, collection, get_simple_index, get_pos):
         '''
@@ -290,11 +290,11 @@ class TestGetBase:
         connect.create_partition(collection, tag)
         ids = connect.insert(collection, entities, partition_tag=tag)
         connect.flush([collection])
-        connect.create_index(collection, field_name, index_name, get_simple_index)
+        connect.create_index(collection, field_name, default_index_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_entity(res[i], entities[i])
+            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
 
     """
     ******************************************************************
@@ -398,8 +398,9 @@ class TestGetBase:
         connect.flush([collection])
         get_ids = [ids[get_pos]]
         res = connect.get_entity_by_id(collection, get_ids)
-        assert not len(res[0])
+        assert not len(res)
 
+    # TODO
     def test_get_entities_after_delete(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -411,7 +412,7 @@ class TestGetBase:
         delete_ids = ids[:get_pos]
         status = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
-        get_ids = ids[:get_pos]
+        get_ids = delete_ids
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
             assert not len(res[i])
@@ -441,11 +442,11 @@ class TestGetBase:
         '''
         ids = connect.insert(collection, entities)
         connect.flush([collection])
-        connect.create_index(collection, field_name, index_name, get_simple_index)
+        connect.create_index(collection, field_name, default_index_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_entity(res[i], entities[i])
+            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
 
     def test_get_entities_indexed_single(self, connect, collection, get_simple_index, get_pos):
         '''
@@ -453,14 +454,15 @@ class TestGetBase:
         method: add entities 1 entity/per request, create index, get
         expected: entity returned
         '''
+        ids = []
         for i in range(nb):
-            ids = connect.insert(collection, entity, ids=[i])
+            ids.append(connect.insert(collection, entity)[0])
         connect.flush([collection])
-        connect.create_index(collection, field_name, index_name, get_simple_index)
+        connect.create_index(collection, field_name, default_index_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_entity(res[i], entities[i])
+            assert_equal_vector(res[i].get("vector"), entity[-1]["values"][0])
 
     def test_get_entities_after_delete_disable_autoflush(self, connect, collection, get_pos):
         '''
@@ -477,10 +479,11 @@ class TestGetBase:
             get_ids = ids[:get_pos]
             res = connect.get_entity_by_id(collection, get_ids)
             for i in range(get_pos):
-                assert_equal_entity(res[i], entities[i])
+                assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
         finally:
             enable_flush(connect)
 
+    # TODO:
     def test_get_entities_after_delete_same_ids(self, connect, collection):
         '''
         target: test.get_entity_by_id
@@ -511,7 +514,6 @@ class TestGetBase:
         res = connect.get_entity_by_id(collection, [ids[get_pos]])
         assert not len(res[0])
 
-    @pytest.mark.timeout(60)
     def test_get_entity_by_id_multithreads(self, connect, collection):
         ids = connect.insert(collection, entities)
         connect.flush([collection])
@@ -520,7 +522,7 @@ class TestGetBase:
             res = connect.get_entity_by_id(collection, get_id)
             assert len(res) == len(get_id)
             for i in range(len(res)):
-                assert_equal_entity(res[i], entities[100+i])
+                assert_equal_vector(res[i].get("vector"), entities[-1]["values"][100+i])
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_results = {executor.submit(
                 get): i for i in range(10)}
@@ -537,6 +539,13 @@ class TestGetInvalid(object):
         params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
+        yield request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_strs()
+    )
+    def get_field_name(self, request):
         yield request.param
 
     @pytest.fixture(

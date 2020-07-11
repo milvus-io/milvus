@@ -224,7 +224,7 @@ class TestInsertBase:
             res_ids_new = connect.insert(collection, entities, ids)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_insert_ids_length_not_match(self, connect, collection):
+    def test_insert_ids_length_not_match_batch(self, connect, collection):
         '''
         target: test insert vectors in collection, use customize ids, len(ids) != len(vectors)
         method: create collection and insert vectors in it
@@ -234,6 +234,18 @@ class TestInsertBase:
         logging.getLogger().info(len(ids))
         with pytest.raises(Exception) as e:
             res_ids = connect.insert(collection, entities, ids)
+
+    @pytest.mark.timeout(ADD_TIMEOUT)
+    def test_insert_ids_length_not_match_single(self, connect, collection):
+        '''
+        target: test insert vectors in collection, use customize ids, len(ids) != len(vectors)
+        method: create collection and insert vectors in it
+        expected: raise an exception
+        '''
+        ids = [i for i in range(1, nb)]
+        logging.getLogger().info(len(ids))
+        with pytest.raises(Exception) as e:
+            res_ids = connect.insert(collection, entity, ids)
 
     # TODO
     @pytest.mark.timeout(ADD_TIMEOUT)
