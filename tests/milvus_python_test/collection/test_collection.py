@@ -14,14 +14,17 @@ vectors = gen_vectors(100, dim)
 
 
 class TestCollection:
-
     """
     ******************************************************************
       The following cases are used to test `create_collection` function
     ******************************************************************
     """
 
-    def test_create_collection(self, connect):
+    @pytest.fixture(params=get_all_metric_types())
+    def get_metric_type(self, request):
+        return request.param
+
+    def test_create_collection(self, connect, get_metric_type):
         '''
         target: test create normal collection 
         method: create collection with corrent params
@@ -30,78 +33,10 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size, 
-                 'metric_type': MetricType.L2}
-        status = connect.create_collection(param)
-        assert status.OK()
-
-    def test_create_collection_ip(self, connect):
-        '''
-        target: test create normal collection 
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size, 
-                 'metric_type': MetricType.IP}
-        status = connect.create_collection(param)
-        assert status.OK()
-
-    def test_create_collection_jaccard(self, connect):
-        '''
-        target: test create normal collection 
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size, 
-                 'metric_type': MetricType.JACCARD}
-        status = connect.create_collection(param)
-        assert status.OK()
-
-    def test_create_collection_hamming(self, connect):
-        '''
-        target: test create normal collection
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
                  'index_file_size': index_file_size,
-                 'metric_type': MetricType.HAMMING}
-        status = connect.create_collection(param)
-        assert status.OK()
-
-    def test_create_collection_substructure(self, connect):
-        '''
-        target: test create normal collection
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.SUBSTRUCTURE}
-        status = connect.create_collection(param)
-        assert status.OK()
-
-    def test_create_collection_superstructure(self, connect):
-        '''
-        target: test create normal collection
-        method: create collection with corrent params
-        expected: create status return ok
-        '''
-        collection_name = gen_unique_str("test_collection")
-        param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.SUPERSTRUCTURE}
+                 'metric_type': get_metric_type}
+        assert get_metric_type in [MetricType.L2, MetricType.IP, MetricType.JACCARD, MetricType.HAMMING,
+                                   MetricType.SUBSTRUCTURE, MetricType.SUPERSTRUCTURE]
         status = connect.create_collection(param)
         assert status.OK()
 
@@ -120,7 +55,7 @@ class TestCollection:
                      'metric_type': MetricType.SUPERSTRUCTURE}
             status = connect.create_collection(param)
             assert status.OK()
-            status = connect.drop_collection(collection_name,)
+            status = connect.drop_collection(collection_name, )
             assert status.OK()
             time.sleep(2)
             ## recreate collection
@@ -155,7 +90,7 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size, 
+                 'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         status = connect.create_collection(param)
         status = connect.create_collection(param)
@@ -171,7 +106,7 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size, 
+                 'index_file_size': index_file_size,
                  'metric_type': MetricType.IP}
         status = connect.create_collection(param)
         status = connect.create_collection(param)
@@ -185,7 +120,7 @@ class TestCollection:
         '''
         param = {'collection_name': None,
                  'dimension': dim,
-                 'index_file_size': index_file_size, 
+                 'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         with pytest.raises(Exception) as e:
             status = connect.create_collection(param)
@@ -350,7 +285,7 @@ class TestCollection:
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'index_file_size': index_file_size, 
+                 'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         connect.create_collection(param)
 
@@ -367,7 +302,7 @@ class TestCollection:
             p.start()
         for p in processes:
             p.join()
-    
+
     # @pytest.mark.level(2)
     # def test_collection_describe_without_connection(self, collection, dis_connect):
     #     '''
@@ -386,12 +321,12 @@ class TestCollection:
         '''
         collection_name = gen_unique_str("test_collection")
         param = {'collection_name': collection_name,
-                 'dimension': dim+1,
+                 'dimension': dim + 1,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         connect.create_collection(param)
         status, res = connect.get_collection_info(collection_name)
-        assert res.dimension == dim+1
+        assert res.dimension == dim + 1
 
     """
     ******************************************************************
@@ -470,14 +405,14 @@ class TestCollection:
             assert the value returned by delete method
         expected: create ok and delete ok
         '''
-        loops = 2 
+        loops = 2
         timeout = 5
         for i in range(loops):
             collection_name = "test_collection"
             param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
+                     'dimension': dim,
+                     'index_file_size': index_file_size,
+                     'metric_type': MetricType.L2}
             connect.create_collection(param)
             status = None
             while i < timeout:
@@ -500,6 +435,7 @@ class TestCollection:
         '''
         process_num = 6
         processes = []
+
         def deletecollection(milvus):
             status = milvus.drop_collection(collection)
             # assert not status.code==0
@@ -529,28 +465,28 @@ class TestCollection:
 
         collection = []
         j = 0
-        while j < (process_num*loop_num):
+        while j < (process_num * loop_num):
             collection_name = gen_unique_str("test_drop_collection_with_multiprocessing")
             collection.append(collection_name)
             param = {'collection_name': collection_name,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
+                     'dimension': dim,
+                     'index_file_size': index_file_size,
+                     'metric_type': MetricType.L2}
             connect.create_collection(param)
             j = j + 1
 
-        def delete(connect,ids):
+        def delete(connect, ids):
             i = 0
             while i < loop_num:
-                status = connect.drop_collection(collection[ids*process_num+i])
+                status = connect.drop_collection(collection[ids * process_num + i])
                 time.sleep(2)
                 assert status.OK()
-                assert not assert_has_collection(connect, collection[ids*process_num+i])
+                assert not assert_has_collection(connect, collection[ids * process_num + i])
                 i = i + 1
 
         for i in range(process_num):
             ids = i
-            p = Process(target=delete, args=(connect,ids))
+            p = Process(target=delete, args=(connect, ids))
             processes.append(p)
             p.start()
         for p in processes:
@@ -655,7 +591,7 @@ class TestCollection:
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
-        connect.create_collection(param)    
+        connect.create_collection(param)
         status, result = connect.list_collections()
         assert status.OK()
         assert collection_name in result
@@ -671,7 +607,7 @@ class TestCollection:
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.IP}
-        connect.create_collection(param)    
+        connect.create_collection(param)
         status, result = connect.list_collections()
         assert status.OK()
         assert collection_name in result
@@ -687,7 +623,7 @@ class TestCollection:
                  'dimension': dim,
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.JACCARD}
-        connect.create_collection(param)    
+        connect.create_collection(param)
         status, result = connect.list_collections()
         assert status.OK()
         assert collection_name in result
@@ -781,6 +717,7 @@ class TestCollection:
                  'index_file_size': index_file_size,
                  'metric_type': MetricType.L2}
         connect.create_collection(param)
+
         def showcollections(milvus):
             status, result = milvus.list_collections()
             assert status.OK()
@@ -806,6 +743,7 @@ class TestCollection:
     """
     generate valid create_index params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
@@ -894,6 +832,7 @@ class TestCollectionInvalid(object):
     """
     Test creating collection with invalid collection names
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_collection_names()
@@ -930,6 +869,7 @@ class TestCreateCollectionDimInvalid(object):
     """
     Test creating collection with invalid dimension
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_dims()
@@ -952,13 +892,14 @@ class TestCreateCollectionDimInvalid(object):
         else:
             with pytest.raises(Exception) as e:
                 status = connect.create_collection(param)
-            
+
 
 # TODO: max / min index file size
 class TestCreateCollectionIndexSizeInvalid(object):
     """
     Test creating collections with invalid index_file_size
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_file_sizes()
@@ -985,6 +926,7 @@ class TestCreateMetricTypeInvalid(object):
     """
     Test creating collections with invalid metric_type
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_metric_types()
@@ -1011,59 +953,70 @@ def create_collection(connect, **params):
     status = connect.create_collection(param)
     return status
 
+
 def search_collection(connect, **params):
     status, result = connect.search(
-        params["collection_name"], 
-        params["top_k"], 
+        params["collection_name"],
+        params["top_k"],
         params["query_vectors"],
         params={"nprobe": params["nprobe"]})
     return status
+
 
 def load_collection(connect, **params):
     status = connect.load_collection(params["collection_name"])
     return status
 
+
 def has(connect, **params):
     status, result = connect.has_collection(params["collection_name"])
     return status
+
 
 def show(connect, **params):
     status, result = connect.list_collections()
     return status
 
+
 def delete(connect, **params):
     status = connect.drop_collection(params["collection_name"])
     return status
+
 
 def describe(connect, **params):
     status, result = connect.get_collection_info(params["collection_name"])
     return status
 
+
 def rowcount(connect, **params):
     status, result = connect.count_entities(params["collection_name"])
     return status
+
 
 def create_index(connect, **params):
     status = connect.create_index(params["collection_name"], params["index_type"], params["index_param"])
     return status
 
-func_map = { 
+
+func_map = {
     # 0:has, 
-    1:show,
-    10:create_collection, 
-    11:describe,
-    12:rowcount,
-    13:search_collection,
-    14:load_collection,
-    15:create_index,
-    30:delete
+    1: show,
+    10: create_collection,
+    11: describe,
+    12: rowcount,
+    13: search_collection,
+    14: load_collection,
+    15: create_index,
+    30: delete
 }
+
 
 def gen_sequence():
     raw_seq = func_map.keys()
     result = itertools.permutations(raw_seq)
     for x in result:
         yield x
+
 
 class TestCollectionLogic(object):
     @pytest.mark.parametrize("logic_seq", gen_sequence())
@@ -1086,7 +1039,7 @@ class TestCollectionLogic(object):
         for i in range(len(seq)):
             if seq[i] > 10 and not_created:
                 return False
-            elif seq [i] > 10 and has_deleted:
+            elif seq[i] > 10 and has_deleted:
                 return False
             elif seq[i] == 10:
                 not_created = False
@@ -1132,7 +1085,7 @@ class TestCollectionLogic(object):
                  'top_k': top_k,
                  'index_type': IndexType.IVF_SQ8,
                  'index_param': {
-                        'nlist': 16384
+                     'nlist': 16384
                  },
                  'query_vectors': vectors}
         return param

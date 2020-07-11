@@ -26,6 +26,18 @@ all_index_types = [
 ]
 
 
+def get_all_metric_types():
+    params = [
+        MetricType.L2,
+        MetricType.IP,
+        MetricType.JACCARD,
+        MetricType.HAMMING,
+        MetricType.SUBSTRUCTURE,
+        MetricType.SUPERSTRUCTURE
+    ]
+    return params
+
+
 def get_milvus(host, port, uri=None, handler=None, **kwargs):
     if handler is None:
         handler = "GRPC"
@@ -120,20 +132,23 @@ def gen_binary_super_vectors(vectors, length):
     dim = len(vectors[0])
     for i in range(length):
         cnt_1 = np.count_nonzero(vectors[i])
-        raw_vector = [1 for i in range(dim)] 
+        raw_vector = [1 for i in range(dim)]
         raw_vectors.append(raw_vector)
         binary_vectors.append(bytes(np.packbits(raw_vector, axis=-1).tolist()))
     return raw_vectors, binary_vectors
-    
+
 
 def gen_single_vector(dim):
     return [[random.random() for _ in range(dim)]]
 
+
 def gen_int_attr(row_num):
     return [random.randint(0, 255) for _ in range(row_num)]
 
+
 def gen_float_attr(row_num):
     return [random.uniform(0, 255) for _ in range(row_num)]
+
 
 def gen_vector(nb, d, seed=np.random.RandomState(1234)):
     xb = seed.rand(nb, d).astype("float32")
@@ -154,37 +169,37 @@ def gen_long_str(num):
 
 def gen_invalid_ips():
     ips = [
-            # "255.0.0.0",
-            # "255.255.0.0",
-            # "255.255.255.0",
-            # "255.255.255.255",
-            "127.0.0",
-            # "123.0.0.2",
-            "12-s",
-            " ",
-            "12 s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "中文",
-            "a".join("a" for _ in range(256))
+        # "255.0.0.0",
+        # "255.255.0.0",
+        # "255.255.255.0",
+        # "255.255.255.255",
+        "127.0.0",
+        # "123.0.0.2",
+        "12-s",
+        " ",
+        "12 s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "中文",
+        "a".join("a" for _ in range(256))
     ]
     return ips
 
 
 def gen_invalid_ports():
     ports = [
-            # empty
-            " ",
-            -1,
-            # too big port
-            100000,
-            # not correct port
-            39540,
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "中文"
+        # empty
+        " ",
+        -1,
+        # too big port
+        100000,
+        # not correct port
+        39540,
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "中文"
     ]
     return ports
 
@@ -192,306 +207,306 @@ def gen_invalid_ports():
 def gen_invalid_uris():
     ip = None
     uris = [
-            " ",
-            "中文",
-            # invalid protocol
-            # "tc://%s:%s" % (ip, port),
-            # "tcp%s:%s" % (ip, port),
+        " ",
+        "中文",
+        # invalid protocol
+        # "tc://%s:%s" % (ip, port),
+        # "tcp%s:%s" % (ip, port),
 
-            # # invalid port
-            # "tcp://%s:100000" % ip,
-            # "tcp://%s: " % ip,
-            # "tcp://%s:19540" % ip,
-            # "tcp://%s:-1" % ip,
-            # "tcp://%s:string" % ip,
+        # # invalid port
+        # "tcp://%s:100000" % ip,
+        # "tcp://%s: " % ip,
+        # "tcp://%s:19540" % ip,
+        # "tcp://%s:-1" % ip,
+        # "tcp://%s:string" % ip,
 
-            # invalid ip
-            "tcp:// :19530",
-            # "tcp://123.0.0.1:%s" % port,
-            "tcp://127.0.0:19530",
-            # "tcp://255.0.0.0:%s" % port,
-            # "tcp://255.255.0.0:%s" % port,
-            # "tcp://255.255.255.0:%s" % port,
-            # "tcp://255.255.255.255:%s" % port,
-            "tcp://\n:19530",
+        # invalid ip
+        "tcp:// :19530",
+        # "tcp://123.0.0.1:%s" % port,
+        "tcp://127.0.0:19530",
+        # "tcp://255.0.0.0:%s" % port,
+        # "tcp://255.255.0.0:%s" % port,
+        # "tcp://255.255.255.0:%s" % port,
+        # "tcp://255.255.255.255:%s" % port,
+        "tcp://\n:19530",
     ]
     return uris
 
 
 def gen_invalid_collection_names():
     collection_names = [
-            "12-s",
-            " ",
-            # "",
-            # None,
-            "12 s",
-            "BB。A",
-            "c|c",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文",
-            "a".join("a" for i in range(256))
+        "12-s",
+        " ",
+        # "",
+        # None,
+        "12 s",
+        "BB。A",
+        "c|c",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文",
+        "a".join("a" for i in range(256))
     ]
     return collection_names
 
 
 def gen_invalid_top_ks():
     top_ks = [
-            0,
-            -1,
-            None,
-            [1,2,3],
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文",
-            "a".join("a" for i in range(256))
+        0,
+        -1,
+        None,
+        [1, 2, 3],
+        (1, 2),
+        {"a": 1},
+        " ",
+        "",
+        "String",
+        "12-s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文",
+        "a".join("a" for i in range(256))
     ]
     return top_ks
 
 
 def gen_invalid_dims():
     dims = [
-            0,
-            -1,
-            100001,
-            1000000000000001,
-            None,
-            False,
-            [1,2,3],
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文",
-            "a".join("a" for i in range(256))
+        0,
+        -1,
+        100001,
+        1000000000000001,
+        None,
+        False,
+        [1, 2, 3],
+        (1, 2),
+        {"a": 1},
+        " ",
+        "",
+        "String",
+        "12-s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文",
+        "a".join("a" for i in range(256))
     ]
     return dims
 
 
 def gen_invalid_file_sizes():
     file_sizes = [
-            0,
-            -1,
-            1000000000000001,
-            None,
-            False,
-            [1,2,3],
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文",
-            "a".join("a" for i in range(256))
+        0,
+        -1,
+        1000000000000001,
+        None,
+        False,
+        [1, 2, 3],
+        (1, 2),
+        {"a": 1},
+        " ",
+        "",
+        "String",
+        "12-s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文",
+        "a".join("a" for i in range(256))
     ]
     return file_sizes
 
 
 def gen_invalid_index_types():
     invalid_types = [
-            0,
-            -1,
-            100,
-            1000000000000001,
-            # None,
-            False,
-            [1,2,3],
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文",
-            "a".join("a" for i in range(256))
+        0,
+        -1,
+        100,
+        1000000000000001,
+        # None,
+        False,
+        [1, 2, 3],
+        (1, 2),
+        {"a": 1},
+        " ",
+        "",
+        "String",
+        "12-s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文",
+        "a".join("a" for i in range(256))
     ]
     return invalid_types
 
 
 def gen_invalid_params():
     params = [
-            9999999999,
-            -1,
-            # None,
-            [1,2,3],
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文"
+        9999999999,
+        -1,
+        # None,
+        [1, 2, 3],
+        (1, 2),
+        {"a": 1},
+        " ",
+        "",
+        "String",
+        "12-s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文"
     ]
     return params
 
 
 def gen_invalid_nprobes():
     nprobes = [
-            0,
-            -1,
-            1000000000000001,
-            None,
-            [1,2,3],
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文"
+        0,
+        -1,
+        1000000000000001,
+        None,
+        [1, 2, 3],
+        (1, 2),
+        {"a": 1},
+        " ",
+        "",
+        "String",
+        "12-s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文"
     ]
     return nprobes
 
 
 def gen_invalid_metric_types():
     metric_types = [
-            0,
-            -1,
-            1000000000000001,
-            # None,
-            [1,2,3],
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文"    
+        0,
+        -1,
+        1000000000000001,
+        # None,
+        [1, 2, 3],
+        (1, 2),
+        {"a": 1},
+        " ",
+        "",
+        "String",
+        "12-s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文"
     ]
     return metric_types
 
 
 def gen_invalid_vectors():
     invalid_vectors = [
-            "1*2",
-            [],
-            [1],
-            [1,2],
-            [" "],
-            ['a'],
-            [None],
-            None,
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文",
-            "a".join("a" for i in range(256))
+        "1*2",
+        [],
+        [1],
+        [1, 2],
+        [" "],
+        ['a'],
+        [None],
+        None,
+        (1, 2),
+        {"a": 1},
+        " ",
+        "",
+        "String",
+        "12-s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文",
+        "a".join("a" for i in range(256))
     ]
     return invalid_vectors
 
 
 def gen_invalid_vector_ids():
     invalid_vector_ids = [
-            1.0,
-            -1.0,
-            None,
-            # int 64
-            10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
-            " ",
-            "",
-            "String",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "=c",
-            "中文",
+        1.0,
+        -1.0,
+        None,
+        # int 64
+        10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+        " ",
+        "",
+        "String",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "=c",
+        "中文",
     ]
     return invalid_vector_ids
 
 
 def gen_invalid_cache_config():
     invalid_configs = [
-            0,
-            -1,
-            9223372036854775808,
-            [1,2,3],
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文",
-            "'123'",
-            "さようなら"
+        0,
+        -1,
+        9223372036854775808,
+        [1, 2, 3],
+        (1, 2),
+        {"a": 1},
+        " ",
+        "",
+        "String",
+        "12-s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文",
+        "'123'",
+        "さようなら"
     ]
     return invalid_configs
 
 
 def gen_invalid_gpu_config():
     invalid_configs = [
-            -1,
-            [1,2,3],
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文",
-            "'123'",
+        -1,
+        [1, 2, 3],
+        (1, 2),
+        {"a": 1},
+        " ",
+        "",
+        "String",
+        "12-s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文",
+        "'123'",
     ]
     return invalid_configs
 
@@ -585,8 +600,8 @@ def gen_index():
             index_params.extend(ivf_params)
         elif index_type == IndexType.IVF_PQ:
             ivf_pq_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m}} \
-                        for nlist in nlists \
-                        for m in pq_ms]
+                             for nlist in nlists \
+                             for m in pq_ms]
             index_params.extend(ivf_pq_params)
         elif index_type == IndexType.HNSW:
             hnsw_params = [{"index_type": index_type, "index_param": {"M": M, "efConstruction": efConstruction}} \
