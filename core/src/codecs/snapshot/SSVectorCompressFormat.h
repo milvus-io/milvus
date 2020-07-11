@@ -20,6 +20,9 @@
 #include <memory>
 #include <string>
 
+#include "knowhere/common/BinarySet.h"
+#include "storage/FSHandler.h"
+
 namespace milvus {
 namespace codec {
 
