@@ -120,6 +120,7 @@ set(storage_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/snapshot codecs_snapshot_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
 
