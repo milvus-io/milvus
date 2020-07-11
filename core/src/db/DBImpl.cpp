@@ -1773,6 +1773,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 
         // step 2: check index difference
         CollectionIndex old_index;
+        old_index.field_name_ = index.field_name_;
         status = DescribeIndex(collection_id, old_index);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to get collection index info for collection: " << collection_id;
@@ -1781,6 +1782,11 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 
         // step 3: update index info
         CollectionIndex new_index = index;
+        json new_index_json = new_index.extra_params_;
+        if (new_index_json.contains("index_type")) {
+            new_index.engine_type_ = (int32_t)engine::s_map_engine_type.at(new_index_json["index_type"]);
+        }
+
         new_index.metric_type_ = old_index.metric_type_;  // dont change metric type, it was defined by CreateCollection
         if (!utils::IsSameIndex(old_index, new_index)) {
             status = UpdateCollectionIndexRecursively(collection_id, new_index);
