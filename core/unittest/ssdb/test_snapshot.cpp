@@ -417,33 +417,32 @@ TEST_F(SnapshotTest, PartitionTest) {
     }
 }
 
-// TODO: Open this test later
-/* TEST_F(SnapshotTest, PartitionTest2) { */
-/*     std::string collection_name("c1"); */
-/*     LSN_TYPE lsn = 1; */
-/*     milvus::Status status; */
+TEST_F(SnapshotTest, PartitionTest2) {
+    std::string collection_name("c1");
+    LSN_TYPE lsn = 1;
+    milvus::Status status;
 
-/*     auto ss = CreateCollection(collection_name, ++lsn); */
-/*     ASSERT_TRUE(ss); */
-/*     ASSERT_EQ(lsn, ss->GetMaxLsn()); */
+    auto ss = CreateCollection(collection_name, ++lsn);
+    ASSERT_TRUE(ss);
+    ASSERT_EQ(lsn, ss->GetMaxLsn());
 
-/*     OperationContext context; */
-/*     context.lsn = lsn; */
-/*     auto cp_op = std::make_shared<CreatePartitionOperation>(context, ss); */
-/*     std::string partition_name("p1"); */
-/*     PartitionContext p_ctx; */
-/*     p_ctx.name = partition_name; */
-/*     PartitionPtr partition; */
-/*     status = cp_op->CommitNewPartition(p_ctx, partition); */
-/*     ASSERT_TRUE(status.ok()); */
-/*     ASSERT_TRUE(partition); */
-/*     ASSERT_EQ(partition->GetName(), partition_name); */
-/*     ASSERT_FALSE(partition->IsActive()); */
-/*     ASSERT_TRUE(partition->HasAssigned()); */
+    OperationContext context;
+    context.lsn = lsn;
+    auto cp_op = std::make_shared<CreatePartitionOperation>(context, ss);
+    std::string partition_name("p1");
+    PartitionContext p_ctx;
+    p_ctx.name = partition_name;
+    PartitionPtr partition;
+    status = cp_op->CommitNewPartition(p_ctx, partition);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(partition);
+    ASSERT_EQ(partition->GetName(), partition_name);
+    ASSERT_FALSE(partition->IsActive());
+    ASSERT_TRUE(partition->HasAssigned());
 
-/*     status = cp_op->Push(); */
-/*     ASSERT_FALSE(status.ok()); */
-/* } */
+    status = cp_op->Push();
+    ASSERT_FALSE(status.ok());
+}
 
 TEST_F(SnapshotTest, IndexTest) {
     LSN_TYPE lsn = 0;

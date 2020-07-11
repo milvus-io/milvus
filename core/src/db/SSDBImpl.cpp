@@ -263,8 +263,6 @@ SSDBImpl::CreatePartition(const std::string& collection_name, const std::string&
     if (options_.wal_enable_) {
         // SS TODO
         /* lsn = wal_mgr_->CreatePartition(collection_id, partition_tag); */
-    } else {
-        lsn = ss->GetCollection()->GetLsn();
     }
 
     snapshot::OperationContext context;
