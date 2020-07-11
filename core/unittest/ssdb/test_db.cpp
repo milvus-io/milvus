@@ -32,7 +32,7 @@ CreateCollection(std::shared_ptr<SSDBImpl> db, const std::string& collection_nam
     auto vector_field = std::make_shared<Field>("vector", 0,
             milvus::engine::snapshot::FieldType::VECTOR);
     auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
-            milvus::engine::snapshot::FieldElementType::IVFSQ8);
+            milvus::engine::snapshot::FieldElementType::FET_VECTOR_INDEX);
     auto int_field = std::make_shared<Field>("int", 0,
             milvus::engine::snapshot::FieldType::INT32);
     context.fields_schema[vector_field] = {vector_field_element};
