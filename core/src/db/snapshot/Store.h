@@ -68,9 +68,12 @@ class Store {
             op.GetStepHolders());
 
         ID_TYPE result_id;
-        session->Commit(result_id);
-        op.SetStepResult(result_id);
-        return Status::OK();
+        auto status = session->Commit(result_id);
+        if (status.ok()) {
+            op.SetStepResult(result_id);
+        }
+
+        return status;
     }
 
     template <typename T, typename OpT>
@@ -98,7 +101,7 @@ class Store {
     template <typename ResourceT>
     Status
     GetResource(ID_TYPE id, typename ResourceT::Ptr& return_v) {
-        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
+//        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         auto status = DBImp::GetInstance().Select<ResourceT>(id, return_v);
 
         if (!status.ok()) {
@@ -115,19 +118,20 @@ class Store {
 
     Status
     GetCollection(const std::string& name, CollectionPtr& return_v) {
-        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
+
+//        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         auto it = name_ids_.find(name);
         if (it == name_ids_.end()) {
             return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
         }
         auto& id = it->second;
-        lock.unlock();
+//        lock.unlock();
         return GetResource<Collection>(id, return_v);
     }
 
     Status
     RemoveCollection(ID_TYPE id) {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+//        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto rc_ctx_p = ResourceContextBuilder<Collection>().SetTable(Collection::Name)
             .SetOp(oDelete).SetID(id).CreatePtr();
 
@@ -138,7 +142,7 @@ class Store {
     template <typename ResourceT>
     Status
     RemoveResource(ID_TYPE id) {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+//        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto rc_ctx_p = ResourceContextBuilder<ResourceT>().SetTable(ResourceT::Name)
             .SetOp(oDelete).SetID(id).CreatePtr();
 
@@ -148,7 +152,7 @@ class Store {
 
     IDS_TYPE
     AllActiveCollectionIds(bool reversed = true) const {
-        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
+//        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         IDS_TYPE ids;
         IDS_TYPE selected_ids;
         DBImp::GetInstance().SelectResourceIDs(Collection::Name, selected_ids, "", "");
@@ -166,7 +170,6 @@ class Store {
 
     IDS_TYPE
     AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
-        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         IDS_TYPE ids, selected_ids;
         DBImp::GetInstance().SelectResourceIDs(CollectionCommit::Name, selected_ids, F_COLLECTON_ID, std::to_string(collection_id));
 
@@ -210,7 +213,7 @@ class Store {
     template <typename ResourceT>
     Status
     CreateResource(ResourceT&& resource, typename ResourceT::Ptr& return_v) {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+//        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto res_p = std::make_shared<ResourceT>(resource);
         auto res_ctx_p = ResourceContextBuilder<ResourceT>().SetOp(oAdd).SetResource(res_p).CreatePtr();
 
@@ -224,7 +227,7 @@ class Store {
         return_v->SetID(result_id);
         return_v->ResetCnt();
 
-        lock.unlock();
+//        lock.unlock();
 //        auto status = GetResource<ResourceT>(res->GetID(), return_v);
         /* std::cout << ">>> [Create] " << ResourceT::Name << " " << id; */
         /* std::cout << " " << std::boolalpha << res->IsActive() << std::endl; */

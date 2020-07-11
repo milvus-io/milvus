@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <mutex>
+
 #include <mysql++/mysql++.h>
 
 #include "db/Options.h"
@@ -45,7 +47,7 @@ class MySqlEngine: public DBEngine {
     std::shared_ptr<meta::MySQLConnectionPool> mysql_connection_pool_;
     bool safe_grab_ = false;  // Safely graps a connection from mysql pool
 
-//    std::mutex meta_mutex_;
+    std::mutex meta_mutex_;
 //    std::mutex genid_mutex_;
 };
 

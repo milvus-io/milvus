@@ -362,6 +362,9 @@ Status
 MySqlEngine::Query(const std::string& query_sql, AttrsMapList& attrs) {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+        std::lock_guard<std::mutex> lock(meta_mutex_);
+
         mysqlpp::Query query = connectionPtr->query(query_sql);
         auto res = query.store();
         if (!res) {
@@ -401,6 +404,7 @@ MySqlEngine::ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
         mysqlpp::Transaction trans(*connectionPtr, mysqlpp::Transaction::serializable, mysqlpp::Transaction::session);
 
+        std::lock_guard<std::mutex> lock(meta_mutex_);
 //        mysqlpp::Query query = connectionPtr->query();
 //        std::cout << "[DB] " << "<" << std::this_thread::get_id() << ">" << "Transaction start: " << std::endl;
         for (auto & context : sql_contexts) {

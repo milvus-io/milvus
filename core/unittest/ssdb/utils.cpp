@@ -195,7 +195,6 @@ SSDBTest::SetUp() {
     milvus::engine::snapshot::SegmentsHolder::GetInstance().Reset();
     milvus::engine::snapshot::SegmentCommitsHolder::GetInstance().Reset();
     milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
-
     milvus::engine::snapshot::Store::GetInstance().DoReset();
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
     milvus::engine::snapshot::Snapshots::GetInstance().Init();
@@ -207,6 +206,11 @@ SSDBTest::SetUp() {
 
 void
 SSDBTest::TearDown() {
+    milvus::engine::snapshot::IDS_TYPE ids;
+    milvus::engine::snapshot::Snapshots::GetInstance().GetCollectionIds(ids);
+    for (auto id : ids) {
+        milvus::engine::snapshot::Snapshots::GetInstance().DropCollection(id, 0);
+    }
     db_ = nullptr;
     // TODO: Temp to delay some time. OperationExecutor should wait all resources be destructed before stop
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
