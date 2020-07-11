@@ -191,6 +191,17 @@ target_link_libraries(test_hnsw ${depend_libs} ${unittest_libs} ${basic_libs})
 install(TARGETS test_hnsw DESTINATION unittest)
 
 ################################################################################
+#<HNSWSQ8NR-TEST>
+set(hnsw_sq8nr_srcs
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexHNSW_SQ8NR.cpp
+        )
+if (NOT TARGET test_hnsw_sq8nr)
+    add_executable(test_hnsw_sq8nr test_hnsw_sq8nr.cpp ${hnsw_sq8nr_srcs} ${util_srcs})
+endif ()
+target_link_libraries(test_hnsw_sq8nr ${depend_libs} ${unittest_libs} ${basic_libs})
+install(TARGETS test_hnsw_sq8nr DESTINATION unittest)
+
+################################################################################
 #<SPTAG-TEST>
 if (MILVUS_SUPPORT_SPTAG)
     set(sptag_srcs

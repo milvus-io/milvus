@@ -56,7 +56,6 @@ namespace hnswlib_nm {
 
             is_sq8_ = false;
             sq_ = nullptr;
-            sqdc_ = nullptr;
 
             level_generator_.seed(random_seed);
 
@@ -104,7 +103,6 @@ namespace hnswlib_nm {
             delete visited_list_pool_;
 
             if (sq_) delete sq_;
-            if (sqdc_) delete sqdc_;
 
             // linxj: delete
             delete space;
@@ -126,7 +124,6 @@ namespace hnswlib_nm {
 
         bool is_sq8_ = false;
         faiss::ScalarQuantizer *sq_ = nullptr;
-        faiss::SQDistanceComputer *sqdc_ = nullptr;
 
         double mult_, revSize_;
         int maxlevel_;
@@ -160,31 +157,28 @@ namespace hnswlib_nm {
             return ((char*)pdata + offset * data_size_);
         }
 
-        void SetSq8(bool set_sq8) {
-            is_sq8_ = set_sq8;
-            if (is_sq8_) {
-                sq_ = new faiss::ScalarQuantizer(*(size_t*)dist_func_param_, faiss::QuantizerType::QT_8bit); // hard code
-            }
+
+        void SetSq8(const float *trained) {
+            if (!trained)
+                throw std::runtime_error("trained sq8 data cannot be null in SetSq8!");
+            if (sq_) delete sq_;
+            is_sq8_ = true;
+            sq_ = new faiss::ScalarQuantizer(*(size_t*)dist_func_param_, faiss::QuantizerType::QT_8bit); // hard code
+            sq_->trained.resize((sq_->d) << 1);
+            memcpy(sq_->trained.data(), trained, sq_->trained.size() * sizeof(float));
         }
 
         void sq_train(size_t nb, const float *xb, uint8_t *p_codes) {
-            if (!is_sq8_) {
-                throw std::runtime_error("is_sq8 should be set true by interface SetSq8(true) before you  invoke sq_train!");
-            }
-            if (!sq_) {
-                sq_ = new faiss::ScalarQuantizer(*(size_t*)dist_func_param_, faiss::QuantizerType::QT_8bit); // hard code
-            }
+            if (!p_codes)
+                throw std::runtime_error("p_codes cannot be null in sq_train!");
+            if (!xb)
+                throw std::runtime_error("base vector cannot be null in sq_train!");
+            if (sq_) delete sq_;
+            is_sq8_ = true;
+            sq_ = new faiss::ScalarQuantizer(*(size_t*)dist_func_param_, faiss::QuantizerType::QT_8bit); // hard code
             sq_->train(nb, xb);
             sq_->compute_codes(xb, p_codes, nb);
             memcpy(p_codes + *(size_t*)dist_func_param_ * nb, sq_->trained.data(), *(size_t*)dist_func_param_ * sizeof(float) * 2);
-            if (metric_type_ == 0) { // L2
-                sqdc_ = new DCClassL2(sq_->d, sq_->trained);
-            } else if (metric_type_ == 1) { // IP
-                sqdc_ = new DCClassIP(sq_->d, sq_->trained);
-            } else {
-                throw std::runtime_error("unsupported metric_type, it must be 0(L2) or 1(IP)!");
-            }
-            sqdc_->code_size = sq_->code_size;
         }
 
         int getRandomLevel(double reverse_size) {
@@ -282,9 +276,18 @@ namespace hnswlib_nm {
             vl_type *visited_array = vl->mass;
             vl_type visited_array_tag = vl->curV;
 
+            faiss::SQDistanceComputer *sqdc = nullptr;
             if (is_sq8_) {
-                sqdc_->codes = (uint8_t*)pdata;
-                sqdc_->set_query((const float*)data_point);
+                if (metric_type_ == 0) { // L2
+                    sqdc = new DCClassL2(sq_->d, sq_->trained);
+                } else if (metric_type_ == 1) { // IP
+                    sqdc = new DCClassIP(sq_->d, sq_->trained);
+                } else {
+                    throw std::runtime_error("unsupported metric_type, it must be 0(L2) or 1(IP)!");
+                }
+                sqdc->code_size = sq_->code_size;
+                sqdc->codes = (uint8_t*)pdata;
+                sqdc->set_query((const float*)data_point);
             }
 
             std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates;
@@ -295,7 +298,7 @@ namespace hnswlib_nm {
             if (!has_deletions || !bitset->test((faiss::ConcurrentBitset::id_type_t)(ep_id))) {
                 dist_t dist;
                 if (is_sq8_) {
-                    dist = (*sqdc_)(ep_id);
+                    dist = (*sqdc)(ep_id);
                 } else {
                     dist = fstdistfunc_(data_point, getDataByInternalId(pdata, ep_id), dist_func_param_);
                 }
@@ -345,7 +348,7 @@ namespace hnswlib_nm {
 
                         dist_t dist;
                         if (is_sq8_) {
-                            dist = (*sqdc_)(candidate_id);
+                            dist = (*sqdc)(candidate_id);
                         } else {
                             char *currObj1 = (getDataByInternalId(pdata, candidate_id));
                             dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
@@ -373,6 +376,7 @@ namespace hnswlib_nm {
             }
 
             visited_list_pool_->releaseVisitedList(vl);
+            if (is_sq8_) delete sqdc;
             return top_candidates;
         }
 
@@ -1117,10 +1121,19 @@ namespace hnswlib_nm {
 
             tableint currObj = enterpoint_node_;
             dist_t curdist;
+            faiss::SQDistanceComputer *sqdc = nullptr;
             if (is_sq8_) {
-                sqdc_->set_query((const float*)query_data);
-                sqdc_->codes = (uint8_t*)pdata;
-                curdist = (*sqdc_)(currObj);
+                if (metric_type_ == 0) { // L2
+                    sqdc = new DCClassL2(sq_->d, sq_->trained);
+                } else if (metric_type_ == 1) { // IP
+                    sqdc = new DCClassIP(sq_->d, sq_->trained);
+                } else {
+                    throw std::runtime_error("unsupported metric_type, it must be 0(L2) or 1(IP)!");
+                }
+                sqdc->code_size = sq_->code_size;
+                sqdc->set_query((const float*)query_data);
+                sqdc->codes = (uint8_t*)pdata;
+                curdist = (*sqdc)(currObj);
             } else {
                 curdist = fstdistfunc_(query_data, getDataByInternalId(pdata, enterpoint_node_), dist_func_param_);
             }
@@ -1140,7 +1153,7 @@ namespace hnswlib_nm {
                             throw std::runtime_error("cand error");
                         dist_t d;
                         if (is_sq8_) {
-                            d = (*sqdc_)(cand);
+                            d = (*sqdc)(cand);
                         } else {
                             d = fstdistfunc_(query_data, getDataByInternalId(pdata, cand), dist_func_param_);
                         }
@@ -1174,6 +1187,7 @@ namespace hnswlib_nm {
                 result.push(std::pair<dist_t, labeltype>(rez.first, rez.second));
                 top_candidates.pop();
             }
+            if (is_sq8_) delete sqdc;
             return result;
         };
 
