@@ -28,7 +28,7 @@ class HNSWSQ8NRTest : public DataGen, public TestWithParam<std::string> {
         IndexType = GetParam();
         std::cout << "IndexType from GetParam() is: " << IndexType << std::endl;
         Generate(64, 10000, 10);  // dim = 64, nb = 10000, nq = 10
-//        Generate(2, 10, 2);  // dim = 64, nb = 10000, nq = 10
+                                  //        Generate(2, 10, 2);  // dim = 64, nb = 10000, nq = 10
         index_ = std::make_shared<milvus::knowhere::IndexHNSW_SQ8NR>();
         conf = milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, 64},        {milvus::knowhere::meta::TOPK, 10},
@@ -75,13 +75,13 @@ TEST_P(HNSWSQ8NRTest, HNSW_basic) {
     // Serialize and Load before Query
     milvus::knowhere::BinarySet bs = index_->Serialize();
 
-//    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
-//    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
-//    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
-//    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
-//    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
-//    bptr->size = dim * rows * sizeof(float);
-//    bs.Append(RAW_DATA, bptr);
+    //    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    //    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+    //    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    //    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
+    //    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    //    bptr->size = dim * rows * sizeof(float);
+    //    bs.Append(RAW_DATA, bptr);
 
     index_->Load(bs);
 
@@ -105,13 +105,13 @@ TEST_P(HNSWSQ8NRTest, HNSW_delete) {
     // Serialize and Load before Query
     milvus::knowhere::BinarySet bs = index_->Serialize();
 
-//    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
-//    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
-//    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
-//    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
-//    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
-//    bptr->size = dim * rows * sizeof(float);
-//    bs.Append(RAW_DATA, bptr);
+    //    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    //    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+    //    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    //    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
+    //    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    //    bptr->size = dim * rows * sizeof(float);
+    //    bs.Append(RAW_DATA, bptr);
 
     index_->Load(bs);
 
