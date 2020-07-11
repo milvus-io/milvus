@@ -49,6 +49,7 @@ class SegmentFieldElementVisitor {
     SetFieldElement(snapshot::FieldElementPtr field_element) {
         field_element_ = field_element;
     }
+
     void
     SetFile(snapshot::SegmentFilePtr file) {
         file_ = file;
@@ -58,6 +59,7 @@ class SegmentFieldElementVisitor {
     GetElement() const {
         return field_element_;
     }
+
     const snapshot::SegmentFilePtr
     GetFile() const {
         return file_;
@@ -67,6 +69,7 @@ class SegmentFieldElementVisitor {
     snapshot::FieldElementPtr field_element_;
     snapshot::SegmentFilePtr file_;
 };
+using SegmentFieldElementVisitorPtr = std::shared_ptr<SegmentFieldElementVisitor>;
 
 class SegmentFieldVisitor {
  public:
@@ -98,10 +101,22 @@ class SegmentFieldVisitor {
         elements_map_[element->GetElement()->GetID()] = element;
     }
 
+    const ElementT
+    GetElementVisitor(const FieldElementType elem_type) const {
+        for (auto& kv : elements_map_) {
+            auto& ev = kv.second;
+            if (ev->GetElement()->GetFtype() == elem_type) {
+                return ev;
+            }
+        }
+        return nullptr;
+    }
+
  protected:
     ElementsMapT elements_map_;
     snapshot::FieldPtr field_;
 };
+using SegmentFieldVisitorPtr = SegmentFieldVisitor::Ptr;
 
 class SegmentVisitor {
  public:
@@ -127,6 +142,7 @@ class SegmentVisitor {
         }
         return it->second;
     }
+
     FieldVisitorT
     GetFieldVisitor(const std::string& field_name) const {
         auto it = name_map_.find(field_name);
@@ -159,6 +175,7 @@ class SegmentVisitor {
     IdMapT id_map_;
     NameMapT name_map_;
 };
+using SegmentVisitorPtr = SegmentVisitor::Ptr;
 
 }  // namespace engine
 }  // namespace milvus

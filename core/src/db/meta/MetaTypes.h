@@ -114,6 +114,8 @@ enum DataType {
 
     STRING = 20,
 
+    UID = 30,
+
     VECTOR_BINARY = 100,
     VECTOR_FLOAT = 101,
     VECTOR = 200,
