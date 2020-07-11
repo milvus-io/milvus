@@ -11,7 +11,9 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
+#include <string>
 
 #include "db/snapshot/Event.h"
 
@@ -42,18 +44,19 @@ class HandlerFactory {
  public:
     using ThisT = HandlerFactory<T>;
 
-    static ThisT& GetInstance() {
-       static ThisT factory;
-       return factory;
+    static ThisT&
+    GetInstance() {
+        static ThisT factory;
+        return factory;
     }
 
     IEventHandler::Ptr
     GetHandler(const std::string& event_name) {
-       auto it = registry_.find(event_name);
-       if (it == registry_.end()) {
-           return nullptr;
-       }
-       return it->second->GetHandler();
+        auto it = registry_.find(event_name);
+        if (it == registry_.end()) {
+            return nullptr;
+        }
+        return it->second->GetHandler();
     }
 
     void
@@ -73,7 +76,7 @@ class EventHandlerRegistrar : public IEventHandlerRegistrar {
  public:
     using FactoryT = HandlerFactory<T>;
     using HandlerPtr = typename HandlerT::Ptr;
-    EventHandlerRegistrar(const std::string& event_name) : event_name_(event_name) {
+    explicit EventHandlerRegistrar(const std::string& event_name) : event_name_(event_name) {
         auto& factory = FactoryT::GetInstance();
         factory.Register(this, event_name_);
     }
@@ -87,10 +90,10 @@ class EventHandlerRegistrar : public IEventHandlerRegistrar {
     std::string event_name_;
 };
 
-#define REGISTER_HANDLER(EXECUTOR, HANDLER) \
-    namespace { \
-      static milvus::engine::snapshot::EventHandlerRegistrar<EXECUTOR, HANDLER> \
-      EXECUTOR ## HANDLER ## _registrar( HANDLER ::EventName ); \
+#define REGISTER_HANDLER(EXECUTOR, HANDLER)                                                                  \
+    namespace {                                                                                              \
+    static milvus::engine::snapshot::EventHandlerRegistrar<EXECUTOR, HANDLER> EXECUTOR##HANDLER##_registrar( \
+        HANDLER ::EventName);                                                                                \
     }
 
 }  // namespace snapshot

@@ -59,7 +59,8 @@ class Operations : public std::enable_shared_from_this<Operations> {
         return context_.lsn;
     }
 
-    void SetContextLsn(LSN_TYPE lsn) {
+    void
+    SetContextLsn(LSN_TYPE lsn) {
         context_.lsn = lsn;
     }
 
