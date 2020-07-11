@@ -21,6 +21,7 @@
 
 #include "Vectors.h"
 #include "codecs/snapshot/SSCodec.h"
+#include "db/Types.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "storage/disk/DiskIOReader.h"
@@ -52,11 +53,29 @@ SSSegmentReader::LoadCache(bool& in_cache) {
 Status
 SSSegmentReader::Load() {
     try {
-        //        auto& ss_codec = codec::SSCodec::instance();
+        // auto& ss_codec = codec::SSCodec::instance();
 
         auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+
+        /* load UID's raw data */
+        auto uid_raw_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+        std::string uid_raw_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_raw_visitor->GetFile());
+        std::vector<segment::doc_id_t> uids;
+        STATUS_CHECK(LoadUids(uid_raw_path, segment_ptr_->vectors_ptr_->GetMutableUids()));
+
+        /* load UID's deleted docs */
+        auto uid_del_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
+        std::string uid_del_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_del_visitor->GetFile());
+        segment::DeletedDocsPtr deleted_docs_ptr;
+        STATUS_CHECK(LoadDeletedDocs(uid_del_path, segment_ptr_->deleted_docs_ptr_));
+
+        /* load other data */
         for (auto& f_kv : field_visitors_map) {
             auto& field_visitor = f_kv.second;
+            auto& field = field_visitor->GetField();
             for (auto& file_kv : field_visitor->GetElementVistors()) {
                 auto& field_element_visitor = file_kv.second;
 
@@ -67,25 +86,14 @@ SSSegmentReader::Load() {
                 auto file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_file);
                 auto& field_element = field_element_visitor->GetElement();
 
-                switch (field_element->GetFtype()) {
-                    case engine::snapshot::FieldElementType::FET_UIDS:
-                        LoadUids(file_path, segment_ptr_->vectors_ptr_->GetMutableUids());
-                        break;
-                    case engine::snapshot::FieldElementType::FET_DELETED_DOCS:
-                        LoadDeletedDocs(file_path, segment_ptr_->deleted_docs_ptr_);
-                        break;
-                    case engine::snapshot::FieldElementType::FET_VECTOR_RAW:
-                        LoadVectors(file_path, 0, INT64_MAX, segment_ptr_->vectors_ptr_->GetMutableData());
-                        break;
-                        //                    case engine::snapshot::FieldElementType::FET_ATTR_RAW:
-                        //                        ss_codec.GetAttrsFormat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
-                        //                        break;
-                        //                    case engine::snapshot::FieldElementType::FET_ATTR_INDEX:
-                        //                        ss_codec.GetAttrsIndexFormat()->read(fs_ptr_,
-                        //                        segment_ptr_->attrs_index_ptr_); break;
-                    default:
-                        break;
+                if ((field->GetFtype() == engine::FieldType::VECTOR_FLOAT ||
+                     field->GetFtype() == engine::FieldType::VECTOR_BINARY) &&
+                    field_element->GetFtype() == engine::FieldElementType::FET_RAW) {
+                    STATUS_CHECK(LoadVectors(file_path, 0, INT64_MAX, segment_ptr_->vectors_ptr_->GetMutableData()));
                 }
+
+                /* SS TODO: load attr data ? */
+
             }
         }
     } catch (std::exception& e) {

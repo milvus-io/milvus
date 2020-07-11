@@ -117,8 +117,30 @@ SSSegmentWriter::SetVectorIndex(const milvus::knowhere::VecIndexPtr& index) {
 Status
 SSSegmentWriter::Serialize() {
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+    auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+
+    /* write UID's raw data */
+    auto uid_raw_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+    std::string uid_raw_path =
+        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_raw_visitor->GetFile());
+    STATUS_CHECK(WriteUids(uid_raw_path, segment_ptr_->vectors_ptr_->GetUids()));
+
+    /* write UID's deleted docs */
+    auto uid_del_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
+    std::string uid_del_path =
+        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_del_visitor->GetFile());
+    STATUS_CHECK(WriteDeletedDocs(uid_del_path, segment_ptr_->deleted_docs_ptr_));
+
+    /* write UID's bloom filter */
+    auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
+    std::string uid_blf_path =
+        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_blf_visitor->GetFile());
+    STATUS_CHECK(WriteBloomFilter(uid_blf_path, segment_ptr_->id_bloom_filter_ptr_));
+
+    /* write other data */
     for (auto& f_kv : field_visitors_map) {
         auto& field_visitor = f_kv.second;
+        auto& field = field_visitor->GetField();
         for (auto& file_kv : field_visitor->GetElementVistors()) {
             auto& field_element_visitor = file_kv.second;
 
@@ -129,29 +151,14 @@ SSSegmentWriter::Serialize() {
             auto file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_file);
             auto& field_element = field_element_visitor->GetElement();
 
-            switch (field_element->GetFtype()) {
-                case engine::snapshot::FieldElementType::FET_UIDS:
-                    STATUS_CHECK(WriteUids(file_path, segment_ptr_->vectors_ptr_->GetUids()));
-                    break;
-                case engine::snapshot::FieldElementType::FET_BLOOMFILTER:
-                    STATUS_CHECK(WriteBloomFilter(file_path));
-                    break;
-                case engine::snapshot::FieldElementType::FET_DELETED_DOCS:
-                    // Write an empty deleted doc
-                    STATUS_CHECK(WriteDeletedDocs(file_path));
-                    break;
-                case engine::snapshot::FieldElementType::FET_VECTOR_RAW:
-                    STATUS_CHECK(WriteVectors(file_path, segment_ptr_->vectors_ptr_->GetData()));
-                    break;
-                case engine::snapshot::FieldElementType::FET_ATTR_RAW:
-                    STATUS_CHECK(WriteAttrs());
-                    break;
-                case engine::snapshot::FieldElementType::FET_ATTR_INDEX:
-                    STATUS_CHECK(WriteAttrsIndex());
-                    break;
-                default:
-                    break;
+            if ((field->GetFtype() == engine::FieldType::VECTOR_FLOAT ||
+                 field->GetFtype() == engine::FieldType::VECTOR_BINARY) &&
+                field_element->GetFtype() == engine::FieldElementType::FET_RAW) {
+                STATUS_CHECK(WriteVectors(file_path, segment_ptr_->vectors_ptr_->GetData()));
             }
+
+            /* SS TODO: write attr data ? */
+
         }
     }
 

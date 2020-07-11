@@ -11,27 +11,27 @@
 
 #pragma once
 
+#include <faiss/Index.h>
+
+#include <cstdint>
+#include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
+#include "db/engine/ExecutionEngine.h"
 #include "db/meta/MetaTypes.h"
+#include "segment/Types.h"
+#include "utils/Json.h"
 
 namespace milvus {
 namespace engine {
-namespace snapshot {
 
-using ID_TYPE = int64_t;
-using NUM_TYPE = int64_t;
-using FTYPE_TYPE = int64_t;
-using TS_TYPE = int64_t;
-using LSN_TYPE = int64_t;
-using SIZE_TYPE = uint64_t;
-using MappingT = std::set<ID_TYPE>;
-using IDS_TYPE = std::vector<ID_TYPE>;
+const char* DEFAULT_UID_NAME = "_uid";
+const char* DEFAULT_BLOOM_FILTER_NAME = "_blf";
+const char* DEFAULT_DELETED_DOCS_NAME = "_del";
 
-enum State { PENDING = 0, ACTIVE = 1, DEACTIVE = 2, INVALID = 999 };
-
-}  // namespace snapshot
 }  // namespace engine
 }  // namespace milvus

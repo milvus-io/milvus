@@ -77,5 +77,19 @@ struct QueryResult {
 using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;
 
+extern const char* DEFAULT_UID_NAME;
+extern const char* DEFAULT_BLOOM_FILTER_NAME;
+extern const char* DEFAULT_DELETED_DOCS_NAME;
+
+using FieldType = meta::hybrid::DataType;
+
+enum FieldElementType {
+    FET_NONE = 0,
+    FET_RAW = 1,
+    FET_BLOOM_FILTER = 2,
+    FET_DELETED_DOCS = 3,
+    FET_INDEX = 4,
+};
+
 }  // namespace engine
 }  // namespace milvus
