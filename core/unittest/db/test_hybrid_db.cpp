@@ -218,7 +218,7 @@ TEST_F(DBTest, HYBRID_DB_TEST) {
     //    stat = db_->CreateIndex(COLLECTION_NAME, index);
     //    ASSERT_TRUE(stat.ok());
 }
-
+/*
 TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     milvus::engine::meta::CollectionSchema collection_info;
     milvus::engine::meta::hybrid::FieldsSchema fields_info;
@@ -258,7 +258,7 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     ASSERT_TRUE(stat.ok());
     //    ASSERT_EQ(result.row_num_, NQ);
     //    ASSERT_EQ(result.result_ids_.size(), NQ * TOPK);
-}
+}*/
 
 TEST_F(DBTest, COMPACT_TEST) {
     milvus::engine::meta::CollectionSchema collection_info;
