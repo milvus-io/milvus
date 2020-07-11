@@ -259,7 +259,7 @@ TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     //    ASSERT_EQ(result.row_num_, NQ);
     //    ASSERT_EQ(result.result_ids_.size(), NQ * TOPK);
 }
-
+/*
 TEST_F(DBTest, COMPACT_TEST) {
     milvus::engine::meta::CollectionSchema collection_info;
     milvus::engine::meta::hybrid::FieldsSchema fields_info;
@@ -311,7 +311,7 @@ TEST_F(DBTest, COMPACT_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(result_ids[0], -1);
     ASSERT_EQ(result_distances[0], std::numeric_limits<float>::max());
-}
+}*/
 
 TEST_F(DBTest2, GET_ENTITY_BY_ID_TEST) {
     milvus::engine::meta::CollectionSchema collection_schema;
