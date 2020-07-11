@@ -1172,7 +1172,7 @@ TEST_F(WebControllerTest, SEARCH_BIN) {
     response = client_ptr->vectorsOp(collection_name, search_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
-
+/*
 TEST_F(WebControllerTest, SEARCH_BY_IDS) {
 #ifdef MILVUS_GPU_VERSION
     auto &config  = milvus::server::Config::GetInstance();
@@ -1219,6 +1219,7 @@ TEST_F(WebControllerTest, SEARCH_BY_IDS) {
 //        ASSERT_EQ(std::to_string(ids.at(j)), id.get<std::string>());
 //    }
 }
+*/
 
 TEST_F(WebControllerTest, GET_VECTORS_BY_IDS) {
     const OString collection_name = "test_milvus_web_get_vector_by_id_test_" + OString(RandomName().c_str());
