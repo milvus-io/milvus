@@ -292,7 +292,7 @@ XSearchTask::Execute() {
             search_job->time_stat().reduce_time += span / 1000;
         } catch (std::exception& ex) {
             LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
-            // search_job->IndexSearchDone(index_id_);  //mark as done avoid dead lock, even search failed
+            search_job->GetStatus() = Status(SERVER_UNEXPECTED_ERROR, ex.what());
         }
 
         /* step 4: notify to send result to client */
@@ -319,7 +319,6 @@ XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const sch
 
     scheduler::ResultIds buf_ids(nq * buf_k, -1);
     scheduler::ResultDistances buf_distances(nq * buf_k, 0.0);
-
     for (uint64_t i = 0; i < nq; i++) {
         size_t buf_k_j = 0, src_k_j = 0, tar_k_j = 0;
         size_t buf_idx, src_idx, tar_idx;

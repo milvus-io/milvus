@@ -22,6 +22,7 @@ add_executable(test_ssdb
         ${cache_files}
         ${codecs_files}
         ${codecs_default_files}
+        ${codecs_snapshot_files}
         ${config_files}
         ${config_handler_files}
         ${db_main_files}

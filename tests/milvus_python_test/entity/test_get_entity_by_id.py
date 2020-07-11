@@ -194,7 +194,6 @@ class TestGetBase:
         status, res = connect.get_entity_by_id(collection_new, [1]) 
         assert not status.OK()
 
-    @pytest.mark.timeout(60)
     def test_get_vector_by_id_multithreads(self, connect, collection):
         vectors = gen_vectors(nb, dim)
         status, ids = connect.insert(collection, vectors)

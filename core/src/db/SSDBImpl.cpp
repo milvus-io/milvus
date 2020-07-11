@@ -23,7 +23,6 @@
 #include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
 #include "scheduler/SchedInst.h"
-#include "segment/SegmentReader.h"
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
@@ -450,9 +449,9 @@ SSDBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_
     handler->Iterate();
     STATUS_CHECK(handler->GetStatus());
 
-    vector_data = std::move(handler->vector_data_);
+    // vector_data = std::move(handler->segment_ptr_->vectors_ptr_);
     // attr_type = std::move(handler->attr_type_);
-    attr_data = std::move(handler->attr_data_);
+    // attr_data = std::move(handler->attr_data_);
 
     return Status::OK();
 }
