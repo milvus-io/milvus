@@ -35,7 +35,8 @@ class SSIdBloomFilterFormat {
          segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     void
-    write(const storage::FSHandlerPtr& fs_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr);
+    write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+          const segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     void
     create(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr);

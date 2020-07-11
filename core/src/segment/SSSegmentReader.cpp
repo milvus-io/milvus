@@ -62,6 +62,9 @@ SSSegmentReader::Load() {
                 auto &field_element_visitor = file_kv.second;
 
                 auto &segment_file = field_element_visitor->GetFile();
+                if (segment_file == nullptr) {
+                    continue;
+                }
                 auto file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_file);
                 auto &field_element = field_element_visitor->GetElement();
 
@@ -69,18 +72,18 @@ SSSegmentReader::Load() {
                     case engine::snapshot::FieldElementType::FET_UIDS:
                         LoadUids(file_path, segment_ptr_->vectors_ptr_->GetMutableUids());
                         break;
-                    case engine::snapshot::FieldElementType::FET_VECTOR_RAW:
-                        LoadVectors(file_path, 0, INT64_MAX, segment_ptr_->vectors_ptr_->GetMutableData());
-                        break;
-//                    case engine::snapshot::fieldelementtype::fet_attr_raw:
-//                        ss_codec.getattrsformat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
-//                        break;
-//                    case engine::snapshot::fieldelementtype::fet_attr_index:
-//                        ss_codec.getattrsindexformat()->read(fs_ptr_, segment_ptr_->attrs_index_ptr_);
-//                        break;
                     case engine::snapshot::FieldElementType::FET_DELETED_DOCS:
                         LoadDeletedDocs(file_path, segment_ptr_->deleted_docs_ptr_);
                         break;
+                    case engine::snapshot::FieldElementType::FET_VECTOR_RAW:
+                        LoadVectors(file_path, 0, INT64_MAX, segment_ptr_->vectors_ptr_->GetMutableData());
+                        break;
+//                    case engine::snapshot::FieldElementType::FET_ATTR_RAW:
+//                        ss_codec.GetAttrsFormat()->read(fs_ptr_, segment_ptr_->attrs_ptr_);
+//                        break;
+//                    case engine::snapshot::FieldElementType::FET_ATTR_INDEX:
+//                        ss_codec.GetAttrsIndexFormat()->read(fs_ptr_, segment_ptr_->attrs_index_ptr_);
+//                        break;
                     default:
                         break;
                 }

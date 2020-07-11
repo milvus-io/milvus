@@ -80,7 +80,7 @@ SSVectorsFormat::read_vectors_internal(const storage::FSHandlerPtr& fs_ptr, cons
 
 void
 SSVectorsFormat::read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                                         std::vector<segment::doc_id_t>& uids) {
+                                    std::vector<segment::doc_id_t>& uids) {
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
@@ -124,6 +124,36 @@ SSVectorsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::VectorsPtr& 
 }
 
 void
+SSVectorsFormat::write_vectors_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                                        const std::vector<uint8_t>& raw_vectors) {
+    if (!fs_ptr->writer_ptr_->open(file_path.c_str())) {
+        std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
+    }
+
+    size_t rv_num_bytes = raw_vectors.size() * sizeof(uint8_t);
+    fs_ptr->writer_ptr_->write(&rv_num_bytes, sizeof(size_t));
+    fs_ptr->writer_ptr_->write((void*)raw_vectors.data(), rv_num_bytes);
+    fs_ptr->writer_ptr_->close();
+}
+
+void
+SSVectorsFormat::write_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                                     const std::vector<segment::doc_id_t>& uids) {
+    if (!fs_ptr->writer_ptr_->open(file_path.c_str())) {
+        std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
+    }
+
+    size_t uid_num_bytes = uids.size() * sizeof(segment::doc_id_t);
+    fs_ptr->writer_ptr_->write(&uid_num_bytes, sizeof(size_t));
+    fs_ptr->writer_ptr_->write((void*)uids.data(), uid_num_bytes);
+    fs_ptr->writer_ptr_->close();
+}
+
+void
 SSVectorsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::VectorsPtr& vectors) {
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
 
@@ -132,28 +162,11 @@ SSVectorsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::Vecto
 
     TimeRecorder rc("write vectors");
 
-    if (!fs_ptr->writer_ptr_->open(rv_file_path.c_str())) {
-        std::string err_msg = "Failed to open file: " + rv_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
-    }
-
-    size_t rv_num_bytes = vectors->GetData().size() * sizeof(uint8_t);
-    fs_ptr->writer_ptr_->write(&rv_num_bytes, sizeof(size_t));
-    fs_ptr->writer_ptr_->write((void*)vectors->GetData().data(), rv_num_bytes);
-    fs_ptr->writer_ptr_->close();
+    write_vectors_internal(fs_ptr, rv_file_path, vectors->GetData());
 
     rc.RecordSection("write rv done");
 
-    if (!fs_ptr->writer_ptr_->open(uid_file_path.c_str())) {
-        std::string err_msg = "Failed to open file: " + uid_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
-    }
-    size_t uid_num_bytes = vectors->GetUids().size() * sizeof(segment::doc_id_t);
-    fs_ptr->writer_ptr_->write(&uid_num_bytes, sizeof(size_t));
-    fs_ptr->writer_ptr_->write((void*)vectors->GetUids().data(), uid_num_bytes);
-    fs_ptr->writer_ptr_->close();
+    write_uids_internal(fs_ptr, uid_file_path, vectors->GetUids());
 
     rc.RecordSection("write uids done");
 }
@@ -191,6 +204,18 @@ void
 SSVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, off_t offset,
                               size_t num_bytes, std::vector<uint8_t>& raw_vectors) {
     read_vectors_internal(fs_ptr, file_path, offset, num_bytes, raw_vectors);
+}
+
+void
+SSVectorsFormat::write_uids(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                            const std::vector<segment::doc_id_t>& uids) {
+    write_uids_internal(fs_ptr, file_path, uids);
+}
+
+void
+SSVectorsFormat::write_vectors(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                               const std::vector<uint8_t>& raw_vectors) {
+    write_vectors_internal(fs_ptr, file_path, raw_vectors);
 }
 
 }  // namespace codec

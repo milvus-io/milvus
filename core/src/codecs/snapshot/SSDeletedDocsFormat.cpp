@@ -73,12 +73,12 @@ SSDeletedDocsFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string
 }
 
 void
-SSDeletedDocsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::DeletedDocsPtr& deleted_docs) {
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-    const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
+SSDeletedDocsFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                           const segment::DeletedDocsPtr& deleted_docs) {
+    const std::string del_file_path = file_path;
 
     // Create a temporary file from the existing file
-    const std::string temp_path = dir_path + "/" + "temp_del";
+    const std::string temp_path = file_path + ".temp_del";
     bool exists = boost::filesystem::exists(del_file_path);
     if (exists) {
         boost::filesystem::copy_file(del_file_path, temp_path, boost::filesystem::copy_option::fail_if_exists);

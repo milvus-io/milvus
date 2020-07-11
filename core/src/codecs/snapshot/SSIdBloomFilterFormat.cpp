@@ -47,10 +47,9 @@ SSIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::stri
 }
 
 void
-SSIdBloomFilterFormat::write(const storage::FSHandlerPtr& fs_ptr,
-                                  const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-    const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
+SSIdBloomFilterFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                             const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+    const std::string bloom_filter_file_path = file_path;
     if (scaling_bloom_flush(id_bloom_filter_ptr->GetBloomFilter()) == -1) {
         std::string err_msg =
             "Failed to write bloom filter to file: " + bloom_filter_file_path + ". " + std::strerror(errno);

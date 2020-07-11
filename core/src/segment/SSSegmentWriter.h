@@ -23,6 +23,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "db/SnapshotVisitor.h"
 #include "segment/Types.h"
 #include "storage/FSHandler.h"
 #include "utils/Status.h"
@@ -32,7 +33,7 @@ namespace segment {
 
 class SSSegmentWriter {
  public:
-    explicit SSSegmentWriter(const std::string& directory);
+    explicit SSSegmentWriter(const engine::SegmentVisitorPtr& segment_visitor);
 
     Status
     AddVectors(const std::string& name, const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
@@ -53,10 +54,10 @@ class SSSegmentWriter {
                   const std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type);
 
     Status
-    WriteBloomFilter(const IdBloomFilterPtr& bloom_filter_ptr);
+    WriteBloomFilter(const std::string& file_path, const IdBloomFilterPtr& bloom_filter_ptr);
 
     Status
-    WriteDeletedDocs(const DeletedDocsPtr& deleted_docs);
+    WriteDeletedDocs(const std::string& file_path, const DeletedDocsPtr& deleted_docs);
 
     Status
     Serialize();
@@ -87,18 +88,22 @@ class SSSegmentWriter {
 
  private:
     Status
-    WriteVectors();
+    WriteUids(const std::string& file_path, const std::vector<doc_id_t>& uids);
+
+    Status
+    WriteVectors(const std::string& file_path, const std::vector<uint8_t>& raw_vectors);
 
     Status
     WriteAttrs();
 
     Status
-    WriteBloomFilter();
+    WriteBloomFilter(const std::string& file_path);
 
     Status
-    WriteDeletedDocs();
+    WriteDeletedDocs(const std::string& file_path);
 
  private:
+    engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
     SegmentPtr segment_ptr_;
 };

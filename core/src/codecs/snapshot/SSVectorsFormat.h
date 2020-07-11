@@ -48,6 +48,14 @@ class SSVectorsFormat {
     read_vectors(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, off_t offset, size_t num_bytes,
                  std::vector<uint8_t>& raw_vectors);
 
+    void
+    write_uids(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+               const std::vector<segment::doc_id_t>& uids);
+
+    void
+    write_vectors(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                  const std::vector<uint8_t>& raw_vectors);
+
     // No copy and move
     SSVectorsFormat(const SSVectorsFormat&) = delete;
     SSVectorsFormat(SSVectorsFormat&&) = delete;
@@ -69,6 +77,14 @@ class SSVectorsFormat {
     void
     read_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                        std::vector<segment::doc_id_t>& uids);
+
+    void
+    write_vectors_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                           const std::vector<uint8_t>& raw_vectors);
+
+    void
+    write_uids_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                        const std::vector<segment::doc_id_t>& uids);
 
  private:
     const std::string raw_vector_extension_ = ".rv";
