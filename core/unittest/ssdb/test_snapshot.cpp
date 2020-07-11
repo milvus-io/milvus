@@ -1560,18 +1560,18 @@ struct FlushSchedule {
 };
 
 using IEventHandler = milvus::engine::snapshot::IEventHandler;
-struct SampleHandler : public IEventHandler {
-    static constexpr const char* EventName = "SampleHandler";
-    const char*
-    GetEventName() const override {
-        return EventName;
-    }
-};
+/* struct SampleHandler : public IEventHandler { */
+/*     static constexpr const char* EventName = "SampleHandler"; */
+/*     const char* */
+/*     GetEventName() const override { */
+/*         return EventName; */
+/*     } */
+/* }; */
 
 REGISTER_HANDLER(GCSchedule, IEventHandler);
-REGISTER_HANDLER(GCSchedule, SampleHandler);
+/* REGISTER_HANDLER(GCSchedule, SampleHandler); */
 REGISTER_HANDLER(FlushSchedule, IEventHandler);
-REGISTER_HANDLER(FlushSchedule, SampleHandler);
+/* REGISTER_HANDLER(FlushSchedule, SampleHandler); */
 
 using GCScheduleFactory = milvus::engine::snapshot::HandlerFactory<GCSchedule>;
 using FlushScheduleFactory = milvus::engine::snapshot::HandlerFactory<GCSchedule>;
@@ -1581,16 +1581,16 @@ TEST_F(SnapshotTest, RegistryTest) {
         auto& factory = GCScheduleFactory::GetInstance();
         auto ihandler = factory.GetHandler(IEventHandler::EventName);
         ASSERT_TRUE(ihandler);
-        auto sihandler = factory.GetHandler(SampleHandler::EventName);
-        ASSERT_TRUE(sihandler);
-        ASSERT_EQ(SampleHandler::EventName, sihandler->GetEventName());
+        /* auto sihandler = factory.GetHandler(SampleHandler::EventName); */
+        /* ASSERT_TRUE(sihandler); */
+        /* ASSERT_EQ(SampleHandler::EventName, sihandler->GetEventName()); */
     }
     {
-        auto& factory = FlushScheduleFactory::GetInstance();
-        auto ihandler = factory.GetHandler(IEventHandler::EventName);
-        ASSERT_TRUE(ihandler);
-        auto sihandler = factory.GetHandler(SampleHandler::EventName);
-        ASSERT_TRUE(sihandler);
-        ASSERT_EQ(SampleHandler::EventName, sihandler->GetEventName());
+        /* auto& factory = FlushScheduleFactory::GetInstance(); */
+        /* auto ihandler = factory.GetHandler(IEventHandler::EventName); */
+        /* ASSERT_TRUE(ihandler); */
+        /* auto sihandler = factory.GetHandler(SampleHandler::EventName); */
+        /* ASSERT_TRUE(sihandler); */
+        /* ASSERT_EQ(SampleHandler::EventName, sihandler->GetEventName()); */
     }
 }
