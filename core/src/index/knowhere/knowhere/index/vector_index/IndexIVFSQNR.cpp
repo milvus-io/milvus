@@ -22,11 +22,11 @@
 #include <faiss/index_factory.h>
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQNR.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #ifdef MILVUS_GPU_VERSION
-#include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
+#include "knowhere/index/vector_index/gpu/IndexGPUIVFSQNR.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
 
@@ -34,25 +34,20 @@ namespace milvus {
 namespace knowhere {
 
 void
-IVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+IVFSQNR::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
-
-    // std::stringstream index_type;
-    // index_type << "IVF" << config[IndexParams::nlist] << ","
-    //           << "SQ" << config[IndexParams::nbits];
-    // index_ = std::shared_ptr<faiss::Index>(
-    //    faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>())));
 
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
-    index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFScalarQuantizer(
-        coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), faiss::QuantizerType::QT_8bit, metric_type));
+    index_ = std::shared_ptr<faiss::Index>(
+        new faiss::IndexIVFScalarQuantizer(coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(),
+                                           faiss::QuantizerType::QT_8bit, metric_type, false));
 
     index_->train(rows, (float*)p_data);
 }
 
 VecIndexPtr
-IVFSQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
+IVFSQNR::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 #ifdef MILVUS_GPU_VERSION
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
@@ -61,7 +56,7 @@ IVFSQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 
         std::shared_ptr<faiss::Index> device_index;
         device_index.reset(gpu_index);
-        return std::make_shared<GPUIVFSQ>(device_index, device_id, res);
+        return std::make_shared<GPUIVFSQNR>(device_index, device_id, res);
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
     }
