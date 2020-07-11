@@ -24,17 +24,17 @@ namespace {
 
 const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 
-constexpr int64_t COLLECTION_DIMENSION = 512;
+constexpr int64_t COLLECTION_DIMENSION = 128;
 constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ENTITY_COUNT = 100000;
+constexpr int64_t BATCH_ENTITY_COUNT = 40000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
-constexpr int64_t NPROBE = 32;
+constexpr int64_t NPROBE = 20;
 constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
 constexpr int64_t ADD_ENTITY_LOOP = 5;
-constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
-constexpr int32_t NLIST = 16384;
+constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFSQ8NR;
+constexpr int32_t NLIST = 2048;
 
 void
 PrintEntity(const std::string& tag, const milvus::Entity& entity) {
@@ -310,9 +310,9 @@ ClientTest::Test() {
     CreateIndex(collection_name, INDEX_TYPE, NLIST);
     GetCollectionStats(collection_name);
 
-    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
-    DeleteByIds(collection_name, delete_ids);
-    CompactCollection(collection_name);
+    //std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
+    //DeleteByIds(collection_name, delete_ids);
+    //CompactCollection(collection_name);
 
     LoadCollection(collection_name);
     SearchEntities(collection_name, TOP_K, NPROBE); // this line get two search error since we delete two entities
