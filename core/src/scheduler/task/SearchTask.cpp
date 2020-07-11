@@ -326,7 +326,7 @@ XSearchTask::Execute() {
             // search_job->AccumReduceCost(span);
         } catch (std::exception& ex) {
             LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
-            //            search_job->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed
+            search_job->GetStatus() = Status(SERVER_UNEXPECTED_ERROR, ex.what());
         }
 
         // step 4: notify to send result to client
