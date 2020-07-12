@@ -59,6 +59,11 @@ class Operations : public std::enable_shared_from_this<Operations> {
         return context_.lsn;
     }
 
+    void
+    SetContextLsn(LSN_TYPE lsn) {
+        context_.lsn = lsn;
+    }
+
     virtual Status
     CheckStale(const CheckStaleFunc& checker = nullptr) const;
     virtual Status

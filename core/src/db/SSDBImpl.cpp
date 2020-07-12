@@ -262,8 +262,6 @@ SSDBImpl::CreatePartition(const std::string& collection_name, const std::string&
     if (options_.wal_enable_) {
         // SS TODO
         /* lsn = wal_mgr_->CreatePartition(collection_id, partition_tag); */
-    } else {
-        lsn = ss->GetCollection()->GetLsn();
     }
 
     snapshot::OperationContext context;
@@ -316,8 +314,6 @@ SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field
     // SS TODO: Check Index Type
 
     snapshot::OperationContext context;
-    // SS TODO: no lsn for drop index
-    context.lsn = ss->GetCollectionCommit()->GetLsn();
     STATUS_CHECK(ss->GetFieldElement(field_name, field_element_name, context.stale_field_element));
     auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
     STATUS_CHECK(op->Push());

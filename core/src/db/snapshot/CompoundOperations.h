@@ -44,9 +44,11 @@ class CompoundBaseOperation : public Operations {
     Status
     PreCheck() override {
         // TODO
-        /* if (GetContextLsn() <= GetStartedSS()->GetMaxLsn()) { */
-        /*     return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation"); */
-        /* } */
+        if (GetContextLsn() == 0) {
+            SetContextLsn(GetStartedSS()->GetMaxLsn());
+        } else if (GetContextLsn() <= GetStartedSS()->GetMaxLsn()) {
+            return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation");
+        }
         return Status::OK();
     }
 
