@@ -18,7 +18,8 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2692 Milvus hangs during multi-thread concurrent search
 -   \#2739 Fix mishards start failed
 -   \#2752 Milvus formats vectors data to double-precision and return to http client
--   \#2767 fix a bug of getting wrong nprobe limitation in knowhere on GPU version
+-   \#2767 Fix a bug of getting wrong nprobe limitation in knowhere on GPU version
+-   \#2768 After building the index,the number of vectors increases
 -   \#2776 Fix too many data copies during creating IVF index
 
 ## Feature
