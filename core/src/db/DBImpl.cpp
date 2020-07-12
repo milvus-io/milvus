@@ -2390,7 +2390,7 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
 Status
 DBImpl::UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index) {
     DropIndex(collection_id);
-
+    WaitMergeFileFinish();  // DropIndex called StartMergeTask, need to wait merge thread finish
     auto status = meta_ptr_->UpdateCollectionIndex(collection_id, index);
     fiu_do_on("DBImpl.UpdateCollectionIndexRecursively.fail_update_collection_index",
               status = Status(DB_META_TRANSACTION_FAILED, ""));
