@@ -182,6 +182,7 @@ ValidateIndexParams(const milvus::json& index_params, const engine::meta::Collec
         }
         case (int32_t)engine::EngineType::FAISS_IVFFLAT:
         case (int32_t)engine::EngineType::FAISS_IVFSQ8:
+        case (int32_t)engine::EngineType::FAISS_IVFSQ8NR:
         case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
         case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT: {
             auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
@@ -279,6 +280,7 @@ ValidateSearchParams(const milvus::json& search_params, const engine::meta::Coll
         }
         case (int32_t)engine::EngineType::FAISS_IVFFLAT:
         case (int32_t)engine::EngineType::FAISS_IVFSQ8:
+        case (int32_t)engine::EngineType::FAISS_IVFSQ8NR:
         case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
         case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT:
         case (int32_t)engine::EngineType::FAISS_PQ: {
