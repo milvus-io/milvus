@@ -70,6 +70,7 @@ const char* INDEX_FAISS_IDMAP = "IDMAP";
 const char* INDEX_FAISS_IVFFLAT = "IVF_FLAT";
 const char* INDEX_FAISS_IVFPQ = "IVF_PQ";
 const char* INDEX_FAISS_IVFSQ8 = "IVF_SQ8";
+const char* INDEX_FAISS_IVFSQ8NR = "IVF_SQ8NR";
 const char* INDEX_FAISS_IVFSQ8H = "IVF_SQ8_HYBRID";
 const char* INDEX_FAISS_BIN_IDMAP = "BIN_IDMAP";
 const char* INDEX_FAISS_BIN_IVFFLAT = "BIN_IVF_FLAT";
@@ -81,7 +82,6 @@ const char* INDEX_SPTAG_BKT_RNT = "SPTAG_BKT_RNT";
 const char* INDEX_HNSW = "HNSW";
 const char* INDEX_ANNOY = "ANNOY";
 const char* INDEX_HNSW_SQ8NR = "HNSW_SQ8NR";
-const char* INDEX_FAISS_IVFSQ8NR = "IVFSQ8NR";
 }  // namespace IndexEnum
 
 std::string

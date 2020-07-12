@@ -15,7 +15,7 @@ from utils import *
 
 dim = 128
 collection_id = "test_search"
-add_interval_time = 2
+add_interval_time = 5
 vectors = gen_vectors(6000, dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
