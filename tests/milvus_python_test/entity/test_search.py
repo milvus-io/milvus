@@ -80,9 +80,6 @@ class TestSearchBase:
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] == IndexType.IVF_SQ8H:
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     @pytest.fixture(
@@ -167,12 +164,9 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type == IndexType.IVF_PQ:
-            pytest.skip("Skip PQ")
-
         vectors, ids = self.init_data(connect, collection)
         status = connect.create_index(collection, index_type, index_param)
-        query_vec = [vectors[0]]
+        query_vec = [vectors[0], vectors[1]]
         search_param = get_search_param(index_type)
         status, result = connect.search(collection, top_k, query_vec, params=search_param)
         logging.getLogger().info(result)
@@ -180,7 +174,8 @@ class TestSearchBase:
             assert status.OK()
             assert len(result[0]) == min(len(vectors), top_k)
             assert check_result(result[0], ids[0])
-            assert result[0][0].distance <= epsilon
+            assert result[0][0].distance < result[0][1].distance
+            assert result[1][0].distance < result[1][1].distance
         else:
             assert not status.OK()
 
@@ -412,9 +407,8 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type in [IndexType.RNSG, IndexType.IVF_PQ]:
-            pytest.skip("rnsg not support in ip, skip pq")
-
+        if index_type in [IndexType.RNSG]:
+            pytest.skip("rnsg not support in ip")
         vectors, ids = self.init_data(connect, ip_collection)
         status = connect.create_index(ip_collection, index_type, index_param)
         query_vec = [vectors[0]]
@@ -424,7 +418,7 @@ class TestSearchBase:
         assert status.OK()
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
-        assert result[0][0].distance >= 1 - gen_inaccuracy(result[0][0].distance)
+        assert result[0][0].distance >= result[0][1].distance
 
     def test_search_ip_large_nq_index_params(self, connect, ip_collection, get_simple_index):
         '''
