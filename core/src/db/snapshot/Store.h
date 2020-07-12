@@ -131,21 +131,8 @@ class Store {
 
     Status
     GetCollections(const std::string& name, std::vector<CollectionPtr>& returns_v) {
-        // TODO: Get active collection
         std::string field_value = "\'" + name + "\'";
         return DBImp::GetInstance().SelectBy<Collection>(NameField::Name, field_value, returns_v);
-//        if (!status.ok()) {
-//            return status;
-//        }
-//
-//        for (auto& res : resources) {
-//            if (res->IsActive()) {
-//                return_v = res;
-//                return Status::OK();
-//            }
-//        }
-//
-//        return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
     }
 
     Status
@@ -171,7 +158,7 @@ class Store {
     AllActiveCollectionIds(bool reversed = true) const {
         IDS_TYPE ids;
         IDS_TYPE selected_ids;
-        DBImp::GetInstance().SelectResourceIDs(Collection::Name, selected_ids, "", "");
+        DBImp::GetInstance().SelectResourceIDs<Collection>(selected_ids, "", "");
 
         if (!reversed) {
             ids = selected_ids;
@@ -187,7 +174,7 @@ class Store {
     IDS_TYPE
     AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
         IDS_TYPE ids, selected_ids;
-        DBImp::GetInstance().SelectResourceIDs(CollectionCommit::Name, selected_ids, F_COLLECTON_ID, std::to_string(collection_id));
+        DBImp::GetInstance().SelectResourceIDs<CollectionCommit>(selected_ids, F_COLLECTON_ID, std::to_string(collection_id));
 
         if (!reversed) {
             ids = selected_ids;

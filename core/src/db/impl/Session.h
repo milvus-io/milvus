@@ -29,18 +29,6 @@ namespace engine {
 namespace snapshot {
 
 ///////////////////////////////////////////////////////////////////////////////////////
-//class AbstractSession {
-// public:
-////    template <typename T>
-////    virtual Status
-////    Select(const std::string& table, int64_t id, typename T::Ptr& resource) = 0;
-//
-//    virtual Status
-//    Apply(ResourceContextPtr resp) = 0;
-//
-//    virtual Status
-//    Commit(std::vector<int64_t>& result_ids) = 0;
-//};
 
 class Session {
  public:
@@ -53,7 +41,7 @@ class Session {
  public:
     template <typename ResourceT>
     Status
-    Select(const std::string field, const std::string& value, std::vector<typename ResourceT::Ptr>& resources);
+    Select(const std::string& field, const std::string& value, std::vector<typename ResourceT::Ptr>& resources);
 
     template<typename ResourceT>
     Status
@@ -134,9 +122,14 @@ class Session {
 
 template <typename T>
 Status
-Session::Select(const std::string field, const std::string& value, std::vector<typename T::Ptr>& resources) {
-    std::string sql = "SELECT * FROM " + std::string(T::Name) + " WHERE " + field + " = " + value + ";";
-    std::cout << sql << std::endl;
+Session::Select(const std::string& field, const std::string& value, std::vector<typename T::Ptr>& resources) {
+//    std::string sql = "SELECT * FROM " + std::string(T::Name) + " WHERE " + field + " = " + value + ";";
+    std::string sql = "SELECT * FROM " + std::string(T::Name);
+    if (!field.empty()) {
+        sql +=  + " WHERE " + field + " = " + value;
+    }
+    sql += ";";
+
     AttrsMapList attrs;
 
     auto status = db_engine_->Query(sql, attrs);
@@ -300,7 +293,6 @@ Session::Apply(ResourceContextPtr<ResourceT> resp) {
     } else if (resp->Op() == oUpdate) {
         status = ResourceContextToUpdateSql<ResourceT>(resp, sql);
     } else if (resp->Op() == oDelete) {
-//        ID_TYPE id = resp->ID();
         status = ResourceContextToDeleteSql<ResourceT>(resp, sql);
     }
 
@@ -317,8 +309,6 @@ Session::Apply(ResourceContextPtr<ResourceT> resp) {
         AttrValue2Str<ResourceT>(resp->Resource(), F_ID, id);
         context.id_ = std::stol(id);
     }
-//    IntValueOfAttr<ResourceT>(resp->Resource(), F_ID, id);
-//    sql_statements.push_back(sql);
     context.sql_ = sql;
     sql_context_.push_back(context);
 
@@ -326,7 +316,6 @@ Session::Apply(ResourceContextPtr<ResourceT> resp) {
 }
 
 using SessionPtr = std::shared_ptr<Session>;
-//using MockSessionPtr = std::shared_ptr<MockSession>;
 
 }  // namespace snapshot
 }  // namespace engine

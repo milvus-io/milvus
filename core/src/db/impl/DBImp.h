@@ -61,34 +61,23 @@ class DBImp {
 
     template<typename ResourceT>
     Status
-    SelectBy(const std::string field, const std::string& value, std::vector<typename ResourceT::Ptr>& resources) {
+    SelectBy(const std::string& field, const std::string& value, std::vector<typename ResourceT::Ptr>& resources) {
         auto session = CreateSession();
         return session->Select<ResourceT>(field, value, resources);
-//
-//        if (status.ok() && resources.empty()) {
-//            return Status(SERVER_UNEXPECTED_ERROR, "Cannot find target resource in DB");
-//        }
-//
-//        return status;
     }
 
+    template<typename ResourceT>
     Status
-    SelectResourceIDs(const std::string& table, std::vector<int64_t>& ids, const std::string& filter_field, const std::string& filter_value) {
-        std::string sql = "SELECT id FROM " + table;
-        //+ " WHERE " + filter_field + " = " + filter_value + ";";
-        if (!filter_field.empty()) {
-            sql += " WHERE " + filter_field + " = " + filter_value;
-        }
-        sql += ";";
-
-        AttrsMapList attrs;
-        auto status = engine_->Query(sql, attrs);
+    SelectResourceIDs(std::vector<int64_t>& ids, const std::string& filter_field, const std::string& filter_value) {
+        std::vector<typename ResourceT::Ptr> resources;
+        auto session = CreateSession();
+        auto status = session->Select<ResourceT>(filter_field, filter_value, resources);
         if (!status.ok()) {
-            throw Exception(status.code(), status.message());
+            return status;
         }
 
-        for (auto& raw: attrs) {
-            ids.push_back(std::stol(raw[F_ID]));
+        for (auto& res: resources) {
+            ids.push_back(res->GetID());
         }
 
         return Status::OK();
