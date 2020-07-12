@@ -14,7 +14,7 @@ index_file_size = 10
 collection_id = "test_add"
 ADD_TIMEOUT = 60
 tag = "1970-01-01"
-add_interval_time = 1.5
+add_interval_time = 5 
 nb = 6000
 
 
