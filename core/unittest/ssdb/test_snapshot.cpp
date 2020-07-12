@@ -18,6 +18,7 @@
 #include <algorithm>
 
 #include "ssdb/utils.h"
+#include "db/snapshot/HandlerFactory.h"
 
 TEST_F(SnapshotTest, ResourcesTest) {
     int nprobe = 16;
@@ -416,33 +417,32 @@ TEST_F(SnapshotTest, PartitionTest) {
     }
 }
 
-// TODO: Open this test later
-/* TEST_F(SnapshotTest, PartitionTest2) { */
-/*     std::string collection_name("c1"); */
-/*     LSN_TYPE lsn = 1; */
-/*     milvus::Status status; */
+TEST_F(SnapshotTest, PartitionTest2) {
+    std::string collection_name("c1");
+    LSN_TYPE lsn = 1;
+    milvus::Status status;
 
-/*     auto ss = CreateCollection(collection_name, ++lsn); */
-/*     ASSERT_TRUE(ss); */
-/*     ASSERT_EQ(lsn, ss->GetMaxLsn()); */
+    auto ss = CreateCollection(collection_name, ++lsn);
+    ASSERT_TRUE(ss);
+    ASSERT_EQ(lsn, ss->GetMaxLsn());
 
-/*     OperationContext context; */
-/*     context.lsn = lsn; */
-/*     auto cp_op = std::make_shared<CreatePartitionOperation>(context, ss); */
-/*     std::string partition_name("p1"); */
-/*     PartitionContext p_ctx; */
-/*     p_ctx.name = partition_name; */
-/*     PartitionPtr partition; */
-/*     status = cp_op->CommitNewPartition(p_ctx, partition); */
-/*     ASSERT_TRUE(status.ok()); */
-/*     ASSERT_TRUE(partition); */
-/*     ASSERT_EQ(partition->GetName(), partition_name); */
-/*     ASSERT_FALSE(partition->IsActive()); */
-/*     ASSERT_TRUE(partition->HasAssigned()); */
+    OperationContext context;
+    context.lsn = lsn;
+    auto cp_op = std::make_shared<CreatePartitionOperation>(context, ss);
+    std::string partition_name("p1");
+    PartitionContext p_ctx;
+    p_ctx.name = partition_name;
+    PartitionPtr partition;
+    status = cp_op->CommitNewPartition(p_ctx, partition);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(partition);
+    ASSERT_EQ(partition->GetName(), partition_name);
+    ASSERT_FALSE(partition->IsActive());
+    ASSERT_TRUE(partition->HasAssigned());
 
-/*     status = cp_op->Push(); */
-/*     ASSERT_FALSE(status.ok()); */
-/* } */
+    status = cp_op->Push();
+    ASSERT_FALSE(status.ok());
+}
 
 TEST_F(SnapshotTest, IndexTest) {
     LSN_TYPE lsn = 0;
@@ -1549,4 +1549,48 @@ TEST_F(SnapshotTest, CompoundTest2) {
     }
     ASSERT_EQ(final_segments, expect_segments);
     // TODO: Check Total Segment Files Cnt
+}
+
+struct GCSchedule {
+    static constexpr const char* Name = "GCSchedule";
+};
+
+struct FlushSchedule {
+    static constexpr const char* Name = "FlushSchedule";
+};
+
+using IEventHandler = milvus::engine::snapshot::IEventHandler;
+/* struct SampleHandler : public IEventHandler { */
+/*     static constexpr const char* EventName = "SampleHandler"; */
+/*     const char* */
+/*     GetEventName() const override { */
+/*         return EventName; */
+/*     } */
+/* }; */
+
+REGISTER_HANDLER(GCSchedule, IEventHandler);
+/* REGISTER_HANDLER(GCSchedule, SampleHandler); */
+REGISTER_HANDLER(FlushSchedule, IEventHandler);
+/* REGISTER_HANDLER(FlushSchedule, SampleHandler); */
+
+using GCScheduleFactory = milvus::engine::snapshot::HandlerFactory<GCSchedule>;
+using FlushScheduleFactory = milvus::engine::snapshot::HandlerFactory<GCSchedule>;
+
+TEST_F(SnapshotTest, RegistryTest) {
+    {
+        auto& factory = GCScheduleFactory::GetInstance();
+        auto ihandler = factory.GetHandler(IEventHandler::EventName);
+        ASSERT_TRUE(ihandler);
+        /* auto sihandler = factory.GetHandler(SampleHandler::EventName); */
+        /* ASSERT_TRUE(sihandler); */
+        /* ASSERT_EQ(SampleHandler::EventName, sihandler->GetEventName()); */
+    }
+    {
+        /* auto& factory = FlushScheduleFactory::GetInstance(); */
+        /* auto ihandler = factory.GetHandler(IEventHandler::EventName); */
+        /* ASSERT_TRUE(ihandler); */
+        /* auto sihandler = factory.GetHandler(SampleHandler::EventName); */
+        /* ASSERT_TRUE(sihandler); */
+        /* ASSERT_EQ(SampleHandler::EventName, sihandler->GetEventName()); */
+    }
 }
