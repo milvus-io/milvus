@@ -35,6 +35,9 @@ class DBEngine {
 
     virtual Status
     ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std::vector<int64_t>& result_ids) = 0;
+
+    virtual Status
+    TruncateAll() = 0;
 };
 
 using DBEnginePtr = std::shared_ptr<DBEngine>;

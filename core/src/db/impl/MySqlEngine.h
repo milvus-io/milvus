@@ -36,6 +36,9 @@ class MySqlEngine: public DBEngine {
     Status
     ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std::vector<int64_t>& result_ids) override;
 
+    Status
+    TruncateAll() override;
+
  private:
     Status
     Initialize();

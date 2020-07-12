@@ -676,12 +676,12 @@ TEST_F(SnapshotTest, OperationTest) {
         stale_segment_commit_ids.insert(segment_commit->GetID());
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    // Check stale snapshot has been deleted from store
-    {
-        auto collection_commit = CollectionCommitsHolder::GetInstance().GetResource(ss_id, false);
-        ASSERT_FALSE(collection_commit);
-    }
+//    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+//    // Check stale snapshot has been deleted from store
+//    {
+//        auto collection_commit = CollectionCommitsHolder::GetInstance().GetResource(ss_id, false);
+//        ASSERT_FALSE(collection_commit);
+//    }
 
     ss_id = ss->GetID();
     ID_TYPE partition_id;

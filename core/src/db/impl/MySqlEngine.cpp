@@ -150,8 +150,8 @@ static const MetaField MetaRowCountField = MetaField(F_ROW_COUNT, "BIGINT", "NOT
 
 // Environment schema
 static const MetaSchema COLLECTION_SCHEMA(snapshot::Collection::Name,
-    {MetaIdField, MetaNameField,MetaLSNField,MetaParamsField,MetaStateField,MetaCreatedOnField,MetaUpdatedOnField},
-                                          {MetaNameField, MetaStateField});
+    {MetaIdField, MetaNameField,MetaLSNField,MetaParamsField,
+     MetaStateField,MetaCreatedOnField,MetaUpdatedOnField});
 
 // Tables schema
 static const MetaSchema COLLECTIONCOMMIT_SCHEMA(snapshot::CollectionCommit::Name,
@@ -162,9 +162,7 @@ static const MetaSchema COLLECTIONCOMMIT_SCHEMA(snapshot::CollectionCommit::Name
 // TableFiles schema
 static const MetaSchema PARTITION_SCHEMA(snapshot::Partition::Name,
     {MetaIdField, MetaNameField, MetaCollectionIdField, MetaLSNField,
-     MetaStateField, MetaCreatedOnField, MetaUpdatedOnField,},
-    {MetaNameField, MetaCollectionIdField, MetaStateField}
-);
+     MetaStateField, MetaCreatedOnField, MetaUpdatedOnField,});
 
 // Fields schema
 static const MetaSchema PARTITIONCOMMIT_SCHEMA(snapshot::PartitionCommit::Name,
@@ -444,6 +442,37 @@ MySqlEngine::ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std
     }
 
     return Status::OK();
+}
+
+Status
+MySqlEngine::TruncateAll() {
+//    std::vector<std::string>
+
+    std::vector<std::string> collecton_names = {
+    "TRUNCATE Collection;",
+                      "TRUNCATE CollectionCommit;",
+                      "TRUNCATE Field;",
+                      "TRUNCATE FieldCommit;",
+                      "TRUNCATE FieldElement;",
+                      "TRUNCATE PartitionCommit;",
+                      "TRUNCATE Partitions;",
+                      "TRUNCATE SchemaCommit;",
+                      "TRUNCATE Segment;",
+                      "TRUNCATE SegmentCommit;",
+                      "TRUNCATE SegmentFile;"};
+
+    std::vector<SqlContext> contexts;
+    for (auto & name : collecton_names) {
+        SqlContext context;
+        context.sql_ = name;
+        context.id_ = 0;
+        context.op_ = oDelete;
+
+        contexts.push_back(context);
+    }
+
+    std::vector<ID_TYPE> ids;
+    return ExecuteTransaction(contexts, ids);
 }
 
 }  // namespace milvus::engine

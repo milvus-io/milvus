@@ -136,6 +136,7 @@ template <typename T>
 Status
 Session::Select(const std::string field, const std::string& value, std::vector<typename T::Ptr>& resources) {
     std::string sql = "SELECT * FROM " + std::string(T::Name) + " WHERE " + field + " = " + value + ";";
+    std::cout << sql << std::endl;
     AttrsMapList attrs;
 
     auto status = db_engine_->Query(sql, attrs);

@@ -554,6 +554,32 @@ CreateCollectionOperation::GetRepr() const {
 Status
 CreateCollectionOperation::DoExecute(Store& store) {
     // TODO: Do some checks
+//    LoadOperationContext context;
+//    context.id = id;
+//    auto op = std::make_shared<LoadOperation<ResourceT>>(context);
+//    (*op)(store);
+//    typename ResourceT::Ptr c;
+//    auto status = op->GetResource(c);
+//    if (status.ok() && c->IsActive()) {
+//        /* if (status.ok()) { */
+//        Add(c);
+//        return c;
+//    }
+//    return nullptr;
+    std::vector<Collection::Ptr> collections;
+    auto status = store.GetCollections(c_context_.collection->GetName(), collections);
+    if (!status.ok()) {
+        std::cerr << status.ToString() << std::endl;
+        return status;
+    }
+
+    for (auto & clt: collections) {
+        std::cout << "XXXXXXXXXX " << clt->GetName() << " " << clt->GetID() << std::endl;
+        if (!clt->IsDeactive()) {
+            return Status(SS_DUPLICATED_ERROR, "Collection has exist in DB");
+        }
+    }
+
     CollectionPtr collection;
     ScopedSnapshotT ss;
     Snapshots::GetInstance().GetSnapshot(ss, c_context_.collection->GetName());
@@ -563,7 +589,7 @@ CreateCollectionOperation::DoExecute(Store& store) {
         return Status(SS_DUPLICATED_ERROR, emsg.str());
     }
 
-    auto status = store.CreateCollection(Collection(c_context_.collection->GetName()), collection);
+    status = store.CreateCollection(Collection(c_context_.collection->GetName()), collection);
     if (!status.ok()) {
         std::cerr << status.ToString() << std::endl;
         return status;

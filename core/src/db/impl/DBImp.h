@@ -115,6 +115,11 @@ class DBImp {
         return Status::OK();
     }
 
+    Status
+    TruncateAll() {
+        return engine_->TruncateAll();
+    }
+
  private:
     DBEnginePtr engine_;
 };

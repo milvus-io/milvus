@@ -130,6 +130,25 @@ class Store {
     }
 
     Status
+    GetCollections(const std::string& name, std::vector<CollectionPtr>& returns_v) {
+        // TODO: Get active collection
+        std::string field_value = "\'" + name + "\'";
+        return DBImp::GetInstance().SelectBy<Collection>(NameField::Name, field_value, returns_v);
+//        if (!status.ok()) {
+//            return status;
+//        }
+//
+//        for (auto& res : resources) {
+//            if (res->IsActive()) {
+//                return_v = res;
+//                return Status::OK();
+//            }
+//        }
+//
+//        return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
+    }
+
+    Status
     RemoveCollection(ID_TYPE id) {
         auto rc_ctx_p = ResourceContextBuilder<Collection>().SetTable(Collection::Name)
             .SetOp(oDelete).SetID(id).CreatePtr();
@@ -233,9 +252,11 @@ class Store {
 
     void
     DoReset() {
-        ids_ = MockIDST();
-        resources_ = MockResourcesT();
-        name_ids_.clear();
+//        RemoveCollection();
+        auto status = DBImp::GetInstance().TruncateAll();
+        if (!status.ok()) {
+            std::cout << "TruncateAll failed: " << status.ToString() << std::endl;
+        }
     }
 
     void
