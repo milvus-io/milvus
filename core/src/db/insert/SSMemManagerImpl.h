@@ -42,24 +42,16 @@ class SSMemManagerImpl : public SSMemManager, public server::CacheConfigHandler 
     }
 
     Status
-    InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                  const float* vectors, uint64_t lsn) override;
-
-    Status
-    InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                  const uint8_t* vectors, uint64_t lsn) override;
-
-    Status
     InsertEntities(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                    const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                    const std::unordered_map<std::string, uint64_t>& attr_size,
                    const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) override;
 
     Status
-    DeleteVector(int64_t collection_id, IDNumber vector_id, uint64_t lsn) override;
+    DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t lsn) override;
 
     Status
-    DeleteVectors(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
+    DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
 
     Status
     Flush(int64_t collection_id) override;
@@ -92,9 +84,6 @@ class SSMemManagerImpl : public SSMemManager, public server::CacheConfigHandler 
 
     std::vector<SSMemCollectionPtr>
     GetMemByTable(int64_t collection_id);
-
-    Status
-    InsertVectorsNoLock(int64_t collection_id, int64_t partition_id, const SSVectorSourcePtr& source, uint64_t lsn);
 
     Status
     InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const SSVectorSourcePtr& source, uint64_t lsn);

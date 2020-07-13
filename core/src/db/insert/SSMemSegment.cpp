@@ -100,39 +100,13 @@ SSMemSegment::Add(const SSVectorSourcePtr& source) {
         return Status(DB_ERROR, "Not able to create collection file");
     }
 
-    size_t single_vector_mem_size = source->SingleVectorSize(dimension);
-    size_t mem_left = GetMemLeft();
-    if (mem_left >= single_vector_mem_size) {
-        size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
-        size_t num_vectors_added;
-
-        auto status =
-            source->Add(/*execution_engine_,*/ segment_writer_ptr_, dimension, num_vectors_to_add, num_vectors_added);
-        if (status.ok()) {
-            current_mem_ += (num_vectors_added * single_vector_mem_size);
-        }
-        return status;
-    }
-    return Status::OK();
-}
-
-Status
-SSMemSegment::AddEntities(const SSVectorSourcePtr& source) {
-    int64_t dimension = GetDimension();
-    if (dimension <= 0) {
-        std::string err_msg = "SSMemSegment::Add: table_file_schema dimension = " + std::to_string(dimension) +
-                              ", collection_id = " + std::to_string(collection_id_);
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << err_msg;
-        return Status(DB_ERROR, "Not able to create collection file");
-    }
-
     size_t single_entity_mem_size = source->SingleEntitySize(dimension);
     size_t mem_left = GetMemLeft();
     if (mem_left >= single_entity_mem_size) {
         size_t num_entities_to_add = std::ceil(mem_left / single_entity_mem_size);
         size_t num_entities_added;
 
-        auto status = source->AddEntities(segment_writer_ptr_, dimension, num_entities_to_add, num_entities_added);
+        auto status = source->Add(segment_writer_ptr_, dimension, num_entities_to_add, num_entities_added);
 
         if (status.ok()) {
             current_mem_ += (num_entities_added * single_entity_mem_size);

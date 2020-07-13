@@ -26,24 +26,16 @@ namespace engine {
 class SSMemManager {
  public:
     virtual Status
-    InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                  const float* vectors, uint64_t lsn) = 0;
-
-    virtual Status
-    InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                  const uint8_t* vectors, uint64_t lsn) = 0;
-
-    virtual Status
-    InsertEntities(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+    InsertEntities(int64_t collection_id, int64_t partition_id, int64_t count, const IDNumber* entity_ids, int64_t dim,
                    const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                    const std::unordered_map<std::string, uint64_t>& attr_size,
                    const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) = 0;
 
     virtual Status
-    DeleteVector(int64_t collection_id, IDNumber vector_id, uint64_t lsn) = 0;
+    DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t lsn) = 0;
 
     virtual Status
-    DeleteVectors(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) = 0;
+    DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) = 0;
 
     virtual Status
     Flush(int64_t collection_id) = 0;

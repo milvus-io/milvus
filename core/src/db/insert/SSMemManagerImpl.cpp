@@ -49,38 +49,6 @@ SSMemManagerImpl::GetMemByTable(int64_t collection_id) {
 }
 
 Status
-SSMemManagerImpl::InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids,
-                                int64_t dim, const float* vectors, uint64_t lsn) {
-    VectorsData vectors_data;
-    vectors_data.vector_count_ = length;
-    vectors_data.float_data_.resize(length * dim);
-    memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(float));
-    vectors_data.id_array_.resize(length);
-    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
-    SSVectorSourcePtr source = std::make_shared<SSVectorSource>(vectors_data);
-
-    std::unique_lock<std::mutex> lock(mutex_);
-
-    return InsertVectorsNoLock(collection_id, partition_id, source, lsn);
-}
-
-Status
-SSMemManagerImpl::InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids,
-                                int64_t dim, const uint8_t* vectors, uint64_t lsn) {
-    VectorsData vectors_data;
-    vectors_data.vector_count_ = length;
-    vectors_data.binary_data_.resize(length * dim);
-    memcpy(vectors_data.binary_data_.data(), vectors, length * dim * sizeof(uint8_t));
-    vectors_data.id_array_.resize(length);
-    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
-    SSVectorSourcePtr source = std::make_shared<SSVectorSource>(vectors_data);
-
-    std::unique_lock<std::mutex> lock(mutex_);
-
-    return InsertVectorsNoLock(collection_id, partition_id, source, lsn);
-}
-
-Status
 SSMemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, int64_t length,
                                  const IDNumber* vector_ids, int64_t dim, const float* vectors,
                                  const std::unordered_map<std::string, uint64_t>& attr_nbytes,
@@ -101,8 +69,8 @@ SSMemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, in
 }
 
 Status
-SSMemManagerImpl::InsertVectorsNoLock(int64_t collection_id, int64_t partition_id, const SSVectorSourcePtr& source,
-                                      uint64_t lsn) {
+SSMemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id,
+                                       const milvus::engine::SSVectorSourcePtr& source, uint64_t lsn) {
     SSMemCollectionPtr mem = GetMemByTable(collection_id, partition_id);
     mem->SetLSN(lsn);
 
@@ -111,17 +79,7 @@ SSMemManagerImpl::InsertVectorsNoLock(int64_t collection_id, int64_t partition_i
 }
 
 Status
-SSMemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id,
-                                       const milvus::engine::SSVectorSourcePtr& source, uint64_t lsn) {
-    SSMemCollectionPtr mem = GetMemByTable(collection_id, partition_id);
-    mem->SetLSN(lsn);
-
-    auto status = mem->AddEntities(source);
-    return status;
-}
-
-Status
-SSMemManagerImpl::DeleteVector(int64_t collection_id, IDNumber vector_id, uint64_t lsn) {
+SSMemManagerImpl::DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
     std::vector<SSMemCollectionPtr> mems = GetMemByTable(collection_id);
 
@@ -137,7 +95,7 @@ SSMemManagerImpl::DeleteVector(int64_t collection_id, IDNumber vector_id, uint64
 }
 
 Status
-SSMemManagerImpl::DeleteVectors(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
+SSMemManagerImpl::DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
     std::vector<SSMemCollectionPtr> mems = GetMemByTable(collection_id);
 

@@ -36,9 +36,6 @@ class SSMemCollection : public server::CacheConfigHandler {
     Add(const SSVectorSourcePtr& source);
 
     Status
-    AddEntities(const SSVectorSourcePtr& source);
-
-    Status
     Delete(segment::doc_id_t doc_id);
 
     Status
