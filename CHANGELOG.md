@@ -41,8 +41,6 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2675 Print out system memory size when report invalid cpu cache size 
 -   \#2836 Unify index names and index types
 
-## Task
-
 # Milvus 0.10.0 (2020-6-15)
 
 ## Bug
