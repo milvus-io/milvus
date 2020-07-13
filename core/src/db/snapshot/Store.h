@@ -131,8 +131,7 @@ class Store {
 
     Status
     GetCollections(const std::string& name, std::vector<CollectionPtr>& returns_v) {
-        std::string field_value = "\'" + name + "\'";
-        return DBImp::GetInstance().SelectBy<Collection>(NameField::Name, field_value, returns_v);
+        return DBImp::GetInstance().SelectBy<Collection, std::string>(NameField::Name, name, returns_v);
     }
 
     Status
@@ -158,7 +157,7 @@ class Store {
     AllActiveCollectionIds(bool reversed = true) const {
         IDS_TYPE ids;
         IDS_TYPE selected_ids;
-        DBImp::GetInstance().SelectResourceIDs<Collection>(selected_ids, "", "");
+        DBImp::GetInstance().SelectResourceIDs<Collection, std::string>(selected_ids, "", "");
 
         if (!reversed) {
             ids = selected_ids;
@@ -174,7 +173,7 @@ class Store {
     IDS_TYPE
     AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
         IDS_TYPE ids, selected_ids;
-        DBImp::GetInstance().SelectResourceIDs<CollectionCommit>(selected_ids, F_COLLECTON_ID, std::to_string(collection_id));
+        DBImp::GetInstance().SelectResourceIDs<CollectionCommit, int64_t>(selected_ids, F_COLLECTON_ID, collection_id);
 
         if (!reversed) {
             ids = selected_ids;

@@ -52,7 +52,7 @@ class DBImp {
         // TODO move select logic to here
         auto session = CreateSession();
         std::vector<typename T::Ptr> resources;
-        auto status = session->Select<T>(IdField::Name, std::to_string(id), resources);
+        auto status = session->Select<T, ID_TYPE>(IdField::Name, id, resources);
         if (status.ok() && !resources.empty()) {
             // TODO: may need to check num of resources
             resource = resources.at(0);
@@ -61,19 +61,19 @@ class DBImp {
         return status;
     }
 
-    template<typename ResourceT>
+    template<typename ResourceT, typename U>
     Status
-    SelectBy(const std::string& field, const std::string& value, std::vector<typename ResourceT::Ptr>& resources) {
+    SelectBy(const std::string& field, const U& value, std::vector<typename ResourceT::Ptr>& resources) {
         auto session = CreateSession();
-        return session->Select<ResourceT>(field, value, resources);
+        return session->Select<ResourceT, U>(field, value, resources);
     }
 
-    template<typename ResourceT>
+    template<typename ResourceT, typename U>
     Status
-    SelectResourceIDs(std::vector<int64_t>& ids, const std::string& filter_field, const std::string& filter_value) {
+    SelectResourceIDs(std::vector<int64_t>& ids, const std::string& filter_field, const U& filter_value) {
         std::vector<typename ResourceT::Ptr> resources;
         auto session = CreateSession();
-        auto status = session->Select<ResourceT>(filter_field, filter_value, resources);
+        auto status = session->Select<ResourceT, U>(filter_field, filter_value, resources);
         if (!status.ok()) {
             return status;
         }

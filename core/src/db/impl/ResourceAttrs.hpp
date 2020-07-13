@@ -210,44 +210,47 @@ ResourceContextUpdateAttrMap(ResourceContextPtr<ResourceT> res, std::unordered_m
     return Status::OK();
 }
 
-template <typename ResourceT>
-inline Status
-ResourceContextToUpdateSql(ResourceContextPtr<ResourceT> res, std::string& sql) {
-    std::map<std::string, std::string> attr_map;
-    ResourceContextUpdateAttrMap<ResourceT>(res, attr_map);
-
-    sql = "UPDATE " + res->Table() + " SET ";
-    std::string field_pairs;
-    for (auto& attr_kv: attr_map) {
-        field_pairs += attr_kv.first + "=" + attr_kv.second + ",";
-    }
-
-    field_pairs.erase(field_pairs.end() - 1, field_pairs.end());
-    sql += field_pairs;
-
-    std::string id_value;
-    AttrValue2Str<ResourceT>(res->Resource(), "id", id_value);
-    sql += " WHERE id = " + id_value;
-
-    return Status::OK();
+/////////////////////////////////////////////////////////////////////
+template<typename T>
+inline void
+ResourceFieldToSqlStr(const T& t, std::string& val) {
+    val = "";
 }
 
-template <typename ResourceT>
-inline Status
-ResourceContextDeleteAttrMap(ResourceContextPtr<ResourceT> res, std::map<std::string, std::string>& attr_map) {
-    std::string id_value;
-    AttrValue2Str<ResourceT>(res->Resource(), F_ID, id_value);
-    attr_map[F_ID] = id_value;
-
-    return Status::OK();
+template<>
+inline void
+ResourceFieldToSqlStr<int64_t>(const int64_t& ival, std::string& val) {
+    int2str(ival, val);
 }
 
-template <typename ResourceT>
-inline Status
-ResourceContextToDeleteSql(ResourceContextPtr<ResourceT> res, std::string& sql) {
-    auto id_value = std::to_string(res->ID());
-    sql = "DELETE FROM " + res->Table() + " WHERE id = " + id_value;
-    return Status::OK();
+template<>
+inline void
+ResourceFieldToSqlStr<uint64_t>(const uint64_t& uival, std::string& val) {
+    uint2str(uival, val);
+}
+
+template<>
+inline void
+ResourceFieldToSqlStr<State>(const State& sval, std::string& val) {
+    state2str(sval, val);
+}
+
+template<>
+inline void
+ResourceFieldToSqlStr<MappingT>(const MappingT & mval, std::string& val) {
+    mappings2str(mval, val);
+}
+
+template<>
+inline void
+ResourceFieldToSqlStr<std::string>(const std::string & sval, std::string& val) {
+    str2str(sval, val);
+}
+
+template<>
+inline void
+ResourceFieldToSqlStr<json>(const json& jval, std::string& val) {
+    json2str(jval, val);
 }
 
 }

@@ -38,9 +38,9 @@ class Session {
     ~Session() = default;
 
  public:
-    template <typename ResourceT>
+    template <typename ResourceT, typename U>
     Status
-    Select(const std::string& field, const std::string& value, std::vector<typename ResourceT::Ptr>& resources);
+    Select(const std::string& field, const U& value, std::vector<typename ResourceT::Ptr>& resources);
 
     template<typename ResourceT>
     Status
@@ -87,14 +87,17 @@ class Session {
     DBEnginePtr db_engine_;
 };
 
-template <typename T>
+template <typename T, typename U>
 Status
-Session::Select(const std::string& field, const std::string& value, std::vector<typename T::Ptr>& resources) {
+Session::Select(const std::string& field, const U& value, std::vector<typename T::Ptr>& resources) {
+//    std::string field_value = "\'" + name + "\'";
     DBQueryContext context;
     context.table_ = T::Name;
 
     if (!field.empty()) {
-        context.filter_attrs_ = {{field, value}};
+        std::string field_value;
+        ResourceFieldToSqlStr(value, field_value);
+        context.filter_attrs_ = {{field, field_value}};
     }
 
     AttrsMapList attrs;
