@@ -19,6 +19,7 @@ namespace impl {
 
 void
 write_index(NsgIndex* index, MemoryIOWriter& writer) {
+    writer(&index->metric_type, sizeof(int32_t), 1);
     writer(&index->ntotal, sizeof(index->ntotal), 1);
     writer(&index->dimension, sizeof(index->dimension), 1);
     writer(&index->navigation_point, sizeof(index->navigation_point), 1);
@@ -36,9 +37,11 @@ NsgIndex*
 read_index(MemoryIOReader& reader) {
     size_t ntotal;
     size_t dimension;
+    int32_t metric;
+    reader(&metric, sizeof(int32_t), 1);
     reader(&ntotal, sizeof(size_t), 1);
     reader(&dimension, sizeof(size_t), 1);
-    auto index = new NsgIndex(dimension, ntotal);
+    auto index = new NsgIndex(dimension, ntotal, (impl::NsgIndex::Metric_Type)metric);
     reader(&index->navigation_point, sizeof(index->navigation_point), 1);
 
     index->ori_data_ = new float[index->ntotal * index->dimension];
