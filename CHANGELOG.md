@@ -21,6 +21,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2767 Fix a bug of getting wrong nprobe limitation in knowhere on GPU version
 -   \#2768 After building the index,the number of vectors increases
 -   \#2776 Fix too many data copies during creating IVF index
+-   \#2813 To implemente RNSG IP
 
 ## Feature
 
