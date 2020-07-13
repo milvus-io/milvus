@@ -22,7 +22,9 @@
 namespace milvus {
 namespace engine {
 
-const char* VECTOR_DIMENSION = "dimension";
+const char* ENTITY_ID_FIELD = "id";                // hard code
+const char* VECTOR_DIMENSION_PARAM = "dimension";  // hard code
+const char* VECTOR_FIELD = "vector";               // hard code
 
 SSMemCollectionPtr
 SSMemManagerImpl::GetMemByTable(int64_t collection_id, int64_t partition_id) {
@@ -132,13 +134,13 @@ SSMemManagerImpl::ValidateChunk(int64_t collection_id, int64_t partition_id, con
             case meta::hybrid::DataType::VECTOR_FLOAT:
             case meta::hybrid::DataType::VECTOR_BINARY: {
                 json params = field->GetParams();
-                if (params.find(VECTOR_DIMENSION) == params.end()) {
+                if (params.find(VECTOR_DIMENSION_PARAM) == params.end()) {
                     std::string msg = "Vector field params must contain: dimension";
                     LOG_SERVER_ERROR_ << msg;
                     return Status(DB_ERROR, msg);
                 }
 
-                int64_t dimension = params[VECTOR_DIMENSION];
+                int64_t dimension = params[VECTOR_DIMENSION_PARAM];
                 int64_t row_size =
                     (ftype == meta::hybrid::DataType::VECTOR_BINARY) ? dimension / 8 : dimension * sizeof(float);
                 if (data_size != chunk->count_ * row_size) {

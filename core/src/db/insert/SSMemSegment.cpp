@@ -109,13 +109,13 @@ SSMemSegment::GetSingleEntitySize(size_t& single_size) {
             case meta::hybrid::DataType::VECTOR_FLOAT:
             case meta::hybrid::DataType::VECTOR_BINARY: {
                 json params = field->GetParams();
-                if (params.find(VECTOR_DIMENSION) == params.end()) {
+                if (params.find(VECTOR_DIMENSION_PARAM) == params.end()) {
                     std::string msg = "Vector field params must contain: dimension";
                     LOG_SERVER_ERROR_ << msg;
                     return Status(DB_ERROR, msg);
                 }
 
-                int64_t dimension = params[VECTOR_DIMENSION];
+                int64_t dimension = params[VECTOR_DIMENSION_PARAM];
                 if (ftype == meta::hybrid::DataType::VECTOR_BINARY) {
                     single_size += (dimension / 8);
                 } else {

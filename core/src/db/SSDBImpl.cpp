@@ -1056,11 +1056,19 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            //            status =
-            //                mem_mgr_->InsertEntities(collection_id, partition_id, record.length, record.ids,
-            //                                         (record.data_size / record.length / sizeof(float)), (const
-            //                                         float*)record.data, record.attr_nbytes, record.attr_data_size,
-            //                                         record.attr_data, record.lsn);
+            // construct chunk data
+            DataChunkPtr chunk = std::make_shared<DataChunk>();
+            chunk->count_ = record.length;
+            chunk->fields_data_ = record.attr_data;
+            std::vector<uint8_t> uid_data;
+            uid_data.resize(record.length * sizeof(int64_t));
+            memcpy(uid_data.data(), record.ids, record.length * sizeof(int64_t));
+            std::vector<uint8_t> vector_data;
+            vector_data.resize(record.data_size);
+            memcpy(vector_data.data(), record.data, record.data_size);
+            chunk->fields_data_.insert(std::make_pair(VECTOR_FIELD, vector_data));
+
+            status = mem_mgr_->InsertEntities(collection_id, partition_id, chunk, record.lsn);
             force_flush_if_mem_full();
 
             // metrics
