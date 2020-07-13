@@ -203,8 +203,8 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
         FIU_ENABLE_FIU("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
         milvus::json index_params = {{"search_length", 100}, {"out_degree", 40}, {"pool_size", 100}, {"knng", 200},
                                      {"candidate_pool_size", 500}};
-        auto engine_ptr = CreateExecEngine(index_params, milvus::engine::MetricType::L2);
-        engine_ptr->BuildIndex("/tmp/milvus_index_NSG_MIX", milvus::engine::EngineType::NSG_MIX);
+        auto engine_ptr = CreateExecEngine(index_params, milvus::engine::meta::MetricType::L2);
+        engine_ptr->BuildIndex("/tmp/milvus_index_NSG_MIX", milvus::engine::meta::EngineType::NSG_MIX);
         fiu_disable("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
 
         auto status = engine_ptr->CopyToGpu(0, false);

@@ -48,7 +48,7 @@ FaissIVFFlatPass::Run(const TaskPtr& task) {
     }
 
     auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
+    if (search_task->file_->engine_type_ != (int)EngineType::FAISS_IVFFLAT) {
         return false;
     }
 

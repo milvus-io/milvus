@@ -349,7 +349,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     }
 
 #ifdef MILVUS_GPU_VERSION
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFSQ8H;
     db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 
     {
@@ -399,7 +399,7 @@ TEST_F(DBTest, SEARCH_TEST) {
 
 #ifdef MILVUS_GPU_VERSION
     // test FAISS_IVFSQ8H optimizer
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFSQ8H;
     db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
     std::vector<std::string> partition_tag;
     milvus::engine::ResultIds result_ids;
@@ -735,7 +735,7 @@ TEST_F(DBTest, INDEX_TEST) {
     fiu_disable("DBImpl.UpdateCollectionIndexRecursively.fail_update_collection_index");
 
 #ifdef MILVUS_GPU_VERSION
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFSQ8H;
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 #endif
