@@ -48,7 +48,7 @@ BuildCollectionSchema() {
     milvus::engine::meta::CollectionSchema collection_info;
     collection_info.dimension_ = COLLECTION_DIM;
     collection_info.collection_id_ = GetCollectionName();
-    collection_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
+    collection_info.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IDMAP;
     return collection_info;
 }
 
@@ -164,7 +164,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
         options.insert_cache_immediately_ = true;
         milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
         collection_schema.collection_id_ = "faiss_pq";
-        collection_schema.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
+        collection_schema.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_PQ;
         auto status = impl_->CreateCollection(collection_schema);
         ASSERT_TRUE(status.ok());
 
@@ -333,8 +333,8 @@ TEST_F(MemManagerTest2, INSERT_BINARY_TEST) {
     milvus::engine::meta::CollectionSchema collection_info;
     collection_info.dimension_ = COLLECTION_DIM;
     collection_info.collection_id_ = GetCollectionName();
-    collection_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_BIN_IDMAP;
-    collection_info.metric_type_ = (int32_t)milvus::engine::MetricType::JACCARD;
+    collection_info.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_BIN_IDMAP;
+    collection_info.metric_type_ = (int32_t)milvus::engine::meta::MetricType::JACCARD;
     auto stat = db_->CreateCollection(collection_info);
     ASSERT_TRUE(stat.ok());
 

@@ -26,11 +26,12 @@ static constexpr int64_t ROW_COUNT = 1000;
 static const char* INIT_PATH = "/tmp/milvus_index_1";
 
 milvus::engine::ExecutionEnginePtr
-CreateExecEngine(const milvus::json& json_params, milvus::engine::MetricType metric = milvus::engine::MetricType::IP) {
+CreateExecEngine(const milvus::json& json_params,
+                 milvus::engine::meta::MetricType metric = milvus::engine::meta::MetricType::IP) {
     auto engine_ptr = milvus::engine::EngineFactory::Build(
         DIMENSION,
         INIT_PATH,
-        milvus::engine::EngineType::FAISS_IDMAP,
+        milvus::engine::meta::EngineType::FAISS_IDMAP,
         metric,
         json_params);
 
@@ -57,8 +58,8 @@ TEST_F(EngineTest, FACTORY_TEST) {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
             512,
             "/tmp/milvus_index_1",
-            milvus::engine::EngineType::INVALID,
-            milvus::engine::MetricType::IP,
+            milvus::engine::meta::EngineType::INVALID,
+            milvus::engine::meta::MetricType::IP,
             index_params);
 
         ASSERT_TRUE(engine_ptr == nullptr);
@@ -68,8 +69,8 @@ TEST_F(EngineTest, FACTORY_TEST) {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
             512,
             "/tmp/milvus_index_1",
-            milvus::engine::EngineType::FAISS_IDMAP,
-            milvus::engine::MetricType::IP,
+            milvus::engine::meta::EngineType::FAISS_IDMAP,
+            milvus::engine::meta::MetricType::IP,
             index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
@@ -77,8 +78,8 @@ TEST_F(EngineTest, FACTORY_TEST) {
 
     {
         auto engine_ptr =
-            milvus::engine::EngineFactory::Build(512, "/tmp/milvus_index_1", milvus::engine::EngineType::FAISS_IVFFLAT,
-                                                 milvus::engine::MetricType::IP, index_params);
+            milvus::engine::EngineFactory::Build(512, "/tmp/milvus_index_1", milvus::engine::meta::EngineType::FAISS_IVFFLAT,
+                                                 milvus::engine::meta::MetricType::IP, index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
@@ -87,8 +88,8 @@ TEST_F(EngineTest, FACTORY_TEST) {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
             512,
             "/tmp/milvus_index_1",
-            milvus::engine::EngineType::FAISS_IVFSQ8,
-            milvus::engine::MetricType::IP,
+            milvus::engine::meta::EngineType::FAISS_IVFSQ8,
+            milvus::engine::meta::MetricType::IP,
             index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
@@ -98,8 +99,8 @@ TEST_F(EngineTest, FACTORY_TEST) {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
             512,
             "/tmp/milvus_index_1",
-            milvus::engine::EngineType::NSG_MIX,
-            milvus::engine::MetricType::IP,
+            milvus::engine::meta::EngineType::NSG_MIX,
+            milvus::engine::meta::MetricType::IP,
             index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
@@ -109,8 +110,8 @@ TEST_F(EngineTest, FACTORY_TEST) {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
             512,
             "/tmp/milvus_index_1",
-            milvus::engine::EngineType::FAISS_PQ,
-            milvus::engine::MetricType::IP,
+            milvus::engine::meta::EngineType::FAISS_PQ,
+            milvus::engine::meta::MetricType::IP,
             index_params);
 
         ASSERT_TRUE(engine_ptr != nullptr);
@@ -164,11 +165,11 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
         ASSERT_EQ(engine_ptr->Dimension(), DIMENSION);
         ASSERT_EQ(engine_ptr->Count(), ROW_COUNT);
         ASSERT_EQ(engine_ptr->GetLocation(), INIT_PATH);
-        ASSERT_EQ(engine_ptr->IndexMetricType(), milvus::engine::MetricType::IP);
+        ASSERT_EQ(engine_ptr->IndexMetricType(), milvus::engine::meta::MetricType::IP);
 
-        ASSERT_ANY_THROW(engine_ptr->BuildIndex(INIT_PATH, milvus::engine::EngineType::INVALID));
+        ASSERT_ANY_THROW(engine_ptr->BuildIndex(INIT_PATH, milvus::engine::meta::EngineType::INVALID));
 
-        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IVFSQ8);
+        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::meta::EngineType::FAISS_IVFSQ8);
         ASSERT_NE(engine_build, nullptr);
     }
 
@@ -177,7 +178,7 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
         milvus::json index_params = {{"nlist", 10}, {"m", 16}};
         auto engine_ptr = CreateExecEngine(index_params);
         //PQ don't support IP In gpu version
-        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_3", milvus::engine::EngineType::FAISS_PQ);
+        auto engine_build = engine_ptr->BuildIndex("/tmp/milvus_index_3", milvus::engine::meta::EngineType::FAISS_PQ);
         ASSERT_NE(engine_build, nullptr);
 #endif
     }
@@ -227,7 +228,7 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
     std::string file_path = "/tmp/milvus_index_1";
     milvus::json index_params = {{"nlist", 1024}};
     auto engine_ptr = milvus::engine::EngineFactory::Build(
-        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, index_params);
+        dimension, file_path, milvus::engine::meta::EngineType::FAISS_IVFFLAT, milvus::engine::meta::MetricType::IP, index_params);
 
     fiu_init(0); // init
     fiu_enable("read_null_index", 1, NULL, 0);
@@ -239,7 +240,7 @@ TEST_F(EngineTest, ENGINE_IMPL_NULL_INDEX_TEST) {
     auto dim = engine_ptr->Dimension();
     ASSERT_EQ(dim, dimension);
 
-    auto build_index = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::EngineType::FAISS_IDMAP);
+    auto build_index = engine_ptr->BuildIndex("/tmp/milvus_index_2", milvus::engine::meta::EngineType::FAISS_IDMAP);
     ASSERT_EQ(build_index, nullptr);
 
 //    int64_t n = 0;
@@ -268,7 +269,7 @@ TEST_F(EngineTest, ENGINE_IMPL_THROW_EXCEPTION_TEST) {
     fiu_enable("ValidateStringNotBool", 1, NULL, 0);
 
     auto engine_ptr = milvus::engine::EngineFactory::Build(
-        dimension, file_path, milvus::engine::EngineType::FAISS_IVFFLAT, milvus::engine::MetricType::IP, index_params);
+        dimension, file_path, milvus::engine::meta::EngineType::FAISS_IVFFLAT, milvus::engine::meta::MetricType::IP, index_params);
 
     fiu_disable("ValidateStringNotBool");
 

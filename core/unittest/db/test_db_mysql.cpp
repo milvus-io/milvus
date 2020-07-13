@@ -34,7 +34,7 @@ BuildCollectionSchema() {
     milvus::engine::meta::CollectionSchema collection_info;
     collection_info.dimension_ = COLLECTION_DIM;
     collection_info.collection_id_ = COLLECTION_NAME;
-    collection_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
+    collection_info.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IDMAP;
     return collection_info;
 }
 
@@ -353,8 +353,8 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
 
     {  // build index
         milvus::engine::CollectionIndex index;
-        index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
-        index.metric_type_ = (int)milvus::engine::MetricType::L2;
+        index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFFLAT;
+        index.metric_type_ = (int)milvus::engine::meta::MetricType::L2;
         stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
         ASSERT_TRUE(stat.ok());
 

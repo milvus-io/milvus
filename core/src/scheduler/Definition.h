@@ -33,8 +33,9 @@ using SegmentSchema = engine::meta::SegmentSchema;
 
 using ExecutionEnginePtr = engine::ExecutionEnginePtr;
 using EngineFactory = engine::EngineFactory;
-using EngineType = engine::EngineType;
-using MetricType = engine::MetricType;
+using EngineType = engine::meta::EngineType;
+using MetricType = engine::meta::MetricType;
+using DataType = engine::meta::hybrid::DataType;
 
 constexpr uint64_t TASK_TABLE_MAX_COUNT = 1ULL << 16ULL;
 

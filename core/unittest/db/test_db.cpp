@@ -312,7 +312,7 @@ TEST_F(DBTest, SEARCH_TEST) {
 
     milvus::json json_params = {{"nprobe", 10}};
     milvus::engine::CollectionIndex index;
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IDMAP;
     index.extra_params_ = {{"nlist", 16384}};
 //    db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 //
@@ -336,7 +336,7 @@ TEST_F(DBTest, SEARCH_TEST) {
 //        ASSERT_TRUE(stat.ok());
 //    }
 
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 16384}};
     db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 
@@ -451,7 +451,7 @@ TEST_F(DBTest, PRELOAD_TEST) {
     }
 
     milvus::engine::CollectionIndex index;
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IDMAP;
     db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 
     int64_t prev_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
@@ -713,12 +713,12 @@ TEST_F(DBTest, INDEX_TEST) {
     ASSERT_EQ(xb.id_array_.size(), nb);
 
     milvus::engine::CollectionIndex index;
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
-    index.metric_type_ = (int)milvus::engine::MetricType::IP;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFSQ8;
+    index.metric_type_ = (int)milvus::engine::meta::MetricType::IP;
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFFLAT;
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
@@ -728,7 +728,7 @@ TEST_F(DBTest, INDEX_TEST) {
     ASSERT_FALSE(stat.ok());
     fiu_disable("SqliteMetaImpl.DescribeCollectionIndex.throw_exception");
 
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_PQ;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_PQ;
     FIU_ENABLE_FIU("DBImpl.UpdateCollectionIndexRecursively.fail_update_collection_index");
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_FALSE(stat.ok());
@@ -815,8 +815,8 @@ TEST_F(DBTest, PARTITION_TEST) {
 
     {  // build index
         milvus::engine::CollectionIndex index;
-        index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
-        index.metric_type_ = (int)milvus::engine::MetricType::L2;
+        index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFFLAT;
+        index.metric_type_ = (int)milvus::engine::meta::MetricType::L2;
         stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
         ASSERT_TRUE(stat.ok());
 

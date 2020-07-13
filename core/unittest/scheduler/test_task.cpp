@@ -139,7 +139,7 @@ TEST(TaskTest, TEST_TASK) {
     engine::VectorsData vector;
     auto search_job = std::make_shared<SearchJob>(dummy_context, 1, 1, vector);
     file->metric_type_ = static_cast<int>(MetricType::IP);
-    file->engine_type_ = static_cast<int>(engine::EngineType::FAISS_IVFSQ8H);
+    file->engine_type_ = static_cast<int>(EngineType::FAISS_IVFSQ8H);
     opentracing::mocktracer::MockTracerOptions tracer_options;
     auto mock_tracer =
         std::shared_ptr<opentracing::Tracer>{new opentracing::mocktracer::MockTracer{std::move(tracer_options)}};

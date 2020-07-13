@@ -70,10 +70,10 @@ DescribeIndexRequest::OnExecute() {
 
         // for binary vector, IDMAP and IVFLAT will be treated as BIN_IDMAP and BIN_IVFLAT internally
         // return IDMAP and IVFLAT for outside caller
-        if (index.engine_type_ == (int32_t)engine::EngineType::FAISS_BIN_IDMAP) {
-            index.engine_type_ = (int32_t)engine::EngineType::FAISS_IDMAP;
-        } else if (index.engine_type_ == (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT) {
-            index.engine_type_ = (int32_t)engine::EngineType::FAISS_IVFFLAT;
+        if (index.engine_type_ == (int32_t)engine::meta::EngineType::FAISS_BIN_IDMAP) {
+            index.engine_type_ = (int32_t)engine::meta::EngineType::FAISS_IDMAP;
+        } else if (index.engine_type_ == (int32_t)engine::meta::EngineType::FAISS_BIN_IVFFLAT) {
+            index.engine_type_ = (int32_t)engine::meta::EngineType::FAISS_IVFFLAT;
         }
 
         index_param_.collection_name_ = collection_name_;

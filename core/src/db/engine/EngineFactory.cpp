@@ -19,9 +19,9 @@ namespace milvus {
 namespace engine {
 
 ExecutionEnginePtr
-EngineFactory::Build(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
-                     const milvus::json& index_params) {
-    if (index_type == EngineType::INVALID) {
+EngineFactory::Build(uint16_t dimension, const std::string& location, meta::EngineType index_type,
+                     meta::MetricType metric_type, const milvus::json& index_params) {
+    if (index_type == meta::EngineType::INVALID) {
         LOG_ENGINE_ERROR_ << "Unsupported engine type";
         return nullptr;
     }

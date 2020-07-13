@@ -83,10 +83,10 @@ CreateCollectionRequest::OnExecute() {
 
         // some metric type only support binary vector, adapt the index type
         if (engine::utils::IsBinaryMetricType(metric_type_)) {
-            if (collection_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
-                collection_info.engine_type_ = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
-            } else if (collection_info.engine_type_ == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
-                collection_info.engine_type_ = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
+            if (collection_info.engine_type_ == static_cast<int32_t>(engine::meta::EngineType::FAISS_IDMAP)) {
+                collection_info.engine_type_ = static_cast<int32_t>(engine::meta::EngineType::FAISS_BIN_IDMAP);
+            } else if (collection_info.engine_type_ == static_cast<int32_t>(engine::meta::EngineType::FAISS_IVFFLAT)) {
+                collection_info.engine_type_ = static_cast<int32_t>(engine::meta::EngineType::FAISS_BIN_IVFFLAT);
             }
         }
 

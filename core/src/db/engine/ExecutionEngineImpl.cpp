@@ -22,6 +22,7 @@
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
+#include "db/meta/MetaTypes.h"
 #include "db/Utils.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/structured_index/StructuredIndexSort.h"
@@ -57,27 +58,27 @@ namespace engine {
 namespace {
 
 Status
-MappingMetricType(MetricType metric_type, milvus::json& conf) {
+MappingMetricType(meta::MetricType metric_type, milvus::json& conf) {
     switch (metric_type) {
-        case MetricType::IP:
+        case meta::MetricType::IP:
             conf[knowhere::Metric::TYPE] = knowhere::Metric::IP;
             break;
-        case MetricType::L2:
+        case meta::MetricType::L2:
             conf[knowhere::Metric::TYPE] = knowhere::Metric::L2;
             break;
-        case MetricType::HAMMING:
+        case meta::MetricType::HAMMING:
             conf[knowhere::Metric::TYPE] = knowhere::Metric::HAMMING;
             break;
-        case MetricType::JACCARD:
+        case meta::MetricType::JACCARD:
             conf[knowhere::Metric::TYPE] = knowhere::Metric::JACCARD;
             break;
-        case MetricType::TANIMOTO:
+        case meta::MetricType::TANIMOTO:
             conf[knowhere::Metric::TYPE] = knowhere::Metric::TANIMOTO;
             break;
-        case MetricType::SUBSTRUCTURE:
+        case meta::MetricType::SUBSTRUCTURE:
             conf[knowhere::Metric::TYPE] = knowhere::Metric::SUBSTRUCTURE;
             break;
-        case MetricType::SUPERSTRUCTURE:
+        case meta::MetricType::SUPERSTRUCTURE:
             conf[knowhere::Metric::TYPE] = knowhere::Metric::SUPERSTRUCTURE;
             break;
         default:
@@ -93,16 +94,16 @@ IsBinaryIndexType(knowhere::IndexType type) {
 }
 
 codec::ExternalData
-GetIndexDataType(EngineType type) {
+GetIndexDataType(meta::EngineType type) {
     switch (type) {
-        case EngineType::FAISS_IVFFLAT:
-        case EngineType::HNSW:
-        case EngineType::NSG_MIX:
+        case meta::EngineType::FAISS_IVFFLAT:
+        case meta::EngineType::HNSW:
+        case meta::EngineType::NSG_MIX:
             return codec::ExternalData::ExternalData_RawData;
 
-        case EngineType::FAISS_IVFSQ8:
-        case EngineType::HNSW_SQ8NR:
-        case EngineType::FAISS_IVFSQ8NR:
+        case meta::EngineType::FAISS_IVFSQ8:
+        case meta::EngineType::HNSW_SQ8NR:
+        case meta::EngineType::FAISS_IVFSQ8NR:
             return codec::ExternalData::ExternalData_SQ8;
 
         default:
@@ -133,15 +134,15 @@ class CachedQuantizer : public cache::DataObj {
 };
 #endif
 
-ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type,
-                                         MetricType metric_type, const milvus::json& index_params)
+ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, meta::EngineType index_type,
+                                         meta::MetricType metric_type, const milvus::json& index_params)
     : location_(location),
       dim_(dimension),
       index_type_(index_type),
       metric_type_(metric_type),
       index_params_(index_params) {
-    EngineType tmp_index_type =
-        utils::IsBinaryMetricType((int32_t)metric_type) ? EngineType::FAISS_BIN_IDMAP : EngineType::FAISS_IDMAP;
+    meta::EngineType tmp_index_type =
+        utils::IsBinaryMetricType((int32_t)metric_type) ? meta::EngineType::FAISS_BIN_IDMAP : meta::EngineType::FAISS_IDMAP;
     index_ = CreatetVecIndex(tmp_index_type);
     if (!index_) {
         throw Exception(DB_ERROR, "Unsupported index type");
@@ -167,7 +168,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location,
-                                         EngineType index_type, MetricType metric_type,
+                                         meta::EngineType index_type, meta::MetricType metric_type,
                                          const milvus::json& index_params)
     : index_(std::move(index)),
       location_(location),
@@ -177,7 +178,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(knowhere::VecIndexPtr index, const std:
 }
 
 knowhere::VecIndexPtr
-ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
+ExecutionEngineImpl::CreatetVecIndex(meta::EngineType type) {
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
     knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
 #ifdef MILVUS_GPU_VERSION
@@ -190,62 +191,62 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     }
 #endif
 
-    fiu_do_on("ExecutionEngineImpl.CreateVecIndex.invalid_type", type = EngineType::INVALID);
+    fiu_do_on("ExecutionEngineImpl.CreateVecIndex.invalid_type", type = meta::EngineType::INVALID);
     knowhere::VecIndexPtr index = nullptr;
     switch (type) {
-        case EngineType::FAISS_IDMAP: {
+        case meta::EngineType::FAISS_IDMAP: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP, mode);
             break;
         }
-        case EngineType::FAISS_IVFFLAT: {
+        case meta::EngineType::FAISS_IVFFLAT: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, mode);
             break;
         }
-        case EngineType::FAISS_PQ: {
+        case meta::EngineType::FAISS_PQ: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFPQ, mode);
             break;
         }
-        case EngineType::FAISS_IVFSQ8: {
+        case meta::EngineType::FAISS_IVFSQ8: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, mode);
             break;
         }
-        case EngineType::FAISS_IVFSQ8NR: {
+        case meta::EngineType::FAISS_IVFSQ8NR: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, mode);
             break;
         }
 #ifdef MILVUS_GPU_VERSION
-        case EngineType::FAISS_IVFSQ8H: {
+        case meta::EngineType::FAISS_IVFSQ8H: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, mode);
             break;
         }
 #endif
-        case EngineType::FAISS_BIN_IDMAP: {
+        case meta::EngineType::FAISS_BIN_IDMAP: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, mode);
             break;
         }
-        case EngineType::FAISS_BIN_IVFFLAT: {
+        case meta::EngineType::FAISS_BIN_IVFFLAT: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, mode);
             break;
         }
-        case EngineType::NSG_MIX: {
+        case meta::EngineType::NSG_MIX: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_NSG, mode);
             break;
         }
 #ifdef MILVUS_SUPPORT_SPTAG
-        case EngineType::SPTAG_KDT: {
+        case meta::EngineType::SPTAG_KDT: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, mode);
             break;
         }
-        case EngineType::SPTAG_BKT: {
+        case meta::EngineType::SPTAG_BKT: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, mode);
             break;
         }
 #endif
-        case EngineType::HNSW: {
+        case meta::EngineType::HNSW: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW, mode);
             break;
         }
-        case EngineType::ANNOY: {
+        case meta::EngineType::ANNOY: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_ANNOY, mode);
             break;
         }
@@ -415,7 +416,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
         knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
 
         if (utils::IsRawIndexType((int32_t)index_type_)) {
-            if (index_type_ == EngineType::FAISS_IDMAP) {
+            if (index_type_ == meta::EngineType::FAISS_IDMAP) {
                 index_ = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
             } else {
                 index_ = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP);
@@ -453,12 +454,12 @@ ExecutionEngineImpl::Load(bool to_cache) {
             }
 
             auto dataset = knowhere::GenDataset(count, this->dim_, vectors_data.data());
-            if (index_type_ == EngineType::FAISS_IDMAP) {
+            if (index_type_ == meta::EngineType::FAISS_IDMAP) {
                 auto bf_index = std::static_pointer_cast<knowhere::IDMAP>(index_);
                 bf_index->Train(knowhere::DatasetPtr(), conf);
                 bf_index->AddWithoutIds(dataset, conf);
                 bf_index->SetBlacklist(concurrent_bitset_ptr);
-            } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
+            } else if (index_type_ == meta::EngineType::FAISS_BIN_IDMAP) {
                 auto bin_bf_index = std::static_pointer_cast<knowhere::BinaryIDMAP>(index_);
                 bin_bf_index->Train(knowhere::DatasetPtr(), conf);
                 bin_bf_index->AddWithoutIds(dataset, conf);
@@ -716,7 +717,7 @@ ExecutionEngineImpl::CopyToCpu() {
 }
 
 ExecutionEnginePtr
-ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {
+ExecutionEngineImpl::BuildIndex(const std::string& location, meta::EngineType engine_type) {
     LOG_ENGINE_DEBUG_ << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_);
@@ -803,12 +804,12 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
 
 Status
 ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::GeneralQueryPtr general_query,
-                                      std::unordered_map<std::string, DataType>& attr_type) {
+                                      std::unordered_map<std::string, meta::hybrid::DataType>& attr_type) {
     auto field_name = general_query->leaf->term_query->field_name;
     auto type = attr_type.at(field_name);
 
     switch (type) {
-        case DataType::INT8: {
+        case meta::hybrid::DataType::INT8: {
             auto int8_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int8_t>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not int8_index) {
@@ -823,7 +824,7 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
             bitset = int8_index->In(term_size, term_value.data());
             break;
         }
-        case DataType::INT16: {
+        case meta::hybrid::DataType::INT16: {
             auto int16_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int16_t>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not int16_index) {
@@ -838,7 +839,7 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
             bitset = int16_index->In(term_size, term_value.data());
             break;
         }
-        case DataType::INT32: {
+        case meta::hybrid::DataType::INT32: {
             auto int32_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int32_t>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not int32_index) {
@@ -853,7 +854,7 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
             bitset = int32_index->In(term_size, term_value.data());
             break;
         }
-        case DataType::INT64: {
+        case meta::hybrid::DataType::INT64: {
             auto int64_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int64_t>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not int64_index) {
@@ -868,7 +869,7 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
             bitset = int64_index->In(term_size, term_value.data());
             break;
         }
-        case DataType::FLOAT: {
+        case meta::hybrid::DataType::FLOAT: {
             auto float_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<float>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not float_index) {
@@ -883,7 +884,7 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
             bitset = float_index->In(term_size, term_value.data());
             break;
         }
-        case DataType::DOUBLE: {
+        case meta::hybrid::DataType::DOUBLE: {
             auto double_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<double>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not double_index) {
@@ -905,39 +906,39 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
 }
 
 Status
-ExecutionEngineImpl::ProcessRangeQuery(const engine::DataType data_type, const std::string& operand,
+ExecutionEngineImpl::ProcessRangeQuery(const meta::hybrid::DataType data_type, const std::string& operand,
                                        const query::CompareOperator& com_operator, knowhere::IndexPtr& index_ptr,
                                        faiss::ConcurrentBitsetPtr& bitset) {
     switch (data_type) {
-        case DataType::INT8: {
+        case meta::hybrid::DataType::INT8: {
             auto int8_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int8_t>>(index_ptr);
 
             int8_t value = atoi(operand.c_str());
             bitset = int8_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case DataType::INT16: {
+        case meta::hybrid::DataType::INT16: {
             auto int16_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int16_t>>(index_ptr);
 
             int16_t value = atoi(operand.c_str());
             bitset = int16_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case DataType::INT32: {
+        case meta::hybrid::DataType::INT32: {
             auto int32_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int32_t>>(index_ptr);
 
             int32_t value = atoi(operand.c_str());
             bitset = int32_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case DataType::INT64: {
+        case meta::hybrid::DataType::INT64: {
             auto int64_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int64_t>>(index_ptr);
 
             int64_t value = atoi(operand.c_str());
             bitset = int64_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case DataType::FLOAT: {
+        case meta::hybrid::DataType::FLOAT: {
             auto float_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<float>>(index_ptr);
 
             std::istringstream iss(operand);
@@ -946,7 +947,7 @@ ExecutionEngineImpl::ProcessRangeQuery(const engine::DataType data_type, const s
             bitset = float_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case DataType::DOUBLE: {
+        case meta::hybrid::DataType::DOUBLE: {
             auto double_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<double>>(index_ptr);
 
             std::istringstream iss(operand);
@@ -963,7 +964,7 @@ ExecutionEngineImpl::ProcessRangeQuery(const engine::DataType data_type, const s
 
 Status
 ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
-                                  std::unordered_map<std::string, DataType>& attr_type, std::vector<float>& distances,
+                                  std::unordered_map<std::string, meta::hybrid::DataType>& attr_type, std::vector<float>& distances,
                                   std::vector<int64_t>& search_ids, bool hybrid) {
     faiss::ConcurrentBitsetPtr bitset;
     std::string vector_placeholder;
@@ -1005,7 +1006,7 @@ ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
 }
 Status
 ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
-                                     std::unordered_map<std::string, DataType>& attr_type,
+                                     std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
                                      std::string& vector_placeholder) {
     Status status = Status::OK();
     if (general_query->leaf == nullptr) {

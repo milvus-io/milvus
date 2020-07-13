@@ -46,8 +46,8 @@ BuildCollectionSchema() {
     milvus::engine::meta::CollectionSchema collection_info;
     collection_info.dimension_ = COLLECTION_DIM;
     collection_info.collection_id_ = GetCollectionName();
-    collection_info.metric_type_ = (int32_t)milvus::engine::MetricType::L2;
-    collection_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
+    collection_info.metric_type_ = (int32_t)milvus::engine::meta::MetricType::L2;
+    collection_info.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFFLAT;
     return collection_info;
 }
 
@@ -212,7 +212,7 @@ TEST_F(SearchByIdTest, WITH_INDEX_TEST) {
     ASSERT_TRUE(stat.ok());
 
     milvus::engine::CollectionIndex index;
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 10}};
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
@@ -397,7 +397,7 @@ TEST_F(GetVectorByIdTest, WITH_INDEX_TEST) {
 
     milvus::engine::CollectionIndex index;
     index.extra_params_ = {{"nlist", 10}};
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFSQ8;
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 
@@ -478,8 +478,8 @@ TEST_F(GetVectorByIdTest, WITH_DELETE_TEST) {
 
 TEST_F(SearchByIdTest, BINARY_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
-    collection_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_BIN_IDMAP;
-    collection_info.metric_type_ = (int32_t)milvus::engine::MetricType::JACCARD;
+    collection_info.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_BIN_IDMAP;
+    collection_info.metric_type_ = (int32_t)milvus::engine::meta::MetricType::JACCARD;
     auto stat = db_->CreateCollection(collection_info);
     ASSERT_TRUE(stat.ok());
 

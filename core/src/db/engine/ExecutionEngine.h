@@ -19,7 +19,7 @@
 
 #include <faiss/utils/ConcurrentBitset.h>
 
-#include "knowhere/index/IndexType.h"
+#include "db/meta/MetaTypes.h"
 #include "query/GeneralQuery.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
@@ -32,75 +32,6 @@ using SearchJobPtr = std::shared_ptr<SearchJob>;
 }  // namespace scheduler
 
 namespace engine {
-
-// TODO(linxj): replace with VecIndex::IndexType
-enum class EngineType {
-    INVALID = 0,
-    FAISS_IDMAP = 1,
-    FAISS_IVFFLAT,
-    FAISS_IVFSQ8,
-    NSG_MIX,
-    FAISS_IVFSQ8H,
-    FAISS_PQ,
-#ifdef MILVUS_SUPPORT_SPTAG
-    SPTAG_KDT,
-    SPTAG_BKT,
-#endif
-    FAISS_BIN_IDMAP,
-    FAISS_BIN_IVFFLAT,
-    HNSW,
-    ANNOY,
-    FAISS_IVFSQ8NR,
-    HNSW_SQ8NR,
-    MAX_VALUE = HNSW_SQ8NR,
-};
-
-static std::map<std::string, EngineType> s_map_engine_type = {
-    {knowhere::IndexEnum::INDEX_FAISS_IDMAP, EngineType::FAISS_IDMAP},
-    {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, EngineType::FAISS_IVFFLAT},
-    {knowhere::IndexEnum::INDEX_FAISS_IVFPQ, EngineType::FAISS_PQ},
-    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, EngineType::FAISS_IVFSQ8},
-    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, EngineType::FAISS_IVFSQ8NR},
-    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, EngineType::FAISS_IVFSQ8H},
-    {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, EngineType::FAISS_BIN_IDMAP},
-    {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, EngineType::FAISS_BIN_IVFFLAT},
-    {knowhere::IndexEnum::INDEX_NSG, EngineType::NSG_MIX},
-#ifdef MILVUS_SUPPORT_SPTAG
-    {knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, EngineType::SPTAG_KDT},
-    {knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, EngineType::SPTAG_BKT},
-#endif
-    {knowhere::IndexEnum::INDEX_HNSW, EngineType::HNSW},
-    {knowhere::IndexEnum::INDEX_HNSW_SQ8NR, EngineType::HNSW_SQ8NR},
-    {knowhere::IndexEnum::INDEX_ANNOY, EngineType::ANNOY},
-};
-
-enum class MetricType {
-    L2 = 1,              // Euclidean Distance
-    IP = 2,              // Cosine Similarity
-    HAMMING = 3,         // Hamming Distance
-    JACCARD = 4,         // Jaccard Distance
-    TANIMOTO = 5,        // Tanimoto Distance
-    SUBSTRUCTURE = 6,    // Substructure Distance
-    SUPERSTRUCTURE = 7,  // Superstructure Distance
-    MAX_VALUE = SUPERSTRUCTURE
-};
-
-enum class DataType {
-    INT8 = 1,
-    INT16 = 2,
-    INT32 = 3,
-    INT64 = 4,
-
-    STRING = 20,
-
-    BOOL = 30,
-
-    FLOAT = 40,
-    DOUBLE = 41,
-
-    VECTOR = 100,
-    UNKNOWN = 9999,
-};
 
 class ExecutionEngine {
  public:
@@ -153,17 +84,18 @@ class ExecutionEngine {
 
     virtual Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
-                    std::unordered_map<std::string, DataType>& attr_type, std::string& vector_placeholder) = 0;
+                    std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                    std::string& vector_placeholder) = 0;
 
     virtual Status
-    HybridSearch(scheduler::SearchJobPtr job, std::unordered_map<std::string, DataType>& attr_type,
+    HybridSearch(scheduler::SearchJobPtr job, std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
                  std::vector<float>& distances, std::vector<int64_t>& search_ids, bool hybrid) = 0;
 
     virtual Status
     Search(std::vector<int64_t>& ids, std::vector<float>& distances, scheduler::SearchJobPtr job, bool hybrid) = 0;
 
     virtual std::shared_ptr<ExecutionEngine>
-    BuildIndex(const std::string& location, EngineType engine_type) = 0;
+    BuildIndex(const std::string& location, meta::EngineType engine_type) = 0;
 
     virtual Status
     Cache() = 0;
@@ -174,10 +106,10 @@ class ExecutionEngine {
     virtual Status
     Init() = 0;
 
-    virtual EngineType
+    virtual meta::EngineType
     IndexEngineType() const = 0;
 
-    virtual MetricType
+    virtual meta::MetricType
     IndexMetricType() const = 0;
 
     virtual std::string

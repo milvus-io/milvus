@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "cache/CpuCacheMgr.h"
+#include "db/meta/MetaTypes.h"
 #include "db/snapshot/Resources.h"
 #ifdef MILVUS_GPU_VERSION
 #include "cache/GpuCacheMgr.h"
@@ -173,16 +174,16 @@ IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2) {
 
 bool
 IsRawIndexType(int32_t type) {
-    return (type == (int32_t)EngineType::FAISS_IDMAP) || (type == (int32_t)EngineType::FAISS_BIN_IDMAP);
+    return (type == (int32_t)meta::EngineType::FAISS_IDMAP) || (type == (int32_t)meta::EngineType::FAISS_BIN_IDMAP);
 }
 
 bool
 IsBinaryMetricType(int32_t metric_type) {
-    return (metric_type == (int32_t)engine::MetricType::HAMMING) ||
-           (metric_type == (int32_t)engine::MetricType::JACCARD) ||
-           (metric_type == (int32_t)engine::MetricType::SUBSTRUCTURE) ||
-           (metric_type == (int32_t)engine::MetricType::SUPERSTRUCTURE) ||
-           (metric_type == (int32_t)engine::MetricType::TANIMOTO);
+    return (metric_type == (int32_t)meta::MetricType::HAMMING) ||
+           (metric_type == (int32_t)meta::MetricType::JACCARD) ||
+           (metric_type == (int32_t)meta::MetricType::SUBSTRUCTURE) ||
+           (metric_type == (int32_t)meta::MetricType::SUPERSTRUCTURE) ||
+           (metric_type == (int32_t)meta::MetricType::TANIMOTO);
 }
 
 meta::DateT
@@ -249,22 +250,22 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
 std::string
 GetIndexName(int32_t index_type) {
     static std::map<int32_t, std::string> index_type_name = {
-        {(int32_t)engine::EngineType::FAISS_IDMAP, knowhere::IndexEnum::INDEX_FAISS_IDMAP},
-        {(int32_t)engine::EngineType::FAISS_IVFFLAT, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
-        {(int32_t)engine::EngineType::FAISS_PQ, knowhere::IndexEnum::INDEX_FAISS_IVFPQ},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8NR, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8H, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H},
-        {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP},
-        {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT},
-        {(int32_t)engine::EngineType::NSG_MIX, knowhere::IndexEnum::INDEX_NSG},
+        {(int32_t)meta::EngineType::FAISS_IDMAP, knowhere::IndexEnum::INDEX_FAISS_IDMAP},
+        {(int32_t)meta::EngineType::FAISS_IVFFLAT, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {(int32_t)meta::EngineType::FAISS_PQ, knowhere::IndexEnum::INDEX_FAISS_IVFPQ},
+        {(int32_t)meta::EngineType::FAISS_IVFSQ8, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8},
+        {(int32_t)meta::EngineType::FAISS_IVFSQ8NR, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR},
+        {(int32_t)meta::EngineType::FAISS_IVFSQ8H, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H},
+        {(int32_t)meta::EngineType::FAISS_BIN_IDMAP, knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP},
+        {(int32_t)meta::EngineType::FAISS_BIN_IVFFLAT, knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT},
+        {(int32_t)meta::EngineType::NSG_MIX, knowhere::IndexEnum::INDEX_NSG},
 #ifdef MILVUS_SUPPORT_SPTAG
-        {(int32_t)engine::EngineType::SPTAG_KDT, knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT},
-        {(int32_t)engine::EngineType::SPTAG_BKT, knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT},
+        {(int32_t)meta::EngineType::SPTAG_KDT, knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT},
+        {(int32_t)meta::EngineType::SPTAG_BKT, knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT},
 #endif
-        {(int32_t)engine::EngineType::HNSW, knowhere::IndexEnum::INDEX_HNSW},
-        {(int32_t)engine::EngineType::HNSW_SQ8NR, knowhere::IndexEnum::INDEX_HNSW_SQ8NR},
-        {(int32_t)engine::EngineType::ANNOY, knowhere::IndexEnum::INDEX_ANNOY},
+        {(int32_t)meta::EngineType::HNSW, knowhere::IndexEnum::INDEX_HNSW},
+        {(int32_t)meta::EngineType::HNSW_SQ8NR, knowhere::IndexEnum::INDEX_HNSW_SQ8NR},
+        {(int32_t)meta::EngineType::ANNOY, knowhere::IndexEnum::INDEX_ANNOY},
     };
 
     if (index_type_name.find(index_type) == index_type_name.end()) {

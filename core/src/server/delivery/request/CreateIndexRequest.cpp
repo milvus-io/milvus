@@ -87,10 +87,10 @@ CreateIndexRequest::OnExecute() {
 
         int32_t adapter_index_type = index_type_;
         if (engine::utils::IsBinaryMetricType(collection_info.metric_type_)) {  // binary vector not allow
-            if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
-                adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
-            } else if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
-                adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
+            if (adapter_index_type == static_cast<int32_t>(engine::meta::EngineType::FAISS_IDMAP)) {
+                adapter_index_type = static_cast<int32_t>(engine::meta::EngineType::FAISS_BIN_IDMAP);
+            } else if (adapter_index_type == static_cast<int32_t>(engine::meta::EngineType::FAISS_IVFFLAT)) {
+                adapter_index_type = static_cast<int32_t>(engine::meta::EngineType::FAISS_BIN_IVFFLAT);
             } else {
                 return Status(SERVER_INVALID_INDEX_TYPE, "Invalid index type for collection metric type");
             }

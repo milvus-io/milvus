@@ -160,7 +160,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
             type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
             bool hybrid = false;
-            if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H) {
+            if (index_engine_->IndexEngineType() == EngineType::FAISS_IVFSQ8H) {
                 hybrid = true;
             }
             stat = index_engine_->CopyToGpu(device_id, hybrid);
@@ -244,17 +244,17 @@ XSearchTask::Execute() {
         try {
             /* step 2: search */
             bool hybrid = false;
-            if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H &&
+            if (index_engine_->IndexEngineType() == EngineType::FAISS_IVFSQ8H &&
                 ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
                 hybrid = true;
             }
             Status s;
             if (general_query != nullptr) {
-                std::unordered_map<std::string, engine::DataType> types;
+                std::unordered_map<std::string, DataType> types;
                 auto attr_type = search_job->attr_type();
                 auto type_it = attr_type.begin();
                 for (; type_it != attr_type.end(); type_it++) {
-                    types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
+                    types.insert(std::make_pair(type_it->first, (DataType)(type_it->second)));
                 }
 
                 auto query_ptr = search_job->query_ptr();

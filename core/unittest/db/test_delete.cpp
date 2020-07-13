@@ -46,8 +46,8 @@ BuildCollectionSchema() {
     milvus::engine::meta::CollectionSchema collection_info;
     collection_info.dimension_ = COLLECTION_DIM;
     collection_info.collection_id_ = GetCollectionName();
-    collection_info.metric_type_ = (int32_t)milvus::engine::MetricType::L2;
-    collection_info.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
+    collection_info.metric_type_ = (int32_t)milvus::engine::meta::MetricType::L2;
+    collection_info.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IDMAP;
     return collection_info;
 }
 
@@ -278,7 +278,7 @@ TEST_F(DeleteTest, delete_multiple_times) {
 
 TEST_F(DeleteTest, delete_before_create_index) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
-    collection_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
+    collection_info.engine_type_ = (int32_t)milvus::engine::meta::EngineType::FAISS_IVFFLAT;
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
@@ -327,7 +327,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
     ASSERT_TRUE(stat.ok());
 
     milvus::engine::CollectionIndex index;
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 100}};
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
@@ -360,7 +360,7 @@ TEST_F(DeleteTest, delete_before_create_index) {
 
 TEST_F(DeleteTest, delete_with_index) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
-    collection_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFFLAT;
+    collection_info.engine_type_ = (int32_t)milvus::engine::meta::EngineType::FAISS_IVFFLAT;
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
@@ -397,7 +397,7 @@ TEST_F(DeleteTest, delete_with_index) {
     }
 
     milvus::engine::CollectionIndex index;
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFSQ8;
     index.extra_params_ = {{"nlist", 100}};
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
@@ -483,7 +483,7 @@ TEST_F(DeleteTest, delete_multiple_times_with_index) {
     ASSERT_TRUE(stat.ok());
 
     milvus::engine::CollectionIndex index;
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFFLAT;
     index.extra_params_ = {{"nlist", 1}};
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
@@ -588,7 +588,7 @@ TEST_F(DeleteTest, delete_add_create_index) {
     // stat = db_->Flush();
     // ASSERT_TRUE(stat.ok());
     milvus::engine::CollectionIndex index;
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFFLAT;
     index.extra_params_ = {{"nlist", 100}};
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
@@ -771,7 +771,7 @@ TEST_F(CompactTest, compact_basic) {
 TEST_F(CompactTest, compact_with_index) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     collection_info.index_file_size_ = milvus::engine::KB;
-    collection_info.engine_type_ = (int32_t)milvus::engine::EngineType::FAISS_IVFSQ8;
+    collection_info.engine_type_ = (int32_t)milvus::engine::meta::EngineType::FAISS_IVFSQ8;
     auto stat = db_->CreateCollection(collection_info);
 
     milvus::engine::meta::CollectionSchema collection_info_get;
@@ -809,7 +809,7 @@ TEST_F(CompactTest, compact_with_index) {
     }
 
     milvus::engine::CollectionIndex index;
-    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8;
+    index.engine_type_ = (int)milvus::engine::meta::EngineType::FAISS_IVFSQ8;
     stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
     ASSERT_TRUE(stat.ok());
 

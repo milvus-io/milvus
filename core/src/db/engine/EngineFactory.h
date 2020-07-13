@@ -12,8 +12,8 @@
 #pragma once
 
 #include "ExecutionEngine.h"
+#include "db/meta/MetaTypes.h"
 #include "utils/Json.h"
-#include "utils/Status.h"
 
 #include <string>
 
@@ -23,7 +23,7 @@ namespace engine {
 class EngineFactory {
  public:
     static ExecutionEnginePtr
-    Build(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
+    Build(uint16_t dimension, const std::string& location, meta::EngineType index_type, meta::MetricType metric_type,
           const milvus::json& index_params);
 
     //    static ExecutionEnginePtr

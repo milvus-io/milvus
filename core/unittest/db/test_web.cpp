@@ -664,7 +664,7 @@ TEST_F(WebControllerTest, GET_COLLECTION_META) {
     ASSERT_EQ(10, result_dto->dimension);
     ASSERT_EQ("L2", result_dto->metric_type->std_str());
     ASSERT_EQ(10, result_dto->index_file_size->getValue());
-    ASSERT_EQ("FLAT", result_dto->index->std_str());
+    ASSERT_EQ("IDMAP", result_dto->index->std_str());
 
     // invalid collection name
     collection_name = "57474dgdfhdfhdh  dgd";
@@ -833,7 +833,7 @@ TEST_F(WebControllerTest, INDEX) {
     auto response = client_ptr->createIndex(collection_name, index_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 
-    index_json["index_type"] = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IDMAP);
+    index_json["index_type"] = milvus::server::web::IndexMap.at(milvus::engine::meta::EngineType::FAISS_IDMAP);
 
     // missing index `params`
     response = client_ptr->createIndex(collection_name, index_json.dump().c_str(), conncetion_ptr);
@@ -867,7 +867,7 @@ TEST_F(WebControllerTest, INDEX) {
     auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200);
     ASSERT_TRUE(status.ok()) << status.message();
 
-    index_json["index_type"] = milvus::server::web::IndexMap.at(milvus::engine::EngineType::FAISS_IVFFLAT);
+    index_json["index_type"] = milvus::server::web::IndexMap.at(milvus::engine::meta::EngineType::FAISS_IVFFLAT);
     response = client_ptr->createIndex(collection_name, index_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
@@ -876,7 +876,7 @@ TEST_F(WebControllerTest, INDEX) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto result_index_json = nlohmann::json::parse(response->readBodyToString()->c_str());
     ASSERT_TRUE(result_index_json.contains("index_type"));
-    ASSERT_EQ("IVFFLAT", result_index_json["index_type"].get<std::string>());
+    ASSERT_EQ("IVF_FLAT", result_index_json["index_type"].get<std::string>());
     ASSERT_TRUE(result_index_json.contains("params"));
 
     // check index params

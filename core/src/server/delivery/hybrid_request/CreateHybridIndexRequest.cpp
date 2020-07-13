@@ -84,7 +84,7 @@ CreateHybridIndexRequest::OnExecute() {
         int32_t index_type = 0;
         if (extra_params_.contains("index_type")) {
             std::string index_type_str = extra_params_["index_type"];
-            index_type = (int32_t)engine::s_map_engine_type.at(index_type_str);
+            index_type = (int32_t)engine::meta::s_map_engine_type.at(index_type_str);
         }
 
         status = ValidateCollectionIndexType(index_type);
@@ -100,10 +100,10 @@ CreateHybridIndexRequest::OnExecute() {
         // step 2: binary and float vector support different index/metric type, need to adapt here
         int32_t adapter_index_type = index_type;
         if (engine::utils::IsBinaryMetricType(collection_schema.metric_type_)) {  // binary vector not allow
-            if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
-                adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
-            } else if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
-                adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
+            if (adapter_index_type == static_cast<int32_t>(engine::meta::EngineType::FAISS_IDMAP)) {
+                adapter_index_type = static_cast<int32_t>(engine::meta::EngineType::FAISS_BIN_IDMAP);
+            } else if (adapter_index_type == static_cast<int32_t>(engine::meta::EngineType::FAISS_IVFFLAT)) {
+                adapter_index_type = static_cast<int32_t>(engine::meta::EngineType::FAISS_BIN_IVFFLAT);
             } else {
                 return Status(SERVER_INVALID_INDEX_TYPE, "Invalid index type for collection metric type");
             }

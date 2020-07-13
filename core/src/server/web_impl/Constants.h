@@ -48,10 +48,10 @@ extern const int64_t VALUE_CONFIG_CPU_CACHE_CAPACITY_DEFAULT;
 extern const bool VALUE_CONFIG_CACHE_INSERT_DATA_DEFAULT;
 
 /////////////////////////////////////////////////////
-extern const std::unordered_map<engine::EngineType, std::string> IndexMap;
-extern const std::unordered_map<std::string, engine::EngineType> IndexNameMap;
-extern const std::unordered_map<engine::MetricType, std::string> MetricMap;
-extern const std::unordered_map<std::string, engine::MetricType> MetricNameMap;
+extern const std::unordered_map<engine::meta::EngineType, std::string> IndexMap;
+extern const std::unordered_map<std::string, engine::meta::EngineType> IndexNameMap;
+extern const std::unordered_map<engine::meta::MetricType, std::string> MetricMap;
+extern const std::unordered_map<std::string, engine::meta::MetricType> MetricNameMap;
 
 }  // namespace web
 }  // namespace server

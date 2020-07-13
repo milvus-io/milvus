@@ -486,19 +486,19 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
             break;
         }
 
-        EngineType engine_type;
+        meta::EngineType engine_type;
         if (file.file_type_ == meta::SegmentSchema::FILE_TYPE::RAW ||
             file.file_type_ == meta::SegmentSchema::FILE_TYPE::TO_INDEX ||
             file.file_type_ == meta::SegmentSchema::FILE_TYPE::BACKUP) {
             engine_type =
-                utils::IsBinaryMetricType(file.metric_type_) ? EngineType::FAISS_BIN_IDMAP : EngineType::FAISS_IDMAP;
+                utils::IsBinaryMetricType(file.metric_type_) ? meta::EngineType::FAISS_BIN_IDMAP : meta::EngineType::FAISS_IDMAP;
         } else {
-            engine_type = (EngineType)file.engine_type_;
+            engine_type = (meta::EngineType)file.engine_type_;
         }
 
         auto json = milvus::json::parse(file.index_params_);
         ExecutionEnginePtr engine =
-            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
+            EngineFactory::Build(file.dimension_, file.location_, engine_type, (meta::MetricType)file.metric_type_, json);
         fiu_do_on("DBImpl.PreloadCollection.null_engine", engine = nullptr);
         if (engine == nullptr) {
             LOG_ENGINE_ERROR_ << "Invalid engine type";

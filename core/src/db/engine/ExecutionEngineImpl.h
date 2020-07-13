@@ -29,11 +29,11 @@ namespace engine {
 
 class ExecutionEngineImpl : public ExecutionEngine {
  public:
-    ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
-                        const milvus::json& index_params);
+    ExecutionEngineImpl(uint16_t dimension, const std::string& location, meta::EngineType index_type,
+                        meta::MetricType metric_type, const milvus::json& index_params);
 
-    ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location, EngineType index_type,
-                        MetricType metric_type, const milvus::json& index_params);
+    ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location, meta::EngineType index_type,
+                        meta::MetricType metric_type, const milvus::json& index_params);
 
     Status
     AddWithIds(int64_t n, const float* xdata, const int64_t* xids) override;
@@ -78,17 +78,17 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
-                    std::unordered_map<std::string, DataType>& attr_type, std::string& vector_placeholder) override;
+                    std::unordered_map<std::string, meta::hybrid::DataType>& attr_type, std::string& vector_placeholder) override;
 
     Status
-    HybridSearch(scheduler::SearchJobPtr job, std::unordered_map<std::string, DataType>& attr_type,
+    HybridSearch(scheduler::SearchJobPtr job, std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
                  std::vector<float>& distances, std::vector<int64_t>& search_ids, bool hybrid) override;
 
     Status
     Search(std::vector<int64_t>& ids, std::vector<float>& distances, scheduler::SearchJobPtr job, bool hybrid) override;
 
     ExecutionEnginePtr
-    BuildIndex(const std::string& location, EngineType engine_type) override;
+    BuildIndex(const std::string& location, meta::EngineType engine_type) override;
 
     Status
     Cache() override;
@@ -99,12 +99,12 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Status
     Init() override;
 
-    EngineType
+    meta::EngineType
     IndexEngineType() const override {
         return index_type_;
     }
 
-    MetricType
+    meta::MetricType
     IndexMetricType() const override {
         return metric_type_;
     }
@@ -121,17 +121,17 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
  private:
     knowhere::VecIndexPtr
-    CreatetVecIndex(EngineType type);
+    CreatetVecIndex(meta::EngineType type);
 
     knowhere::VecIndexPtr
     Load(const std::string& location);
 
     Status
     ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::GeneralQueryPtr general_query,
-                     std::unordered_map<std::string, DataType>& attr_type);
+                     std::unordered_map<std::string, meta::hybrid::DataType>& attr_type);
 
     Status
-    ProcessRangeQuery(const engine::DataType data_type, const std::string& operand,
+    ProcessRangeQuery(const meta::hybrid::DataType data_type, const std::string& operand,
                       const query::CompareOperator& com_operator, knowhere::IndexPtr& index_ptr,
                       faiss::ConcurrentBitsetPtr& bitset);
 
@@ -145,8 +145,8 @@ class ExecutionEngineImpl : public ExecutionEngine {
     knowhere::VecIndexPtr index_ = nullptr;
     std::string location_;
     int64_t dim_;
-    EngineType index_type_;
-    MetricType metric_type_;
+    meta::EngineType index_type_;
+    meta::MetricType metric_type_;
 
     Attr::AttrIndexPtr attr_index_ = nullptr;
 

@@ -152,8 +152,8 @@ ValidateTableDimension(int64_t dimension, int64_t metric_type) {
 
 Status
 ValidateCollectionIndexType(int32_t index_type) {
-    int engine_type = static_cast<int>(engine::EngineType(index_type));
-    if (engine_type <= 0 || engine_type > static_cast<int>(engine::EngineType::MAX_VALUE)) {
+    int engine_type = static_cast<int>(engine::meta::EngineType(index_type));
+    if (engine_type <= 0 || engine_type > static_cast<int>(engine::meta::EngineType::MAX_VALUE)) {
         std::string msg = "Invalid index type: " + std::to_string(index_type) + ". " +
                           "Make sure the index type is in IndexType list.";
         LOG_SERVER_ERROR_ << msg;
@@ -162,7 +162,7 @@ ValidateCollectionIndexType(int32_t index_type) {
 
 #ifndef MILVUS_GPU_VERSION
     // special case, hybird index only available in customize faiss library
-    if (engine_type == static_cast<int>(engine::EngineType::FAISS_IVFSQ8H)) {
+    if (engine_type == static_cast<int>(engine::meta::EngineType::FAISS_IVFSQ8H)) {
         std::string msg = "Unsupported index type: " + std::to_string(index_type);
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
@@ -176,22 +176,22 @@ Status
 ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& collection_schema,
                     int32_t index_type) {
     switch (index_type) {
-        case (int32_t)engine::EngineType::FAISS_IDMAP:
-        case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
+        case (int32_t)engine::meta::EngineType::FAISS_IDMAP:
+        case (int32_t)engine::meta::EngineType::FAISS_BIN_IDMAP: {
             break;
         }
-        case (int32_t)engine::EngineType::FAISS_IVFFLAT:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8NR:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
-        case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT: {
+        case (int32_t)engine::meta::EngineType::FAISS_IVFFLAT:
+        case (int32_t)engine::meta::EngineType::FAISS_IVFSQ8:
+        case (int32_t)engine::meta::EngineType::FAISS_IVFSQ8NR:
+        case (int32_t)engine::meta::EngineType::FAISS_IVFSQ8H:
+        case (int32_t)engine::meta::EngineType::FAISS_BIN_IVFFLAT: {
             auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
             if (!status.ok()) {
                 return status;
             }
             break;
         }
-        case (int32_t)engine::EngineType::FAISS_PQ: {
+        case (int32_t)engine::meta::EngineType::FAISS_PQ: {
             auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
             if (!status.ok()) {
                 return status;
@@ -229,7 +229,7 @@ ValidateIndexParams(const milvus::json& index_params, const engine::meta::Collec
 
             break;
         }
-        case (int32_t)engine::EngineType::NSG_MIX: {
+        case (int32_t)engine::meta::EngineType::NSG_MIX: {
             auto status = CheckParameterRange(index_params, knowhere::IndexParams::search_length, 10, 300);
             if (!status.ok()) {
                 return status;
@@ -248,7 +248,7 @@ ValidateIndexParams(const milvus::json& index_params, const engine::meta::Collec
             }
             break;
         }
-        case (int32_t)engine::EngineType::HNSW: {
+        case (int32_t)engine::meta::EngineType::HNSW: {
             auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
             if (!status.ok()) {
                 return status;
@@ -259,7 +259,7 @@ ValidateIndexParams(const milvus::json& index_params, const engine::meta::Collec
             }
             break;
         }
-        case (int32_t)engine::EngineType::ANNOY: {
+        case (int32_t)engine::meta::EngineType::ANNOY: {
             auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
             if (!status.ok()) {
                 return status;
@@ -274,37 +274,37 @@ Status
 ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& collection_schema,
                      int64_t topk) {
     switch (collection_schema.engine_type_) {
-        case (int32_t)engine::EngineType::FAISS_IDMAP:
-        case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
+        case (int32_t)engine::meta::EngineType::FAISS_IDMAP:
+        case (int32_t)engine::meta::EngineType::FAISS_BIN_IDMAP: {
             break;
         }
-        case (int32_t)engine::EngineType::FAISS_IVFFLAT:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8NR:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
-        case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT:
-        case (int32_t)engine::EngineType::FAISS_PQ: {
+        case (int32_t)engine::meta::EngineType::FAISS_IVFFLAT:
+        case (int32_t)engine::meta::EngineType::FAISS_IVFSQ8:
+        case (int32_t)engine::meta::EngineType::FAISS_IVFSQ8NR:
+        case (int32_t)engine::meta::EngineType::FAISS_IVFSQ8H:
+        case (int32_t)engine::meta::EngineType::FAISS_BIN_IVFFLAT:
+        case (int32_t)engine::meta::EngineType::FAISS_PQ: {
             auto status = CheckParameterRange(search_params, knowhere::IndexParams::nprobe, 1, 999999);
             if (!status.ok()) {
                 return status;
             }
             break;
         }
-        case (int32_t)engine::EngineType::NSG_MIX: {
+        case (int32_t)engine::meta::EngineType::NSG_MIX: {
             auto status = CheckParameterRange(search_params, knowhere::IndexParams::search_length, 10, 300);
             if (!status.ok()) {
                 return status;
             }
             break;
         }
-        case (int32_t)engine::EngineType::HNSW: {
+        case (int32_t)engine::meta::EngineType::HNSW: {
             auto status = CheckParameterRange(search_params, knowhere::IndexParams::ef, topk, 4096);
             if (!status.ok()) {
                 return status;
             }
             break;
         }
-        case (int32_t)engine::EngineType::ANNOY: {
+        case (int32_t)engine::meta::EngineType::ANNOY: {
             auto status = CheckParameterRange(search_params, knowhere::IndexParams::search_k,
                                               std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
             if (!status.ok()) {
@@ -384,7 +384,7 @@ ValidateCollectionIndexFileSize(int64_t index_file_size) {
 
 Status
 ValidateCollectionIndexMetricType(int32_t metric_type) {
-    if (metric_type <= 0 || metric_type > static_cast<int32_t>(engine::MetricType::MAX_VALUE)) {
+    if (metric_type <= 0 || metric_type > static_cast<int32_t>(engine::meta::MetricType::MAX_VALUE)) {
         std::string msg = "Invalid index metric type: " + std::to_string(metric_type) + ". " +
                           "Make sure the metric type is in MetricType list.";
         LOG_SERVER_ERROR_ << msg;

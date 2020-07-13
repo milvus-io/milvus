@@ -92,10 +92,10 @@ WebRequestHandler::IsBinaryCollection(const std::string& collection_name, bool& 
     CollectionSchema schema;
     auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
     if (status.ok()) {
-        auto metric = engine::MetricType(schema.metric_type_);
-        bin = engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
-              engine::MetricType::TANIMOTO == metric || engine::MetricType::SUPERSTRUCTURE == metric ||
-              engine::MetricType::SUBSTRUCTURE == metric;
+        auto metric = engine::meta::MetricType(schema.metric_type_);
+        bin = engine::meta::MetricType::HAMMING == metric || engine::meta::MetricType::JACCARD == metric ||
+              engine::meta::MetricType::TANIMOTO == metric || engine::meta::MetricType::SUPERSTRUCTURE == metric ||
+              engine::meta::MetricType::SUBSTRUCTURE == metric;
     }
 
     return status;
@@ -156,9 +156,9 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
     json_out["collection_name"] = schema.collection_name_;
     json_out["dimension"] = schema.dimension_;
     json_out["index_file_size"] = schema.index_file_size_;
-    json_out["index"] = IndexMap.at(engine::EngineType(index_param.index_type_));
+    json_out["index"] = IndexMap.at(engine::meta::EngineType(index_param.index_type_));
     json_out["index_params"] = index_param.extra_params_;
-    json_out["metric_type"] = MetricMap.at(engine::MetricType(schema.metric_type_));
+    json_out["metric_type"] = MetricMap.at(engine::meta::MetricType(schema.metric_type_));
     json_out["count"] = count;
 
     return Status::OK();
@@ -1441,7 +1441,7 @@ WebRequestHandler::GetIndex(const OString& collection_name, OString& result) {
 
     if (status.ok()) {
         nlohmann::json json_out;
-        auto index_type = IndexMap.at(engine::EngineType(param.index_type_));
+        auto index_type = IndexMap.at(engine::meta::EngineType(param.index_type_));
         json_out["index_type"] = index_type;
         json_out["params"] = nlohmann::json::parse(param.extra_params_);
         result = json_out.dump().c_str();
