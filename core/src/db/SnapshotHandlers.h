@@ -15,6 +15,7 @@
 #include "db/meta/FilesHolder.h"
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/Snapshot.h"
+#include "segment/Types.h"
 #include "server/context/Context.h"
 #include "utils/Log.h"
 

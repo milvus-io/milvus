@@ -18,7 +18,7 @@
 #include <boost/filesystem.hpp>
 #include <memory>
 
-#include "codecs/default/DefaultVectorCompressFormat.h"
+#include "codecs/snapshot/SSVectorCompressFormat.h"
 #include "knowhere/common/BinarySet.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -28,8 +28,8 @@ namespace milvus {
 namespace codec {
 
 void
-DefaultVectorCompressFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                                  knowhere::BinaryPtr& compress) {
+SSVectorCompressFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                             knowhere::BinaryPtr& compress) {
     const std::string compress_file_path = location + sq8_vector_extension_;
 
     milvus::TimeRecorder recorder("read_index");
@@ -46,7 +46,6 @@ DefaultVectorCompressFormat::read(const storage::FSHandlerPtr& fs_ptr, const std
         return;
     }
 
-    compress = std::make_shared<knowhere::Binary>();
     compress->data = std::shared_ptr<uint8_t[]>(new uint8_t[length]);
     compress->size = length;
 
@@ -60,8 +59,8 @@ DefaultVectorCompressFormat::read(const storage::FSHandlerPtr& fs_ptr, const std
 }
 
 void
-DefaultVectorCompressFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                                   const knowhere::BinaryPtr& compress) {
+SSVectorCompressFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                              const knowhere::BinaryPtr& compress) {
     const std::string compress_file_path = location + sq8_vector_extension_;
 
     milvus::TimeRecorder recorder("write_index");

@@ -521,6 +521,14 @@ Status
 CreateCollectionOperation::DoExecute(Store& store) {
     // TODO: Do some checks
     CollectionPtr collection;
+    ScopedSnapshotT ss;
+    Snapshots::GetInstance().GetSnapshot(ss, c_context_.collection->GetName());
+    if (ss) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Duplicated collection " << c_context_.collection->GetName();
+        return Status(SS_DUPLICATED_ERROR, emsg.str());
+    }
+
     auto status = store.CreateCollection(Collection(c_context_.collection->GetName()), collection);
     if (!status.ok()) {
         std::cerr << status.ToString() << std::endl;
@@ -541,7 +549,7 @@ CreateCollectionOperation::DoExecute(Store& store) {
         MappingT element_ids = {};
         FieldElementPtr raw_element;
         status = store.CreateResource<FieldElement>(
-            FieldElement(collection->GetID(), field->GetID(), "RAW", FieldElementType::RAW), raw_element);
+            FieldElement(collection->GetID(), field->GetID(), "NONE", FieldElementType::FET_NONE), raw_element);
         AddStepWithLsn(*raw_element, c_context_.lsn);
         element_ids.insert(raw_element->GetID());
         for (auto& element_schema : field_elements) {

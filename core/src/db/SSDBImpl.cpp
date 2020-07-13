@@ -23,7 +23,6 @@
 #include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
 #include "scheduler/SchedInst.h"
-#include "segment/SegmentReader.h"
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
@@ -263,8 +262,6 @@ SSDBImpl::CreatePartition(const std::string& collection_name, const std::string&
     if (options_.wal_enable_) {
         // SS TODO
         /* lsn = wal_mgr_->CreatePartition(collection_id, partition_tag); */
-    } else {
-        lsn = ss->GetCollection()->GetLsn();
     }
 
     snapshot::OperationContext context;
@@ -317,8 +314,6 @@ SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field
     // SS TODO: Check Index Type
 
     snapshot::OperationContext context;
-    // SS TODO: no lsn for drop index
-    context.lsn = ss->GetCollectionCommit()->GetLsn();
     STATUS_CHECK(ss->GetFieldElement(field_name, field_element_name, context.stale_field_element));
     auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
     STATUS_CHECK(op->Push());
@@ -454,9 +449,9 @@ SSDBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_
     handler->Iterate();
     STATUS_CHECK(handler->GetStatus());
 
-    vector_data = std::move(handler->vector_data_);
+    // vector_data = std::move(handler->segment_ptr_->vectors_ptr_);
     // attr_type = std::move(handler->attr_type_);
-    attr_data = std::move(handler->attr_data_);
+    // attr_data = std::move(handler->attr_data_);
 
     return Status::OK();
 }

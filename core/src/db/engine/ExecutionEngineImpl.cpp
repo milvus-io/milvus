@@ -209,6 +209,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, mode);
             break;
         }
+        case EngineType::FAISS_IVFSQ8NR: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, mode);
+            break;
+        }
 #ifdef MILVUS_GPU_VERSION
         case EngineType::FAISS_IVFSQ8H: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, mode);
@@ -239,6 +243,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 #endif
         case EngineType::HNSW: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW, mode);
+            break;
+        }
+        case EngineType::HNSW_SQ8NR: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW_SQ8NR, mode);
             break;
         }
         case EngineType::ANNOY: {
