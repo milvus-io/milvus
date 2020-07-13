@@ -23,13 +23,19 @@
 namespace milvus {
 namespace engine {
 
+extern const char* VECTOR_DIMENSION;
+
+struct DataChunk {
+    uint64_t count_ = 0;
+    std::unordered_map<std::string, std::vector<uint8_t>> fields_data_;
+};
+
+using DataChunkPtr = std::shared_ptr<DataChunk>;
+
 class SSMemManager {
  public:
     virtual Status
-    InsertEntities(int64_t collection_id, int64_t partition_id, int64_t count, const IDNumber* entity_ids, int64_t dim,
-                   const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                   const std::unordered_map<std::string, uint64_t>& attr_size,
-                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) = 0;
+    InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) = 0;
 
     virtual Status
     DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t lsn) = 0;

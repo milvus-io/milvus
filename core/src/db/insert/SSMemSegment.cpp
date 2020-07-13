@@ -20,6 +20,7 @@
 #include "db/Constants.h"
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
+#include "db/meta/MetaTypes.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/Snapshots.h"
 #include "metrics/Metrics.h"
@@ -66,47 +67,83 @@ SSMemSegment::CreateSegment() {
     return status;
 }
 
-int64_t
-SSMemSegment::GetDimension() {
+Status
+SSMemSegment::GetSingleEntitySize(size_t& single_size) {
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
     if (!status.ok()) {
-        std::string err_msg = "SSMemSegment::GetDimension failed: " + status.ToString();
+        std::string err_msg = "SSMemSegment::SingleEntitySize failed: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
-        return 0;
+        return status;
     }
 
-    const std::string hard_code_vector_field = "vector";
-    const std::string hard_code_dimension = "dimension";
-    snapshot::FieldPtr field = ss->GetField(hard_code_vector_field);
-    json params = field->GetParams();
-    if (params.find(hard_code_dimension) == params.end()) {
-        std::string msg = "Vector field params must contain: dimension";
-        LOG_SERVER_ERROR_ << msg;
-        return 0;
+    single_size = 0;
+    std::vector<std::string> field_names = ss->GetFieldNames();
+    for (auto& name : field_names) {
+        snapshot::FieldPtr field = ss->GetField(name);
+        meta::hybrid::DataType ftype = static_cast<meta::hybrid::DataType>(field->GetFtype());
+        switch (ftype) {
+            case meta::hybrid::DataType::BOOL:
+                single_size += sizeof(bool);
+                break;
+            case meta::hybrid::DataType::DOUBLE:
+                single_size += sizeof(double);
+                break;
+            case meta::hybrid::DataType::FLOAT:
+                single_size += sizeof(float);
+                break;
+            case meta::hybrid::DataType::INT8:
+                single_size += sizeof(uint8_t);
+                break;
+            case meta::hybrid::DataType::INT16:
+                single_size += sizeof(uint16_t);
+                break;
+            case meta::hybrid::DataType::INT32:
+                single_size += sizeof(uint32_t);
+                break;
+            case meta::hybrid::DataType::UID:
+            case meta::hybrid::DataType::INT64:
+                single_size += sizeof(uint64_t);
+                break;
+            case meta::hybrid::DataType::VECTOR:
+            case meta::hybrid::DataType::VECTOR_FLOAT:
+            case meta::hybrid::DataType::VECTOR_BINARY: {
+                json params = field->GetParams();
+                if (params.find(VECTOR_DIMENSION) == params.end()) {
+                    std::string msg = "Vector field params must contain: dimension";
+                    LOG_SERVER_ERROR_ << msg;
+                    return Status(DB_ERROR, msg);
+                }
+
+                int64_t dimension = params[VECTOR_DIMENSION];
+                if (ftype == meta::hybrid::DataType::VECTOR_BINARY) {
+                    single_size += (dimension / 8);
+                } else {
+                    single_size += (dimension * sizeof(float));
+                }
+
+                break;
+            }
+        }
     }
 
-    int64_t dimension = params[hard_code_dimension];
-    return dimension;
+    return Status::OK();
 }
 
 Status
 SSMemSegment::Add(const SSVectorSourcePtr& source) {
-    int64_t dimension = GetDimension();
-    if (dimension <= 0) {
-        std::string err_msg = "SSMemSegment::Add: table_file_schema dimension = " + std::to_string(dimension) +
-                              ", collection_id = " + std::to_string(collection_id_);
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << err_msg;
-        return Status(DB_ERROR, "Not able to create collection file");
+    size_t single_entity_mem_size = 0;
+    auto status = GetSingleEntitySize(single_entity_mem_size);
+    if (!status.ok()) {
+        return status;
     }
 
-    size_t single_entity_mem_size = source->SingleEntitySize(dimension);
     size_t mem_left = GetMemLeft();
     if (mem_left >= single_entity_mem_size) {
         size_t num_entities_to_add = std::ceil(mem_left / single_entity_mem_size);
         size_t num_entities_added;
 
-        auto status = source->Add(segment_writer_ptr_, dimension, num_entities_to_add, num_entities_added);
+        auto status = source->Add(segment_writer_ptr_, num_entities_to_add, num_entities_added);
 
         if (status.ok()) {
             current_mem_ += (num_entities_added * single_entity_mem_size);
@@ -180,8 +217,13 @@ SSMemSegment::GetMemLeft() {
 
 bool
 SSMemSegment::IsFull() {
-    size_t single_vector_mem_size = GetDimension() * FLOAT_TYPE_SIZE;
-    return (GetMemLeft() < single_vector_mem_size);
+    size_t single_entity_mem_size = 0;
+    auto status = GetSingleEntitySize(single_entity_mem_size);
+    if (!status.ok()) {
+        return true;
+    }
+
+    return (GetMemLeft() < single_entity_mem_size);
 }
 
 Status

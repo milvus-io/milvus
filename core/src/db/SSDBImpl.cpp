@@ -1056,10 +1056,11 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            status =
-                mem_mgr_->InsertEntities(collection_id, partition_id, record.length, record.ids,
-                                         (record.data_size / record.length / sizeof(float)), (const float*)record.data,
-                                         record.attr_nbytes, record.attr_data_size, record.attr_data, record.lsn);
+            //            status =
+            //                mem_mgr_->InsertEntities(collection_id, partition_id, record.length, record.ids,
+            //                                         (record.data_size / record.length / sizeof(float)), (const
+            //                                         float*)record.data, record.attr_nbytes, record.attr_data_size,
+            //                                         record.attr_data, record.lsn);
             force_flush_if_mem_full();
 
             // metrics

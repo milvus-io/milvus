@@ -16,10 +16,13 @@
 
 #include "SSVectorSource.h"
 #include "db/Constants.h"
+#include "db/snapshot/Snapshots.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
+
+const char* VECTOR_DIMENSION = "dimension";
 
 SSMemCollectionPtr
 SSMemManagerImpl::GetMemByTable(int64_t collection_id, int64_t partition_id) {
@@ -49,23 +52,105 @@ SSMemManagerImpl::GetMemByTable(int64_t collection_id) {
 }
 
 Status
-SSMemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, int64_t length,
-                                 const IDNumber* vector_ids, int64_t dim, const float* vectors,
-                                 const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                                 const std::unordered_map<std::string, uint64_t>& attr_size,
-                                 const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) {
-    VectorsData vectors_data;
-    vectors_data.vector_count_ = length;
-    vectors_data.float_data_.resize(length * dim);
-    memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(float));
-    vectors_data.id_array_.resize(length);
-    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
+SSMemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) {
+    auto status = ValidateChunk(collection_id, partition_id, chunk);
+    if (!status.ok()) {
+        return status;
+    }
 
-    SSVectorSourcePtr source = std::make_shared<SSVectorSource>(vectors_data, attr_nbytes, attr_size, attr_data);
-
+    SSVectorSourcePtr source = std::make_shared<SSVectorSource>(chunk);
     std::unique_lock<std::mutex> lock(mutex_);
-
     return InsertEntitiesNoLock(collection_id, partition_id, source, lsn);
+}
+
+Status
+SSMemManagerImpl::ValidateChunk(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk) {
+    if (chunk == nullptr) {
+        return Status(DB_ERROR, "Null chunk pointer");
+    }
+
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id);
+    if (!status.ok()) {
+        std::string err_msg = "Could not get snapshot: " + status.ToString();
+        LOG_ENGINE_ERROR_ << err_msg;
+        return status;
+    }
+
+    std::vector<std::string> field_names = ss->GetFieldNames();
+    for (auto& name : field_names) {
+        auto iter = chunk->fields_data_.find(name);
+        if (iter == chunk->fields_data_.end()) {
+            std::string err_msg = "Missed chunk field: " + name;
+            LOG_ENGINE_ERROR_ << err_msg;
+            return Status(DB_ERROR, err_msg);
+        }
+
+        size_t data_size = iter->second.size();
+
+        snapshot::FieldPtr field = ss->GetField(name);
+        meta::hybrid::DataType ftype = static_cast<meta::hybrid::DataType>(field->GetFtype());
+        std::string err_msg = "Illegal data size for chunk field: ";
+        switch (ftype) {
+            case meta::hybrid::DataType::BOOL:
+                if (data_size != chunk->count_ * sizeof(bool)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::DOUBLE:
+                if (data_size != chunk->count_ * sizeof(double)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::FLOAT:
+                if (data_size != chunk->count_ * sizeof(float)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::INT8:
+                if (data_size != chunk->count_ * sizeof(uint8_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::INT16:
+                if (data_size != chunk->count_ * sizeof(uint16_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::INT32:
+                if (data_size != chunk->count_ * sizeof(uint32_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::UID:
+            case meta::hybrid::DataType::INT64:
+                if (data_size != chunk->count_ * sizeof(uint64_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::VECTOR:
+            case meta::hybrid::DataType::VECTOR_FLOAT:
+            case meta::hybrid::DataType::VECTOR_BINARY: {
+                json params = field->GetParams();
+                if (params.find(VECTOR_DIMENSION) == params.end()) {
+                    std::string msg = "Vector field params must contain: dimension";
+                    LOG_SERVER_ERROR_ << msg;
+                    return Status(DB_ERROR, msg);
+                }
+
+                int64_t dimension = params[VECTOR_DIMENSION];
+                int64_t row_size =
+                    (ftype == meta::hybrid::DataType::VECTOR_BINARY) ? dimension / 8 : dimension * sizeof(float);
+                if (data_size != chunk->count_ * row_size) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+
+                break;
+            }
+        }
+    }
+
+    return Status::OK();
 }
 
 Status

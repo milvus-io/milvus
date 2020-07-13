@@ -65,8 +65,8 @@ class SSMemSegment : public server::CacheConfigHandler {
     Status
     CreateSegment();
 
-    int64_t
-    GetDimension();
+    Status
+    GetSingleEntitySize(size_t& single_size);
 
  private:
     int64_t collection_id_;

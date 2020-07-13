@@ -42,10 +42,7 @@ class SSMemManagerImpl : public SSMemManager, public server::CacheConfigHandler 
     }
 
     Status
-    InsertEntities(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                   const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                   const std::unordered_map<std::string, uint64_t>& attr_size,
-                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) override;
+    InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) override;
 
     Status
     DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t lsn) override;
@@ -84,6 +81,9 @@ class SSMemManagerImpl : public SSMemManager, public server::CacheConfigHandler 
 
     std::vector<SSMemCollectionPtr>
     GetMemByTable(int64_t collection_id);
+
+    Status
+    ValidateChunk(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk);
 
     Status
     InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const SSVectorSourcePtr& source, uint64_t lsn);
