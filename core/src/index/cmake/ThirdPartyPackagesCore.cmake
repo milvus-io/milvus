@@ -543,6 +543,8 @@ macro(build_faiss)
                 --without-cuda)
     endif ()
 
+    message(STATUS "Building FAISS with configure args -${FAISS_CONFIGURE_ARGS}")
+
     if (DEFINED ENV{FAISS_SOURCE_URL})
         set(FAISS_SOURCE_URL "$ENV{FAISS_SOURCE_URL}")
         externalproject_add(faiss_ep
