@@ -18,6 +18,7 @@
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Resources.h"
 #include "utils/Json.h"
+#include "utils/StringHelpFunctions.h"
 
 namespace milvus::engine {
 
@@ -160,10 +161,14 @@ AttrValue2Str(typename ResourceContext<ResourceT>::ResPtr src, const std::string
 
 template <typename ResourceT>
 inline Status
-ResourceContextAddAttrMap(ResourceContextPtr<ResourceT> src, std::map<std::string, std::string>& attr_map) {
+ResourceContextAddAttrMap(ResourceContextPtr<ResourceT> src, std::unordered_map<std::string, std::string>& attr_map) {
     std::vector<std::string> attrs = ResourceAttrMap.at(ResourceT::Name);
 
     for (auto& attr : attrs) {
+        if (attr == F_ID) {
+            continue;
+        }
+
         std::string value;
         AttrValue2Str<ResourceT>(src->Resource(), attr, value);
         attr_map[attr] = value;
@@ -195,7 +200,7 @@ ResourceContextToAddSql(ResourceContextPtr<ResourceT> res, std::string& sql) {
 
 template <typename ResourceT>
 inline Status
-ResourceContextUpdateAttrMap(ResourceContextPtr<ResourceT> res, std::map<std::string, std::string>& attr_map) {
+ResourceContextUpdateAttrMap(ResourceContextPtr<ResourceT> res, std::unordered_map<std::string, std::string>& attr_map) {
     std::string value;
     for (auto& attr: res->Attrs()) {
         AttrValue2Str<ResourceT>(res->Resource(), attr, value);

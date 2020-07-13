@@ -31,10 +31,10 @@ class MySqlEngine: public DBEngine {
     ~MySqlEngine() = default;
 
     Status
-    Query(const std::string& query_sql, AttrsMapList& attrs) override;
+    Query(const DBQueryContext& context, AttrsMapList& attrs) override;
 
     Status
-    ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std::vector<int64_t>& result_ids) override;
+    ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) override;
 
     Status
     TruncateAll() override;

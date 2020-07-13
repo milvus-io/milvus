@@ -11,29 +11,27 @@
 
 #pragma once
 
-#include "db/impl/ResourceAttrs.hpp"
+#include "db/impl/DBEngine.h"
 #include "utils/Status.h"
 
 namespace milvus::engine {
 
-class Query {
+class MemDBEngine: public DBEngine {
  public:
-    Query() = default;
-    ~Query() = default;
-
- public:
-    Query&
-    Filter(const std::string& filter) {
-        return *this;
+    MemDBEngine(){
     }
+
+    ~MemDBEngine() = default;
 
     Status
-    Store() {
-        return Status::OK();
-    }
+    Query(const DBQueryContext& context, AttrsMapList& attrs) override;
 
- private:
-    std::string filter;
+    Status
+    ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) override;
+
+    Status
+    TruncateAll() override;
+
 };
 
 }

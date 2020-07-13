@@ -29,7 +29,6 @@ namespace engine {
 namespace snapshot {
 
 ///////////////////////////////////////////////////////////////////////////////////////
-
 class Session {
  public:
     explicit
@@ -49,22 +48,22 @@ class Session {
 
     Status
     ResultPos() {
-        if (sql_context_.empty()) {
+        if (apply_context_.empty()) {
             return Status(SERVER_UNEXPECTED_ERROR, "Session is empty");
         }
-        pos_ = sql_context_.size() - 1;
+        pos_ = apply_context_.size() - 1;
 
         return Status::OK();
     }
 
     Status
     Commit(std::vector<int64_t>& result_ids) {
-        return db_engine_->ExecuteTransaction(sql_context_, result_ids);
+        return db_engine_->ExecuteTransaction(apply_context_, result_ids);
     }
 
     Status
     Commit(int64_t& result_id) {
-        if (sql_context_.empty()) {
+        if (apply_context_.empty()) {
             return Status::OK();
         }
 
@@ -73,7 +72,7 @@ class Session {
 //            return Status(SERVER_UNEXPECTED_ERROR, "Result pos is small than 0");
         }
         std::vector<int64_t> result_ids;
-        auto status = db_engine_->ExecuteTransaction(sql_context_, result_ids);
+        auto status = db_engine_->ExecuteTransaction(apply_context_, result_ids);
         if (!status.ok()) {
             return status;
         }
@@ -83,56 +82,23 @@ class Session {
     }
 
  private:
-    std::vector<SqlContext> sql_context_;
+    std::vector<DBApplyContext> apply_context_;
     int64_t pos_;
     DBEnginePtr db_engine_;
 };
 
-//class MockSession: AbstractSession {
-//
-// public:
-//    explicit
-//    MockSession(DBEnginePtr engine): db_engine_(std::move(engine)) {
-//    }
-////    MockSession() : transcation_enable_(false) {
-////    }
-//
-//    ~MockSession() = default;
-//
-// public:
-//
-//    template <typename T>
-//    Status
-//    Select(const std::string& table, int64_t id, typename T::Ptr& resource);
-//
-//    Status
-//    Apply(ResourceContextPtr resp) override;
-//
-//    Status
-//    Commit(std::vector<int64_t>& result_ids) override;
-//
-// private:
-//    std::unordered_map<std::string, std::vector<int64_t> > add_resources_;
-//    std::unordered_map<std::string, std::vector<std::map<std::string, std::string>> > update_resources_;
-//    std::unordered_map<std::string, std::vector<std::map<std::string, std::string>> > delete_resources_;
-//    std::vector<int64_t> result_ids_;
-//
-//    DBEnginePtr db_engine_;
-//};
-
 template <typename T>
 Status
 Session::Select(const std::string& field, const std::string& value, std::vector<typename T::Ptr>& resources) {
-//    std::string sql = "SELECT * FROM " + std::string(T::Name) + " WHERE " + field + " = " + value + ";";
-    std::string sql = "SELECT * FROM " + std::string(T::Name);
+    DBQueryContext context;
+    context.table_ = T::Name;
+
     if (!field.empty()) {
-        sql +=  + " WHERE " + field + " = " + value;
+        context.filter_attrs_ = {{field, value}};
     }
-    sql += ";";
 
     AttrsMapList attrs;
-
-    auto status = db_engine_->Query(sql, attrs);
+    auto status = db_engine_->Query(context, attrs);
     if (!status.ok()) {
         return status;
     }
@@ -288,29 +254,28 @@ Session::Apply(ResourceContextPtr<ResourceT> resp) {
     // TODO: may here not need to store resp
     auto status = Status::OK();
     std::string sql;
-    if (resp->Op() == oAdd) {
-        status = ResourceContextToAddSql<ResourceT>(resp, sql);
-    } else if (resp->Op() == oUpdate) {
-        status = ResourceContextToUpdateSql<ResourceT>(resp, sql);
-    } else if (resp->Op() == oDelete) {
-        status = ResourceContextToDeleteSql<ResourceT>(resp, sql);
+
+    DBApplyContext context;
+    context.op_ = resp->Op();
+    if (context.op_ == oAdd) {
+        status = ResourceContextAddAttrMap<ResourceT>(resp, context.attrs_);
+//        status = ResourceContextToAddSql<ResourceT>(resp, sql);
+    } else if (context.op_ == oUpdate) {
+        status = ResourceContextUpdateAttrMap<ResourceT>(resp, context.attrs_);
+        context.id_ = resp->Resource()->GetID();
+//        status = ResourceContextToUpdateSql<ResourceT>(resp, sql);
+    } else if (context.op_ == oDelete) {
+        context.id_ = resp->ID();
+    } else {
+        return Status(SERVER_UNEXPECTED_ERROR, "Unknown resource context operation");
     }
 
     if (!status.ok()) {
         return status;
     }
 
-    SqlContext context;
-    context.op_ = resp->Op();
-    if (resp->Op() == oDelete) {
-        context.id_ = resp->ID();
-    } else {
-        std::string id;
-        AttrValue2Str<ResourceT>(resp->Resource(), F_ID, id);
-        context.id_ = std::stol(id);
-    }
-    context.sql_ = sql;
-    sql_context_.push_back(context);
+    context.table_ = resp->Table();
+    apply_context_.push_back(context);
 
     return Status::OK();
 }

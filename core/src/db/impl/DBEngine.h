@@ -31,10 +31,10 @@ class DBEngine {
 //    ~DBEngine() = default;
 
     virtual Status
-    Query(const std::string& query_sql, AttrsMapList& attrs) = 0;
+    Query(const DBQueryContext& context, AttrsMapList& attrs) = 0;
 
     virtual Status
-    ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std::vector<int64_t>& result_ids) = 0;
+    ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) = 0;
 
     virtual Status
     TruncateAll() = 0;

@@ -11,7 +11,10 @@
 
 #pragma once
 
+#include <string>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "db/snapshot/ResourceTypes.h"
 
@@ -27,6 +30,22 @@ struct SqlContext {
     std::string sql_;
     ResourceContextOp op_;
     snapshot::ID_TYPE id_;
+};
+
+struct DBQueryContext {
+    std::string table_;
+    bool all_required_ = true;
+    std::vector<std::string> query_fields_;
+    std::unordered_map<std::string, std::string> filter_attrs_;
+};
+
+struct DBApplyContext {
+    std::string table_;
+    ResourceContextOp op_;
+    snapshot::ID_TYPE id_;
+    std::unordered_map<std::string, std::string> attrs_;
+    std::unordered_map<std::string, std::string> filter_attrs_;
+    std::string sql_;
 };
 
 }

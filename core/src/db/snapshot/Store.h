@@ -239,7 +239,6 @@ class Store {
 
     void
     DoReset() {
-//        RemoveCollection();
         auto status = DBImp::GetInstance().TruncateAll();
         if (!status.ok()) {
             std::cout << "TruncateAll failed: " << status.ToString() << std::endl;

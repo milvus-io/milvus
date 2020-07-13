@@ -17,6 +17,7 @@
 #include <mysql++/sqlstream.h>
 
 #include "db/Utils.h"
+#include "db/impl/DBHelper.h"
 #include "db/impl/MetaFields.h"
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
@@ -357,13 +358,19 @@ MySqlEngine::Initialize() {
 }
 
 Status
-MySqlEngine::Query(const std::string& query_sql, AttrsMapList& attrs) {
+MySqlEngine::Query(const DBQueryContext& context, AttrsMapList& attrs) {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
+        std::string sql;
+        auto status = DBHelper::DBQueryContextToSql(context, sql);
+        if (!status.ok()) {
+            return status;
+        }
+
         std::lock_guard<std::mutex> lock(meta_mutex_);
 
-        mysqlpp::Query query = connectionPtr->query(query_sql);
+        mysqlpp::Query query = connectionPtr->query(sql);
         auto res = query.store();
         if (!res) {
             throw Exception(1, "Query res is false");
@@ -397,17 +404,20 @@ MySqlEngine::Query(const std::string& query_sql, AttrsMapList& attrs) {
 }
 
 Status
-MySqlEngine::ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std::vector<int64_t>& result_ids) {
+MySqlEngine::ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
         mysqlpp::Transaction trans(*connectionPtr, mysqlpp::Transaction::serializable, mysqlpp::Transaction::session);
 
         std::lock_guard<std::mutex> lock(meta_mutex_);
-//        mysqlpp::Query query = connectionPtr->query();
-//        std::cout << "[DB] " << "<" << std::this_thread::get_id() << ">" << "Transaction start: " << std::endl;
         for (auto & context : sql_contexts) {
-//            std::cout << "\t" << context.sql_ << std::endl;
-            auto query = connectionPtr->query(context.sql_);
+            std::string sql;
+            auto status = DBHelper::DBApplyContextToSql(context, sql);
+            if (!status.ok()) {
+                return status;
+            }
+
+            auto query = connectionPtr->query(sql);
             auto res = query.execute();
             if (context.op_ == oAdd) {
                 auto id = res.insert_id();
@@ -446,27 +456,25 @@ MySqlEngine::ExecuteTransaction(const std::vector<SqlContext>& sql_contexts, std
 
 Status
 MySqlEngine::TruncateAll() {
-//    std::vector<std::string>
+    static std::vector<std::string> collecton_names = {
+        COLLECTION_SCHEMA.name(),
+        COLLECTIONCOMMIT_SCHEMA.name(),
+        PARTITION_SCHEMA.name(),
+        PARTITIONCOMMIT_SCHEMA.name(),
+        SEGMENT_SCHEMA.name(),
+        SEGMENTCOMMIT_SCHEMA.name(),
+        SEGMENTFILE_SCHEMA.name(),
+        SCHEMACOMMIT_SCHEMA.name(),
+        FIELD_SCHEMA.name(),
+        FIELDCOMMIT_SCHEMA.name(),
+        FIELDELEMENT_SCHEMA.name(),
+    };
 
-    std::vector<std::string> collecton_names = {
-    "TRUNCATE Collection;",
-                      "TRUNCATE CollectionCommit;",
-                      "TRUNCATE Field;",
-                      "TRUNCATE FieldCommit;",
-                      "TRUNCATE FieldElement;",
-                      "TRUNCATE PartitionCommit;",
-                      "TRUNCATE Partitions;",
-                      "TRUNCATE SchemaCommit;",
-                      "TRUNCATE Segment;",
-                      "TRUNCATE SegmentCommit;",
-                      "TRUNCATE SegmentFile;"};
-
-    std::vector<SqlContext> contexts;
+    std::vector<DBApplyContext> contexts;
     for (auto & name : collecton_names) {
-        SqlContext context;
-        context.sql_ = name;
+        DBApplyContext context;
+        context.sql_ = "TRUNCATE " + name + ";";
         context.id_ = 0;
-        context.op_ = oDelete;
 
         contexts.push_back(context);
     }

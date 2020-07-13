@@ -9,4 +9,28 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "Query.h"
+#pragma once
+
+#include "db/impl/Context.h"
+#include "utils/Status.h"
+
+namespace milvus::engine {
+
+class DBHelper {
+ private:
+    DBHelper() = default;
+
+ public:
+    static Status
+    DBQueryContextToSql(const DBQueryContext& context, std::string& sql);
+
+    static Status
+    DBApplyContextToSql(const DBApplyContext& context, std::string& sql);
+//
+//    static Status
+//    DB
+
+};
+
+}
+
