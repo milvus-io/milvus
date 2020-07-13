@@ -40,6 +40,32 @@ SnapshotVisitor::SegmentsToSearch(meta::FilesHolder& files_holder) {
 }
 
 SegmentFieldElementVisitor::Ptr
+SegmentFieldElementVisitor::Build(snapshot::ScopedSnapshotT ss,
+                                  const snapshot::SegmentPtr& segment,
+                                  const snapshot::SegmentFilePtr& segment_file) {
+    if (!ss || !segment || !segment_file) {
+        return nullptr;
+    }
+
+    auto element = ss->GetResource<snapshot::FieldElement>(segment_file->GetFieldElementId());
+    if (!element) {
+        return nullptr;
+    }
+
+    if (segment_file->GetSegmentId() != segment->GetID()) {
+        std::cout << "Segment " << segment_file->GetSegmentId() <<  " is expected for SegmentFile ";
+        std::cout << segment_file->GetID() << " while actual is " << segment->GetID() << std::endl;
+        return nullptr;
+    }
+
+    auto visitor = std::make_shared<SegmentFieldElementVisitor>();
+    visitor->SetFieldElement(element);
+    visitor->SetFile(segment_file);
+
+    return visitor;
+}
+
+SegmentFieldElementVisitor::Ptr
 SegmentFieldElementVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id,
                                   snapshot::ID_TYPE field_element_id) {
     if (!ss) {
@@ -59,11 +85,10 @@ SegmentFieldElementVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYP
     }
 
     auto file = ss->GetSegmentFile(segment_id, field_element_id);
-    if (!file) {
-        return nullptr;
+    if (file) {
+        visitor->SetFile(file);
     }
 
-    visitor->SetFile(file);
     return visitor;
 }
 
@@ -139,7 +164,12 @@ SegmentVisitor::ToString() const {
         auto& fe_visitors = fkv.second->GetElementVistors();
         for (auto& fekv : fe_visitors) {
             ss << "    FieldElement[" << fekv.first << "] ";
-            ss << "SegmentFile [" << fekv.second->GetFile()->GetID() << "]\n";
+            auto file = fekv.second->GetFile();
+            if (file) {
+                ss << "SegmentFile [" << fekv.second->GetFile()->GetID() << "]\n";
+            } else {
+                ss << "No SegmentFile!\n";
+            }
         }
     }
 
