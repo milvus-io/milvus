@@ -11,8 +11,8 @@
 
 #include <unordered_map>
 
-#include "knowhere/index/IndexType.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/IndexType.h"
 
 namespace milvus {
 namespace knowhere {

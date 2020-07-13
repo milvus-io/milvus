@@ -22,11 +22,11 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
+#include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQNR.h"
-#include "src/index/knowhere/knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 #ifdef MILVUS_GPU_VERSION
