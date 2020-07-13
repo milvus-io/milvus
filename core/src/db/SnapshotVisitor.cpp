@@ -40,22 +40,20 @@ SnapshotVisitor::SegmentsToSearch(meta::FilesHolder& files_holder) {
 }
 
 SegmentFieldElementVisitor::Ptr
-SegmentFieldElementVisitor::Build(snapshot::ScopedSnapshotT ss,
-                                  const snapshot::FieldElementPtr& field_element,
-                                  const snapshot::SegmentPtr& segment,
-                                  const snapshot::SegmentFilePtr& segment_file) {
+SegmentFieldElementVisitor::Build(snapshot::ScopedSnapshotT ss, const snapshot::FieldElementPtr& field_element,
+                                  const snapshot::SegmentPtr& segment, const snapshot::SegmentFilePtr& segment_file) {
     if (!ss || !segment || !field_element) {
         return nullptr;
     }
 
     if (segment_file) {
         if (segment_file->GetFieldElementId() != field_element->GetID()) {
-            std::cout << "FieldElement " << segment_file->GetFieldElementId() <<  " is expected for SegmentFile ";
+            std::cout << "FieldElement " << segment_file->GetFieldElementId() << " is expected for SegmentFile ";
             std::cout << segment_file->GetID() << " while actual is " << field_element->GetID() << std::endl;
             return nullptr;
         }
         if (segment_file->GetSegmentId() != segment->GetID()) {
-            std::cout << "Segment " << segment_file->GetSegmentId() <<  " is expected for SegmentFile ";
+            std::cout << "Segment " << segment_file->GetSegmentId() << " is expected for SegmentFile ";
             std::cout << segment_file->GetID() << " while actual is " << segment->GetID() << std::endl;
             return nullptr;
         }
@@ -99,7 +97,7 @@ SegmentFieldElementVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYP
 
 SegmentFieldVisitor::Ptr
 SegmentFieldVisitor::Build(snapshot::ScopedSnapshotT ss, const snapshot::FieldPtr& field,
-        const snapshot::SegmentPtr& segment, const snapshot::SegmentFile::VecT& segment_files) {
+                           const snapshot::SegmentPtr& segment, const snapshot::SegmentFile::VecT& segment_files) {
     if (!ss || !segment || !field) {
         return nullptr;
     }
@@ -174,11 +172,11 @@ SegmentFieldVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segme
 
 SegmentVisitor::Ptr
 SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& segment,
-        const snapshot::SegmentFile::VecT& segment_files) {
+                      const snapshot::SegmentFile::VecT& segment_files) {
     if (!ss || !segment) {
         return nullptr;
     }
-    if (ss->GetResource<snapshot::Partition>(segment->GetPartitionId())) {
+    if (!ss->GetResource<snapshot::Partition>(segment->GetPartitionId())) {
         return nullptr;
     }
 
@@ -233,7 +231,7 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id
 std::string
 SegmentVisitor::ToString() const {
     std::stringstream ss;
-    ss << "SegmentVisitor[" << GetSegment()->GetID() << "]: \n";
+    ss << "SegmentVisitor[" << GetSegment()->GetID() << "]: " << (GetSegment()->IsActive() ? "" : "*") << "\n";
     auto& field_visitors = GetFieldVisitors();
     for (auto& fkv : field_visitors) {
         ss << "  Field[" << fkv.first << "]\n";
@@ -242,7 +240,7 @@ SegmentVisitor::ToString() const {
             ss << "    FieldElement[" << fekv.first << "] ";
             auto file = fekv.second->GetFile();
             if (file) {
-                ss << "SegmentFile [" << fekv.second->GetFile()->GetID() << "]\n";
+                ss << "SegmentFile [" << file->GetID() << "]: " << (file->IsActive() ? "" : "*") << "\n";
             } else {
                 ss << "No SegmentFile!\n";
             }

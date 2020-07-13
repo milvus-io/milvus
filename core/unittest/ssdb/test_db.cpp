@@ -235,12 +235,14 @@ TEST_F(SSDBTest, VisitorTest) {
 
     auto new_total = 0;
     auto& partitions = ss->GetResources<Partition>();
+    ID_TYPE partition_id;
     for (auto& kv : partitions) {
         num = RandomInt(1, 3);
         for (auto i = 0; i < num; ++i) {
             ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context).ok());
         }
         new_total += num;
+        partition_id = kv.first;
     }
 
     status = Snapshots::GetInstance().GetSnapshot(ss, c1);
@@ -259,4 +261,44 @@ TEST_F(SSDBTest, VisitorTest) {
     segment_handler->Iterate();
     std::cout << segment_handler->GetStatus().ToString() << std::endl;
     ASSERT_TRUE(segment_handler->GetStatus().ok());
+
+    {
+        OperationContext context;
+        context.lsn = next_lsn();
+        context.prev_partition = ss->GetResource<Partition>(partition_id);
+        auto op = std::make_shared<NewSegmentOperation>(context, ss);
+        SegmentPtr new_seg;
+        status = op->CommitNewSegment(new_seg);
+        ASSERT_TRUE(status.ok());
+        SegmentFilePtr seg_file;
+        auto nsf_context = sf_context;
+        nsf_context.segment_id = new_seg->GetID();
+        nsf_context.partition_id = new_seg->GetPartitionId();
+        status = op->CommitNewSegmentFile(nsf_context, seg_file);
+        ASSERT_TRUE(status.ok());
+        auto ctx = op->GetContext();
+        ASSERT_TRUE(ctx.new_segment);
+        auto visitor = SegmentVisitor::Build(ss, ctx.new_segment, ctx.new_segment_files);
+        ASSERT_TRUE(visitor);
+        ASSERT_EQ(visitor->GetSegment(), new_seg);
+        ASSERT_FALSE(visitor->GetSegment()->IsActive());
+
+        int file_num = 0;
+        auto field_visitors = visitor->GetFieldVisitors();
+        for (auto& kv : field_visitors) {
+            auto& field_visitor = kv.second;
+            auto field_element_visitors = field_visitor->GetElementVistors();
+            for (auto& kkvv : field_element_visitors) {
+                auto& field_element_visitor = kkvv.second;
+                auto file = field_element_visitor->GetFile();
+                if (file) {
+                    file_num++;
+                    ASSERT_FALSE(file->IsActive());
+                }
+            }
+        }
+        ASSERT_EQ(file_num, 1);
+
+        std::cout << visitor->ToString() << std::endl;
+    }
 }
