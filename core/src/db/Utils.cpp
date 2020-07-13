@@ -179,8 +179,7 @@ IsRawIndexType(int32_t type) {
 
 bool
 IsBinaryMetricType(int32_t metric_type) {
-    return (metric_type == (int32_t)meta::MetricType::HAMMING) ||
-           (metric_type == (int32_t)meta::MetricType::JACCARD) ||
+    return (metric_type == (int32_t)meta::MetricType::HAMMING) || (metric_type == (int32_t)meta::MetricType::JACCARD) ||
            (metric_type == (int32_t)meta::MetricType::SUBSTRUCTURE) ||
            (metric_type == (int32_t)meta::MetricType::SUPERSTRUCTURE) ||
            (metric_type == (int32_t)meta::MetricType::TANIMOTO);

@@ -78,7 +78,8 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
-                    std::unordered_map<std::string, meta::hybrid::DataType>& attr_type, std::string& vector_placeholder) override;
+                    std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                    std::string& vector_placeholder) override;
 
     Status
     HybridSearch(scheduler::SearchJobPtr job, std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,

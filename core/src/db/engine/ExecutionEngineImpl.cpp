@@ -22,8 +22,8 @@
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
-#include "db/meta/MetaTypes.h"
 #include "db/Utils.h"
+#include "db/meta/MetaTypes.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/structured_index/StructuredIndexSort.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
@@ -141,8 +141,9 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
       index_type_(index_type),
       metric_type_(metric_type),
       index_params_(index_params) {
-    meta::EngineType tmp_index_type =
-        utils::IsBinaryMetricType((int32_t)metric_type) ? meta::EngineType::FAISS_BIN_IDMAP : meta::EngineType::FAISS_IDMAP;
+    meta::EngineType tmp_index_type = utils::IsBinaryMetricType((int32_t)metric_type)
+                                          ? meta::EngineType::FAISS_BIN_IDMAP
+                                          : meta::EngineType::FAISS_IDMAP;
     index_ = CreatetVecIndex(tmp_index_type);
     if (!index_) {
         throw Exception(DB_ERROR, "Unsupported index type");
@@ -964,8 +965,8 @@ ExecutionEngineImpl::ProcessRangeQuery(const meta::hybrid::DataType data_type, c
 
 Status
 ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
-                                  std::unordered_map<std::string, meta::hybrid::DataType>& attr_type, std::vector<float>& distances,
-                                  std::vector<int64_t>& search_ids, bool hybrid) {
+                                  std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                                  std::vector<float>& distances, std::vector<int64_t>& search_ids, bool hybrid) {
     faiss::ConcurrentBitsetPtr bitset;
     std::string vector_placeholder;
     auto status = ExecBinaryQuery(search_job->general_query(), bitset, attr_type, vector_placeholder);

@@ -39,7 +39,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2561 Clean util dependencies with other modules
 -   \#2612 Move all APIs in utils into namespace milvus 
 -   \#2675 Print out system memory size when report invalid cpu cache size 
--   \#2836 Move IndexType.h under knowhere/index 
+-   \#2836 Unify index names and index types
 
 ## Task
 
