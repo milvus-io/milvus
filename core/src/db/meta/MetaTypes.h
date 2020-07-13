@@ -18,7 +18,7 @@
 
 #include "db/Constants.h"
 #include "knowhere/index/IndexType.h"
-#include "version.h"
+#include "src/version.h"
 
 namespace milvus {
 namespace engine {

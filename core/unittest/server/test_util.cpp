@@ -398,8 +398,8 @@ TEST(ValidationUtilTest, VALIDATE_COLLECTION_NAME_TEST) {
 }
 
 TEST(ValidationUtilTest, VALIDATE_DIMENSION_TEST) {
-    std::vector<int64_t>
-        float_metric_types = {(int64_t)milvus::engine::meta::MetricType::L2, (int64_t)milvus::engine::meta::MetricType::IP};
+    std::vector<int64_t> float_metric_types = {(int64_t)milvus::engine::meta::MetricType::L2,
+                                               (int64_t)milvus::engine::meta::MetricType::IP};
 
     std::vector<int64_t>
         binary_metric_types = {
