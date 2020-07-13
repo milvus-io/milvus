@@ -197,5 +197,7 @@ class SSDBImpl {
     std::mutex suspend_build_mutex_;
 };  // SSDBImpl
 
+using SSDBImplPtr = std::shared_ptr<SSDBImpl>;
+
 }  // namespace engine
 }  // namespace milvus

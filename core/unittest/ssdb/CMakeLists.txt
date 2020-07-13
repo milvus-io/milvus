@@ -14,6 +14,7 @@
 set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_segment.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp)
 
 add_executable(test_ssdb
