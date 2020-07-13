@@ -223,35 +223,35 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetStorageConfigPath(str_val).ok());
     ASSERT_TRUE(str_val == storage_primary_path);
 
-//    bool storage_s3_enable = true;
-//    ASSERT_TRUE(config.SetStorageConfigS3Enable(std::to_string(storage_s3_enable)).ok());
-//    ASSERT_TRUE(config.GetStorageConfigS3Enable(bool_val).ok());
-//    ASSERT_TRUE(bool_val == storage_s3_enable);
-//
-//    std::string storage_s3_addr = "192.168.1.100";
-//    ASSERT_TRUE(config.SetStorageConfigS3Address(storage_s3_addr).ok());
-//    ASSERT_TRUE(config.GetStorageConfigS3Address(str_val).ok());
-//    ASSERT_TRUE(str_val == storage_s3_addr);
-//
-//    std::string storage_s3_port = "12345";
-//    ASSERT_TRUE(config.SetStorageConfigS3Port(storage_s3_port).ok());
-//    ASSERT_TRUE(config.GetStorageConfigS3Port(str_val).ok());
-//    ASSERT_TRUE(str_val == storage_s3_port);
-//
-//    std::string storage_s3_access_key = "minioadmin";
-//    ASSERT_TRUE(config.SetStorageConfigS3AccessKey(storage_s3_access_key).ok());
-//    ASSERT_TRUE(config.GetStorageConfigS3AccessKey(str_val).ok());
-//    ASSERT_TRUE(str_val == storage_s3_access_key);
-//
-//    std::string storage_s3_secret_key = "minioadmin";
-//    ASSERT_TRUE(config.SetStorageConfigS3SecretKey(storage_s3_secret_key).ok());
-//    ASSERT_TRUE(config.GetStorageConfigS3SecretKey(str_val).ok());
-//    ASSERT_TRUE(str_val == storage_s3_secret_key);
-//
-//    std::string storage_s3_bucket = "s3bucket";
-//    ASSERT_TRUE(config.SetStorageConfigS3Bucket(storage_s3_bucket).ok());
-//    ASSERT_TRUE(config.GetStorageConfigS3Bucket(str_val).ok());
-//    ASSERT_TRUE(str_val == storage_s3_bucket);
+    //    bool storage_s3_enable = true;
+    //    ASSERT_TRUE(config.SetStorageConfigS3Enable(std::to_string(storage_s3_enable)).ok());
+    //    ASSERT_TRUE(config.GetStorageConfigS3Enable(bool_val).ok());
+    //    ASSERT_TRUE(bool_val == storage_s3_enable);
+    //
+    //    std::string storage_s3_addr = "192.168.1.100";
+    //    ASSERT_TRUE(config.SetStorageConfigS3Address(storage_s3_addr).ok());
+    //    ASSERT_TRUE(config.GetStorageConfigS3Address(str_val).ok());
+    //    ASSERT_TRUE(str_val == storage_s3_addr);
+    //
+    //    std::string storage_s3_port = "12345";
+    //    ASSERT_TRUE(config.SetStorageConfigS3Port(storage_s3_port).ok());
+    //    ASSERT_TRUE(config.GetStorageConfigS3Port(str_val).ok());
+    //    ASSERT_TRUE(str_val == storage_s3_port);
+    //
+    //    std::string storage_s3_access_key = "minioadmin";
+    //    ASSERT_TRUE(config.SetStorageConfigS3AccessKey(storage_s3_access_key).ok());
+    //    ASSERT_TRUE(config.GetStorageConfigS3AccessKey(str_val).ok());
+    //    ASSERT_TRUE(str_val == storage_s3_access_key);
+    //
+    //    std::string storage_s3_secret_key = "minioadmin";
+    //    ASSERT_TRUE(config.SetStorageConfigS3SecretKey(storage_s3_secret_key).ok());
+    //    ASSERT_TRUE(config.GetStorageConfigS3SecretKey(str_val).ok());
+    //    ASSERT_TRUE(str_val == storage_s3_secret_key);
+    //
+    //    std::string storage_s3_bucket = "s3bucket";
+    //    ASSERT_TRUE(config.SetStorageConfigS3Bucket(storage_s3_bucket).ok());
+    //    ASSERT_TRUE(config.GetStorageConfigS3Bucket(str_val).ok());
+    //    ASSERT_TRUE(str_val == storage_s3_bucket);
 
     /* metric config */
     bool metric_enable_monitor = false;
@@ -294,8 +294,15 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
         // #2564
         int64_t total_mem = 0, free_mem = 0;
         milvus::server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        int64_t cgroup_limit_size = 0;
+        milvus::server::CommonUtil::GetSysCgroupMemLimit(cgroup_limit_size);
         ASSERT_TRUE(config.SetCacheConfigInsertBufferSize("1GB").ok());
-        int64_t cache_cpu_cache_size = total_mem / 2;
+        int64_t cache_cpu_cache_size = 0;
+        if (cgroup_limit_size < total_mem) {
+            cache_cpu_cache_size = cgroup_limit_size / 2;
+        } else {
+            cache_cpu_cache_size = total_mem / 2;
+        }
         float cache_cpu_cache_threshold = 0.7;
         ASSERT_TRUE(config.SetCacheConfigCpuCacheThreshold(std::to_string(cache_cpu_cache_threshold)).ok());
         ASSERT_TRUE(config.SetCacheConfigCpuCacheCapacity(std::to_string(cache_cpu_cache_size)).ok());
@@ -306,13 +313,19 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     {
         int64_t total_mem = 0, free_mem = 0;
         milvus::server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+        int64_t cgroup_limit_size = 0;
+        milvus::server::CommonUtil::GetSysCgroupMemLimit(cgroup_limit_size);
         ASSERT_TRUE(config.SetCacheConfigInsertBufferSize("1GB").ok());
-        int64_t cache_cpu_cache_size = total_mem - 1073741824 - 1; // total_size - 1GB - 1
+        int64_t cache_cpu_cache_size = 0;
+        if (cgroup_limit_size < total_mem) {
+            cache_cpu_cache_size = cgroup_limit_size - 1073741824 - 1;
+        } else {
+            cache_cpu_cache_size = total_mem - 1073741824 - 1;  // total_size - 1GB - 1
+        }
         ASSERT_TRUE(config.SetCacheConfigCpuCacheCapacity(std::to_string(cache_cpu_cache_size)).ok());
         ASSERT_TRUE(config.GetCacheConfigCpuCacheCapacity(int64_val).ok());
         ASSERT_TRUE(int64_val == cache_cpu_cache_size);
     }
-
 
     /* engine config */
     int64_t engine_use_blas_threshold = 50;
@@ -389,7 +402,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetWalConfigRecoveryErrorIgnore(bool_val).ok());
     ASSERT_TRUE(bool_val == wal_recovery_ignore);
 
-    int64_t wal_buffer_size = 128 * 1024 * 1024; // 128 M
+    int64_t wal_buffer_size = 128 * 1024 * 1024;  // 128 M
     ASSERT_TRUE(config.SetWalConfigBufferSize(std::to_string(wal_buffer_size)).ok());
     ASSERT_TRUE(config.GetWalConfigBufferSize(int64_val).ok());
     ASSERT_TRUE(int64_val == wal_buffer_size);
@@ -419,7 +432,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     auto s = config.SetLogsMaxLogFileSize(logs_max_log_file_size);
     ASSERT_TRUE(s.ok()) << s.message();
     ASSERT_TRUE(config.GetLogsMaxLogFileSize(int64_val).ok());
-    ASSERT_TRUE(int64_val == 1000 * 1024 * 1024); // 1000MB
+    ASSERT_TRUE(int64_val == 1000 * 1024 * 1024);  // 1000MB
 
     int64_t logs_log_rotate_num = 100;
     ASSERT_TRUE(config.SetLogsLogRotateNum(std::to_string(logs_log_rotate_num)).ok());
@@ -497,8 +510,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_CLI_TEST) {
     ASSERT_TRUE(s.ok());
     s = config.ProcessConfigCli(result, get_cmd);
     ASSERT_TRUE(s.ok());
-
-
 
     /* cache config */
     std::string cache_cpu_cache_capacity = "1";
@@ -681,7 +692,6 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     ASSERT_FALSE(config.SetDBConfigArchiveDaysThreshold("0x10").ok());
 
-
     /* storage config */
     ASSERT_FALSE(config.SetStorageConfigPath("").ok());
     ASSERT_FALSE(config.SetStorageConfigPath("./milvus").ok());
@@ -691,18 +701,18 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
 
     ASSERT_FALSE(config.SetStorageConfigAutoFlushInterval("0.1").ok());
 
-//    ASSERT_FALSE(config.SetStorageConfigS3Enable("10").ok());
-//
-//    ASSERT_FALSE(config.SetStorageConfigS3Address("127.0.0").ok());
-//
-//    ASSERT_FALSE(config.SetStorageConfigS3Port("100").ok());
-//    ASSERT_FALSE(config.SetStorageConfigS3Port("100000").ok());
-//
-//    ASSERT_FALSE(config.SetStorageConfigS3AccessKey("").ok());
-//
-//    ASSERT_FALSE(config.SetStorageConfigS3SecretKey("").ok());
-//
-//    ASSERT_FALSE(config.SetStorageConfigS3Bucket("").ok());
+    //    ASSERT_FALSE(config.SetStorageConfigS3Enable("10").ok());
+    //
+    //    ASSERT_FALSE(config.SetStorageConfigS3Address("127.0.0").ok());
+    //
+    //    ASSERT_FALSE(config.SetStorageConfigS3Port("100").ok());
+    //    ASSERT_FALSE(config.SetStorageConfigS3Port("100000").ok());
+    //
+    //    ASSERT_FALSE(config.SetStorageConfigS3AccessKey("").ok());
+    //
+    //    ASSERT_FALSE(config.SetStorageConfigS3SecretKey("").ok());
+    //
+    //    ASSERT_FALSE(config.SetStorageConfigS3Bucket("").ok());
 
     /* metric config */
     ASSERT_FALSE(config.SetMetricConfigEnableMonitor("Y").ok());
@@ -1288,8 +1298,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     std::string reply_set, reply_get;
     std::string cmd_set, cmd_get;
 
-    auto lambda = [&conf_file](const std::string& key, const std::string& child_key,
-                               const std::string& default_value, std::string& value) {
+    auto lambda = [&conf_file](const std::string& key, const std::string& child_key, const std::string& default_value,
+                               std::string& value) {
         auto* ymgr = milvus::server::YamlConfigMgr::GetInstance();
         auto status = ymgr->LoadConfigFile(conf_file);
 
@@ -1310,52 +1320,58 @@ TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
 
     ASSERT_TRUE(lambda(ms::CONFIG_CACHE, ms::CONFIG_CACHE_INSERT_BUFFER_SIZE,
-                       ms::CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT, yaml_value).ok());
+                       ms::CONFIG_CACHE_INSERT_BUFFER_SIZE_DEFAULT, yaml_value)
+                    .ok());
     ASSERT_EQ("2", yaml_value);
 
     // test boolean config value
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "True");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
-                       ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT,
+                       yaml_value)
+                    .ok());
     ASSERT_EQ("true", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "On");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
-                       ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT,
+                       yaml_value)
+                    .ok());
     ASSERT_EQ("true", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "False");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
-                       ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT,
+                       yaml_value)
+                    .ok());
     ASSERT_EQ("false", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, "Off");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR,
-                       ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_METRIC, ms::CONFIG_METRIC_ENABLE_MONITOR, ms::CONFIG_METRIC_ENABLE_MONITOR_DEFAULT,
+                       yaml_value)
+                    .ok());
     ASSERT_EQ("false", yaml_value);
 
     // test path
     cmd_set = gen_set_command(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PATH, "/tmp/milvus_config_unittest");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
-    ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PATH,
-                       ms::CONFIG_STORAGE_PATH_DEFAULT, yaml_value).ok());
+    ASSERT_TRUE(lambda(ms::CONFIG_STORAGE, ms::CONFIG_STORAGE_PATH, ms::CONFIG_STORAGE_PATH_DEFAULT, yaml_value).ok());
     ASSERT_EQ("/tmp/milvus_config_unittest", yaml_value);
 
 #ifdef MILVUS_GPU_VERSION
     cmd_set = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, "gpu0");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
     ASSERT_TRUE(lambda(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES,
-                       ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
+                       ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value)
+                    .ok());
     ASSERT_EQ("gpu0", yaml_value);
 
     cmd_set = gen_set_command(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, "GPU0");
     ASSERT_TRUE(config.ProcessConfigCli(reply_set, cmd_set).ok());
     ASSERT_TRUE(lambda(ms::CONFIG_GPU_RESOURCE, ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES,
-                       ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value).ok());
+                       ms::CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES_DEFAULT, yaml_value)
+                    .ok());
     ASSERT_EQ("gpu0", yaml_value);
 #endif
 }
