@@ -115,6 +115,8 @@ Utils::IndexTypeName(const milvus::IndexType& index_type) {
             return "HNSW";
         case milvus::IndexType::ANNOY:
             return "ANNOY";
+        case milvus::IndexType::IVFSQ8NR:
+            return "IVFSQ8NR";
         default:
             return "Unknown index type";
     }

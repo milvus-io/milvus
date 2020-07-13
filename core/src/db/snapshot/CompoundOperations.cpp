@@ -521,6 +521,14 @@ Status
 CreateCollectionOperation::DoExecute(Store& store) {
     // TODO: Do some checks
     CollectionPtr collection;
+    ScopedSnapshotT ss;
+    Snapshots::GetInstance().GetSnapshot(ss, c_context_.collection->GetName());
+    if (ss) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Duplicated collection " << c_context_.collection->GetName();
+        return Status(SS_DUPLICATED_ERROR, emsg.str());
+    }
+
     auto status = store.CreateCollection(Collection(c_context_.collection->GetName()), collection);
     if (!status.ok()) {
         std::cerr << status.ToString() << std::endl;
