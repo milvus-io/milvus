@@ -69,7 +69,16 @@ InsertEntityRequest::OnExecute() {
         auto vector_datas_it = vector_datas_.begin();
         if (vector_datas_it->second.float_data_.empty() && vector_datas_it->second.binary_data_.empty()) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                          "The vector array is empty. Make sure you have entered vector records.");
+                          "The entity array is empty. Make sure you have entered vector records.");
+        }
+
+        int64_t entity_count = vector_datas_it->second.vector_count_;
+        if (!vector_datas_it->second.id_array_.empty()) {
+            if (!vector_datas_it->second.id_array_.size() != (size_t)entity_count) {
+                std::string msg = "The size of entity ID array must be equal to the size of the entity.";
+                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Invalid id array: %s", "insert", 0, msg.c_str());
+                return Status(SERVER_ILLEGAL_VECTOR_ID, msg);
+            }
         }
 
         // step 2: check table existence
