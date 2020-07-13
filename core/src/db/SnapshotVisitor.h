@@ -42,6 +42,9 @@ class SegmentFieldElementVisitor {
 
     static Ptr
     Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id, snapshot::ID_TYPE field_element_id);
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, const snapshot::FieldElementPtr& field_element,
+          const snapshot::SegmentPtr& segment, const snapshot::SegmentFilePtr& segment_file);
 
     SegmentFieldElementVisitor() = default;
 
@@ -79,6 +82,9 @@ class SegmentFieldVisitor {
 
     static Ptr
     Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id, snapshot::ID_TYPE field_id);
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, const snapshot::FieldPtr& field, const snapshot::SegmentPtr& segment,
+          const snapshot::SegmentFile::VecT& segment_files);
 
     SegmentFieldVisitor() = default;
 
@@ -127,6 +133,10 @@ class SegmentVisitor {
 
     static Ptr
     Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id);
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& segment,
+          const snapshot::SegmentFile::VecT& segment_files);
+
     SegmentVisitor() = default;
 
     const IdMapT&
