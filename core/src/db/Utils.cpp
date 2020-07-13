@@ -26,6 +26,7 @@
 #include "cache/GpuCacheMgr.h"
 #endif
 #include "config/Config.h"
+#include "knowhere/index/IndexType.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -248,20 +249,23 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
 std::string
 GetIndexName(int32_t index_type) {
     static std::map<int32_t, std::string> index_type_name = {
-        {(int32_t)engine::EngineType::FAISS_IDMAP, "IDMAP"},
-        {(int32_t)engine::EngineType::FAISS_IVFFLAT, "IVFFLAT"},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8, "IVFSQ8"},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8NR, "IVFSQ8NR"},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
-        {(int32_t)engine::EngineType::FAISS_PQ, "PQ"},
-        {(int32_t)engine::EngineType::SPTAG_KDT, "KDT"},
-        {(int32_t)engine::EngineType::SPTAG_BKT, "BKT"},
-        {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, "IDMAP"},
-        {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "IVFFLAT"},
-        {(int32_t)engine::EngineType::HNSW_SQ8NR, "HNSW_SQ8NR"},
-        {(int32_t)engine::EngineType::HNSW, "HNSW"},
-        {(int32_t)engine::EngineType::NSG_MIX, "NSG"},
-        {(int32_t)engine::EngineType::ANNOY, "ANNOY"}};
+        {(int32_t)engine::EngineType::FAISS_IDMAP, knowhere::IndexEnum::INDEX_FAISS_IDMAP},
+        {(int32_t)engine::EngineType::FAISS_IVFFLAT, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {(int32_t)engine::EngineType::FAISS_PQ, knowhere::IndexEnum::INDEX_FAISS_IVFPQ},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8NR, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8H, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H},
+        {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP},
+        {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT},
+        {(int32_t)engine::EngineType::NSG_MIX, knowhere::IndexEnum::INDEX_NSG},
+#ifdef MILVUS_SUPPORT_SPTAG
+        {(int32_t)engine::EngineType::SPTAG_KDT, knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT},
+        {(int32_t)engine::EngineType::SPTAG_BKT, knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT},
+#endif
+        {(int32_t)engine::EngineType::HNSW, knowhere::IndexEnum::INDEX_HNSW},
+        {(int32_t)engine::EngineType::HNSW_SQ8NR, knowhere::IndexEnum::INDEX_HNSW_SQ8NR},
+        {(int32_t)engine::EngineType::ANNOY, knowhere::IndexEnum::INDEX_ANNOY},
+    };
 
     if (index_type_name.find(index_type) == index_type_name.end()) {
         return "Unknow";

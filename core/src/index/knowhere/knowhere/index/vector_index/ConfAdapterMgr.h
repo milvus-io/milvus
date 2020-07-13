@@ -16,7 +16,7 @@
 #include <unordered_map>
 
 #include "knowhere/index/vector_index/ConfAdapter.h"
-#include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 
 namespace milvus {
 namespace knowhere {

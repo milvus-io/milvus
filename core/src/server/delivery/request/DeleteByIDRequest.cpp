@@ -68,6 +68,7 @@ DeleteByIDRequest::OnExecute() {
         }
 
         // Check collection's index type supports delete
+#ifdef MILVUS_SUPPORT_SPTAG
         if (collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_BKT ||
             collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_KDT) {
             std::string err_msg =
@@ -75,6 +76,7 @@ DeleteByIDRequest::OnExecute() {
             LOG_SERVER_ERROR_ << err_msg;
             return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
         }
+#endif
 
         rc.RecordSection("check validation");
 

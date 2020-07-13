@@ -14,7 +14,7 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
-#include "knowhere/index/vector_index/IndexType.h"
+#include "src/index/knowhere/knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace milvus {

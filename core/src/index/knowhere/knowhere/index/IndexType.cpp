@@ -9,8 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "knowhere/index/vector_index/IndexType.h"
 #include <unordered_map>
+
+#include "knowhere/index/IndexType.h"
 #include "knowhere/common/Exception.h"
 
 namespace milvus {
@@ -80,8 +81,8 @@ const char* INDEX_SPTAG_KDT_RNT = "SPTAG_KDT_RNT";
 const char* INDEX_SPTAG_BKT_RNT = "SPTAG_BKT_RNT";
 #endif
 const char* INDEX_HNSW = "HNSW";
-const char* INDEX_ANNOY = "ANNOY";
 const char* INDEX_HNSW_SQ8NR = "HNSW_SQ8NR";
+const char* INDEX_ANNOY = "ANNOY";
 }  // namespace IndexEnum
 
 std::string

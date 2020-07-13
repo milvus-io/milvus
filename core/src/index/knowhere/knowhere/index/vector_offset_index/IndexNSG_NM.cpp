@@ -16,7 +16,7 @@
 #include "knowhere/common/Timer.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
-#include "knowhere/index/vector_index/IndexType.h"
+#include "src/index/knowhere/knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/impl/nsg/NSGIO.h"
 #include "knowhere/index/vector_offset_index/IndexNSG_NM.h"

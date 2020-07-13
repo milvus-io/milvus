@@ -19,6 +19,7 @@
 
 #include <faiss/utils/ConcurrentBitset.h>
 
+#include "knowhere/index/IndexType.h"
 #include "query/GeneralQuery.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
@@ -41,8 +42,10 @@ enum class EngineType {
     NSG_MIX,
     FAISS_IVFSQ8H,
     FAISS_PQ,
+#ifdef MILVUS_SUPPORT_SPTAG
     SPTAG_KDT,
     SPTAG_BKT,
+#endif
     FAISS_BIN_IDMAP,
     FAISS_BIN_IVFFLAT,
     HNSW,
@@ -53,10 +56,23 @@ enum class EngineType {
 };
 
 static std::map<std::string, EngineType> s_map_engine_type = {
-    {"FLAT", EngineType::FAISS_IDMAP},   {"IVFFLAT", EngineType::FAISS_IVFFLAT},  {"IVFSQ8", EngineType::FAISS_IVFSQ8},
-    {"RNSG", EngineType::NSG_MIX},       {"IVFSQ8H", EngineType::FAISS_IVFSQ8H},  {"IVFPQ", EngineType::FAISS_PQ},
-    {"SPTAGKDT", EngineType::SPTAG_KDT}, {"SPTAGBKT", EngineType::SPTAG_BKT},     {"HNSW", EngineType::HNSW},
-    {"ANNOY", EngineType::ANNOY},        {"IVFSQ8NR", EngineType::FAISS_IVFSQ8NR}};
+    {knowhere::IndexEnum::INDEX_FAISS_IDMAP, EngineType::FAISS_IDMAP},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, EngineType::FAISS_IVFFLAT},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFPQ, EngineType::FAISS_PQ},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, EngineType::FAISS_IVFSQ8},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, EngineType::FAISS_IVFSQ8NR},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, EngineType::FAISS_IVFSQ8H},
+    {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, EngineType::FAISS_BIN_IDMAP},
+    {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, EngineType::FAISS_BIN_IVFFLAT},
+    {knowhere::IndexEnum::INDEX_NSG, EngineType::NSG_MIX},
+#ifdef MILVUS_SUPPORT_SPTAG
+    {knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, EngineType::SPTAG_KDT},
+    {knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, EngineType::SPTAG_BKT},
+#endif
+    {knowhere::IndexEnum::INDEX_HNSW, EngineType::HNSW},
+    {knowhere::IndexEnum::INDEX_HNSW_SQ8NR, EngineType::HNSW_SQ8NR},
+    {knowhere::IndexEnum::INDEX_ANNOY, EngineType::ANNOY},
+};
 
 enum class MetricType {
     L2 = 1,              // Euclidean Distance
