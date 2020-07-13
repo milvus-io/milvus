@@ -217,6 +217,44 @@ SSDBTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void
+SSSegmentTest::SetUp() {
+    BaseTest::SetUp();
+    milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
+    milvus::engine::snapshot::EventExecutor::GetInstance().Start();
+    milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::CollectionsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SchemaCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::FieldCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::FieldsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::FieldElementsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::PartitionsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::PartitionCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SegmentsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SegmentCommitsHolder::GetInstance().Reset();
+    milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
+
+    milvus::engine::snapshot::Store::GetInstance().DoReset();
+    milvus::engine::snapshot::Snapshots::GetInstance().Reset();
+    milvus::engine::snapshot::Snapshots::GetInstance().Init();
+
+    auto options = milvus::engine::DBOptions();
+    options.wal_enable_ = false;
+    db_ = std::make_shared<milvus::engine::SSDBImpl>(options);
+}
+
+void
+SSSegmentTest::TearDown() {
+    db_ = nullptr;
+    // TODO: Temp to delay some time. OperationExecutor should wait all resources be destructed before stop
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
+    milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
+
+    BaseTest::TearDown();
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int
 main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);

@@ -78,8 +78,11 @@ using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;
 
 extern const char* DEFAULT_UID_NAME;
+
+extern const char* DEFAULT_RAW_DATA_NAME;
 extern const char* DEFAULT_BLOOM_FILTER_NAME;
 extern const char* DEFAULT_DELETED_DOCS_NAME;
+extern const char* DEFAULT_INDEX_NAME;
 
 using FieldType = meta::hybrid::DataType;
 
