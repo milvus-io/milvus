@@ -15,8 +15,11 @@ namespace milvus {
 namespace engine {
 
 const char* DEFAULT_UID_NAME = "_uid";
+
+const char* DEFAULT_RAW_DATA_NAME = "_raw";
 const char* DEFAULT_BLOOM_FILTER_NAME = "_blf";
 const char* DEFAULT_DELETED_DOCS_NAME = "_del";
+const char* DEFAULT_INDEX_NAME = "_idx";
 
 }  // namespace engine
 }  // namespace milvus
