@@ -13,6 +13,7 @@
 
 #include <type_traits>
 
+#include "db/impl/MemDBEngine.h"
 #include "db/impl/MySqlEngine.h"
 #include "db/impl/Session.h"
 #include "db/snapshot/Resources.h"
@@ -33,9 +34,10 @@ class DBImp {
 
  public:
     DBImp() {
-        DBMetaOptions options;
-        options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
-        engine_ = std::make_shared<MySqlEngine>(options);
+        engine_ = std::make_shared<MemDBEngine>();
+//        DBMetaOptions options;
+//        options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
+//        engine_ = std::make_shared<MySqlEngine>(options);
     }
 
 

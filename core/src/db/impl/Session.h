@@ -259,11 +259,9 @@ Session::Apply(ResourceContextPtr<ResourceT> resp) {
     context.op_ = resp->Op();
     if (context.op_ == oAdd) {
         status = ResourceContextAddAttrMap<ResourceT>(resp, context.attrs_);
-//        status = ResourceContextToAddSql<ResourceT>(resp, sql);
     } else if (context.op_ == oUpdate) {
         status = ResourceContextUpdateAttrMap<ResourceT>(resp, context.attrs_);
         context.id_ = resp->Resource()->GetID();
-//        status = ResourceContextToUpdateSql<ResourceT>(resp, sql);
     } else if (context.op_ == oDelete) {
         context.id_ = resp->ID();
     } else {

@@ -11,14 +11,21 @@
 
 #pragma once
 
+#include <mutex>
+#include <unordered_map>
+
 #include "db/impl/DBEngine.h"
 #include "utils/Status.h"
 
 namespace milvus::engine {
 
 class MemDBEngine: public DBEngine {
+ private:
+    using TableRaw = std::unordered_map<std::string, std::string>;
+
  public:
     MemDBEngine(){
+        Init();
     }
 
     ~MemDBEngine() = default;
@@ -32,6 +39,26 @@ class MemDBEngine: public DBEngine {
     Status
     TruncateAll() override;
 
+ private:
+    void
+    Init();
+
+    Status
+    QueryNoLock(const DBQueryContext& context, AttrsMapList& attrs);
+
+    Status
+    AddNoLock(const DBApplyContext& add_context, int64_t& retult_id);
+
+    Status
+    UpdateNoLock(const DBApplyContext& add_context, int64_t& retult_id);
+
+    Status
+    DeleteNoLock(const DBApplyContext& add_context, int64_t& retult_id);
+
+ private:
+    std::mutex mutex_;
+    std::unordered_map<std::string, int64_t> max_ip_map_;
+    std::unordered_map<std::string, std::vector<TableRaw>> resources_;
 };
 
 }
