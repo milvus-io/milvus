@@ -24,6 +24,8 @@ class CommonUtil {
     static bool
     GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem);
     static bool
+    GetSysCgroupMemLimit(int64_t& limit_in_bytes);
+    static bool
     GetSystemAvailableThreads(int64_t& thread_count);
 
     static bool
