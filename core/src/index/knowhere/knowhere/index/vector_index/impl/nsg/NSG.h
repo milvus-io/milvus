@@ -43,9 +43,14 @@ using Graph = std::vector<std::vector<node_t>>;
 
 class NsgIndex {
  public:
+    enum Metric_Type {
+        Metric_Type_L2,
+        Metric_Type_IP,
+    };
+
     size_t dimension;
-    size_t ntotal;            // totabl nb of indexed vectors
-    std::string metric_type;  // L2 | IP
+    size_t ntotal;        // totabl nb of indexed vectors
+    int32_t metric_type;  // enum Metric_Type
     Distance* distance_;
 
     float* ori_data_;
@@ -65,7 +70,7 @@ class NsgIndex {
     size_t out_degree;
 
  public:
-    explicit NsgIndex(const size_t& dimension, const size_t& n, std::string metric = knowhere::Metric::L2);
+    explicit NsgIndex(const size_t& dimension, const size_t& n, Metric_Type metric);
 
     NsgIndex() = default;
 

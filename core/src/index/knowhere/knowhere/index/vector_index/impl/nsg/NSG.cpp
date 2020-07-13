@@ -31,11 +31,11 @@ namespace impl {
 
 unsigned int seed = 100;
 
-NsgIndex::NsgIndex(const size_t& dimension, const size_t& n, std::string metric)
+NsgIndex::NsgIndex(const size_t& dimension, const size_t& n, Metric_Type metric)
     : dimension(dimension), ntotal(n), metric_type(metric) {
-    if (metric == knowhere::Metric::L2) {
+    if (metric == Metric_Type::Metric_Type_L2) {
         distance_ = new DistanceL2;
-    } else if (metric == knowhere::Metric::IP) {
+    } else if (metric == Metric_Type::Metric_Type_IP) {
         distance_ = new DistanceIP;
     }
 }
@@ -406,7 +406,6 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, Graph&
                     // std::cout << "pos: " << pos << ", nn: " << nn.id << ":" << nn.distance << ", nup: " <<
                     // nearest_updated_pos << std::endl;
                     /////
-
                     // trick: avoid search query search_length < init_ids.size() ...
                     if (buffer_size + 1 < resset.size())
                         ++buffer_size;
@@ -846,6 +845,8 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
         }
     }
     rc.RecordSection("search");
+
+    bool is_ip = (metric_type == Metric_Type::Metric_Type_IP);
     for (unsigned int i = 0; i < nq; ++i) {
         unsigned int pos = 0;
         for (unsigned int j = 0; j < resset[i].size(); ++j) {
@@ -853,7 +854,7 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
                 break;  // already top k
             if (!bitset || !bitset->test((faiss::ConcurrentBitset::id_type_t)resset[i][j].id)) {
                 ids[i * k + pos] = ids_[resset[i][j].id];
-                dist[i * k + pos] = resset[i][j].distance;
+                dist[i * k + pos] = is_ip ? -resset[i][j].distance : resset[i][j].distance;
                 ++pos;
             }
         }
