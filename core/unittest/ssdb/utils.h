@@ -245,6 +245,7 @@ CreateSegment(ScopedSnapshotT ss, ID_TYPE partition_id, LSN_TYPE lsn, const Segm
     return op->GetSnapshot(ss);
 }
 
+///////////////////////////////////////////////////////////////////////////////
 class BaseTest : public ::testing::Test {
  protected:
     void
@@ -256,6 +257,7 @@ class BaseTest : public ::testing::Test {
     TearDown() override;
 };
 
+///////////////////////////////////////////////////////////////////////////////
 class SnapshotTest : public BaseTest {
  protected:
     void
@@ -264,7 +266,19 @@ class SnapshotTest : public BaseTest {
     TearDown() override;
 };
 
+///////////////////////////////////////////////////////////////////////////////
 class SSDBTest : public BaseTest {
+ protected:
+    std::shared_ptr<SSDBImpl> db_;
+
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+class SSSegmentTest : public BaseTest {
  protected:
     std::shared_ptr<SSDBImpl> db_;
 
