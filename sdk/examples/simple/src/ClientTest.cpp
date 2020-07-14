@@ -192,7 +192,11 @@ ClientTest::GetEntityByID(const std::string& collection_name, const std::vector<
         milvus::Status stat = conn_->GetEntityByID(collection_name, id_array, result);
         std::cout << "GetEntityByID function call status: " << stat.message() << std::endl;
     }
-    std::cout << "GetEntityByID function result: " << result << std::endl;
+    std::cout << "GetEntityByID function result: " << std::endl;
+    JSON result_json = JSON::parse(result);
+    for (const auto& one_result : result_json) {
+        std::cout << one_result << std::endl;
+    }
 }
 
 void
@@ -210,7 +214,7 @@ ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int
 
     std::vector<std::string> partition_tags;
     milvus::TopKQueryResult topk_query_result;
-    status = conn_->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
+    auto status = conn_->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
 
     std::cout << "Search function call result: " << std::endl;
     milvus_sdk::Utils::PrintTopKQueryResult(topk_query_result);
@@ -332,9 +336,9 @@ ClientTest::Test() {
     Flush(collection_name);
     GetCollectionStats(collection_name);
 
-    //    BuildVectors(NQ, COLLECTION_DIMENSION);
+    BuildVectors(NQ, COLLECTION_DIMENSION);
     GetEntityByID(collection_name, search_id_array_);
-    //    SearchEntities(collection_name, TOP_K, NPROBE);
+    SearchEntities(collection_name, TOP_K, NPROBE);
     GetCollectionStats(collection_name);
 
     std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
