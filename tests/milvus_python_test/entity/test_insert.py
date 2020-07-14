@@ -61,6 +61,26 @@ class TestAddBase:
         status, ids = connect.insert(collection, vector)
         assert assert_has_collection(connect, collection)
 
+    def test_add_vector_with_empty_vector(self, connect, collection):
+        '''
+        target: test add vectors with empty vectors list
+        method: set empty vectors list as add method params
+        expected: raises a Exception
+        '''
+        insert_vec_list = []
+        with pytest.raises(Exception) as e:
+            status, ids = connect.insert(collection,vector)
+
+    def test_add_vector_with_None(self, connect, collection):
+        '''
+        target: test add vectors with None
+        method: set None as add method params
+        expected: raises a Exception
+        '''
+        insert_vec_list = None
+        with pytest.raises(Exception) as e:
+            status, ids = connect.insert(collection,vector)
+
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_drop_collection_add_vector(self, connect, collection):
         '''
@@ -752,7 +772,6 @@ class TestAddAsync:
         collection_new = gen_unique_str()
         with pytest.raises(Exception) as e:
             future = connect.insert(collection_new, insert_vec_list, _async=True)
-
 
 class TestAddIP:
     """
