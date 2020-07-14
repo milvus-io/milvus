@@ -14,7 +14,7 @@
 #include <memory>
 #include <string>
 
-#include "db/SnapshotVisitor.h"
+#include "db/snapshot/Resources.h"
 #include "utils/Status.h"
 
 namespace milvus::engine::snapshot {
@@ -25,65 +25,47 @@ static const char* SEGMENT_PREFIX = "S_";
 static const char* SEGMENT_FILE_PREFIX = "F_";
 
 template <class ResourceT>
-inline Status
-GetResPath(std::string& path, const std::string& root, const typename ResourceT::Ptr& res_ptr) {
-    if (res_ptr == nullptr) {
-        return Status(DB_ERROR, "NULL resource");
-    }
-    return Status::OK();
+inline std::string
+GetResPath(const std::string& root, const typename ResourceT::Ptr& res_ptr) {
+    return std::string();
 }
 
 template <>
-inline Status
-GetResPath<Collection>(std::string& path, const std::string& root, const Collection::Ptr& res_ptr) {
-    if (res_ptr == nullptr) {
-        return Status(DB_ERROR, "NULL collection");
-    }
+inline std::string
+GetResPath<Collection>(const std::string& root, const Collection::Ptr& res_ptr) {
     std::stringstream ss;
     ss << root << "/";
     ss << COLLECTION_PREFIX << res_ptr->GetID();
 
-    path = ss.str();
-    return Status::OK();
+    return ss.str();
 }
 
 template <>
-inline Status
-GetResPath<Partition>(std::string& path, const std::string& root, const Partition::Ptr& res_ptr) {
-    if (res_ptr == nullptr) {
-        return Status(DB_ERROR, "NULL partition");
-    }
+inline std::string
+GetResPath<Partition>(const std::string& root, const Partition::Ptr& res_ptr) {
     std::stringstream ss;
     ss << root << "/";
     ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
     ss << PARTITION_PREFIX << res_ptr->GetID();
 
-    path = ss.str();
-    return Status::OK();
+    return ss.str();
 }
 
 template <>
-inline Status
-GetResPath<Segment>(std::string& path, const std::string& root, const Segment::Ptr& res_ptr) {
-    if (res_ptr == nullptr) {
-        return Status(DB_ERROR, "NULL segment");
-    }
+inline std::string
+GetResPath<Segment>(const std::string& root, const Segment::Ptr& res_ptr) {
     std::stringstream ss;
     ss << root << "/";
     ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
     ss << PARTITION_PREFIX << res_ptr->GetPartitionId() << "/";
     ss << SEGMENT_PREFIX << res_ptr->GetID();
 
-    path = ss.str();
-    return Status::OK();
+    return ss.str();
 }
 
 template <>
-inline Status
-GetResPath<SegmentFile>(std::string& path, const std::string& root, const SegmentFile::Ptr& res_ptr) {
-    if (res_ptr == nullptr) {
-        return Status(DB_ERROR, "NULL segment file");
-    }
+inline std::string
+GetResPath<SegmentFile>(const std::string& root, const SegmentFile::Ptr& res_ptr) {
     std::stringstream ss;
     ss << root << "/";
     ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
@@ -91,24 +73,7 @@ GetResPath<SegmentFile>(std::string& path, const std::string& root, const Segmen
     ss << SEGMENT_PREFIX << res_ptr->GetSegmentId() << "/";
     ss << SEGMENT_FILE_PREFIX << res_ptr->GetID();
 
-    path = ss.str();
-    return Status::OK();
-}
-
-inline Status
-GetResPath(std::string& path, const std::string& root, const SegmentVisitorPtr& visitor) {
-    if (visitor == nullptr) {
-        return Status(DB_ERROR, "NULL visitor");
-    }
-    return GetResPath<Segment>(path, root, visitor->GetSegment());
-}
-
-inline Status
-GetResPath(std::string& path, const std::string& root, const SegmentFieldElementVisitorPtr& visitor) {
-    if (visitor == nullptr) {
-        return Status(DB_ERROR, "NULL visitor");
-    }
-    return GetResPath<SegmentFile>(path, root, visitor->GetFile());
+    return ss.str();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////

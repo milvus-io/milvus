@@ -38,8 +38,8 @@ namespace segment {
 SSSegmentWriter::SSSegmentWriter(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor)
     : dir_root_(dir_root), segment_visitor_(segment_visitor) {
     auto& segment_ptr = segment_visitor_->GetSegment();
-    std::string directory;
-    engine::snapshot::GetResPath(directory, dir_root_, segment_visitor);
+    std::string directory =
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor->GetSegment());
 
     storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
     storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
@@ -125,35 +125,35 @@ SSSegmentWriter::Serialize() {
 
         /* write UID's raw data */
         auto uid_raw_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
-        std::string uid_raw_path;
-        STATUS_CHECK(engine::snapshot::GetResPath(uid_raw_path, dir_root_, uid_raw_visitor));
+        std::string uid_raw_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_raw_visitor->GetFile());
         STATUS_CHECK(WriteUids(uid_raw_path, segment_ptr_->vectors_ptr_->GetUids()));
 
         /* write UID's deleted docs */
         auto uid_del_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
-        std::string uid_del_path;
-        STATUS_CHECK(engine::snapshot::GetResPath(uid_del_path, dir_root_, uid_del_visitor));
+        std::string uid_del_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_del_visitor->GetFile());
         STATUS_CHECK(WriteDeletedDocs(uid_del_path));
 
         /* write other data */
         Status s;
         auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
         for (auto& f_kv : field_visitors_map) {
-            auto& field_visitor = f_kv.second;
-            auto& field = field_visitor->GetField();
-            for (auto& file_kv : field_visitor->GetElementVistors()) {
-                auto& field_element_visitor = file_kv.second;
-                std::string file_path;
-                s = engine::snapshot::GetResPath(file_path, dir_root_, field_element_visitor);
+            auto& fv = f_kv.second;
+            auto& field = fv->GetField();
+            for (auto& file_kv : fv->GetElementVistors()) {
+                auto& fev = file_kv.second;
+                std::string file_path =
+                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, fev->GetFile());
                 if (!s.ok()) {
                     LOG_ENGINE_WARNING_ << "Cannot get resource path";
                 }
 
-                auto& segment_file = field_element_visitor->GetFile();
+                auto& segment_file = fev->GetFile();
                 if (segment_file == nullptr) {
                     continue;
                 }
-                auto& field_element = field_element_visitor->GetElement();
+                auto& field_element = fev->GetElement();
 
                 if ((field->GetFtype() == engine::FieldType::VECTOR_FLOAT ||
                      field->GetFtype() == engine::FieldType::VECTOR_BINARY) &&
