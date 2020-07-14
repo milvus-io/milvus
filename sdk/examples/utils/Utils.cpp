@@ -113,6 +113,8 @@ Utils::IndexTypeName(const milvus::IndexType& index_type) {
             return "SPTAGBKT";
         case milvus::IndexType::HNSW:
             return "HNSW";
+        case milvus::IndexType::HNSW_SQ8NR:
+            return "HNSW_SQ8NR";
         case milvus::IndexType::ANNOY:
             return "ANNOY";
         case milvus::IndexType::IVFSQ8NR:
@@ -368,3 +370,4 @@ Utils::PrintTopKHybridQueryResult(milvus::TopKHybridQueryResult& topk_query_resu
 }
 
 }  // namespace milvus_sdk
+

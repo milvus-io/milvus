@@ -245,6 +245,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW, mode);
             break;
         }
+        case EngineType::HNSW_SQ8NR: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW_SQ8NR, mode);
+            break;
+        }
         case EngineType::ANNOY: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_ANNOY, mode);
             break;
