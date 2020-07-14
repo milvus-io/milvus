@@ -249,7 +249,10 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
 
   bool l2Distance = metric == MetricType::METRIC_L2;
 
-  // Calculate offset lengths, so we know where to write out
+#ifndef FAISS_USE_FLOAT16
+    FAISS_ASSERT(!useFloat16Lookup);
+#endif
+    // Calculate offset lengths, so we know where to write out
   // intermediate results
   runCalcListOffsets(topQueryToCentroid, listLengths, prefixSumOffsets,
                      thrustMem, stream);
@@ -275,7 +278,13 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
     auto block = dim3(kThreadsPerBlock);
 
     // pq centroid distances
-    auto smem = useFloat16Lookup ? sizeof(half) : sizeof(float);
+    //auto smem = useFloat16Lookup ? sizeof(half) : sizeof(float);
+    auto smem = sizeof(float);
+#ifdef FAISS_USE_FLOAT16
+        if (useFloat16Lookup) {
+      smem = sizeof(half);
+    }
+#endif
 
     smem *= numSubQuantizers * numSubQuantizerCodes;
     FAISS_ASSERT(smem <= getMaxSharedMemPerBlockCurrentDevice());
@@ -295,7 +304,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
           prefixSumOffsets,                                             \
           allDistances);                                                \
     } while (0)
-
+#ifdef FAISS_USE_FLOAT16
 #define RUN_PQ(NUM_SUB_Q)                       \
     do {                                        \
       if (useFloat16Lookup) {                   \
@@ -304,8 +313,13 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
         RUN_PQ_OPT(NUM_SUB_Q, float, float4);   \
       }                                         \
     } while (0)
-
-    switch (bytesPerCode) {
+#else
+#define  RUN_PQ(NUM_SUB_Q)                      \
+    do {                                        \
+      RUN_PQ_OPT(NUM_SUB_Q, float, float4);     \
+    } while (0)
+#endif // FAISS_USE_FLOAT16
+        switch (bytesPerCode) {
       case 1:
         RUN_PQ(1);
         break;
@@ -497,7 +511,14 @@ void runPQScanMultiPassNoPrecomputed(Tensor<float, 2, true>& queries,
                               sizeof(int),
                               stream));
 
-  int codeDistanceTypeSize = useFloat16Lookup ? sizeof(half) : sizeof(float);
+  int codeDistanceTypeSize=sizeof(float);
+#ifdef FAISS_USE_FLOAT16
+    if (useFloat16Lookup) {
+    codeDistanceTypeSize = sizeof(half);
+  }
+#else
+    FAISS_ASSERT(!useFloat16Lookup);
+#endif
 
   int totalCodeDistancesSize =
     queryTileSize * nprobe * numSubQuantizers * numSubQuantizerCodes *

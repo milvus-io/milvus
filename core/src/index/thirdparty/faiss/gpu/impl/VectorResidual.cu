@@ -118,7 +118,7 @@ void runCalcResidual(Tensor<float, 2, true>& vecs,
                      cudaStream_t stream) {
   calcResidual<float>(vecs, centroids, vecToCentroid, residuals, stream);
 }
-
+#ifdef FAISS_USE_FLOAT16
 void runCalcResidual(Tensor<float, 2, true>& vecs,
                      Tensor<half, 2, true>& centroids,
                      Tensor<int, 1, true>& vecToCentroid,
@@ -126,19 +126,19 @@ void runCalcResidual(Tensor<float, 2, true>& vecs,
                      cudaStream_t stream) {
   calcResidual<half>(vecs, centroids, vecToCentroid, residuals, stream);
 }
-
+#endif
 void runReconstruct(Tensor<int, 1, true>& listIds,
                     Tensor<float, 2, true>& vecs,
                     Tensor<float, 2, true>& out,
                     cudaStream_t stream) {
   gatherReconstruct<float>(listIds, vecs, out, stream);
 }
-
+#ifdef FAISS_USE_FLOAT16
 void runReconstruct(Tensor<int, 1, true>& listIds,
                     Tensor<half, 2, true>& vecs,
                     Tensor<float, 2, true>& out,
                     cudaStream_t stream) {
   gatherReconstruct<half>(listIds, vecs, out, stream);
 }
-
+#endif
 } } // namespace

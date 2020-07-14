@@ -16,19 +16,21 @@ namespace faiss { namespace gpu {
 void runSumAlongColumns(Tensor<float, 1, true>& input,
                         Tensor<float, 2, true>& output,
                         cudaStream_t stream);
-
+#ifdef FAISS_USE_FLOAT16
 void runSumAlongColumns(Tensor<half, 1, true>& input,
                         Tensor<half, 2, true>& output,
                         cudaStream_t stream);
-
+#endif
 // output[x][i] = input[i] for all x
 void runAssignAlongColumns(Tensor<float, 1, true>& input,
                            Tensor<float, 2, true>& output,
                            cudaStream_t stream);
 
+#ifdef FAISS_USE_FLOAT16
 void runAssignAlongColumns(Tensor<half, 1, true>& input,
                            Tensor<half, 2, true>& output,
                            cudaStream_t stream);
+#endif
 
 // output[i][x] += input[i] for all x
 // If zeroClamp, output[i][x] = max(output[i][x] + input[i], 0) for all x
@@ -36,10 +38,10 @@ void runSumAlongRows(Tensor<float, 1, true>& input,
                      Tensor<float, 2, true>& output,
                      bool zeroClamp,
                      cudaStream_t stream);
-
+#ifdef FAISS_USE_FLOAT16
 void runSumAlongRows(Tensor<half, 1, true>& input,
                      Tensor<half, 2, true>& output,
                      bool zeroClamp,
                      cudaStream_t stream);
-
+#endif
 } } // namespace

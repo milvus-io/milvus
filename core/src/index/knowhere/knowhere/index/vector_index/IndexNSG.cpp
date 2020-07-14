@@ -140,7 +140,18 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     b_params.search_length = config[IndexParams::search_length];
 
     GETTENSORWITHIDS(dataset_ptr)
-    index_ = std::make_shared<impl::NsgIndex>(dim, rows, config[Metric::TYPE].get<std::string>());
+
+    impl::NsgIndex::Metric_Type metric;
+    auto metric_str = config[Metric::TYPE].get<std::string>();
+    if (metric_str == knowhere::Metric::IP) {
+        metric = impl::NsgIndex::Metric_Type::Metric_Type_IP;
+    } else if (metric_str == knowhere::Metric::L2) {
+        metric = impl::NsgIndex::Metric_Type::Metric_Type_L2;
+    } else {
+        KNOWHERE_THROW_MSG("Metric is not supported");
+    }
+
+    index_ = std::make_shared<impl::NsgIndex>(dim, rows, metric);
     index_->SetKnnGraph(knng);
     index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);
 }

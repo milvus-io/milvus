@@ -37,9 +37,6 @@ class SSMemSegment : public server::CacheConfigHandler {
     Add(const SSVectorSourcePtr& source);
 
     Status
-    AddEntities(const SSVectorSourcePtr& source);
-
-    Status
     Delete(segment::doc_id_t doc_id);
 
     Status
@@ -68,8 +65,8 @@ class SSMemSegment : public server::CacheConfigHandler {
     Status
     CreateSegment();
 
-    int64_t
-    GetDimension();
+    Status
+    GetSingleEntitySize(size_t& single_size);
 
  private:
     int64_t collection_id_;

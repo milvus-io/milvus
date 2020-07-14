@@ -46,6 +46,7 @@ DefaultVectorCompressFormat::read(const storage::FSHandlerPtr& fs_ptr, const std
         return;
     }
 
+    compress = std::make_shared<knowhere::Binary>();
     compress->data = std::shared_ptr<uint8_t[]>(new uint8_t[length]);
     compress->size = length;
 

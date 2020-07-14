@@ -144,7 +144,15 @@ NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
     GETTENSOR(dataset_ptr)
-    index_ = std::make_shared<impl::NsgIndex>(dim, rows, config[Metric::TYPE].get<std::string>());
+    impl::NsgIndex::Metric_Type metric_type_nsg;
+    if (config[Metric::TYPE].get<std::string>() == "IP") {
+        metric_type_nsg = impl::NsgIndex::Metric_Type::Metric_Type_IP;
+    } else if (config[Metric::TYPE].get<std::string>() == "L2") {
+        metric_type_nsg = impl::NsgIndex::Metric_Type::Metric_Type_L2;
+    } else {
+        KNOWHERE_THROW_MSG("either IP or L2");
+    }
+    index_ = std::make_shared<impl::NsgIndex>(dim, rows, metric_type_nsg);
     index_->SetKnnGraph(knng);
     index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);
 }

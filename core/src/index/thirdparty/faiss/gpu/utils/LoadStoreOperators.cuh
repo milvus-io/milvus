@@ -34,7 +34,7 @@ struct LoadStore {
     *((T*) p) = v;
   }
 };
-
+#ifdef FAISS_USE_FLOAT16
 template <>
 struct LoadStore<Half4> {
   static inline __device__ Half4 load(void* p) {
@@ -86,5 +86,5 @@ struct LoadStore<Half8> {
 #endif
   }
 };
-
+#endif
 } } // namespace

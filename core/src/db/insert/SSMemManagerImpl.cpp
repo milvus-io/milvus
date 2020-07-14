@@ -16,10 +16,15 @@
 
 #include "SSVectorSource.h"
 #include "db/Constants.h"
+#include "db/snapshot/Snapshots.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
+
+const char* ENTITY_ID_FIELD = "id";                // hard code
+const char* VECTOR_DIMENSION_PARAM = "dimension";  // hard code
+const char* VECTOR_FIELD = "vector";               // hard code
 
 SSMemCollectionPtr
 SSMemManagerImpl::GetMemByTable(int64_t collection_id, int64_t partition_id) {
@@ -49,65 +54,105 @@ SSMemManagerImpl::GetMemByTable(int64_t collection_id) {
 }
 
 Status
-SSMemManagerImpl::InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids,
-                                int64_t dim, const float* vectors, uint64_t lsn) {
-    VectorsData vectors_data;
-    vectors_data.vector_count_ = length;
-    vectors_data.float_data_.resize(length * dim);
-    memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(float));
-    vectors_data.id_array_.resize(length);
-    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
-    SSVectorSourcePtr source = std::make_shared<SSVectorSource>(vectors_data);
+SSMemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) {
+    auto status = ValidateChunk(collection_id, partition_id, chunk);
+    if (!status.ok()) {
+        return status;
+    }
 
+    SSVectorSourcePtr source = std::make_shared<SSVectorSource>(chunk);
     std::unique_lock<std::mutex> lock(mutex_);
-
-    return InsertVectorsNoLock(collection_id, partition_id, source, lsn);
-}
-
-Status
-SSMemManagerImpl::InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids,
-                                int64_t dim, const uint8_t* vectors, uint64_t lsn) {
-    VectorsData vectors_data;
-    vectors_data.vector_count_ = length;
-    vectors_data.binary_data_.resize(length * dim);
-    memcpy(vectors_data.binary_data_.data(), vectors, length * dim * sizeof(uint8_t));
-    vectors_data.id_array_.resize(length);
-    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
-    SSVectorSourcePtr source = std::make_shared<SSVectorSource>(vectors_data);
-
-    std::unique_lock<std::mutex> lock(mutex_);
-
-    return InsertVectorsNoLock(collection_id, partition_id, source, lsn);
-}
-
-Status
-SSMemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, int64_t length,
-                                 const IDNumber* vector_ids, int64_t dim, const float* vectors,
-                                 const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                                 const std::unordered_map<std::string, uint64_t>& attr_size,
-                                 const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) {
-    VectorsData vectors_data;
-    vectors_data.vector_count_ = length;
-    vectors_data.float_data_.resize(length * dim);
-    memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(float));
-    vectors_data.id_array_.resize(length);
-    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
-
-    SSVectorSourcePtr source = std::make_shared<SSVectorSource>(vectors_data, attr_nbytes, attr_size, attr_data);
-
-    std::unique_lock<std::mutex> lock(mutex_);
-
     return InsertEntitiesNoLock(collection_id, partition_id, source, lsn);
 }
 
 Status
-SSMemManagerImpl::InsertVectorsNoLock(int64_t collection_id, int64_t partition_id, const SSVectorSourcePtr& source,
-                                      uint64_t lsn) {
-    SSMemCollectionPtr mem = GetMemByTable(collection_id, partition_id);
-    mem->SetLSN(lsn);
+SSMemManagerImpl::ValidateChunk(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk) {
+    if (chunk == nullptr) {
+        return Status(DB_ERROR, "Null chunk pointer");
+    }
 
-    auto status = mem->Add(source);
-    return status;
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id);
+    if (!status.ok()) {
+        std::string err_msg = "Could not get snapshot: " + status.ToString();
+        LOG_ENGINE_ERROR_ << err_msg;
+        return status;
+    }
+
+    std::vector<std::string> field_names = ss->GetFieldNames();
+    for (auto& name : field_names) {
+        auto iter = chunk->fields_data_.find(name);
+        if (iter == chunk->fields_data_.end()) {
+            std::string err_msg = "Missed chunk field: " + name;
+            LOG_ENGINE_ERROR_ << err_msg;
+            return Status(DB_ERROR, err_msg);
+        }
+
+        size_t data_size = iter->second.size();
+
+        snapshot::FieldPtr field = ss->GetField(name);
+        meta::hybrid::DataType ftype = static_cast<meta::hybrid::DataType>(field->GetFtype());
+        std::string err_msg = "Illegal data size for chunk field: ";
+        switch (ftype) {
+            case meta::hybrid::DataType::BOOL:
+                if (data_size != chunk->count_ * sizeof(bool)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::DOUBLE:
+                if (data_size != chunk->count_ * sizeof(double)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::FLOAT:
+                if (data_size != chunk->count_ * sizeof(float)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::INT8:
+                if (data_size != chunk->count_ * sizeof(uint8_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::INT16:
+                if (data_size != chunk->count_ * sizeof(uint16_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::INT32:
+                if (data_size != chunk->count_ * sizeof(uint32_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::UID:
+            case meta::hybrid::DataType::INT64:
+                if (data_size != chunk->count_ * sizeof(uint64_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case meta::hybrid::DataType::VECTOR:
+            case meta::hybrid::DataType::VECTOR_FLOAT:
+            case meta::hybrid::DataType::VECTOR_BINARY: {
+                json params = field->GetParams();
+                if (params.find(VECTOR_DIMENSION_PARAM) == params.end()) {
+                    std::string msg = "Vector field params must contain: dimension";
+                    LOG_SERVER_ERROR_ << msg;
+                    return Status(DB_ERROR, msg);
+                }
+
+                int64_t dimension = params[VECTOR_DIMENSION_PARAM];
+                int64_t row_size =
+                    (ftype == meta::hybrid::DataType::VECTOR_BINARY) ? dimension / 8 : dimension * sizeof(float);
+                if (data_size != chunk->count_ * row_size) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+
+                break;
+            }
+        }
+    }
+
+    return Status::OK();
 }
 
 Status
@@ -116,12 +161,12 @@ SSMemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_
     SSMemCollectionPtr mem = GetMemByTable(collection_id, partition_id);
     mem->SetLSN(lsn);
 
-    auto status = mem->AddEntities(source);
+    auto status = mem->Add(source);
     return status;
 }
 
 Status
-SSMemManagerImpl::DeleteVector(int64_t collection_id, IDNumber vector_id, uint64_t lsn) {
+SSMemManagerImpl::DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
     std::vector<SSMemCollectionPtr> mems = GetMemByTable(collection_id);
 
@@ -137,7 +182,7 @@ SSMemManagerImpl::DeleteVector(int64_t collection_id, IDNumber vector_id, uint64
 }
 
 Status
-SSMemManagerImpl::DeleteVectors(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
+SSMemManagerImpl::DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
     std::vector<SSMemCollectionPtr> mems = GetMemByTable(collection_id);
 

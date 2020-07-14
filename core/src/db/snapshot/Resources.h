@@ -34,6 +34,8 @@ static const json JEmpty = {};
 
 class MappingsField {
  public:
+    static constexpr const char* Name = "mappings";
+
     explicit MappingsField(MappingT mappings = {}) : mappings_(std::move(mappings)) {
     }
 
@@ -52,6 +54,8 @@ class MappingsField {
 
 class StateField {
  public:
+    static constexpr const char* Name = "state";
+
     explicit StateField(State state = PENDING) : state_(state) {
     }
 
@@ -94,6 +98,8 @@ class StateField {
 
 class LsnField {
  public:
+    static constexpr const char* Name = "lsn";
+
     explicit LsnField(LSN_TYPE lsn = 0) : lsn_(lsn) {
     }
 
@@ -113,6 +119,8 @@ class LsnField {
 
 class CreatedOnField {
  public:
+    static constexpr const char* Name = "created_on";
+
     explicit CreatedOnField(TS_TYPE created_on = GetMicroSecTimeStamp()) : created_on_(created_on) {
     }
 
@@ -121,12 +129,19 @@ class CreatedOnField {
         return created_on_;
     }
 
+    void
+    SetCreatedTime(const TS_TYPE& time) {
+        created_on_ = time;
+    }
+
  protected:
     TS_TYPE created_on_;
 };
 
 class UpdatedOnField {
  public:
+    static constexpr const char* Name = "updated_on";
+
     explicit UpdatedOnField(TS_TYPE updated_on = GetMicroSecTimeStamp()) : updated_on_(updated_on) {
     }
 
@@ -135,12 +150,19 @@ class UpdatedOnField {
         return updated_on_;
     }
 
+    void
+    SetUpdatedTime(const TS_TYPE& time) {
+        updated_on_ = time;
+    }
+
  protected:
     TS_TYPE updated_on_;
 };
 
 class IdField {
  public:
+    static constexpr const char* Name = "id";
+
     explicit IdField(ID_TYPE id) : id_(id) {
     }
 
@@ -163,6 +185,8 @@ class IdField {
 
 class CollectionIdField {
  public:
+    static constexpr const char* Name = "collection_id";
+
     explicit CollectionIdField(ID_TYPE id) : collection_id_(id) {
     }
 
@@ -171,12 +195,19 @@ class CollectionIdField {
         return collection_id_;
     }
 
+    void
+    SetCollectionId(ID_TYPE id) {
+        collection_id_ = id;
+    }
+
  protected:
     ID_TYPE collection_id_;
 };
 
 class SchemaIdField {
  public:
+    static constexpr const char* Name = "schema_id";
+
     explicit SchemaIdField(ID_TYPE id) : schema_id_(id) {
     }
 
@@ -195,6 +226,8 @@ class SchemaIdField {
 
 class NumField {
  public:
+    static constexpr const char* Name = "num";
+
     explicit NumField(NUM_TYPE num) : num_(num) {
     }
 
@@ -213,6 +246,8 @@ class NumField {
 
 class FtypeField {
  public:
+    static constexpr const char* Name = "ftype";
+
     explicit FtypeField(FTYPE_TYPE type) : ftype_(type) {
     }
 
@@ -221,12 +256,19 @@ class FtypeField {
         return ftype_;
     }
 
+    void
+    SetFtype(FTYPE_TYPE type) {
+        ftype_ = type;
+    }
+
  protected:
     FTYPE_TYPE ftype_;
 };
 
 class FieldIdField {
  public:
+    static constexpr const char* Name = "field_id";
+
     explicit FieldIdField(ID_TYPE id) : field_id_(id) {
     }
 
@@ -235,12 +277,19 @@ class FieldIdField {
         return field_id_;
     }
 
+    void
+    SetFieldId(ID_TYPE id) {
+        field_id_ = id;
+    }
+
  protected:
     ID_TYPE field_id_;
 };
 
 class FieldElementIdField {
  public:
+    static constexpr const char* Name = "field_element_id";
+
     explicit FieldElementIdField(ID_TYPE id) : field_element_id_(id) {
     }
 
@@ -249,12 +298,19 @@ class FieldElementIdField {
         return field_element_id_;
     }
 
+    void
+    SetFieldElementId(ID_TYPE id) {
+        field_element_id_ = id;
+    }
+
  protected:
     ID_TYPE field_element_id_;
 };
 
 class PartitionIdField {
  public:
+    static constexpr const char* Name = "partition_id";
+
     explicit PartitionIdField(ID_TYPE id) : partition_id_(id) {
     }
 
@@ -263,12 +319,19 @@ class PartitionIdField {
         return partition_id_;
     }
 
+    void
+    SetPartitionId(ID_TYPE id) {
+        partition_id_ = id;
+    }
+
  protected:
     ID_TYPE partition_id_;
 };
 
 class SegmentIdField {
  public:
+    static constexpr const char* Name = "segment_id";
+
     explicit SegmentIdField(ID_TYPE id) : segment_id_(id) {
     }
 
@@ -277,12 +340,19 @@ class SegmentIdField {
         return segment_id_;
     }
 
+    void
+    SetSegmentId(ID_TYPE id) {
+        segment_id_ = id;
+    }
+
  protected:
     ID_TYPE segment_id_;
 };
 
 class NameField {
  public:
+    static constexpr const char* Name = "name";
+
     explicit NameField(std::string name) : name_(std::move(name)) {
     }
 
@@ -291,12 +361,19 @@ class NameField {
         return name_;
     }
 
+    void
+    SetName(const std::string& name) {
+        name_ = name;
+    }
+
  protected:
     std::string name_;
 };
 
 class ParamsField {
  public:
+    static constexpr const char* Name = "params";
+
     explicit ParamsField(const json& params) : params_(params) {
     }
 
@@ -305,12 +382,19 @@ class ParamsField {
         return params_;
     }
 
+    void
+    SetParams(const json& params) {
+        params_ = params;
+    }
+
  protected:
     json params_;
 };
 
 class SizeField {
  public:
+    static constexpr const char* Name = "size";
+
     explicit SizeField(SIZE_TYPE size) : size_(size) {
     }
 
@@ -330,6 +414,8 @@ class SizeField {
 
 class RowCountField {
  public:
+    static constexpr const char* Name = "row_count";
+
     explicit RowCountField(SIZE_TYPE size) : size_(size) {
     }
 
@@ -413,7 +499,7 @@ class Partition : public BaseResource,
     using SetT = std::set<Ptr>;
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<Partition>>;
     using VecT = std::vector<Ptr>;
-    static constexpr const char* Name = "Partition";
+    static constexpr const char* Name = "Partitions";
 
     Partition(const std::string& name, ID_TYPE collection_id, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
               TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
