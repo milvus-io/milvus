@@ -31,7 +31,6 @@
 #include "server/grpc_impl/GrpcServer.h"
 #include "utils/CommonUtil.h"
 
-
 #include <fiu-control.h>
 #include <fiu-local.h>
 
@@ -178,14 +177,31 @@ class RpcHandlerTest : public testing::Test {
         auto field_0 = request.add_fields();
         field_0->set_name("field_0");
         field_0->set_type(::milvus::grpc::DataType::INT64);
+        auto grpc_index_param_0 = field_0->add_index_params();
+        grpc_index_param_0->set_key("name");
+        grpc_index_param_0->set_value("index_0");
 
         auto field_1 = request.add_fields();
         field_1->set_name("field_1");
         field_1->set_type(::milvus::grpc::DataType::FLOAT);
+        auto grpc_index_param_1 = field_1->add_index_params();
+        grpc_index_param_1->set_key("name");
+        grpc_index_param_1->set_value("index_1");
 
         auto field_2 = request.add_fields();
         field_2->set_name("field_2");
         field_2->set_type(::milvus::grpc::DataType::FLOAT_VECTOR);
+        auto grpc_index_param_2 = field_2->add_index_params();
+        grpc_index_param_2->set_key("name");
+        grpc_index_param_2->set_value("index_2");
+        auto grpc_index_type = field_2->add_index_params();
+        grpc_index_type->set_key("index_type");
+        grpc_index_type->set_value("IVFFLAT");
+        auto field_param = field_2->add_extra_params();
+        field_param->set_key("params");
+        nlohmann::json vector_param;
+        vector_param["dimension"] = COLLECTION_DIM;
+        field_param->set_value(vector_param.dump());
 
         handler->SetContext(&context, dummy_context);
         handler->random_id();
@@ -274,7 +290,7 @@ ConstructHybridSearchParam_1(milvus::grpc::SearchParam& search_param, const std:
     search_param.set_collection_name(collection_name);
     std::vector<int64_t> term_value(nq, 0);
     for (uint64_t i = 0; i < nq; ++i) {
-        term_value[i] = i + nq;
+        term_value[i] = i;
     }
 
     std::default_random_engine e;
@@ -289,15 +305,12 @@ ConstructHybridSearchParam_1(milvus::grpc::SearchParam& search_param, const std:
     }
 
     nlohmann::json dsl_json, bool_json, term_json, range_json, vector_json;
-    term_json["term"]["field_name"] = "field_0";
-    term_json["term"]["values"] = term_value;
+    nlohmann::json term_value_json = {{"field_0", {"values", term_value}}};
+    term_json["term"] = term_value_json;
     bool_json["must"].push_back(term_json);
 
-    range_json["range"]["field_name"] = "field_0";
-    nlohmann::json comp_json;
-    comp_json["gte"] = "0";
-    comp_json["lte"] = "100000";
-    range_json["range"]["values"] = comp_json;
+    nlohmann::json range_value_json = {{"field_0", {{"GTE", "0"}, {"LTE", 10000}}}};
+    range_json["range"] = range_value_json;
     bool_json["must"].push_back(range_json);
 
     std::string placeholder = "placeholder_1";
@@ -307,10 +320,7 @@ ConstructHybridSearchParam_1(milvus::grpc::SearchParam& search_param, const std:
     dsl_json["bool"] = bool_json;
 
     nlohmann::json vector_param_json, vector_extra_params;
-    vector_param_json[placeholder]["field_name"] = "field_1";
-    vector_param_json[placeholder]["topk"] = topk;
-    vector_extra_params["nprobe"] = 64;
-    vector_param_json[placeholder]["params"] = vector_extra_params;
+    vector_param_json[placeholder] = {{"field_1", {{"topk", topk}, {"params", {{"nprobe", 64}}}}}};
 
     search_param.set_dsl(dsl_json.dump());
     auto vector_param = search_param.add_vector_param();
@@ -421,6 +431,7 @@ TEST_F(RpcHandlerTest, HAS_COLLECTION_TEST) {
     ::milvus::grpc::CollectionName request;
     ::milvus::grpc::BoolReply reply;
     ::grpc::Status status = handler->HasCollection(&context, &request, &reply);
+    ASSERT_TRUE(status.error_code() == ::grpc::Status::OK.error_code());
     request.set_collection_name(COLLECTION_NAME);
     status = handler->HasCollection(&context, &request, &reply);
     ASSERT_TRUE(status.error_code() == ::grpc::Status::OK.error_code());
@@ -442,7 +453,7 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     ::milvus::grpc::IndexParam request;
     ::milvus::grpc::Status response;
     ::grpc::Status grpc_status = handler->CreateIndex(&context, &request, &response);
-    request.set_collection_name("test1");
+    request.set_collection_name(COLLECTION_NAME);
     handler->CreateIndex(&context, &request, &response);
 
     request.set_collection_name(COLLECTION_NAME);
@@ -455,12 +466,13 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     handler->CreateIndex(&context, &request, &response);
 
     ::milvus::grpc::KeyValuePair* kv = request.add_extra_params();
-    kv->set_key("param");
-    kv->set_value("{ \"nlist\": 16384 }");
+    kv->set_key("params");
+    nlohmann::json json_params = {{"index_type", "IVFFLAT"}, {"nlist", 16384}};
+    kv->set_value(json_params.dump());
     grpc_status = handler->CreateIndex(&context, &request, &response);
     ASSERT_EQ(grpc_status.error_code(), ::grpc::Status::OK.error_code());
     int error_code = response.error_code();
-    //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
+    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     fiu_init(0);
     fiu_enable("CreateIndexRequest.OnExecute.not_has_collection", 1, NULL, 0);
@@ -527,45 +539,45 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
     ConstructInsertParam(&request, ENTITY_COUNT);
 
     handler->Insert(&context, &request, &entity_ids);
-//    ASSERT_EQ(entity_ids.entity_id_array_size(), ENTITY_COUNT);
+    ASSERT_EQ(entity_ids.entity_id_array_size(), ENTITY_COUNT);
     fiu_init(0);
-    fiu_enable("InsertRequest.OnExecute.id_array_error", 1, NULL, 0);
+    fiu_enable("InsertEntityRequest.OnExecute.id_array_error", 1, NULL, 0);
     handler->Insert(&context, &request, &entity_ids);
     ASSERT_NE(entity_ids.entity_id_array_size(), ENTITY_COUNT);
-    fiu_disable("InsertRequest.OnExecute.id_array_error");
+    fiu_disable("InsertEntityRequest.OnExecute.id_array_error");
 
-    fiu_enable("InsertRequest.OnExecute.db_not_found", 1, NULL, 0);
+    fiu_enable("InsertEntityRequest.OnExecute.db_not_found", 1, NULL, 0);
     handler->Insert(&context, &request, &entity_ids);
     ASSERT_NE(entity_ids.entity_id_array_size(), ENTITY_COUNT);
-    fiu_disable("InsertRequest.OnExecute.db_not_found");
+    fiu_disable("InsertEntityRequest.OnExecute.db_not_found");
 
-    fiu_enable("InsertRequest.OnExecute.describe_collection_fail", 1, NULL, 0);
+    fiu_enable("InsertEntityRequest.OnExecute.describe_collection_fail", 1, NULL, 0);
     handler->Insert(&context, &request, &entity_ids);
     ASSERT_NE(entity_ids.entity_id_array_size(), ENTITY_COUNT);
-    fiu_disable("InsertRequest.OnExecute.describe_collection_fail");
+    fiu_disable("InsertEntityRequest.OnExecute.describe_collection_fail");
 
-    fiu_enable("InsertRequest.OnExecute.illegal_vector_id", 1, NULL, 0);
+    fiu_enable("InsertEntityRequest.OnExecute.illegal_entity_id", 1, NULL, 0);
     handler->Insert(&context, &request, &entity_ids);
     ASSERT_NE(entity_ids.entity_id_array_size(), ENTITY_COUNT);
-    fiu_disable("InsertRequest.OnExecute.illegal_vector_id");
+    fiu_disable("InsertEntityRequest.OnExecute.illegal_entity_id");
 
-    fiu_enable("InsertRequest.OnExecute.illegal_vector_id2", 1, NULL, 0);
+    fiu_enable("InsertEntityRequest.OnExecute.illegal_entity_id2", 1, NULL, 0);
     handler->Insert(&context, &request, &entity_ids);
     ASSERT_NE(entity_ids.entity_id_array_size(), ENTITY_COUNT);
-    fiu_disable("InsertRequest.OnExecute.illegal_vector_id2");
+    fiu_disable("InsertEntityRequest.OnExecute.illegal_entity_id2");
 
-    fiu_enable("InsertRequest.OnExecute.throw_std_exception", 1, NULL, 0);
+    fiu_enable("InsertEntityRequest.OnExecute.throw_std_exception", 1, NULL, 0);
     handler->Insert(&context, &request, &entity_ids);
     ASSERT_NE(entity_ids.entity_id_array_size(), ENTITY_COUNT);
-    fiu_disable("InsertRequest.OnExecute.throw_std_exception");
+    fiu_disable("InsertEntityRequest.OnExecute.throw_std_exception");
 
-    fiu_enable("InsertRequest.OnExecute.insert_fail", 1, NULL, 0);
+    fiu_enable("InsertEntityRequest.OnExecute.insert_fail", 1, NULL, 0);
     handler->Insert(&context, &request, &entity_ids);
-    fiu_disable("InsertRequest.OnExecute.insert_fail");
+    fiu_disable("InsertEntityRequest.OnExecute.insert_fail");
 
-    fiu_enable("InsertRequest.OnExecute.invalid_ids_size", 1, NULL, 0);
+    fiu_enable("InsertEntityRequest.OnExecute.invalid_ids_size", 1, NULL, 0);
     handler->Insert(&context, &request, &entity_ids);
-    fiu_disable("InsertRequest.OnExecute.invalid_ids_size");
+    fiu_disable("InsertEntityRequest.OnExecute.invalid_ids_size");
 
     // insert vectors with wrong dim
     //    std::vector<float> record_wrong_dim(COLLECTION_DIM - 1, 0.5f);
@@ -619,94 +631,93 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     int64_t nq = 10, topk = 10;
     ConstructHybridSearchParam_1(request, COLLECTION_NAME, COLLECTION_DIM, nq, topk);
     handler->Search(&context, &request, &response);
-//    ASSERT_NE(response.mutable_entities()->ids_size(), 0UL);
+    ASSERT_NE(response.mutable_entities()->ids_size(), 0UL);
 
     // wrong file id
-    ::milvus::grpc::SearchInFilesParam search_in_files_param;
-    std::string* file_id = search_in_files_param.add_file_id_array();
-    *file_id = "test_tbl";
-    handler->SearchInFiles(&context, &search_in_files_param, &response);
-    ASSERT_EQ(response.mutable_entities()->ids_size(), 0UL);
+//    ::milvus::grpc::SearchInFilesParam search_in_files_param;
+//    std::string* file_id = search_in_files_param.add_file_id_array();
+//    *file_id = "test_tbl";
+//    handler->SearchInFiles(&context, &search_in_files_param, &response);
+//    ASSERT_EQ(response.mutable_entities()->ids_size(), 0UL);
 }
 
 TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {
-//    ::grpc::ServerContext context;
-//    handler->SetContext(&context, dummy_context);
-//    handler->RegisterRequestHandler(milvus::server::RequestHandler());
-//
-//    // create collection
-//    std::string collection_name = "search_combines";
-//    ::milvus::grpc::Mapping mapping;
-//    ConstructMapping(&mapping, collection_name);
-//    ::milvus::grpc::Status status;
-//    handler->CreateCollection(&context, &mapping, &status);
-//    ASSERT_EQ(status.error_code(), 0) << status.reason();
-//
-//    // insert vectors
-//    ::milvus::grpc::InsertParam insert_param;
-//    ConstructInsertParam(&insert_param, ENTITY_COUNT);
-//    insert_param.set_collection_name(collection_name);
-//    ::milvus::grpc::EntityIds entity_ids;
-//    handler->Insert(&context, &insert_param, &entity_ids);
-//
-//    // flush
-//    ::milvus::grpc::Status grpc_status;
-//    ::milvus::grpc::FlushParam flush_param;
-//    flush_param.add_collection_name_array(collection_name);
-//    handler->Flush(&context, &flush_param, &grpc_status);
-//
-//    // multi thread search requests will be combined
-//    int QUERY_COUNT = 10;
-//    int64_t NQ = 2;
-//    int64_t TOPK = 5;
-//    using RequestPtr = std::shared_ptr<::milvus::grpc::SearchParam>;
-//    std::vector<RequestPtr> request_array;
-//    for (int i = 0; i < QUERY_COUNT; i++) {
-//        RequestPtr request = std::make_shared<::milvus::grpc::SearchParam>();
-//        ConstructHybridSearchParam_1(*(request.get()), collection_name, COLLECTION_DIM, NQ, TOPK);
-//        request_array.emplace_back(request);
-//    }
-//
-//    using ResultPtr = std::shared_ptr<::milvus::grpc::QueryResult>;
-//    std::vector<ResultPtr> result_array;
-//    using ThreadPtr = std::shared_ptr<std::thread>;
-//    std::vector<ThreadPtr> thread_list;
-//    for (int i = 0; i < QUERY_COUNT; i++) {
-//        ResultPtr result_ptr = std::make_shared<::milvus::grpc::QueryResult>();
-//        result_array.push_back(result_ptr);
-//        ThreadPtr thread = std::make_shared<std::thread>(SearchFunc, handler, &context, request_array[i], result_ptr);
-//        thread_list.emplace_back(thread);
-//        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-//    }
-//
-//    // wait search finish
-//    for (auto& iter : thread_list) {
-//        iter->join();
-//    }
-//
-//    // check result
-//    int64_t index = 0;
-//    for (auto& result_ptr : result_array) {
-//        ASSERT_NE(result_ptr->entities().ids_size(), 0);
-//        ASSERT_NE(result_ptr->row_num(), 0);
-//        std::string msg = "Result no." + std::to_string(index) + ": \n";
-//        for (int64_t i = 0; i < NQ; i++) {
-//            for (int64_t k = 0; k < TOPK; k++) {
-//                msg += "[";
-//                msg += std::to_string(result_ptr->entities().ids(i * TOPK + k));
-//                msg += ", ";
-//                msg += std::to_string(result_ptr->distances(i * TOPK + k));
-//                msg += "]";
-//                msg += ", ";
-//            }
-//            msg += "\n";
-//
-//            ASSERT_NE(result_ptr->entities().ids(i * TOPK), 0);
-//            ASSERT_LT(result_ptr->distances(i * TOPK), 0.00001);
-//        }
-//        std::cout << msg << std::endl;
-//        index++;
-//    }
+    //    ::grpc::ServerContext context;
+    //    handler->SetContext(&context, dummy_context);
+    //    handler->RegisterRequestHandler(milvus::server::RequestHandler());
+    //
+    //    // create collection
+    //    std::string collection_name = "search_combines";
+    //    ::milvus::grpc::Mapping mapping;
+    //    ConstructMapping(&mapping, collection_name);
+    //    ::milvus::grpc::Status status;
+    //    handler->CreateCollection(&context, &mapping, &status);
+    //    ASSERT_EQ(status.error_code(), 0) << status.reason();
+    //
+    //    // insert vectors
+    //    ::milvus::grpc::InsertParam insert_param;
+    //    ConstructInsertParam(&insert_param, ENTITY_COUNT);
+    //    insert_param.set_collection_name(collection_name);
+    //    ::milvus::grpc::EntityIds entity_ids;
+    //    handler->Insert(&context, &insert_param, &entity_ids);
+    //
+    //    // flush
+    //    ::milvus::grpc::Status grpc_status;
+    //    ::milvus::grpc::FlushParam flush_param;
+    //    flush_param.add_collection_name_array(collection_name);
+    //    handler->Flush(&context, &flush_param, &grpc_status);
+    //
+    //    // multi thread search requests will be combined
+    //    int QUERY_COUNT = 10;
+    //    int64_t NQ = 2;
+    //    int64_t TOPK = 5;
+    //    using RequestPtr = std::shared_ptr<::milvus::grpc::SearchParam>;
+    //    std::vector<RequestPtr> request_array;
+    //    for (int i = 0; i < QUERY_COUNT; i++) {
+    //        RequestPtr request = std::make_shared<::milvus::grpc::SearchParam>();
+    //        ConstructHybridSearchParam_1(*(request.get()), collection_name, COLLECTION_DIM, NQ, TOPK);
+    //        request_array.emplace_back(request);
+    //    }
+    //
+    //    using ResultPtr = std::shared_ptr<::milvus::grpc::QueryResult>;
+    //    std::vector<ResultPtr> result_array;
+    //    using ThreadPtr = std::shared_ptr<std::thread>;
+    //    std::vector<ThreadPtr> thread_list;
+    //    for (int i = 0; i < QUERY_COUNT; i++) {
+    //        ResultPtr result_ptr = std::make_shared<::milvus::grpc::QueryResult>();
+    //        result_array.push_back(result_ptr);
+    //        ThreadPtr thread = std::make_shared<std::thread>(SearchFunc, handler, &context, request_array[i],
+    //        result_ptr); thread_list.emplace_back(thread); std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    //    }
+    //
+    //    // wait search finish
+    //    for (auto& iter : thread_list) {
+    //        iter->join();
+    //    }
+    //
+    //    // check result
+    //    int64_t index = 0;
+    //    for (auto& result_ptr : result_array) {
+    //        ASSERT_NE(result_ptr->entities().ids_size(), 0);
+    //        ASSERT_NE(result_ptr->row_num(), 0);
+    //        std::string msg = "Result no." + std::to_string(index) + ": \n";
+    //        for (int64_t i = 0; i < NQ; i++) {
+    //            for (int64_t k = 0; k < TOPK; k++) {
+    //                msg += "[";
+    //                msg += std::to_string(result_ptr->entities().ids(i * TOPK + k));
+    //                msg += ", ";
+    //                msg += std::to_string(result_ptr->distances(i * TOPK + k));
+    //                msg += "]";
+    //                msg += ", ";
+    //            }
+    //            msg += "\n";
+    //
+    //            ASSERT_NE(result_ptr->entities().ids(i * TOPK), 0);
+    //            ASSERT_LT(result_ptr->distances(i * TOPK), 0.00001);
+    //        }
+    //        std::cout << msg << std::endl;
+    //        index++;
+    //    }
 }
 
 TEST_F(RpcHandlerTest, COMBINE_SEARCH_BINARY_TEST) {
@@ -1006,21 +1017,21 @@ TEST_F(RpcHandlerTest, GET_ENTITY_BY_ID_TEST) {
     ConstructInsertParam(&request, ENTITY_COUNT);
     ::milvus::grpc::EntityIds entity_ids;
     handler->Insert(&context, &request, &entity_ids);
-//    ASSERT_EQ(entity_ids.entity_id_array_size(), ENTITY_COUNT);
+    ASSERT_EQ(entity_ids.entity_id_array_size(), ENTITY_COUNT);
 
     ::milvus::grpc::FlushParam flush_param;
     flush_param.add_collection_name_array(COLLECTION_NAME);
     handler->Flush(&context, &flush_param, &response);
 
-//    ::milvus::grpc::EntityIdentity entity_identity;
-//    entity_identity.set_collection_name(COLLECTION_NAME);
-//    for (size_t i = 0; i < 10; i++) {
-//        entity_identity.mutable_id_array()->Add(entity_ids.entity_id_array(i));
-//    }
-//
-//    ::milvus::grpc::Entities entities;
-//    handler->GetEntityByID(&context, &entity_identity, &entities);
-//    ASSERT_EQ(10, entities.fields(2).vector_record().records_size());
+    ::milvus::grpc::EntityIdentity entity_identity;
+    entity_identity.set_collection_name(COLLECTION_NAME);
+    for (size_t i = 0; i < 10; i++) {
+        entity_identity.mutable_id_array()->Add(entity_ids.entity_id_array(i));
+    }
+
+    ::milvus::grpc::Entities entities;
+    handler->GetEntityByID(&context, &entity_identity, &entities);
+    ASSERT_EQ(10, entities.fields(2).vector_record().records_size());
 }
 
 TEST_F(RpcHandlerTest, GET_BIN_VECTORS_BY_IDS_TEST) {
@@ -1071,27 +1082,27 @@ TEST_F(RpcHandlerTest, GET_ENTITY_IDS_TEST) {
     ConstructInsertParam(&request, ENTITY_COUNT);
     ::milvus::grpc::EntityIds entity_ids;
     handler->Insert(&context, &request, &entity_ids);
-//    ASSERT_EQ(entity_ids.entity_id_array_size(), ENTITY_COUNT);
+    //    ASSERT_EQ(entity_ids.entity_id_array_size(), ENTITY_COUNT);
 
-//    ::milvus::grpc::FlushParam flush_param;
-//    flush_param.add_collection_name_array(str_collection_name);
-//    handler->Flush(&context, &flush_param, &response);
-//
-//    ::milvus::grpc::CollectionName collection_name;
-//    collection_name.set_collection_name(str_collection_name);
-//    ::milvus::grpc::CollectionInfo collection_info;
-//    handler->ShowCollectionInfo(&context, &collection_name, &collection_info);
-//
-//    std::string json_info = collection_info.json_info();
-//    auto info_json = nlohmann::json::parse(json_info);
-//    std::string segment0 = info_json["partitions"][0]["segments"][0]["name"];
-//
-//    ::milvus::grpc::GetEntityIDsParam entity_ids_param;
-//    entity_ids_param.set_collection_name(str_collection_name);
-//    entity_ids_param.set_segment_name(segment0);
-//    ::milvus::grpc::EntityIds result_entity_ids;
-//    handler->GetEntityIDs(&context, &entity_ids_param, &result_entity_ids);
-//    ASSERT_EQ(0, result_entity_ids.status().error_code());
+    //    ::milvus::grpc::FlushParam flush_param;
+    //    flush_param.add_collection_name_array(str_collection_name);
+    //    handler->Flush(&context, &flush_param, &response);
+    //
+    //    ::milvus::grpc::CollectionName collection_name;
+    //    collection_name.set_collection_name(str_collection_name);
+    //    ::milvus::grpc::CollectionInfo collection_info;
+    //    handler->ShowCollectionInfo(&context, &collection_name, &collection_info);
+    //
+    //    std::string json_info = collection_info.json_info();
+    //    auto info_json = nlohmann::json::parse(json_info);
+    //    std::string segment0 = info_json["partitions"][0]["segments"][0]["name"];
+    //
+    //    ::milvus::grpc::GetEntityIDsParam entity_ids_param;
+    //    entity_ids_param.set_collection_name(str_collection_name);
+    //    entity_ids_param.set_segment_name(segment0);
+    //    ::milvus::grpc::EntityIds result_entity_ids;
+    //    handler->GetEntityIDs(&context, &entity_ids_param, &result_entity_ids);
+    //    ASSERT_EQ(0, result_entity_ids.status().error_code());
 }
 
 TEST_F(RpcHandlerTest, PARTITION_TEST) {
@@ -1196,46 +1207,46 @@ TEST_F(RpcHandlerTest, RELOAD_SEGMENTS_TEST) {
     ConstructInsertParam(&request, ENTITY_COUNT);
     ::milvus::grpc::EntityIds entity_ids;
     handler->Insert(&context, &request, &entity_ids);
-//    ASSERT_EQ(entity_ids.entity_id_array_size(), ENTITY_COUNT);
-//
-//    ::milvus::grpc::FlushParam flush_param;
-//    flush_param.add_collection_name_array(str_collection_name);
-//    handler->Flush(&context, &flush_param, &response);
-//
-//    ::milvus::grpc::DeleteByIDParam delete_param;
-//    delete_param.set_collection_name(str_collection_name);
-//
-//    for (size_t i = 0; i < 10; i++) {
-//        delete_param.mutable_id_array()->Add(entity_ids.entity_id_array(i));
-//    }
-//
-//    handler->DeleteByID(&context, &delete_param, &response);
-//    ASSERT_EQ(0, response.error_code()) << response.reason();
-//
-//    //    ::milvus::grpc::FlushParam flush_param;
-//    flush_param.clear_collection_name_array();
-//    flush_param.add_collection_name_array(str_collection_name);
-//    handler->Flush(&context, &flush_param, &response);
-//
-//    fiu_enable("ReLoadSegmentsRequest.OnExecute.readonly", 1, NULL, 0);
-//    ::milvus::grpc::ReLoadSegmentsParam reload_request;
-//    reload_request.set_collection_name(str_collection_name);
-//    ::milvus::grpc::Status reload_response;
-//
-//    bool found = false;
-//    for (size_t i = 0; i < 5000; i++) {
-//        reload_request.clear_segment_id_array();
-//        reload_request.add_segment_id_array(std::to_string(i));
-//        handler->ReloadSegments(&context, &reload_request, &reload_response);
-//        if (reload_response.error_code() == 0) {
-//            found = true;
-//            break;
-//        }
-//    }
-//
-//    fiu_disable("ReLoadSegmentsRequest.OnExecute.readonly");
-//
-//    ASSERT_TRUE(found) << reload_response.reason();
+    //    ASSERT_EQ(entity_ids.entity_id_array_size(), ENTITY_COUNT);
+    //
+    //    ::milvus::grpc::FlushParam flush_param;
+    //    flush_param.add_collection_name_array(str_collection_name);
+    //    handler->Flush(&context, &flush_param, &response);
+    //
+    //    ::milvus::grpc::DeleteByIDParam delete_param;
+    //    delete_param.set_collection_name(str_collection_name);
+    //
+    //    for (size_t i = 0; i < 10; i++) {
+    //        delete_param.mutable_id_array()->Add(entity_ids.entity_id_array(i));
+    //    }
+    //
+    //    handler->DeleteByID(&context, &delete_param, &response);
+    //    ASSERT_EQ(0, response.error_code()) << response.reason();
+    //
+    //    //    ::milvus::grpc::FlushParam flush_param;
+    //    flush_param.clear_collection_name_array();
+    //    flush_param.add_collection_name_array(str_collection_name);
+    //    handler->Flush(&context, &flush_param, &response);
+    //
+    //    fiu_enable("ReLoadSegmentsRequest.OnExecute.readonly", 1, NULL, 0);
+    //    ::milvus::grpc::ReLoadSegmentsParam reload_request;
+    //    reload_request.set_collection_name(str_collection_name);
+    //    ::milvus::grpc::Status reload_response;
+    //
+    //    bool found = false;
+    //    for (size_t i = 0; i < 5000; i++) {
+    //        reload_request.clear_segment_id_array();
+    //        reload_request.add_segment_id_array(std::to_string(i));
+    //        handler->ReloadSegments(&context, &reload_request, &reload_response);
+    //        if (reload_response.error_code() == 0) {
+    //            found = true;
+    //            break;
+    //        }
+    //    }
+    //
+    //    fiu_disable("ReLoadSegmentsRequest.OnExecute.readonly");
+    //
+    //    ASSERT_TRUE(found) << reload_response.reason();
 }
 
 TEST_F(RpcHandlerTest, COMPACT) {
@@ -1255,22 +1266,22 @@ TEST_F(RpcHandlerTest, COMPACT) {
     std::vector<std::vector<float>> bin_record_array;
     ::milvus::grpc::EntityIds entity_ids;
     handler->Insert(&context, &request, &entity_ids);
-//    ASSERT_EQ(entity_ids.entity_id_array_size(), ENTITY_COUNT);
-//
-//    ::milvus::grpc::DeleteByIDParam delete_param;
-//    delete_param.set_collection_name(str_collection_name);
-//
-//    for (size_t i = 0; i < 10; i++) {
-//        delete_param.mutable_id_array()->Add(entity_ids.entity_id_array(i));
-//    }
-//
-//    handler->DeleteByID(&context, &delete_param, &response);
-//    ASSERT_EQ(0, response.error_code()) << response.reason();
-//
-//    ::milvus::grpc::CollectionName collection_name;
-//    collection_name.set_collection_name(str_collection_name);
-//    handler->Compact(&context, &collection_name, &response);
-//    ASSERT_EQ(0, response.error_code());
+    //    ASSERT_EQ(entity_ids.entity_id_array_size(), ENTITY_COUNT);
+    //
+    //    ::milvus::grpc::DeleteByIDParam delete_param;
+    //    delete_param.set_collection_name(str_collection_name);
+    //
+    //    for (size_t i = 0; i < 10; i++) {
+    //        delete_param.mutable_id_array()->Add(entity_ids.entity_id_array(i));
+    //    }
+    //
+    //    handler->DeleteByID(&context, &delete_param, &response);
+    //    ASSERT_EQ(0, response.error_code()) << response.reason();
+    //
+    //    ::milvus::grpc::CollectionName collection_name;
+    //    collection_name.set_collection_name(str_collection_name);
+    //    handler->Compact(&context, &collection_name, &response);
+    //    ASSERT_EQ(0, response.error_code());
 }
 
 TEST_F(RpcHandlerTest, CMD_TEST) {

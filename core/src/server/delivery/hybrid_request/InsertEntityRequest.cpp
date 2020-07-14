@@ -55,6 +55,7 @@ InsertEntityRequest::Create(const std::shared_ptr<milvus::server::Context>& cont
 
 Status
 InsertEntityRequest::OnExecute() {
+    LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute insert request.";
     try {
         fiu_do_on("InsertEntityRequest.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "InsertEntityRequest(table=" + collection_name_ + ", partition_tag=" + partition_tag_ + ")";
@@ -73,6 +74,7 @@ InsertEntityRequest::OnExecute() {
         }
 
         int64_t entity_count = vector_datas_it->second.vector_count_;
+        fiu_do_on("InsertEntityRequest.OnExecute.id_array_error", vector_datas_it->second.id_array_.resize(entity_count + 1));
         if (!vector_datas_it->second.id_array_.empty()) {
             if (!vector_datas_it->second.id_array_.size() != (size_t)entity_count) {
                 std::string msg = "The size of entity ID array must be equal to the size of the entity.";
@@ -87,6 +89,9 @@ InsertEntityRequest::OnExecute() {
         engine::meta::hybrid::FieldsSchema fields_schema;
         collection_schema.collection_id_ = collection_name_;
         status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
+        fiu_do_on("InsertEntityRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
+        fiu_do_on("InsertEntityRequest.OnExecute.describe_collection_fail",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
@@ -128,21 +133,21 @@ InsertEntityRequest::OnExecute() {
         // step 3: check table flag
         // all user provide id, or all internal id
         bool user_provide_ids = !vector_datas_it->second.id_array_.empty();
-        fiu_do_on("InsertEntityRequest.OnExecute.illegal_vector_id", user_provide_ids = false;
+        fiu_do_on("InsertEntityRequest.OnExecute.illegal_entity_id", user_provide_ids = false;
                   collection_schema.flag_ = engine::meta::FLAG_MASK_HAS_USERID);
         // user already provided id before, all insert action require user id
         if ((collection_schema.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
-                          "Collection vector IDs are user-defined. Please provide IDs for all vectors of this table.");
+                          "Collection entity IDs are user-defined. Please provide IDs for all entities of this table.");
         }
 
-        fiu_do_on("InsertRequest.OnExecute.illegal_vector_id2", user_provide_ids = true;
+        fiu_do_on("InsertEntityRequest.OnExecute.illegal_entity_id2", user_provide_ids = true;
                   collection_schema.flag_ = engine::meta::FLAG_MASK_NO_USERID);
         // user didn't provided id before, no need to provide user id
         if ((collection_schema.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
             return Status(
                 SERVER_ILLEGAL_VECTOR_ID,
-                "Table vector IDs are auto-generated. All vectors of this table must use auto-generated IDs.");
+                "Table entity IDs are auto-generated. All entities of this table must use auto-generated IDs.");
         }
 
         rc.RecordSection("check validation");
@@ -167,20 +172,20 @@ InsertEntityRequest::OnExecute() {
 
         rc.RecordSection("prepare vectors data");
         status = DBWrapper::DB()->InsertEntities(collection_name_, partition_tag_, field_names_, entity, field_types);
-        fiu_do_on("InsertRequest.OnExecute.insert_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("InsertEntityRequest.OnExecute.insert_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
         vector_datas_it->second.id_array_ = entity.id_array_;
 
-        //        auto ids_size = vectors_data_.id_array_.size();
-        //        fiu_do_on("InsertRequest.OnExecute.invalid_ids_size", ids_size = vec_count - 1);
-        //        if (ids_size != vec_count) {
-        //            std::string msg =
-        //                "Add " + std::to_string(vec_count) + " vectors but only return " + std::to_string(ids_size) +
-        //                " id";
-        //            return Status(SERVER_ILLEGAL_VECTOR_ID, msg);
-        //        }
+        auto ids_size = entity.id_array_.size();
+        fiu_do_on("InsertEntityRequest.OnExecute.invalid_ids_size", ids_size = entity_count - 1);
+        if (ids_size != entity_count) {
+            std::string msg =
+                "Add " + std::to_string(entity_count) + " entities but only return " + std::to_string(ids_size) +
+                " id";
+            return Status(SERVER_ILLEGAL_VECTOR_ID, msg);
+        }
 
         // step 6: update table flag
         user_provide_ids ? collection_schema.flag_ |= engine::meta::FLAG_MASK_HAS_USERID

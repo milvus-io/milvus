@@ -867,27 +867,31 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus
 GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                        ::milvus::grpc::Mapping* response) {
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
-    std::unordered_map<std::string, milvus::json> index_param;
-    Status status = request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(),
-                                                              field_types, index_param);
-
-    response->set_collection_name(request->collection_name());
-    auto field_it = field_types.begin();
-    for (; field_it != field_types.end(); field_it++) {
-        auto field = response->add_fields();
-        field->set_name(field_it->first);
-        field->set_type((milvus::grpc::DataType)field_it->second);
-        for (auto& json_param : index_param.at(field_it->first).items()) {
-            auto grpc_index_param = field->add_index_params();
-            grpc_index_param->set_key(json_param.key());
-            grpc_index_param->set_value(json_param.value());
-        }
-    }
-
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
-    SET_RESPONSE(response->mutable_status(), status, context);
+    try {
+        std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
+        std::unordered_map<std::string, milvus::json> index_param;
+        Status status = request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(),
+                                                                  field_types, index_param);
+
+        response->set_collection_name(request->collection_name());
+        auto field_it = field_types.begin();
+        for (; field_it != field_types.end(); field_it++) {
+            auto field = response->add_fields();
+            field->set_name(field_it->first);
+            field->set_type((milvus::grpc::DataType)field_it->second);
+            for (auto& json_param : index_param.at(field_it->first).items()) {
+                auto grpc_index_param = field->add_index_params();
+                grpc_index_param->set_key(json_param.key());
+                grpc_index_param->set_value(json_param.value());
+            }
+        }
+        LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+        SET_RESPONSE(response->mutable_status(), status, context);
+    } catch (std::exception& ex) {
+        Status status = Status{SERVER_UNEXPECTED_ERROR, ""};
+        SET_RESPONSE(response->mutable_status(), status, context);
+    }
     return ::grpc::Status::OK;
 }
 
