@@ -47,7 +47,7 @@ CollectionCommitOperation::DoExecute(Store& store) {
         resource_->SetSchemaId(context_.new_schema_commit->GetID());
     }
     resource_->SetID(0);
-    AddStep(*BaseT::resource_, false);
+    AddStep(*BaseT::resource_, nullptr, false);
     return Status::OK();
 }
 
@@ -66,7 +66,7 @@ PartitionOperation::DoExecute(Store& store) {
     if (!status.ok())
         return status;
     resource_ = std::make_shared<Partition>(context_.name, GetStartedSS()->GetCollection()->GetID());
-    AddStep(*resource_, false);
+    AddStep(*resource_, nullptr, false);
     return status;
 }
 
@@ -139,7 +139,7 @@ PartitionCommitOperation::DoExecute(Store& store) {
             resource_->GetMappings().insert(sc->GetID());
         }
     }
-    AddStep(*resource_, false);
+    AddStep(*resource_, nullptr, false);
     return Status::OK();
 }
 
@@ -180,7 +180,7 @@ SegmentOperation::DoExecute(Store& store) {
     auto prev_num = GetStartedSS()->GetMaxSegmentNumByPartition(context_.prev_partition->GetID());
     resource_ = std::make_shared<Segment>(context_.prev_partition->GetCollectionId(), context_.prev_partition->GetID(),
                                           prev_num + 1);
-    AddStep(*resource_, false);
+    AddStep(*resource_, nullptr, false);
     return Status::OK();
 }
 
@@ -203,7 +203,7 @@ SegmentCommitOperation::DoExecute(Store& store) {
     for (auto& new_segment_file : context_.new_segment_files) {
         resource_->GetMappings().insert(new_segment_file->GetID());
     }
-    AddStep(*resource_, false);
+    AddStep(*resource_, nullptr, false);
     return Status::OK();
 }
 
@@ -264,7 +264,7 @@ FieldCommitOperation::DoExecute(Store& store) {
         resource_->GetMappings().insert(fe->GetID());
     }
 
-    AddStep(*resource_, false);
+    AddStep(*resource_, nullptr, false);
     return Status::OK();
 }
 
@@ -295,7 +295,7 @@ SchemaCommitOperation::DoExecute(Store& store) {
         resource_->GetMappings().insert(fc->GetID());
     }
 
-    AddStep(*resource_, false);
+    AddStep(*resource_, nullptr, false);
     return Status::OK();
 }
 
@@ -309,7 +309,8 @@ SegmentFileOperation::DoExecute(Store& store) {
     STATUS_CHECK(GetStartedSS()->GetFieldElement(context_.field_name, context_.field_element_name, fe));
     resource_ =
         std::make_shared<SegmentFile>(context_.collection_id, context_.partition_id, context_.segment_id, fe->GetID());
-    AddStep(*resource_, false);
+    //    auto seg_ctx_p = ResourceContextBuilder<SegmentFile>().SetResource(resource_).SetOp(oAdd).CreatePtr();
+    AddStep(*resource_, nullptr, false);
     return Status::OK();
 }
 
