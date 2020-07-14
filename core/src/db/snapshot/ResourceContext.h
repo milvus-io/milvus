@@ -11,10 +11,18 @@
 
 #pragma once
 
-#include "db/impl/Context.h"
+#include <memory>
+#include <set>
+#include <string>
+#include <utility>
+
+#include "db/meta/backend/MetaContext.h"
 #include "db/snapshot/BaseResource.h"
+#include "db/snapshot/ResourceTypes.h"
 
 namespace milvus::engine::snapshot {
+
+using ResourceContextOp = meta::MetaContextOp;
 
 template <typename ResourceT>
 class ResourceContext {
@@ -30,7 +38,6 @@ class ResourceContext {
     ~ResourceContext() = default;
 
  public:
-
     void
     AddResource(ResPtr res) {
         table_ = ResourceT::Name;
@@ -77,7 +84,6 @@ class ResourceContext {
         return table_;
     }
 
-
  private:
     std::string table_;
     ID_TYPE id_;
@@ -95,7 +101,7 @@ class ResourceContextBuilder {
     SetResource(typename T::Ptr res) {
         table_ = T::Name;
         id_ = res->GetID();
-//        resource_ = std::shared_ptr<T>(std::move(res));
+        //        resource_ = std::shared_ptr<T>(std::move(res));
         resource_ = std::move(res);
         return *this;
     }

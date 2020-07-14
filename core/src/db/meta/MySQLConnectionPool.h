@@ -11,7 +11,6 @@
 
 #pragma once
 
-
 #include <unistd.h>
 
 #include <atomic>

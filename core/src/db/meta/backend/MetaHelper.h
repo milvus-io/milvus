@@ -11,35 +11,23 @@
 
 #pragma once
 
-#include <memory>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
-#include "db/impl/Context.h"
-#include "db/snapshot/ResourceTypes.h"
+#include "db/meta/backend/MetaContext.h"
 #include "utils/Status.h"
 
-namespace milvus::engine {
+namespace milvus::engine::meta {
 
-using AttrsMap = std::unordered_map<std::string, std::string>;
-using AttrsMapList = std::vector<AttrsMap>;
+class MetaHelper {
+ private:
+    MetaHelper() = default;
 
-class DBEngine {
  public:
-//    DBEngine() = default;
-//    ~DBEngine() = default;
+    static Status
+    MetaQueryContextToSql(const MetaQueryContext& context, std::string& sql);
 
-    virtual Status
-    Query(const DBQueryContext& context, AttrsMapList& attrs) = 0;
-
-    virtual Status
-    ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) = 0;
-
-    virtual Status
-    TruncateAll() = 0;
+    static Status
+    MetaApplyContextToSql(const MetaApplyContext& context, std::string& sql);
 };
 
-using DBEnginePtr = std::shared_ptr<DBEngine>;
-
-}
+}  // namespace milvus::engine::meta

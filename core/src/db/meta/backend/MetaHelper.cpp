@@ -9,13 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/impl/DBHelper.h"
+#include "db/meta/backend/MetaHelper.h"
+
+#include <vector>
+
+#include "db/meta/backend/MetaContext.h"
 #include "utils/StringHelpFunctions.h"
 
-namespace milvus::engine {
+namespace milvus::engine::meta {
 
 Status
-DBHelper::DBQueryContextToSql(const DBQueryContext& context, std::string& sql) {
+MetaHelper::MetaQueryContextToSql(const MetaQueryContext& context, std::string& sql) {
     sql.clear();
     if (context.all_required_) {
         sql = "SELECT * FROM ";
@@ -27,7 +31,7 @@ DBHelper::DBQueryContextToSql(const DBQueryContext& context, std::string& sql) {
     sql += context.table_;
 
     std::vector<std::string> filter_conditions;
-    for (auto& attr: context.filter_attrs_) {
+    for (auto& attr : context.filter_attrs_) {
         filter_conditions.emplace_back(attr.first + "=" + attr.second);
 
         std::string filter_str;
@@ -41,7 +45,7 @@ DBHelper::DBQueryContextToSql(const DBQueryContext& context, std::string& sql) {
 }
 
 Status
-DBHelper::DBApplyContextToSql(const DBApplyContext& context, std::string& sql) {
+MetaHelper::MetaApplyContextToSql(const MetaApplyContext& context, std::string& sql) {
     if (!context.sql_.empty()) {
         sql = context.sql_;
         return Status::OK();
@@ -63,7 +67,7 @@ DBHelper::DBApplyContextToSql(const DBApplyContext& context, std::string& sql) {
         case oUpdate: {
             std::string field_pairs;
             std::vector<std::string> updated_attrs;
-            for (auto& attr_kv: context.attrs_) {
+            for (auto& attr_kv : context.attrs_) {
                 updated_attrs.emplace_back(attr_kv.first + "=" + attr_kv.second);
             }
 
@@ -82,4 +86,4 @@ DBHelper::DBApplyContextToSql(const DBApplyContext& context, std::string& sql) {
     return Status::OK();
 }
 
-}
+}  // namespace milvus::engine::meta

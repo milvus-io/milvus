@@ -11,48 +11,49 @@
 
 #pragma once
 
+#include <memory>
+#include <string>
 #include <type_traits>
+#include <vector>
 
-#include "db/impl/MemDBEngine.h"
-#include "db/impl/MySqlEngine.h"
-#include "db/impl/Session.h"
+#include "db/meta/MetaSession.h"
+#include "db/meta/backend/MockMetaEngine.h"
+#include "db/meta/backend/MySqlEngine.h"
 #include "db/snapshot/Resources.h"
 #include "utils/Exception.h"
 
-namespace milvus::engine {
+namespace milvus::engine::meta {
 
-using namespace snapshot;
+// using namespace snapshot;
 
-class DBImp {
+class MetaAdapter {
  public:
-    static
-    DBImp&
+    static MetaAdapter&
     GetInstance() {
-        static DBImp db;
+        static MetaAdapter db;
         return db;
     }
 
  public:
-    DBImp() {
-        engine_ = std::make_shared<MemDBEngine>();
-//        DBMetaOptions options;
-//        options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
-//        engine_ = std::make_shared<MySqlEngine>(options);
+    MetaAdapter() {
+        engine_ = std::make_shared<MockMetaEngine>();
+        //        DBMetaOptions options;
+        //        options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
+        //        engine_ = std::make_shared<MySqlEngine>(options);
     }
-
 
     SessionPtr
     CreateSession() {
-        return std::make_shared<Session>(engine_);
+        return std::make_shared<MetaSession>(engine_);
     }
 
-    template <typename T, typename std::enable_if<std::is_base_of<BaseResource, T>::value, T>::type* = nullptr>
+    template <typename T>
     Status
     Select(int64_t id, typename T::Ptr& resource) {
         // TODO move select logic to here
         auto session = CreateSession();
         std::vector<typename T::Ptr> resources;
-        auto status = session->Select<T, ID_TYPE>(IdField::Name, id, resources);
+        auto status = session->Select<T, snapshot::ID_TYPE>(snapshot::IdField::Name, id, resources);
         if (status.ok() && !resources.empty()) {
             // TODO: may need to check num of resources
             resource = resources.at(0);
@@ -61,14 +62,14 @@ class DBImp {
         return status;
     }
 
-    template<typename ResourceT, typename U>
+    template <typename ResourceT, typename U>
     Status
     SelectBy(const std::string& field, const U& value, std::vector<typename ResourceT::Ptr>& resources) {
         auto session = CreateSession();
         return session->Select<ResourceT, U>(field, value, resources);
     }
 
-    template<typename ResourceT, typename U>
+    template <typename ResourceT, typename U>
     Status
     SelectResourceIDs(std::vector<int64_t>& ids, const std::string& filter_field, const U& filter_value) {
         std::vector<typename ResourceT::Ptr> resources;
@@ -78,7 +79,7 @@ class DBImp {
             return status;
         }
 
-        for (auto& res: resources) {
+        for (auto& res : resources) {
             ids.push_back(res->GetID());
         }
 
@@ -87,7 +88,7 @@ class DBImp {
 
     template <typename ResourceT>
     Status
-    Apply(ResourceContextPtr<ResourceT> resp, int64_t& result_id) {
+    Apply(snapshot::ResourceContextPtr<ResourceT> resp, int64_t& result_id) {
         auto session = CreateSession();
         session->Apply<ResourceT>(resp);
 
@@ -112,7 +113,7 @@ class DBImp {
     }
 
  private:
-    DBEnginePtr engine_;
+    MetaEnginePtr engine_;
 };
 
-}  // namespace milvus::engine
+}  // namespace milvus::engine::meta

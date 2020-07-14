@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "db/impl/DBImp.h"
+#include "db/meta/MetaAdapter.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
@@ -59,7 +59,7 @@ class Store {
     template <typename OpT>
     Status
     ApplyOperation(OpT& op) {
-        auto session = DBImp::GetInstance().CreateSession();
+        auto session = meta::MetaAdapter::GetInstance().CreateSession();
         std::apply(
             [&](auto&... step_context_set) {
                 std::size_t n{0};
@@ -78,7 +78,8 @@ class Store {
 
     template <typename T, typename OpT>
     void
-    ApplyOpStep(OpT& op, size_t pos, std::set<std::shared_ptr<ResourceContext<T>>>& step_context_set, const SessionPtr& session) {
+    ApplyOpStep(OpT& op, size_t pos, std::set<std::shared_ptr<ResourceContext<T>>>& step_context_set,
+                const meta::SessionPtr& session) {
         for (auto& step_context : step_context_set) {
             session->Apply<T>(step_context);
         }
@@ -96,14 +97,15 @@ class Store {
     template <typename ResourceT>
     Status
     GetResource(ID_TYPE id, typename ResourceT::Ptr& return_v) {
-        auto status = DBImp::GetInstance().Select<ResourceT>(id, return_v);
+        auto status = meta::MetaAdapter::GetInstance().Select<ResourceT>(id, return_v);
 
         if (!status.ok()) {
             return status;
         }
 
         if (return_v == nullptr) {
-            std::string err = "Cannot select resource " + std::string(ResourceT::Name) + " from DB: No resource which id = " + std::to_string(id);
+            std::string err = "Cannot select resource " + std::string(ResourceT::Name) +
+                              " from DB: No resource which id = " + std::to_string(id);
             return Status(SS_NOT_FOUND_ERROR, err);
         }
 
@@ -114,7 +116,7 @@ class Store {
     GetCollection(const std::string& name, CollectionPtr& return_v) {
         // TODO: Get active collection
         std::vector<CollectionPtr> resources;
-        auto status = DBImp::GetInstance().SelectBy<Collection>(NameField::Name, name, resources);
+        auto status = meta::MetaAdapter::GetInstance().SelectBy<Collection>(NameField::Name, name, resources);
         if (!status.ok()) {
             return status;
         }
@@ -131,33 +133,33 @@ class Store {
 
     Status
     GetCollections(const std::string& name, std::vector<CollectionPtr>& returns_v) {
-        return DBImp::GetInstance().SelectBy<Collection, std::string>(NameField::Name, name, returns_v);
+        return meta::MetaAdapter::GetInstance().SelectBy<Collection, std::string>(NameField::Name, name, returns_v);
     }
 
     Status
     RemoveCollection(ID_TYPE id) {
-        auto rc_ctx_p = ResourceContextBuilder<Collection>().SetTable(Collection::Name)
-            .SetOp(oDelete).SetID(id).CreatePtr();
+        auto rc_ctx_p =
+            ResourceContextBuilder<Collection>().SetTable(Collection::Name).SetOp(meta::oDelete).SetID(id).CreatePtr();
 
         int64_t result_id;
-        return DBImp::GetInstance().Apply<Collection>(rc_ctx_p, result_id);
+        return meta::MetaAdapter::GetInstance().Apply<Collection>(rc_ctx_p, result_id);
     }
 
     template <typename ResourceT>
     Status
     RemoveResource(ID_TYPE id) {
-        auto rc_ctx_p = ResourceContextBuilder<ResourceT>().SetTable(ResourceT::Name)
-            .SetOp(oDelete).SetID(id).CreatePtr();
+        auto rc_ctx_p =
+            ResourceContextBuilder<ResourceT>().SetTable(ResourceT::Name).SetOp(meta::oDelete).SetID(id).CreatePtr();
 
         int64_t result_id;
-        return DBImp::GetInstance().Apply<ResourceT>(rc_ctx_p, result_id);
+        return meta::MetaAdapter::GetInstance().Apply<ResourceT>(rc_ctx_p, result_id);
     }
 
     IDS_TYPE
     AllActiveCollectionIds(bool reversed = true) const {
         IDS_TYPE ids;
         IDS_TYPE selected_ids;
-        DBImp::GetInstance().SelectResourceIDs<Collection, std::string>(selected_ids, "", "");
+        meta::MetaAdapter::GetInstance().SelectResourceIDs<Collection, std::string>(selected_ids, "", "");
 
         if (!reversed) {
             ids = selected_ids;
@@ -173,7 +175,8 @@ class Store {
     IDS_TYPE
     AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
         IDS_TYPE ids, selected_ids;
-        DBImp::GetInstance().SelectResourceIDs<CollectionCommit, int64_t>(selected_ids, F_COLLECTON_ID, collection_id);
+        meta::MetaAdapter::GetInstance().SelectResourceIDs<CollectionCommit, int64_t>(
+            selected_ids, meta::F_COLLECTON_ID, collection_id);
 
         if (!reversed) {
             ids = selected_ids;
@@ -215,12 +218,12 @@ class Store {
     template <typename ResourceT>
     Status
     CreateResource(ResourceT&& resource, typename ResourceT::Ptr& return_v) {
-//        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+        //        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto res_p = std::make_shared<ResourceT>(resource);
-        auto res_ctx_p = ResourceContextBuilder<ResourceT>().SetOp(oAdd).SetResource(res_p).CreatePtr();
+        auto res_ctx_p = ResourceContextBuilder<ResourceT>().SetOp(meta::oAdd).SetResource(res_p).CreatePtr();
 
         int64_t result_id;
-        auto status = DBImp::GetInstance().Apply<ResourceT>(res_ctx_p, result_id);
+        auto status = meta::MetaAdapter::GetInstance().Apply<ResourceT>(res_ctx_p, result_id);
         if (!status.ok()) {
             return status;
         }
@@ -229,8 +232,8 @@ class Store {
         return_v->SetID(result_id);
         return_v->ResetCnt();
 
-//        lock.unlock();
-//        auto status = GetResource<ResourceT>(res->GetID(), return_v);
+        //        lock.unlock();
+        //        auto status = GetResource<ResourceT>(res->GetID(), return_v);
         /* std::cout << ">>> [Create] " << ResourceT::Name << " " << id; */
         /* std::cout << " " << std::boolalpha << res->IsActive() << std::endl; */
         return Status::OK();
@@ -238,7 +241,7 @@ class Store {
 
     void
     DoReset() {
-        auto status = DBImp::GetInstance().TruncateAll();
+        auto status = meta::MetaAdapter::GetInstance().TruncateAll();
         if (!status.ok()) {
             std::cout << "TruncateAll failed: " << status.ToString() << std::endl;
         }
@@ -263,9 +266,7 @@ class Store {
         std::vector<std::any> all_records;
         std::unordered_map<ID_TYPE, FieldCommitPtr> field_commit_records;
         std::unordered_map<std::string, ID_TYPE> id_map = {
-            {Collection::Name, 0}, {Field::Name, 0},
-            {FieldElement::Name, 0}, {Partition::Name, 0}
-        };
+            {Collection::Name, 0}, {Field::Name, 0}, {FieldElement::Name, 0}, {Partition::Name, 0}};
 
         for (auto i = 1; i <= random; i++) {
             std::stringstream name;
@@ -366,20 +367,22 @@ class Store {
             if (record.type() == typeid(std::shared_ptr<Collection>)) {
                 const auto& r = std::any_cast<std::shared_ptr<Collection>>(record);
                 r->Activate();
-                auto t_c_p = ResourceContextBuilder<Collection>().SetOp(oUpdate)
-                    .SetResource(r)
-                    .AddAttr(F_STATE)
-                    .CreatePtr();
+                auto t_c_p = ResourceContextBuilder<Collection>()
+                                 .SetOp(meta::oUpdate)
+                                 .SetResource(r)
+                                 .AddAttr(meta::F_STATE)
+                                 .CreatePtr();
 
-                DBImp::GetInstance().Apply<Collection>(t_c_p, result_id);
+                meta::MetaAdapter::GetInstance().Apply<Collection>(t_c_p, result_id);
             } else if (record.type() == typeid(std::shared_ptr<CollectionCommit>)) {
                 const auto& r = std::any_cast<std::shared_ptr<CollectionCommit>>(record);
                 r->Activate();
-                auto t_cc_p = ResourceContextBuilder<CollectionCommit>().SetOp(oUpdate)
-                    .SetResource(r)
-                    .AddAttr(F_STATE)
-                    .CreatePtr();
-                DBImp::GetInstance().Apply<CollectionCommit>(t_cc_p, result_id);
+                auto t_cc_p = ResourceContextBuilder<CollectionCommit>()
+                                  .SetOp(meta::oUpdate)
+                                  .SetResource(r)
+                                  .AddAttr(meta::F_STATE)
+                                  .CreatePtr();
+                meta::MetaAdapter::GetInstance().Apply<CollectionCommit>(t_cc_p, result_id);
             }
         }
     }

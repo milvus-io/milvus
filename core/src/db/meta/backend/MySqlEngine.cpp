@@ -9,20 +9,24 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/impl/MySqlEngine.h"
+#include "db/meta/backend/MySqlEngine.h"
 
 #include <unistd.h>
 
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include <fiu-local.h>
-#include <mysql++/sqlstream.h>
 
 #include "db/Utils.h"
-#include "db/impl/DBHelper.h"
-#include "db/impl/MetaFields.h"
+#include "db/meta/MetaFields.h"
+#include "db/meta/backend/MetaHelper.h"
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
 
-namespace milvus::engine {
+namespace milvus::engine::meta {
 
 ////////// private namespace //////////
 namespace {
@@ -74,7 +78,8 @@ class MetaSchema {
     MetaSchema(const std::string& name, const MetaFields& fields) : name_(name), fields_(fields), constraint_fields_() {
     }
 
-    MetaSchema(const std::string& name, const MetaFields& fields, const MetaFields& constraints) : name_(name), fields_(fields), constraint_fields_(constraints) {
+    MetaSchema(const std::string& name, const MetaFields& fields, const MetaFields& constraints)
+        : name_(name), fields_(fields), constraint_fields_(constraints) {
     }
 
     std::string
@@ -151,109 +156,79 @@ static const MetaField MetaRowCountField = MetaField(F_ROW_COUNT, "BIGINT", "NOT
 
 // Environment schema
 static const MetaSchema COLLECTION_SCHEMA(snapshot::Collection::Name,
-    {MetaIdField, MetaNameField,MetaLSNField,MetaParamsField,
-     MetaStateField,MetaCreatedOnField,MetaUpdatedOnField});
+                                          {MetaIdField, MetaNameField, MetaLSNField, MetaParamsField, MetaStateField,
+                                           MetaCreatedOnField, MetaUpdatedOnField});
 
 // Tables schema
 static const MetaSchema COLLECTIONCOMMIT_SCHEMA(snapshot::CollectionCommit::Name,
-    {MetaIdField, MetaCollectionIdField, MetaSchemaIdField, MetaMappingsField, MetaRowCountField,
-     MetaSizeField, MetaLSNField, MetaStateField, MetaCreatedOnField, MetaUpdatedOnField,}
-);
+                                                {MetaIdField, MetaCollectionIdField, MetaSchemaIdField,
+                                                 MetaMappingsField, MetaRowCountField, MetaSizeField, MetaLSNField,
+                                                 MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
 // TableFiles schema
 static const MetaSchema PARTITION_SCHEMA(snapshot::Partition::Name,
-    {MetaIdField, MetaNameField, MetaCollectionIdField, MetaLSNField,
-     MetaStateField, MetaCreatedOnField, MetaUpdatedOnField,});
+                                         {MetaIdField, MetaNameField, MetaCollectionIdField, MetaLSNField,
+                                          MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
 // Fields schema
 static const MetaSchema PARTITIONCOMMIT_SCHEMA(snapshot::PartitionCommit::Name,
-    {MetaIdField, MetaCollectionIdField, MetaPartitionIdField, MetaMappingsField, MetaRowCountField,
-     MetaSizeField, MetaStateField, MetaLSNField, MetaCreatedOnField,MetaUpdatedOnField});
+                                               {MetaIdField, MetaCollectionIdField, MetaPartitionIdField,
+                                                MetaMappingsField, MetaRowCountField, MetaSizeField, MetaStateField,
+                                                MetaLSNField, MetaCreatedOnField, MetaUpdatedOnField});
 
 static const MetaSchema SEGMENT_SCHEMA(snapshot::Segment::Name, {
-    MetaIdField,
-    MetaCollectionIdField,
-    MetaPartitionIdField,
-    MetaNumField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField,
-});
+                                                                    MetaIdField,
+                                                                    MetaCollectionIdField,
+                                                                    MetaPartitionIdField,
+                                                                    MetaNumField,
+                                                                    MetaLSNField,
+                                                                    MetaStateField,
+                                                                    MetaCreatedOnField,
+                                                                    MetaUpdatedOnField,
+                                                                });
 
 static const MetaSchema SEGMENTCOMMIT_SCHEMA(snapshot::SegmentCommit::Name, {
-    MetaIdField,
-    MetaSchemaIdField,
-    MetaPartitionIdField,
-    MetaSegmentIdField,
-    MetaMappingsField,
-    MetaRowCountField,
-    MetaSizeField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField,
-});
+                                                                                MetaIdField,
+                                                                                MetaSchemaIdField,
+                                                                                MetaPartitionIdField,
+                                                                                MetaSegmentIdField,
+                                                                                MetaMappingsField,
+                                                                                MetaRowCountField,
+                                                                                MetaSizeField,
+                                                                                MetaLSNField,
+                                                                                MetaStateField,
+                                                                                MetaCreatedOnField,
+                                                                                MetaUpdatedOnField,
+                                                                            });
 
-static const MetaSchema SEGMENTFILE_SCHEMA(snapshot::SegmentFile::Name, {
-    MetaIdField,
-    MetaCollectionIdField,
-    MetaPartitionIdField,
-    MetaSegmentIdField,
-    MetaFieldElementIdField,
-    MetaRowCountField,
-    MetaSizeField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField
-});
+static const MetaSchema SEGMENTFILE_SCHEMA(snapshot::SegmentFile::Name,
+                                           {MetaIdField, MetaCollectionIdField, MetaPartitionIdField,
+                                            MetaSegmentIdField, MetaFieldElementIdField, MetaRowCountField,
+                                            MetaSizeField, MetaLSNField, MetaStateField, MetaCreatedOnField,
+                                            MetaUpdatedOnField});
 
 static const MetaSchema SCHEMACOMMIT_SCHEMA(snapshot::SchemaCommit::Name, {
-    MetaIdField,
-    MetaCollectionIdField,
-    MetaMappingsField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField,
-});
+                                                                              MetaIdField,
+                                                                              MetaCollectionIdField,
+                                                                              MetaMappingsField,
+                                                                              MetaLSNField,
+                                                                              MetaStateField,
+                                                                              MetaCreatedOnField,
+                                                                              MetaUpdatedOnField,
+                                                                          });
 
-static const MetaSchema FIELD_SCHEMA(snapshot::Field::Name, {
-    MetaIdField,
-    MetaNameField,
-    MetaNumField,
-    MetaFtypeField,
-    MetaParamsField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField
-});
+static const MetaSchema FIELD_SCHEMA(snapshot::Field::Name,
+                                     {MetaIdField, MetaNameField, MetaNumField, MetaFtypeField, MetaParamsField,
+                                      MetaLSNField, MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
-static const MetaSchema FIELDCOMMIT_SCHEMA(snapshot::FieldCommit::Name, {
-    MetaIdField,
-    MetaCollectionIdField,
-    MetaFieldIdField,
-    MetaMappingsField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField
-});
+static const MetaSchema FIELDCOMMIT_SCHEMA(snapshot::FieldCommit::Name,
+                                           {MetaIdField, MetaCollectionIdField, MetaFieldIdField, MetaMappingsField,
+                                            MetaLSNField, MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
-static const MetaSchema FIELDELEMENT_SCHEMA(snapshot::FieldElement::Name, {
-    MetaIdField,
-    MetaCollectionIdField,
-    MetaFieldIdField,
-    MetaNameField,
-    MetaFtypeField,
-    MetaParamsField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField
-});
+static const MetaSchema FIELDELEMENT_SCHEMA(snapshot::FieldElement::Name,
+                                            {MetaIdField, MetaCollectionIdField, MetaFieldIdField, MetaNameField,
+                                             MetaFtypeField, MetaParamsField, MetaLSNField, MetaStateField,
+                                             MetaCreatedOnField, MetaUpdatedOnField});
 
 }  // namespace
 
@@ -261,15 +236,15 @@ static const MetaSchema FIELDELEMENT_SCHEMA(snapshot::FieldElement::Name, {
 Status
 MySqlEngine::Initialize() {
     // step 1: create db root path
-//    if (!boost::filesystem::is_directory(options_.path_)) {
-//        auto ret = boost::filesystem::create_directory(options_.path_);
-//        fiu_do_on("MySQLMetaImpl.Initialize.fail_create_directory", ret = false);
-//        if (!ret) {
-//            std::string msg = "Failed to create db directory " + options_.path_;
-//            LOG_ENGINE_ERROR_ << msg;
-//            throw Exception(DB_META_TRANSACTION_FAILED, msg);
-//        }
-//    }
+    //    if (!boost::filesystem::is_directory(options_.path_)) {
+    //        auto ret = boost::filesystem::create_directory(options_.path_);
+    //        fiu_do_on("MySQLMetaImpl.Initialize.fail_create_directory", ret = false);
+    //        if (!ret) {
+    //            std::string msg = "Failed to create db directory " + options_.path_;
+    //            LOG_ENGINE_ERROR_ << msg;
+    //            throw Exception(DB_META_TRANSACTION_FAILED, msg);
+    //        }
+    //    }
     std::string uri = options_.backend_uri_;
 
     // step 2: parse and check meta uri
@@ -300,12 +275,12 @@ MySqlEngine::Initialize() {
     LOG_ENGINE_DEBUG_ << "MySQL connection pool: maximum pool size = " << std::to_string(max_pool_size);
 
     // step 4: validate to avoid open old version schema
-//    ValidateMetaSchema();
+    //    ValidateMetaSchema();
 
     // step 5: clean shadow files
-//    if (mode_ != DBOptions::MODE::CLUSTER_READONLY) {
-//        CleanUpShadowFiles();
-//    }
+    //    if (mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+    //        CleanUpShadowFiles();
+    //    }
 
     // step 6: try connect mysql server
     mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
@@ -330,10 +305,10 @@ MySqlEngine::Initialize() {
     auto create_schema = [&](const MetaSchema& schema) {
         std::string create_table_str = "CREATE TABLE IF NOT EXISTS " + schema.name() + "(" + schema.ToString() + ");";
         InitializeQuery << create_table_str;
-//        LOG_ENGINE_DEBUG_ << "Initialize: " << InitializeQuery.str();
+        //        LOG_ENGINE_DEBUG_ << "Initialize: " << InitializeQuery.str();
 
         bool initialize_query_exec = InitializeQuery.exec();
-//        fiu_do_on("MySQLMetaImpl.Initialize.fail_create_collection_files", initialize_query_exec = false);
+        //        fiu_do_on("MySQLMetaImpl.Initialize.fail_create_collection_files", initialize_query_exec = false);
         if (!initialize_query_exec) {
             std::string msg = "Failed to create meta collection '" + schema.name() + "' in MySQL";
             LOG_ENGINE_ERROR_ << msg;
@@ -358,12 +333,12 @@ MySqlEngine::Initialize() {
 }
 
 Status
-MySqlEngine::Query(const DBQueryContext& context, AttrsMapList& attrs) {
+MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
         std::string sql;
-        auto status = DBHelper::DBQueryContextToSql(context, sql);
+        auto status = MetaHelper::MetaQueryContextToSql(context, sql);
         if (!status.ok()) {
             return status;
         }
@@ -377,7 +352,7 @@ MySqlEngine::Query(const DBQueryContext& context, AttrsMapList& attrs) {
         }
 
         auto names = res.field_names();
-        for (auto& row: res) {
+        for (auto& row : res) {
             AttrsMap attrs_map;
             for (auto& name : *names) {
                 attrs_map.insert(std::pair<std::string, std::string>(name, row[name.c_str()]));
@@ -386,17 +361,17 @@ MySqlEngine::Query(const DBQueryContext& context, AttrsMapList& attrs) {
         }
     } catch (const mysqlpp::BadQuery& er) {
         // Handle any query errors
-//        cerr << "Query error: " << er.what() << endl;
+        //        cerr << "Query error: " << er.what() << endl;
         return Status(1, er.what());
     } catch (const mysqlpp::BadConversion& er) {
         // Handle bad conversions
-//        cerr << "Conversion error: " << er.what() << endl <<
-//             "\tretrieved data size: " << er.retrieved <<
-//             ", actual size: " << er.actual_size << endl;
+        //        cerr << "Conversion error: " << er.what() << endl <<
+        //             "\tretrieved data size: " << er.retrieved <<
+        //             ", actual size: " << er.actual_size << endl;
         return Status(1, er.what());
     } catch (const mysqlpp::Exception& er) {
         // Catch-all for any other MySQL++ exceptions
-//        cerr << "Error: " << er.what() << endl;
+        //        cerr << "Error: " << er.what() << endl;
         return Status(1, er.what());
     }
 
@@ -404,15 +379,15 @@ MySqlEngine::Query(const DBQueryContext& context, AttrsMapList& attrs) {
 }
 
 Status
-MySqlEngine::ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
+MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
         mysqlpp::Transaction trans(*connectionPtr, mysqlpp::Transaction::serializable, mysqlpp::Transaction::session);
 
         std::lock_guard<std::mutex> lock(meta_mutex_);
-        for (auto & context : sql_contexts) {
+        for (auto& context : sql_contexts) {
             std::string sql;
-            auto status = DBHelper::DBApplyContextToSql(context, sql);
+            auto status = MetaHelper::MetaApplyContextToSql(context, sql);
             if (!status.ok()) {
                 return status;
             }
@@ -428,26 +403,26 @@ MySqlEngine::ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts,
         }
 
         trans.commit();
-//        std::cout << "[DB] Transaction commit " << std::endl;
+        //        std::cout << "[DB] Transaction commit " << std::endl;
     } catch (const mysqlpp::BadQuery& er) {
         // Handle any query errors
-//        cerr << "Query error: " << er.what() << endl;
-//        return -1;
-//        std::cout << "[DB] Error: " << er.what() << std::endl;
+        //        cerr << "Query error: " << er.what() << endl;
+        //        return -1;
+        //        std::cout << "[DB] Error: " << er.what() << std::endl;
         return Status(SERVER_UNSUPPORTED_ERROR, er.what());
     } catch (const mysqlpp::BadConversion& er) {
         // Handle bad conversions
-//        cerr << "Conversion error: " << er.what() << endl <<
-//             "\tretrieved data size: " << er.retrieved <<
-//             ", actual size: " << er.actual_size << endl;
-//        return -1;
-//        std::cout << "[DB] Error: " << er.what() << std::endl;
+        //        cerr << "Conversion error: " << er.what() << endl <<
+        //             "\tretrieved data size: " << er.retrieved <<
+        //             ", actual size: " << er.actual_size << endl;
+        //        return -1;
+        //        std::cout << "[DB] Error: " << er.what() << std::endl;
         return Status(SERVER_UNSUPPORTED_ERROR, er.what());
     } catch (const mysqlpp::Exception& er) {
         // Catch-all for any other MySQL++ exceptions
-//        cerr << "Error: " << er.what() << endl;
-//        return -1;
-//        std::cout << "[DB] Error: " << er.what() << std::endl;
+        //        cerr << "Error: " << er.what() << endl;
+        //        return -1;
+        //        std::cout << "[DB] Error: " << er.what() << std::endl;
         return Status(SERVER_UNSUPPORTED_ERROR, er.what());
     }
 
@@ -457,31 +432,23 @@ MySqlEngine::ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts,
 Status
 MySqlEngine::TruncateAll() {
     static std::vector<std::string> collecton_names = {
-        COLLECTION_SCHEMA.name(),
-        COLLECTIONCOMMIT_SCHEMA.name(),
-        PARTITION_SCHEMA.name(),
-        PARTITIONCOMMIT_SCHEMA.name(),
-        SEGMENT_SCHEMA.name(),
-        SEGMENTCOMMIT_SCHEMA.name(),
-        SEGMENTFILE_SCHEMA.name(),
-        SCHEMACOMMIT_SCHEMA.name(),
-        FIELD_SCHEMA.name(),
-        FIELDCOMMIT_SCHEMA.name(),
-        FIELDELEMENT_SCHEMA.name(),
+        COLLECTION_SCHEMA.name(),      COLLECTIONCOMMIT_SCHEMA.name(), PARTITION_SCHEMA.name(),
+        PARTITIONCOMMIT_SCHEMA.name(), SEGMENT_SCHEMA.name(),          SEGMENTCOMMIT_SCHEMA.name(),
+        SEGMENTFILE_SCHEMA.name(),     SCHEMACOMMIT_SCHEMA.name(),     FIELD_SCHEMA.name(),
+        FIELDCOMMIT_SCHEMA.name(),     FIELDELEMENT_SCHEMA.name(),
     };
 
-    std::vector<DBApplyContext> contexts;
-    for (auto & name : collecton_names) {
-        DBApplyContext context;
+    std::vector<MetaApplyContext> contexts;
+    for (auto& name : collecton_names) {
+        MetaApplyContext context;
         context.sql_ = "TRUNCATE " + name + ";";
         context.id_ = 0;
 
         contexts.push_back(context);
     }
 
-    std::vector<ID_TYPE> ids;
+    std::vector<snapshot::ID_TYPE> ids;
     return ExecuteTransaction(contexts, ids);
 }
 
-}  // namespace milvus::engine
-
+}  // namespace milvus::engine::meta

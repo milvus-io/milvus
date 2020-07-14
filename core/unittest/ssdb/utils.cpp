@@ -178,7 +178,7 @@ SnapshotTest::TearDown() {
         milvus::engine::snapshot::Snapshots::GetInstance().DropCollection(id, 0);
     }
     // TODO: Temp to delay some time. OperationExecutor should wait all resources be destructed before stop
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
     milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
     milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
     BaseTest::TearDown();
@@ -212,7 +212,6 @@ SSDBTest::SetUp() {
 
 void
 SSDBTest::TearDown() {
-
     db_ = nullptr;
     // TODO: Temp to delay some time. OperationExecutor should wait all resources be destructed before stop
     std::this_thread::sleep_for(std::chrono::milliseconds(20));

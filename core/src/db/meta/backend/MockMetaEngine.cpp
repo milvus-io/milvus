@@ -9,44 +9,33 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/impl/MemDBEngine.h"
+#include "db/meta/backend/MockMetaEngine.h"
 
-#include "db/impl/MetaFields.h"
+#include <utility>
+
+#include "db/meta/MetaFields.h"
 #include "utils/StringHelpFunctions.h"
 
-namespace milvus::engine {
+namespace milvus::engine::meta {
 
 void
-MemDBEngine::Init() {
+MockMetaEngine::Init() {
     max_ip_map_.clear();
     resources_.clear();
 }
 
 Status
-MemDBEngine::QueryNoLock(const DBQueryContext& context, AttrsMapList& attrs) {
+MockMetaEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs) {
     if (resources_.find(context.table_) == resources_.end()) {
         return Status(0, "Empty");
     }
 
-    auto filter_lambda = [](const AttrsMapList& store_attrs,
-                            AttrsMapList& candidate_attrs,
+    auto filter_lambda = [](const AttrsMapList& store_attrs, AttrsMapList& candidate_attrs,
                             std::pair<std::string, std::string> filter) {
         candidate_attrs.clear();
-        for (auto& store_attr: store_attrs) {
+        for (auto& store_attr : store_attrs) {
             auto attr = store_attr.find(filter.first);
             if (attr->second == filter.second) {
-//                AttrsMap attrs_map;
-//                for (auto &kv: store_attr) {
-//                    if (*kv.second.begin() == '\'' && *kv.second.rbegin() == '\'') {
-//                        std::string v = kv.second;
-//                        StringHelpFunctions::TrimStringQuote(v, "\'");
-//                        attrs_map.insert(std::pair<std::string, std::string>(kv.first, v));
-//                        continue;
-//                    }
-//
-//                    attrs_map.insert(kv);
-//                }
-
                 candidate_attrs.push_back(store_attr);
             }
         }
@@ -57,7 +46,7 @@ MemDBEngine::QueryNoLock(const DBQueryContext& context, AttrsMapList& attrs) {
     AttrsMapList result_attrs;
 
     if (!context.filter_attrs_.empty()) {
-        for (auto& filter_attr: context.filter_attrs_) {
+        for (auto& filter_attr : context.filter_attrs_) {
             filter_lambda(candidate_attrs, result_attrs, filter_attr);
             candidate_attrs.clear();
             candidate_attrs = result_attrs;
@@ -67,8 +56,8 @@ MemDBEngine::QueryNoLock(const DBQueryContext& context, AttrsMapList& attrs) {
         result_attrs = table_attrs->second;
     }
 
-    for (auto& raw_attrs: result_attrs) {
-        for (auto& kv: raw_attrs) {
+    for (auto& raw_attrs : result_attrs) {
+        for (auto& kv : raw_attrs) {
             if (*kv.second.begin() == '\'' && *kv.second.rbegin() == '\'') {
                 std::string v = kv.second;
                 StringHelpFunctions::TrimStringQuote(v, "\'");
@@ -77,15 +66,16 @@ MemDBEngine::QueryNoLock(const DBQueryContext& context, AttrsMapList& attrs) {
         }
     }
 
-    //TODO: filter select field here
+    // TODO: filter select field here
     attrs = result_attrs;
 
     return Status::OK();
 }
 
 Status
-MemDBEngine::AddNoLock(const DBApplyContext& add_context, int64_t& result_id) {
-    if (max_ip_map_.find(add_context.table_) == max_ip_map_.end() || resources_.find(add_context.table_) == resources_.end()) {
+MockMetaEngine::AddNoLock(const MetaApplyContext& add_context, int64_t& result_id) {
+    if (max_ip_map_.find(add_context.table_) == max_ip_map_.end() ||
+        resources_.find(add_context.table_) == resources_.end()) {
         max_ip_map_[add_context.table_] = 0;
         resources_[add_context.table_] = std::vector<TableRaw>();
     }
@@ -94,7 +84,7 @@ MemDBEngine::AddNoLock(const DBApplyContext& add_context, int64_t& result_id) {
     max_ip_map_[add_context.table_] = max_id + 1;
 
     TableRaw new_raw;
-    for (auto& attr: add_context.attrs_) {
+    for (auto& attr : add_context.attrs_) {
         new_raw.insert(attr);
     }
 
@@ -106,13 +96,13 @@ MemDBEngine::AddNoLock(const DBApplyContext& add_context, int64_t& result_id) {
 }
 
 Status
-MemDBEngine::UpdateNoLock(const DBApplyContext& update_context, int64_t& retult_id) {
+MockMetaEngine::UpdateNoLock(const MetaApplyContext& update_context, int64_t& retult_id) {
     const std::string id_str = std::to_string(update_context.id_);
 
     auto& target_collection = resources_[update_context.table_];
-    for (auto& attrs: target_collection) {
+    for (auto& attrs : target_collection) {
         if (attrs[F_ID] == id_str) {
-            for (auto& kv: update_context.attrs_) {
+            for (auto& kv : update_context.attrs_) {
                 attrs[kv.first] = kv.second;
             }
             retult_id = update_context.id_;
@@ -125,7 +115,7 @@ MemDBEngine::UpdateNoLock(const DBApplyContext& update_context, int64_t& retult_
 }
 
 Status
-MemDBEngine::DeleteNoLock(const DBApplyContext& delete_context, int64_t& retult_id) {
+MockMetaEngine::DeleteNoLock(const MetaApplyContext& delete_context, int64_t& retult_id) {
     const std::string id_str = std::to_string(delete_context.id_);
     auto& target_collection = resources_[delete_context.table_];
 
@@ -141,24 +131,25 @@ MemDBEngine::DeleteNoLock(const DBApplyContext& delete_context, int64_t& retult_
 }
 
 Status
-MemDBEngine::Query(const DBQueryContext& context, AttrsMapList& attrs) {
+MockMetaEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
     std::lock_guard<std::mutex> lock(mutex_);
     return QueryNoLock(context, attrs);
 }
 
 Status
-MemDBEngine::ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
+MockMetaEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts,
+                                   std::vector<int64_t>& result_ids) {
     std::unique_lock<std::mutex> lock(mutex_);
 
     auto duplicated_id_map = max_ip_map_;
     auto duplicated_resource = resources_;
 
     auto status = Status::OK();
-    for (auto& context: sql_contexts) {
+    for (auto& context : sql_contexts) {
         int64_t id;
         if (context.op_ == oAdd) {
             status = AddNoLock(context, id);
-        } else if (context.op_ ==oUpdate) {
+        } else if (context.op_ == oUpdate) {
             status = UpdateNoLock(context, id);
         } else if (context.op_ == oDelete) {
             status = DeleteNoLock(context, id);
@@ -182,10 +173,10 @@ MemDBEngine::ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts,
 }
 
 Status
-MemDBEngine::TruncateAll() {
+MockMetaEngine::TruncateAll() {
     max_ip_map_.clear();
     resources_.clear();
     return Status::OK();
 }
 
-}
+}  // namespace milvus::engine::meta

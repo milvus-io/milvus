@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -69,73 +70,73 @@ GetResPath<SegmentFile>(const SegmentFile::Ptr& res_ptr) {
 
 ///////////////////////////////////////////////////////////////////////////////////////
 /// Default resource creator
-template<typename T>
+template <typename T>
 inline typename T::Ptr
 CreateResPtr() {
     return nullptr;
 }
 
-template<>
+template <>
 inline Collection::Ptr
 CreateResPtr<Collection>() {
     return std::make_shared<Collection>("");
-};
+}
 
-template<>
+template <>
 inline CollectionCommit::Ptr
 CreateResPtr<CollectionCommit>() {
     return std::make_shared<CollectionCommit>(0, 0);
 }
 
-template<>
+template <>
 inline Partition::Ptr
 CreateResPtr<Partition>() {
     return std::make_shared<Partition>("", 0);
 }
 
-template<>
+template <>
 inline PartitionCommit::Ptr
 CreateResPtr<PartitionCommit>() {
     return std::make_shared<PartitionCommit>(0, 0);
 }
 
-template<>
+template <>
 inline Segment::Ptr
 CreateResPtr<Segment>() {
     return std::make_shared<Segment>(0, 0);
 }
 
-template<>
+template <>
 inline SegmentCommit::Ptr
 CreateResPtr<SegmentCommit>() {
     return std::make_shared<SegmentCommit>(0, 0, 0);
 }
 
-template<>
+template <>
 inline SegmentFile::Ptr
 CreateResPtr<SegmentFile>() {
     return std::make_shared<SegmentFile>(0, 0, 0, 0);
 }
 
-template<>
+template <>
 inline SchemaCommit::Ptr
 CreateResPtr<SchemaCommit>() {
     return std::make_shared<SchemaCommit>(0);
 }
 
-template<>
+template <>
 inline Field::Ptr
 CreateResPtr<Field>() {
     return std::make_shared<Field>("", 0, 0);
 }
 
-template<>
+template <>
 inline FieldCommit::Ptr
 CreateResPtr<FieldCommit>() {
     return std::make_shared<FieldCommit>(0, 0);
 }
 
-template<>
+template <>
 inline FieldElement::Ptr
 CreateResPtr<FieldElement>() {
     return std::make_shared<FieldElement>(0, 0, "", 0);

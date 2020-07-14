@@ -493,7 +493,6 @@ TEST_F(SnapshotTest, IndexTest) {
 
     auto filter = [&](SegmentFile::Ptr segment_file) -> bool {
         return segment_file->GetSegmentId() == seg_file->GetSegmentId();
-
     };
 
     auto filter2 = [&](SegmentFile::Ptr segment_file) -> bool {
@@ -686,7 +685,6 @@ TEST_F(SnapshotTest, OperationTest) {
     ss_id = ss->GetID();
     ID_TYPE partition_id;
     {
-
         std::vector<PartitionPtr> partitions;
         auto executor = [&](const PartitionPtr& partition,
                             PartitionIterator* itr) -> Status {

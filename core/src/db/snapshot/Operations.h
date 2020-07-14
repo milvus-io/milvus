@@ -23,8 +23,8 @@
 #include <tuple>
 #include <vector>
 
-#include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Context.h"
+#include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Snapshot.h"
 #include "db/snapshot/Store.h"
 #include "utils/Error.h"
@@ -35,15 +35,16 @@ namespace engine {
 namespace snapshot {
 
 using CheckStaleFunc = std::function<Status(ScopedSnapshotT&)>;
-//using StepsHolderT = std::tuple<CollectionCommit::SetT, Collection::SetT, SchemaCommit::SetT, FieldCommit::SetT,
+// using StepsHolderT = std::tuple<CollectionCommit::SetT, Collection::SetT, SchemaCommit::SetT, FieldCommit::SetT,
 //                                Field::SetT, FieldElement::SetT, PartitionCommit::SetT, Partition::SetT,
 //                                SegmentCommit::SetT, Segment::SetT, SegmentFile::SetT>;
 template <typename ResourceT>
 using StepsContextSet = std::set<typename ResourceContext<ResourceT>::Ptr>;
-using StepsHolderT = std::tuple<StepsContextSet<CollectionCommit>, StepsContextSet<Collection>, StepsContextSet<SchemaCommit>,
-                                StepsContextSet<FieldCommit>, StepsContextSet<Field>, StepsContextSet<FieldElement>,
-                                StepsContextSet<PartitionCommit>, StepsContextSet<Partition>,
-                                StepsContextSet<SegmentCommit>, StepsContextSet<Segment>, StepsContextSet<SegmentFile>>;
+using StepsHolderT =
+    std::tuple<StepsContextSet<CollectionCommit>, StepsContextSet<Collection>, StepsContextSet<SchemaCommit>,
+               StepsContextSet<FieldCommit>, StepsContextSet<Field>, StepsContextSet<FieldElement>,
+               StepsContextSet<PartitionCommit>, StepsContextSet<Partition>, StepsContextSet<SegmentCommit>,
+               StepsContextSet<Segment>, StepsContextSet<SegmentFile>>;
 
 enum OperationsType { Invalid, W_Leaf, O_Leaf, W_Compound, O_Compound };
 
@@ -87,7 +88,8 @@ class Operations : public std::enable_shared_from_this<Operations> {
     AddStep(const StepT& step, ResourceContextPtr<StepT> step_context = nullptr, bool activate = true);
     template <typename StepT>
     void
-    AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, ResourceContextPtr<StepT> step_context = nullptr, bool activate = true);
+    AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, ResourceContextPtr<StepT> step_context = nullptr,
+                   bool activate = true);
     void
     SetStepResult(ID_TYPE id) {
         ids_.push_back(id);
@@ -202,7 +204,7 @@ template <typename StepT>
 void
 Operations::AddStep(const StepT& step, ResourceContextPtr<StepT> step_context, bool activate) {
     if (step_context == nullptr) {
-        step_context = ResourceContextBuilder<StepT>().SetOp(oAdd).CreatePtr();
+        step_context = ResourceContextBuilder<StepT>().SetOp(meta::oAdd).CreatePtr();
     }
 
     auto s = std::make_shared<StepT>(step);
@@ -219,9 +221,10 @@ Operations::AddStep(const StepT& step, ResourceContextPtr<StepT> step_context, b
 
 template <typename StepT>
 void
-Operations::AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, ResourceContextPtr<StepT> step_context, bool activate) {
+Operations::AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, ResourceContextPtr<StepT> step_context,
+                           bool activate) {
     if (step_context == nullptr) {
-        step_context = ResourceContextBuilder<StepT>().SetOp(oAdd).CreatePtr();
+        step_context = ResourceContextBuilder<StepT>().SetOp(meta::oAdd).CreatePtr();
     }
 
     auto s = std::make_shared<StepT>(step);
@@ -354,7 +357,7 @@ class SoftDeleteOperation : public Operations {
             return Status(SS_NOT_FOUND_ERROR, emsg.str());
         }
         resource_->Deactivate();
-        auto r_ctx_p = ResourceContextBuilder<ResourceT>().SetResource(resource_).SetOp(oUpdate).CreatePtr();
+        auto r_ctx_p = ResourceContextBuilder<ResourceT>().SetResource(resource_).SetOp(meta::oUpdate).CreatePtr();
         r_ctx_p->AddAttr(StateField::Name);
         AddStep(*resource_, r_ctx_p, false);
         return status;

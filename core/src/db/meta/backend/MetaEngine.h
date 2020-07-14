@@ -11,41 +11,32 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
+#include "db/meta/backend/MetaContext.h"
 #include "db/snapshot/ResourceTypes.h"
+#include "utils/Status.h"
 
-namespace milvus::engine {
+namespace milvus::engine::meta {
 
-enum ResourceContextOp {
-    oAdd = 1,
-    oUpdate,
-    oDelete
+using AttrsMap = std::unordered_map<std::string, std::string>;
+using AttrsMapList = std::vector<AttrsMap>;
+
+class MetaEngine {
+ public:
+    virtual Status
+    Query(const MetaQueryContext& context, AttrsMapList& attrs) = 0;
+
+    virtual Status
+    ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) = 0;
+
+    virtual Status
+    TruncateAll() = 0;
 };
 
-struct SqlContext {
-    std::string sql_;
-    ResourceContextOp op_;
-    snapshot::ID_TYPE id_;
-};
+using MetaEnginePtr = std::shared_ptr<MetaEngine>;
 
-struct DBQueryContext {
-    std::string table_;
-    bool all_required_ = true;
-    std::vector<std::string> query_fields_;
-    std::unordered_map<std::string, std::string> filter_attrs_;
-};
-
-struct DBApplyContext {
-    std::string table_;
-    ResourceContextOp op_;
-    snapshot::ID_TYPE id_;
-    std::unordered_map<std::string, std::string> attrs_;
-    std::unordered_map<std::string, std::string> filter_attrs_;
-    std::string sql_;
-};
-
-}
+}  // namespace milvus::engine::meta

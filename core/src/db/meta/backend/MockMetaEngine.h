@@ -12,29 +12,31 @@
 #pragma once
 
 #include <mutex>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
-#include "db/impl/DBEngine.h"
+#include "db/meta/backend/MetaEngine.h"
 #include "utils/Status.h"
 
-namespace milvus::engine {
+namespace milvus::engine::meta {
 
-class MemDBEngine: public DBEngine {
+class MockMetaEngine : public MetaEngine {
  private:
     using TableRaw = std::unordered_map<std::string, std::string>;
 
  public:
-    MemDBEngine(){
+    MockMetaEngine() {
         Init();
     }
 
-    ~MemDBEngine() = default;
+    ~MockMetaEngine() = default;
 
     Status
-    Query(const DBQueryContext& context, AttrsMapList& attrs) override;
+    Query(const MetaQueryContext& context, AttrsMapList& attrs) override;
 
     Status
-    ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) override;
+    ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) override;
 
     Status
     TruncateAll() override;
@@ -44,16 +46,16 @@ class MemDBEngine: public DBEngine {
     Init();
 
     Status
-    QueryNoLock(const DBQueryContext& context, AttrsMapList& attrs);
+    QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs);
 
     Status
-    AddNoLock(const DBApplyContext& add_context, int64_t& retult_id);
+    AddNoLock(const MetaApplyContext& add_context, int64_t& retult_id);
 
     Status
-    UpdateNoLock(const DBApplyContext& add_context, int64_t& retult_id);
+    UpdateNoLock(const MetaApplyContext& add_context, int64_t& retult_id);
 
     Status
-    DeleteNoLock(const DBApplyContext& add_context, int64_t& retult_id);
+    DeleteNoLock(const MetaApplyContext& add_context, int64_t& retult_id);
 
  private:
     std::mutex mutex_;
@@ -61,4 +63,4 @@ class MemDBEngine: public DBEngine {
     std::unordered_map<std::string, std::vector<TableRaw>> resources_;
 };
 
-}
+}  // namespace milvus::engine::meta

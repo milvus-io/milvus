@@ -11,30 +11,31 @@
 
 #pragma once
 
+#include <memory>
 #include <mutex>
+#include <vector>
 
 #include <mysql++/mysql++.h>
 
 #include "db/Options.h"
-#include "db/impl/DBEngine.h"
 #include "db/meta/MySQLConnectionPool.h"
+#include "db/meta/backend/MetaEngine.h"
 
-namespace milvus::engine {
+namespace milvus::engine::meta {
 
-class MySqlEngine: public DBEngine {
+class MySqlEngine : public MetaEngine {
  public:
-    explicit
-    MySqlEngine(const DBMetaOptions& options): options_(options) {
+    explicit MySqlEngine(const DBMetaOptions& options) : options_(options) {
         Initialize();
     }
 
     ~MySqlEngine() = default;
 
     Status
-    Query(const DBQueryContext& context, AttrsMapList& attrs) override;
+    Query(const MetaQueryContext& context, AttrsMapList& attrs) override;
 
     Status
-    ExecuteTransaction(const std::vector<DBApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) override;
+    ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) override;
 
     Status
     TruncateAll() override;
@@ -45,13 +46,12 @@ class MySqlEngine: public DBEngine {
 
  private:
     const DBMetaOptions options_;
-//    const int mode_;
+    //    const int mode_;
 
     std::shared_ptr<meta::MySQLConnectionPool> mysql_connection_pool_;
     bool safe_grab_ = false;  // Safely graps a connection from mysql pool
 
     std::mutex meta_mutex_;
-//    std::mutex genid_mutex_;
 };
 
-}  // namespace milvus::engine
+}  // namespace milvus::engine::meta

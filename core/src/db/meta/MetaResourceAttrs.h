@@ -12,17 +12,21 @@
 #pragma once
 
 #include <functional>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
-#include "db/impl/MetaFields.h"
+#include "db/meta/MetaFields.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Resources.h"
 #include "utils/Json.h"
 #include "utils/StringHelpFunctions.h"
 
-namespace milvus::engine {
+namespace milvus::engine::meta {
 
-using namespace snapshot;
+// using namespace snapshot;
+using snapshot::MappingT;
+using snapshot::ResourceContext;
 
 /////////////////////////// Macros ///////////////////////////////
 #define NULLPTR_CHECK(ptr)                                                  \
@@ -31,7 +35,8 @@ using namespace snapshot;
     }
 
 //////////////////////////////////////////////////////////////////
-extern const std::unordered_map<std::string, std::vector<std::string>> ResourceAttrMap;
+Status
+ResourceAttrMapOf(const std::string& table, std::vector<std::string>& attrs);
 
 //////////////////////////////////////////////////////////////////
 inline void
@@ -45,7 +50,7 @@ uint2str(const uint64_t& uival, std::string& val) {
 }
 
 inline void
-state2str(const State& sval, std::string& val) {
+state2str(const snapshot::State& sval, std::string& val) {
     val = std::to_string(sval);
 }
 
@@ -74,82 +79,81 @@ inline Status
 AttrValue2Str(typename ResourceContext<ResourceT>::ResPtr src, const std::string& attr, std::string& value) {
     int64_t int_value;
     uint64_t uint_value;
-    State state_value;
+    snapshot::State state_value;
     MappingT mapping_value;
     std::string str_value;
     json json_value;
 
-    // TODO: try use static_pointer_cast
     if (attr == F_ID) {
-        auto id_field = std::dynamic_pointer_cast<IdField>(src);
+        auto id_field = std::dynamic_pointer_cast<snapshot::IdField>(src);
         int_value = id_field->GetID();
         int2str(int_value, value);
     } else if (F_COLLECTON_ID == attr) {
-        auto collection_id_field = std::dynamic_pointer_cast<CollectionIdField>(src);
+        auto collection_id_field = std::dynamic_pointer_cast<snapshot::CollectionIdField>(src);
         int_value = collection_id_field->GetCollectionId();
         int2str(int_value, value);
     } else if (F_CREATED_ON == attr) {
-        auto created_field = std::dynamic_pointer_cast<CreatedOnField>(src);
+        auto created_field = std::dynamic_pointer_cast<snapshot::CreatedOnField>(src);
         int_value = created_field->GetCreatedTime();
         int2str(int_value, value);
     } else if (F_UPDATED_ON == attr) {
-        auto updated_field = std::dynamic_pointer_cast<UpdatedOnField>(src);
+        auto updated_field = std::dynamic_pointer_cast<snapshot::UpdatedOnField>(src);
         int_value = updated_field->GetUpdatedTime();
         int2str(int_value, value);
     } else if (F_SCHEMA_ID == attr) {
-        auto schema_id_field = std::dynamic_pointer_cast<SchemaIdField>(src);
+        auto schema_id_field = std::dynamic_pointer_cast<snapshot::SchemaIdField>(src);
         int_value = schema_id_field->GetSchemaId();
         int2str(int_value, value);
     } else if (F_NUM == attr) {
-        auto num_field = std::dynamic_pointer_cast<NumField>(src);
+        auto num_field = std::dynamic_pointer_cast<snapshot::NumField>(src);
         int_value = num_field->GetNum();
         int2str(int_value, value);
     } else if (F_FTYPE == attr) {
-        auto ftype_field = std::dynamic_pointer_cast<FtypeField>(src);
+        auto ftype_field = std::dynamic_pointer_cast<snapshot::FtypeField>(src);
         int_value = ftype_field->GetFtype();
         int2str(int_value, value);
     } else if (F_FIELD_ID == attr) {
-        auto field_id_field = std::dynamic_pointer_cast<FieldIdField>(src);
+        auto field_id_field = std::dynamic_pointer_cast<snapshot::FieldIdField>(src);
         int_value = field_id_field->GetFieldId();
         int2str(int_value, value);
     } else if (F_FIELD_ELEMENT_ID == attr) {
-        auto element_id_field = std::dynamic_pointer_cast<FieldElementIdField>(src);
+        auto element_id_field = std::dynamic_pointer_cast<snapshot::FieldElementIdField>(src);
         int_value = element_id_field->GetFieldElementId();
         int2str(int_value, value);
     } else if (F_PARTITION_ID == attr) {
-        auto partition_id_field = std::dynamic_pointer_cast<PartitionIdField>(src);
+        auto partition_id_field = std::dynamic_pointer_cast<snapshot::PartitionIdField>(src);
         int_value = partition_id_field->GetPartitionId();
         int2str(int_value, value);
     } else if (F_SEGMENT_ID == attr) {
-        auto segment_id_field = std::dynamic_pointer_cast<SegmentIdField>(src);
+        auto segment_id_field = std::dynamic_pointer_cast<snapshot::SegmentIdField>(src);
         int_value = segment_id_field->GetSegmentId();
         int2str(int_value, value);
     } /* Uint field */ else if (F_LSN == attr) {
-        auto lsn_field = std::dynamic_pointer_cast<LsnField>(src);
+        auto lsn_field = std::dynamic_pointer_cast<snapshot::LsnField>(src);
         uint_value = lsn_field->GetLsn();
         uint2str(uint_value, value);
     } else if (F_SIZE == attr) {
-        auto size_field = std::dynamic_pointer_cast<SizeField>(src);
+        auto size_field = std::dynamic_pointer_cast<snapshot::SizeField>(src);
         uint_value = size_field->GetSize();
         uint2str(uint_value, value);
     } else if (F_ROW_COUNT == attr) {
-        auto row_count_field = std::dynamic_pointer_cast<RowCountField>(src);
+        auto row_count_field = std::dynamic_pointer_cast<snapshot::RowCountField>(src);
         uint_value = row_count_field->GetRowCount();
         uint2str(uint_value, value);
     } else if (F_STATE == attr) {
-        auto state_field = std::dynamic_pointer_cast<StateField>(src);
+        auto state_field = std::dynamic_pointer_cast<snapshot::StateField>(src);
         state_value = state_field->GetState();
         state2str(state_value, value);
     } else if (F_MAPPINGS == attr) {
-        auto mappings_field = std::dynamic_pointer_cast<MappingsField>(src);
+        auto mappings_field = std::dynamic_pointer_cast<snapshot::MappingsField>(src);
         mapping_value = mappings_field->GetMappings();
         mappings2str(mapping_value, value);
     } else if (F_NAME == attr) {
-        auto name_field = std::dynamic_pointer_cast<NameField>(src);
+        auto name_field = std::dynamic_pointer_cast<snapshot::NameField>(src);
         str_value = name_field->GetName();
         str2str(str_value, value);
     } else if (F_PARAMS == attr) {
-        auto params_field = std::dynamic_pointer_cast<ParamsField>(src);
+        auto params_field = std::dynamic_pointer_cast<snapshot::ParamsField>(src);
         json_value = params_field->GetParams();
         json2str(json_value, value);
     } else {
@@ -161,8 +165,13 @@ AttrValue2Str(typename ResourceContext<ResourceT>::ResPtr src, const std::string
 
 template <typename ResourceT>
 inline Status
-ResourceContextAddAttrMap(ResourceContextPtr<ResourceT> src, std::unordered_map<std::string, std::string>& attr_map) {
-    std::vector<std::string> attrs = ResourceAttrMap.at(ResourceT::Name);
+ResourceContextAddAttrMap(snapshot::ResourceContextPtr<ResourceT> src,
+                          std::unordered_map<std::string, std::string>& attr_map) {
+    std::vector<std::string> attrs;
+    auto status = ResourceAttrMapOf(ResourceT::Name, attrs);
+    if (!status.ok()) {
+        return status;
+    }
 
     for (auto& attr : attrs) {
         if (attr == F_ID) {
@@ -179,30 +188,10 @@ ResourceContextAddAttrMap(ResourceContextPtr<ResourceT> src, std::unordered_map<
 
 template <typename ResourceT>
 inline Status
-ResourceContextToAddSql(ResourceContextPtr<ResourceT> res, std::string& sql) {
-
-    std::map<std::string, std::string> attr_map;
-    ResourceContextAddAttrMap<ResourceT>(res, attr_map);
-
-    sql = "INSERT INTO " + res->Table();
-    std::string field_names = "(";
-    std::string values = "(";
-    for (auto& kv : attr_map) {
-        field_names += kv.first + ",";
-        values += kv.second + ",";
-    }
-    field_names.erase(field_names.end() - 1, field_names.end());
-    values.erase(values.end() - 1, values.end());
-    sql += field_names + ")" + "VALUES" + values + ")";
-
-    return Status::OK();
-}
-
-template <typename ResourceT>
-inline Status
-ResourceContextUpdateAttrMap(ResourceContextPtr<ResourceT> res, std::unordered_map<std::string, std::string>& attr_map) {
+ResourceContextUpdateAttrMap(snapshot::ResourceContextPtr<ResourceT> res,
+                             std::unordered_map<std::string, std::string>& attr_map) {
     std::string value;
-    for (auto& attr: res->Attrs()) {
+    for (auto& attr : res->Attrs()) {
         AttrValue2Str<ResourceT>(res->Resource(), attr, value);
         attr_map[attr] = value;
     }
@@ -211,46 +200,46 @@ ResourceContextUpdateAttrMap(ResourceContextPtr<ResourceT> res, std::unordered_m
 }
 
 /////////////////////////////////////////////////////////////////////
-template<typename T>
+template <typename T>
 inline void
 ResourceFieldToSqlStr(const T& t, std::string& val) {
     val = "";
 }
 
-template<>
+template <>
 inline void
 ResourceFieldToSqlStr<int64_t>(const int64_t& ival, std::string& val) {
     int2str(ival, val);
 }
 
-template<>
+template <>
 inline void
 ResourceFieldToSqlStr<uint64_t>(const uint64_t& uival, std::string& val) {
     uint2str(uival, val);
 }
 
-template<>
+template <>
 inline void
-ResourceFieldToSqlStr<State>(const State& sval, std::string& val) {
+ResourceFieldToSqlStr<snapshot::State>(const snapshot::State& sval, std::string& val) {
     state2str(sval, val);
 }
 
-template<>
+template <>
 inline void
-ResourceFieldToSqlStr<MappingT>(const MappingT & mval, std::string& val) {
+ResourceFieldToSqlStr<MappingT>(const MappingT& mval, std::string& val) {
     mappings2str(mval, val);
 }
 
-template<>
+template <>
 inline void
-ResourceFieldToSqlStr<std::string>(const std::string & sval, std::string& val) {
+ResourceFieldToSqlStr<std::string>(const std::string& sval, std::string& val) {
     str2str(sval, val);
 }
 
-template<>
+template <>
 inline void
 ResourceFieldToSqlStr<json>(const json& jval, std::string& val) {
     json2str(jval, val);
 }
 
-}
+}  // namespace milvus::engine::meta
