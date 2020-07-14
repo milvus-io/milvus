@@ -1620,6 +1620,7 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
             // if vector not found for an id, its VectorsData's vector_count = 0, else 1
             AttrsData& attr_ref = map_id2attr[vector_id];
             VectorsData& vector_ref = map_id2vector[vector_id];
+            attr_ref.attr_type_ = attr_type;
 
             // Check if the id is present in bloom filter.
             if (id_bloom_filter_ptr->Check(vector_id)) {
@@ -1711,7 +1712,6 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
 
                         attr_ref.attr_count_ = 1;
                         attr_ref.attr_data_ = raw_attrs;
-                        attr_ref.attr_type_ = attr_type;
                         temp_ids.erase(it);
                         continue;
                     }
@@ -1732,11 +1732,10 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
         if (data.vector_count_ > 0) {
             data.float_data_ = vector_ref.float_data_;    // copy data since there could be duplicated id
             data.binary_data_ = vector_ref.binary_data_;  // copy data since there could be duplicated id
-            data.id_array_.emplace_back(id);
-            vectors.emplace_back(data);
-
-            attrs.emplace_back(map_id2attr[id]);
         }
+        data.id_array_.emplace_back(id);
+        vectors.emplace_back(data);
+        attrs.emplace_back(map_id2attr[id]);
     }
 
     if (vectors.empty()) {
