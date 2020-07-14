@@ -19,6 +19,7 @@ namespace snapshot {
 Status
 CollectionCommitOperation::DoExecute(Store& store) {
     auto prev_resource = GetPrevResource();
+    auto row_cnt = 0;
     if (!prev_resource) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Cannot find prev collection commit resource";
@@ -26,16 +27,21 @@ CollectionCommitOperation::DoExecute(Store& store) {
     }
     resource_ = std::make_shared<CollectionCommit>(*prev_resource);
     resource_->ResetStatus();
+    row_cnt = resource_->GetRowCount();
 
     auto handle_new_pc = [&](PartitionCommitPtr& pc) {
         auto prev_partition_commit = GetStartedSS()->GetPartitionCommitByPartitionId(pc->GetPartitionId());
-        if (prev_partition_commit)
+        if (prev_partition_commit) {
             resource_->GetMappings().erase(prev_partition_commit->GetID());
+            row_cnt -= prev_partition_commit->GetRowCount();
+        }
         resource_->GetMappings().insert(pc->GetID());
+        row_cnt += pc->GetRowCount();
     };
 
     if (context_.stale_partition_commit) {
         resource_->GetMappings().erase(context_.stale_partition_commit->GetID());
+        row_cnt -= resource_->GetRowCount();
     } else if (context_.new_partition_commit) {
         handle_new_pc(context_.new_partition_commit);
     } else if (context_.new_partition_commits.size() > 0) {
@@ -47,6 +53,7 @@ CollectionCommitOperation::DoExecute(Store& store) {
         resource_->SetSchemaId(context_.new_schema_commit->GetID());
     }
     resource_->SetID(0);
+    resource_->SetRowCount(row_cnt);
     AddStep(*BaseT::resource_, false);
     return Status::OK();
 }
@@ -92,16 +99,19 @@ PartitionCommitOperation::GetPrevResource() const {
 Status
 PartitionCommitOperation::DoExecute(Store& store) {
     auto prev_resource = GetPrevResource();
+    auto row_cnt = 0;
     if (prev_resource) {
         resource_ = std::make_shared<PartitionCommit>(*prev_resource);
         resource_->SetID(0);
         resource_->ResetStatus();
+        row_cnt = resource_->GetRowCount();
         auto erase_sc = [&](SegmentCommitPtr& sc) {
             if (!sc)
                 return;
             auto prev_sc = GetStartedSS()->GetSegmentCommitBySegmentId(sc->GetSegmentId());
             if (prev_sc) {
                 resource_->GetMappings().erase(prev_sc->GetID());
+                row_cnt -= prev_sc->GetRowCount();
             }
         };
 
@@ -120,6 +130,7 @@ PartitionCommitOperation::DoExecute(Store& store) {
                 }
                 auto stale_segment_commit = GetStartedSS()->GetSegmentCommitBySegmentId(stale_segment->GetID());
                 resource_->GetMappings().erase(stale_segment_commit->GetID());
+                row_cnt -= stale_segment_commit->GetRowCount();
             }
         }
     } else {
@@ -134,11 +145,14 @@ PartitionCommitOperation::DoExecute(Store& store) {
 
     if (context_.new_segment_commit) {
         resource_->GetMappings().insert(context_.new_segment_commit->GetID());
+        row_cnt += context_.new_segment_commit->GetRowCount();
     } else if (context_.new_segment_commits.size() > 0) {
         for (auto& sc : context_.new_segment_commits) {
             resource_->GetMappings().insert(sc->GetID());
+            row_cnt += sc->GetRowCount();
         }
     }
+    resource_->SetRowCount(row_cnt);
     AddStep(*resource_, false);
     return Status::OK();
 }

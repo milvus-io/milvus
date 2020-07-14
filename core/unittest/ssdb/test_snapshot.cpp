@@ -530,8 +530,9 @@ TEST_F(SnapshotTest, IndexTest) {
     auto partitions = ss->GetResources<Partition>();
     for (auto& kv : partitions) {
         num = RandomInt(2, 5);
+        auto row_cnt = 1024;
         for (auto i = 0; i < num; ++i) {
-            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context).ok());
+            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
         }
         new_total += num;
     }

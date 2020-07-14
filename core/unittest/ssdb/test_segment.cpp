@@ -77,8 +77,9 @@ TEST_F(SSSegmentTest, SegmentTest) {
     SFContextBuilder(sf_context, ss);
 
     auto& partitions = ss->GetResources<Partition>();
+    auto row_cnt = 100;
     for (auto& kv : partitions) {
-        ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context).ok());
+        ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
     }
 
     status = Snapshots::GetInstance().GetSnapshot(ss, c1);

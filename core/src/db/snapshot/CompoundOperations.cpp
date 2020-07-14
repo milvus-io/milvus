@@ -214,6 +214,12 @@ NewSegmentOperation::NewSegmentOperation(const OperationContext& context, Scoped
 }
 
 Status
+NewSegmentOperation::CommitRowCount(SIZE_TYPE row_cnt) {
+    row_cnt_ = row_cnt;
+    return Status::OK();
+}
+
+Status
 NewSegmentOperation::DoExecute(Store& store) {
     // PXU TODO:
     // 1. Check all requried field elements have related segment files
@@ -224,6 +230,8 @@ NewSegmentOperation::DoExecute(Store& store) {
     SegmentCommitOperation sc_op(context_, GetAdjustedSS());
     STATUS_CHECK(sc_op(store));
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
+    // TODO: Check row cnt
+    context_.new_segment_commit->SetRowCount(row_cnt_);
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
     /* std::cout << GetRepr() << " POST_SC_MAP=("; */
     /* for (auto id : context_.new_segment_commit->GetMappings()) { */
@@ -323,12 +331,17 @@ MergeOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
 
 Status
 MergeOperation::DoExecute(Store& store) {
+    auto row_cnt = 0;
+    for (auto& stale_seg : context_.stale_segments) {
+        row_cnt += GetStartedSS()->GetSegmentCommitBySegmentId(stale_seg->GetID())->GetRowCount();
+    }
     // PXU TODO:
     // 1. Check all required field elements have related segment files
     // 2. Check Stale and others
     SegmentCommitOperation sc_op(context_, GetAdjustedSS());
     STATUS_CHECK(sc_op(store));
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
+    context_.new_segment_commit->SetRowCount(row_cnt);
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn);
     /* std::cout << GetRepr() << " POST_SC_MAP=("; */
     /* for (auto id : context_.new_segment_commit->GetMappings()) { */
