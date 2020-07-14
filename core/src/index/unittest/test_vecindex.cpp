@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 
-#include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
