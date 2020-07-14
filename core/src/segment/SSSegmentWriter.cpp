@@ -82,10 +82,12 @@ SSSegmentWriter::Initialize() {
 
 Status
 SSSegmentWriter::AddChunk(const engine::DataChunkPtr& chunk_ptr) {
+    return segment_ptr_->AddChunk(chunk_ptr);
 }
 
 Status
 SSSegmentWriter::AddChunk(const engine::DataChunkPtr& chunk_ptr, uint64_t from, uint64_t to) {
+    return segment_ptr_->AddChunk(chunk_ptr, from, to);
 }
 
 Status
