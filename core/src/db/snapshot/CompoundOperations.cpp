@@ -257,6 +257,7 @@ NewSegmentOperation::DoExecute(Store& store) {
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
     context_.new_segment_commit->SetRowCount(row_cnt_);
     auto sc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(meta::oUpdate).CreatePtr();
+    sc_ctx_p->AddAttr(RowCountField::Name);
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn, sc_ctx_p);
     /* std::cout << GetRepr() << " POST_SC_MAP=("; */
     /* for (auto id : context_.new_segment_commit->GetMappings()) { */
