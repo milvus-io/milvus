@@ -1056,47 +1056,19 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            status =
-                mem_mgr_->InsertEntities(collection_id, partition_id, record.length, record.ids,
-                                         (record.data_size / record.length / sizeof(float)), (const float*)record.data,
-                                         record.attr_nbytes, record.attr_data_size, record.attr_data, record.lsn);
-            force_flush_if_mem_full();
+            // construct chunk data
+            DataChunkPtr chunk = std::make_shared<DataChunk>();
+            chunk->count_ = record.length;
+            chunk->fields_data_ = record.attr_data;
+            std::vector<uint8_t> uid_data;
+            uid_data.resize(record.length * sizeof(int64_t));
+            memcpy(uid_data.data(), record.ids, record.length * sizeof(int64_t));
+            std::vector<uint8_t> vector_data;
+            vector_data.resize(record.data_size);
+            memcpy(vector_data.data(), record.data, record.data_size);
+            chunk->fields_data_.insert(std::make_pair(VECTOR_FIELD, vector_data));
 
-            // metrics
-            milvus::server::CollectInsertMetrics metrics(record.length, status);
-            break;
-        }
-        case wal::MXLogType::InsertBinary: {
-            int64_t collection_id = 0, partition_id = 0;
-            auto status = get_collection_partition_id(record, collection_id, partition_id);
-            if (!status.ok()) {
-                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0)
-                               << "Get collection/partition id fail: " << status.message();
-                return status;
-            }
-
-            status = mem_mgr_->InsertVectors(collection_id, partition_id, record.length, record.ids,
-                                             (record.data_size / record.length / sizeof(uint8_t)),
-                                             (const u_int8_t*)record.data, record.lsn);
-            force_flush_if_mem_full();
-
-            // metrics
-            milvus::server::CollectInsertMetrics metrics(record.length, status);
-            break;
-        }
-
-        case wal::MXLogType::InsertVector: {
-            int64_t collection_id = 0, partition_id = 0;
-            auto status = get_collection_partition_id(record, collection_id, partition_id);
-            if (!status.ok()) {
-                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0)
-                               << "Get collection/partition id fail: " << status.message();
-                return status;
-            }
-
-            status = mem_mgr_->InsertVectors(collection_id, partition_id, record.length, record.ids,
-                                             (record.data_size / record.length / sizeof(float)),
-                                             (const float*)record.data, record.lsn);
+            status = mem_mgr_->InsertEntities(collection_id, partition_id, chunk, record.lsn);
             force_flush_if_mem_full();
 
             // metrics
@@ -1113,12 +1085,12 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             }
 
             if (record.length == 1) {
-                status = mem_mgr_->DeleteVector(ss->GetCollectionId(), *record.ids, record.lsn);
+                status = mem_mgr_->DeleteEntity(ss->GetCollectionId(), *record.ids, record.lsn);
                 if (!status.ok()) {
                     return status;
                 }
             } else {
-                status = mem_mgr_->DeleteVectors(ss->GetCollectionId(), record.length, record.ids, record.lsn);
+                status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), record.length, record.ids, record.lsn);
                 if (!status.ok()) {
                     return status;
                 }
