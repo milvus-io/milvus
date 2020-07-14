@@ -49,13 +49,13 @@ class MockMetaEngine : public MetaEngine {
     QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs);
 
     Status
-    AddNoLock(const MetaApplyContext& add_context, int64_t& retult_id);
+    AddNoLock(const MetaApplyContext& add_context, int64_t& result_id);
 
     Status
-    UpdateNoLock(const MetaApplyContext& add_context, int64_t& retult_id);
+    UpdateNoLock(const MetaApplyContext& add_context, int64_t& result_id);
 
     Status
-    DeleteNoLock(const MetaApplyContext& add_context, int64_t& retult_id);
+    DeleteNoLock(const MetaApplyContext& add_context, int64_t& result_id);
 
  private:
     std::mutex mutex_;

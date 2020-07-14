@@ -20,6 +20,7 @@
 #include <string>
 
 #include "db/SSDBImpl.h"
+#include "db/meta/MetaAdapter.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/EventExecutor.h"
@@ -35,6 +36,7 @@ using ID_TYPE = milvus::engine::snapshot::ID_TYPE;
 using IDS_TYPE = milvus::engine::snapshot::IDS_TYPE;
 using LSN_TYPE = milvus::engine::snapshot::LSN_TYPE;
 using MappingT = milvus::engine::snapshot::MappingT;
+using State = milvus::engine::snapshot::State;
 using LoadOperationContext = milvus::engine::snapshot::LoadOperationContext;
 using CreateCollectionContext = milvus::engine::snapshot::CreateCollectionContext;
 using SegmentFileContext = milvus::engine::snapshot::SegmentFileContext;
@@ -75,6 +77,8 @@ using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
 using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
 using SSDBImpl = milvus::engine::SSDBImpl;
 using Status = milvus::Status;
+
+using MetaAdapter = milvus::engine::meta::MetaAdapter;
 
 inline int
 RandomInt(int start, int end) {
@@ -307,6 +311,18 @@ class SSSegmentTest : public BaseTest {
  protected:
     std::shared_ptr<SSDBImpl> db_;
 
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+class SSMetaTest : public BaseTest {
+ protected:
+    MetaAdapter meta_ = MetaAdapter::GetInstance();
+
+ protected:
     void
     SetUp() override;
     void

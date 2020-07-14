@@ -96,7 +96,7 @@ MockMetaEngine::AddNoLock(const MetaApplyContext& add_context, int64_t& result_i
 }
 
 Status
-MockMetaEngine::UpdateNoLock(const MetaApplyContext& update_context, int64_t& retult_id) {
+MockMetaEngine::UpdateNoLock(const MetaApplyContext& update_context, int64_t& result_id) {
     const std::string id_str = std::to_string(update_context.id_);
 
     auto& target_collection = resources_[update_context.table_];
@@ -105,7 +105,7 @@ MockMetaEngine::UpdateNoLock(const MetaApplyContext& update_context, int64_t& re
             for (auto& kv : update_context.attrs_) {
                 attrs[kv.first] = kv.second;
             }
-            retult_id = update_context.id_;
+            result_id = update_context.id_;
             return Status::OK();
         }
     }
@@ -115,12 +115,13 @@ MockMetaEngine::UpdateNoLock(const MetaApplyContext& update_context, int64_t& re
 }
 
 Status
-MockMetaEngine::DeleteNoLock(const MetaApplyContext& delete_context, int64_t& retult_id) {
+MockMetaEngine::DeleteNoLock(const MetaApplyContext& delete_context, int64_t& result_id) {
     const std::string id_str = std::to_string(delete_context.id_);
     auto& target_collection = resources_[delete_context.table_];
 
     for (auto iter = target_collection.begin(); iter != target_collection.end(); iter++) {
         if ((*iter)[F_ID] == id_str) {
+            result_id = std::stol(iter->at(F_ID));
             target_collection.erase(iter);
             return Status::OK();
         }
