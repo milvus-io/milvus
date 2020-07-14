@@ -54,6 +54,19 @@ CommonUtil::GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem) {
 }
 
 bool
+CommonUtil::GetSysCgroupMemLimit(int64_t& limit_in_bytes) {
+    try {
+        std::ifstream file("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+        file >> limit_in_bytes;
+    } catch (std::exception& ex) {
+        std::string msg =
+            "Failed to read /sys/fs/cgroup/memory/memory.limit_in_bytes, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
+        return 0;
+    }
+}
+
+bool
 CommonUtil::GetSystemAvailableThreads(int64_t& thread_count) {
     // threadCnt = std::thread::hardware_concurrency();
     thread_count = sysconf(_SC_NPROCESSORS_CONF);
