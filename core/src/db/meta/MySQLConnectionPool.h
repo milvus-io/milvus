@@ -9,11 +9,14 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <mysql++/mysql++.h>
+#pragma once
 
 #include <unistd.h>
+
 #include <atomic>
 #include <string>
+
+#include <mysql++/mysql++.h>
 
 #include "utils/Log.h"
 
