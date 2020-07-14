@@ -23,27 +23,27 @@
 namespace milvus {
 namespace engine {
 
+extern const char* ENTITY_ID_FIELD;
+extern const char* VECTOR_DIMENSION_PARAM;
+extern const char* VECTOR_FIELD;
+
+struct DataChunk {
+    uint64_t count_ = 0;
+    std::unordered_map<std::string, std::vector<uint8_t>> fields_data_;
+};
+
+using DataChunkPtr = std::shared_ptr<DataChunk>;
+
 class SSMemManager {
  public:
     virtual Status
-    InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                  const float* vectors, uint64_t lsn) = 0;
+    InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) = 0;
 
     virtual Status
-    InsertVectors(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                  const uint8_t* vectors, uint64_t lsn) = 0;
+    DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t lsn) = 0;
 
     virtual Status
-    InsertEntities(int64_t collection_id, int64_t partition_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                   const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                   const std::unordered_map<std::string, uint64_t>& attr_size,
-                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) = 0;
-
-    virtual Status
-    DeleteVector(int64_t collection_id, IDNumber vector_id, uint64_t lsn) = 0;
-
-    virtual Status
-    DeleteVectors(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) = 0;
+    DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) = 0;
 
     virtual Status
     Flush(int64_t collection_id) = 0;
