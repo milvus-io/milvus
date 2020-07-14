@@ -160,7 +160,7 @@ pipeline {
                             FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")
                             HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
                             SHARDS_HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-shards-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
-                            DEV_TEST_ARTIFACTS = "_artifacts/${FROMAT_SEMVER}/${FORMAT_OS_NAME}"
+                            DEV_TEST_ARTIFACTS = "_artifacts/${FROMAT_SEMVER}/${FORMAT_OS_NAME}/${BINARY_VERSION}"
                         }
 
                         agent {
