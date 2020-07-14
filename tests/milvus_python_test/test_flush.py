@@ -80,14 +80,14 @@ class TestFlushBase:
         method: flush collection with no vectors
         expected: no error raised
         '''
-        # ids = connect.insert(collection, entities)
-        # assert len(ids) == nb
-        # status = connect.delete_entity_by_id(collection, ids)
-        # assert status.OK()
-        # res = connect.count_entities(collection)
-        # assert 0 == res
-        # with pytest.raises(Exception) as e:
-        connect.flush([collection])
+        ids = connect.insert(collection, entities)
+        assert len(ids) == nb
+        status = connect.delete_entity_by_id(collection, ids)
+        assert status.OK()
+        res = connect.count_entities(collection)
+        assert 0 == res
+        with pytest.raises(Exception) as e:
+            connect.flush([collection])
 
     def test_add_partition_flush(self, connect, collection):
         '''
