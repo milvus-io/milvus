@@ -19,6 +19,7 @@
 #include "db/IDGenerator.h"
 #include "db/engine/ExecutionEngine.h"
 #include "db/insert/SSMemManager.h"
+#include "segment/Segment.h"
 #include "segment/SegmentWriter.h"
 #include "utils/Status.h"
 
