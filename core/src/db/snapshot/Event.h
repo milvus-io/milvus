@@ -49,7 +49,8 @@ class ResourceGCEvent : public Event {
         STATUS_CHECK((*sd_op)(store));
 
         /* TODO: physically clean resource */
-        std::string res_path = GetResPath<ResourceT>(res_);
+        std::string res_path;
+        STATUS_CHECK(GetResPath<ResourceT>(res_path, dir_root_, res_));
         /* if (!boost::filesystem::exists(res_path)) { */
         /*     return Status::OK(); */
         /* } */
@@ -68,6 +69,7 @@ class ResourceGCEvent : public Event {
 
  private:
     class ResourceT::Ptr res_;
+    std::string dir_root_;
 };
 
 }  // namespace snapshot

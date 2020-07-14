@@ -445,7 +445,8 @@ SSDBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    auto handler = std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, id_array, field_names);
+    std::string dir_root = options_.meta_.path_;
+    auto handler = std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, dir_root, id_array, field_names);
     handler->Iterate();
     STATUS_CHECK(handler->GetStatus());
 

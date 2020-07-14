@@ -33,7 +33,7 @@ namespace segment {
 
 class SSSegmentWriter {
  public:
-    explicit SSSegmentWriter(const engine::SegmentVisitorPtr& segment_visitor);
+    explicit SSSegmentWriter(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor);
 
     Status
     AddVectors(const std::string& name, const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
@@ -106,6 +106,7 @@ class SSSegmentWriter {
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
     SegmentPtr segment_ptr_;
+    std::string dir_root_;
 };
 
 using SSSegmentWriterPtr = std::shared_ptr<SSSegmentWriter>;
