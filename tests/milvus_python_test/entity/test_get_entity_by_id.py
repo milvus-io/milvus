@@ -7,7 +7,6 @@ import logging
 from multiprocessing import Pool, Process
 import concurrent.futures
 import pytest
-from milvus import IndexType, MetricType
 from utils import *
 
 
