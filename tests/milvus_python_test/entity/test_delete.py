@@ -254,8 +254,8 @@ class TestDeleteBase:
     # TODO
     def test_insert_same_ids_after_delete_jac(self, connect, jac_collection):
         '''
-        method: add entities and delete
-        expected: status DELETED
+        method: add entities, with the same id and delete the ids
+        expected: status DELETED, all id deleted
         '''
         insert_ids = [i for i in range(nb)]
         ids = connect.insert(jac_collection, binary_entities, insert_ids)
