@@ -634,11 +634,11 @@ TEST_F(RpcHandlerTest, SEARCH_TEST) {
     ASSERT_NE(response.mutable_entities()->ids_size(), 0UL);
 
     // wrong file id
-//    ::milvus::grpc::SearchInFilesParam search_in_files_param;
-//    std::string* file_id = search_in_files_param.add_file_id_array();
-//    *file_id = "test_tbl";
-//    handler->SearchInFiles(&context, &search_in_files_param, &response);
-//    ASSERT_EQ(response.mutable_entities()->ids_size(), 0UL);
+    //    ::milvus::grpc::SearchInFilesParam search_in_files_param;
+    //    std::string* file_id = search_in_files_param.add_file_id_array();
+    //    *file_id = "test_tbl";
+    //    handler->SearchInFiles(&context, &search_in_files_param, &response);
+    //    ASSERT_EQ(response.mutable_entities()->ids_size(), 0UL);
 }
 
 TEST_F(RpcHandlerTest, COMBINE_SEARCH_TEST) {

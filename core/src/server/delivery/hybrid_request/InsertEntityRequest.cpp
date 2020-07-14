@@ -74,7 +74,8 @@ InsertEntityRequest::OnExecute() {
         }
 
         int64_t entity_count = vector_datas_it->second.vector_count_;
-        fiu_do_on("InsertEntityRequest.OnExecute.id_array_error", vector_datas_it->second.id_array_.resize(entity_count + 1));
+        fiu_do_on("InsertEntityRequest.OnExecute.id_array_error",
+                  vector_datas_it->second.id_array_.resize(entity_count + 1));
         if (!vector_datas_it->second.id_array_.empty()) {
             if (!vector_datas_it->second.id_array_.size() != (size_t)entity_count) {
                 std::string msg = "The size of entity ID array must be equal to the size of the entity.";
@@ -182,8 +183,7 @@ InsertEntityRequest::OnExecute() {
         fiu_do_on("InsertEntityRequest.OnExecute.invalid_ids_size", ids_size = entity_count - 1);
         if (ids_size != entity_count) {
             std::string msg =
-                "Add " + std::to_string(entity_count) + " entities but only return " + std::to_string(ids_size) +
-                " id";
+                "Add " + std::to_string(entity_count) + " entities but only return " + std::to_string(ids_size) + " id";
             return Status(SERVER_ILLEGAL_VECTOR_ID, msg);
         }
 
