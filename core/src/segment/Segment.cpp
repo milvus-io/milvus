@@ -131,6 +131,20 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, uint64_t from, uint64_t to) {
 }
 
 Status
+Segment::DeleteEntity(int32_t offset) {
+    for (auto& pair : fixed_fields_) {
+        uint64_t width = fixed_fields_width_[pair.first];
+        if (width != 0) {
+            auto step = offset * width;
+            FIXED_FIELD_DATA& data = pair.second;
+            data.erase(data.begin() + step, data.begin() + step + width);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
 Segment::GetFieldType(const std::string& field_name, FIELD_TYPE& type) {
     auto iter = field_types_.find(field_name);
     if (iter == field_types_.end()) {

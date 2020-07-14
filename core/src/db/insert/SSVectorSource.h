@@ -19,8 +19,8 @@
 #include "db/IDGenerator.h"
 #include "db/engine/ExecutionEngine.h"
 #include "db/insert/SSMemManager.h"
+#include "segment/SSSegmentWriter.h"
 #include "segment/Segment.h"
-#include "segment/SegmentWriter.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -33,7 +33,7 @@ class SSVectorSource {
     explicit SSVectorSource(const DataChunkPtr& chunk);
 
     Status
-    Add(const segment::SegmentWriterPtr& segment_writer_ptr, const size_t& num_attrs_to_add, size_t& num_attrs_added);
+    Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const size_t& num_attrs_to_add, size_t& num_attrs_added);
 
     bool
     AllAdded();

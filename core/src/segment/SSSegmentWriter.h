@@ -58,6 +58,9 @@ class SSSegmentWriter {
     Merge(const SSSegmentReaderPtr& segment_to_merge);
 
     size_t
+    Size();
+
+    size_t
     RowCount();
 
     Status

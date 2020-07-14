@@ -62,6 +62,9 @@ class Segment {
     AddChunk(const DataChunkPtr& chunk_ptr, uint64_t from, uint64_t to);
 
     Status
+    DeleteEntity(int32_t offset);
+
+    Status
     GetFieldType(const std::string& field_name, FIELD_TYPE& type);
 
     Status

@@ -289,6 +289,11 @@ SSSegmentWriter::Merge(const SSSegmentReaderPtr& segment_to_merge) {
 }
 
 size_t
+SSSegmentWriter::Size() {
+    return 0;
+}
+
+size_t
 SSSegmentWriter::RowCount() {
     return segment_ptr_->GetRowCount();
 }
