@@ -465,6 +465,8 @@ TEST_F(SnapshotTest, IndexTest) {
     status = build_op->CommitNewSegmentFile(sf_context, seg_file);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(seg_file);
+    auto op_ctx = build_op->GetContext();
+    ASSERT_EQ(seg_file, op_ctx.new_segment_files[0]);
 
     build_op->Push();
     status = build_op->GetSnapshot(ss);

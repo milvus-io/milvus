@@ -33,7 +33,7 @@ SSMemCollection::SSMemCollection(int64_t collection_id, int64_t partition_id, co
 }
 
 Status
-SSMemCollection::Add(const SSVectorSourcePtr& source) {
+SSMemCollection::Add(const milvus::engine::SSVectorSourcePtr& source) {
     while (!source->AllAdded()) {
         SSMemSegmentPtr current_mem_segment;
         if (!mem_segment_list_.empty()) {
@@ -49,34 +49,6 @@ SSMemCollection::Add(const SSVectorSourcePtr& source) {
             }
         } else {
             status = current_mem_segment->Add(source);
-        }
-
-        if (!status.ok()) {
-            std::string err_msg = "Insert failed: " + status.ToString();
-            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << err_msg;
-            return Status(DB_ERROR, err_msg);
-        }
-    }
-    return Status::OK();
-}
-
-Status
-SSMemCollection::AddEntities(const milvus::engine::SSVectorSourcePtr& source) {
-    while (!source->AllAdded()) {
-        SSMemSegmentPtr current_mem_segment;
-        if (!mem_segment_list_.empty()) {
-            current_mem_segment = mem_segment_list_.back();
-        }
-
-        Status status;
-        if (mem_segment_list_.empty() || current_mem_segment->IsFull()) {
-            SSMemSegmentPtr new_mem_segment = std::make_shared<SSMemSegment>(collection_id_, partition_id_, options_);
-            status = new_mem_segment->AddEntities(source);
-            if (status.ok()) {
-                mem_segment_list_.emplace_back(new_mem_segment);
-            }
-        } else {
-            status = current_mem_segment->AddEntities(source);
         }
 
         if (!status.ok()) {

@@ -18,6 +18,7 @@
 
 #include "db/IDGenerator.h"
 #include "db/engine/ExecutionEngine.h"
+#include "db/insert/SSMemManager.h"
 #include "segment/SegmentWriter.h"
 #include "utils/Status.h"
 
@@ -28,44 +29,18 @@ namespace engine {
 
 class SSVectorSource {
  public:
-    explicit SSVectorSource(VectorsData vectors);
-
-    SSVectorSource(VectorsData vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                   const std::unordered_map<std::string, uint64_t>& attr_size,
-                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data);
+    explicit SSVectorSource(const DataChunkPtr& chunk);
 
     Status
-    Add(const segment::SegmentWriterPtr& segment_writer_ptr, int64_t dimension, const size_t& num_vectors_to_add,
-        size_t& num_vectors_added);
-
-    Status
-    AddEntities(const segment::SegmentWriterPtr& segment_writer_ptr, int64_t dimension, const size_t& num_attrs_to_add,
-                size_t& num_attrs_added);
-
-    size_t
-    GetNumVectorsAdded();
-
-    size_t
-    SingleVectorSize(uint16_t dimension);
-
-    size_t
-    SingleEntitySize(uint16_t dimension);
+    Add(const segment::SegmentWriterPtr& segment_writer_ptr, const size_t& num_attrs_to_add, size_t& num_attrs_added);
 
     bool
     AllAdded();
 
-    IDNumbers
-    GetVectorIds();
-
  private:
-    VectorsData vectors_;
-    IDNumbers vector_ids_;
-    const std::unordered_map<std::string, uint64_t> attr_nbytes_;
-    std::unordered_map<std::string, uint64_t> attr_size_;
-    std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
+    DataChunkPtr chunk_;
 
-    size_t current_num_vectors_added;
-    size_t current_num_attrs_added;
+    size_t current_num_added_ = 0;
 };  // SSVectorSource
 
 using SSVectorSourcePtr = std::shared_ptr<SSVectorSource>;
