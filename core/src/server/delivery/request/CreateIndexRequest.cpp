@@ -54,10 +54,21 @@ CreateIndexRequest::OnExecute() {
             return status;
         }
 
+        status = ValidateFieldName(field_name_);
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = ValidateIndexName(index_name_);
+        if (!status.ok()) {
+            return status;
+        }
+
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema collection_schema;
+        engine::meta::hybrid::FieldsSchema fields_schema;
         collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
         fiu_do_on("CreateIndexRequest.OnExecute.not_has_collection",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreateIndexRequest.OnExecute.throw_std.exception", throw std::exception());
@@ -109,6 +120,10 @@ CreateIndexRequest::OnExecute() {
 
         // step 3: create index
         engine::CollectionIndex index;
+        if (json_params_.contains("metric_type")) {
+            index.metric_type_ = (int32_t)engine::s_map_metric_type.at(json_params_["metric_type"]);
+        }
+
         index.engine_type_ = adapter_index_type;
         index.extra_params_ = json_params_;
         status = DBWrapper::DB()->CreateIndex(context_, collection_name_, index);

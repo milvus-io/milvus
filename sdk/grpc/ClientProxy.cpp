@@ -267,7 +267,7 @@ CopyEntityToJson(::milvus::grpc::Entities& grpc_entities, JSON& json_entity) {
     std::unordered_map<std::string, std::vector<double>> double_data;
     std::unordered_map<std::string, std::vector<milvus::VectorData>> vector_data;
 
-    int row_num = 0;
+    int row_num = grpc_entities.ids_size();
     for (i = 0; i < grpc_field_size; i++) {
         auto grpc_field = grpc_entities.fields(i);
         auto grpc_attr_record = grpc_field.attr_record();
@@ -276,41 +276,64 @@ CopyEntityToJson(::milvus::grpc::Entities& grpc_entities, JSON& json_entity) {
             case ::milvus::grpc::INT8:
             case ::milvus::grpc::INT16:
             case ::milvus::grpc::INT32: {
-                row_num = grpc_attr_record.int32_value_size();
-                std::vector<int32_t> data(row_num);
-                memcpy(data.data(), grpc_attr_record.int32_value().data(), row_num * sizeof(int32_t));
+                std::vector<int32_t> data(row_num, 0);
+                int64_t offset = 0;
+                for (int64_t j = 0; j < row_num; j++) {
+                    if (grpc_entities.valid_row(j)) {
+                        data[j] = grpc_attr_record.int32_value(offset);
+                        offset++;
+                    }
+                }
+                // memcpy(data.data(), grpc_attr_record.int32_value().data(), row_num * sizeof(int32_t));
                 int32_data.insert(std::make_pair(grpc_field.field_name(), data));
                 break;
             }
             case ::milvus::grpc::INT64: {
-                row_num = grpc_attr_record.int64_value_size();
-                std::vector<int64_t> data(row_num);
-                memcpy(data.data(), grpc_attr_record.int64_value().data(), row_num * sizeof(int64_t));
+                std::vector<int64_t> data(row_num, 0);
+                int64_t offset = 0;
+                for (int64_t j = 0; j < row_num; j++) {
+                    if (grpc_entities.valid_row(j)) {
+                        data[j] = grpc_attr_record.int64_value(offset);
+                        offset++;
+                    }
+                }
+                // memcpy(data.data(), grpc_attr_record.int64_value().data(), row_num * sizeof(int64_t));
                 int64_data.insert(std::make_pair(grpc_field.field_name(), data));
                 break;
             }
             case ::milvus::grpc::FLOAT: {
-                row_num = grpc_attr_record.float_value_size();
-                std::vector<float> data(row_num);
-                memcpy(data.data(), grpc_attr_record.float_value().data(), row_num * sizeof(float));
+                std::vector<float> data(row_num, 0);
+                int64_t offset = 0;
+                for (int64_t j = 0; j < row_num; j++) {
+                    if (grpc_entities.valid_row(j)) {
+                        data[j] = grpc_attr_record.float_value(offset);
+                        offset++;
+                    }
+                }
+                // memcpy(data.data(), grpc_attr_record.float_value().data(), row_num * sizeof(float));
                 float_data.insert(std::make_pair(grpc_field.field_name(), data));
                 break;
-        }
+            }
             case ::milvus::grpc::DOUBLE: {
-                row_num = grpc_attr_record.double_value_size();
-                std::vector<double> data(row_num);
-                memcpy(data.data(), grpc_attr_record.double_value().data(), row_num * sizeof(double));
+                std::vector<double> data(row_num, 0);
+                int64_t offset = 0;
+                for (int64_t j = 0; j < row_num; j++) {
+                    if (grpc_entities.valid_row(j)) {
+                        data[j] = grpc_attr_record.double_value(offset);
+                        offset++;
+                    }
+                }
+                // memcpy(data.data(), grpc_attr_record.double_value().data(), row_num * sizeof(double));
                 double_data.insert(std::make_pair(grpc_field.field_name(), data));
                 break;
             }
             case ::milvus::grpc::FLOAT_VECTOR: {
-                row_num = grpc_vector_record.records_size();
                 std::vector<milvus::VectorData> data(row_num);
                 for (int j = 0; j < row_num; j++) {
                     size_t dim = grpc_vector_record.records(j).float_data_size();
                     data[j].float_data.resize(dim);
                     memcpy(data[j].float_data.data(), grpc_vector_record.records(j).float_data().data(),
-                           row_num * sizeof(float));
+                           dim * sizeof(float));
                 }
                 vector_data.insert(std::make_pair(grpc_field.field_name(), data));
                 break;
@@ -324,20 +347,23 @@ CopyEntityToJson(::milvus::grpc::Entities& grpc_entities, JSON& json_entity) {
 
     for (i = 0; i < row_num; i++) {
         JSON one_json;
-        for (const auto& name : field_names) {
-            if (int32_data.find(name) != int32_data.end()) {
-                one_json[name] = int32_data.at(name)[i];
-            } else if (int64_data.find(name) != int64_data.end()) {
-                one_json[name] = int64_data.at(name)[i];
-            } else if (float_data.find(name) != float_data.end()) {
-                one_json[name] = float_data.at(name)[i];
-            } else if (double_data.find(name) != double_data.end()) {
-                one_json[name] = double_data.at(name)[i];
-            } else if (vector_data.find(name) != vector_data.end()) {
-                if (!(vector_data.at(name)[i].float_data.empty())) {
-                    one_json[name] = vector_data.at(name)[i].float_data;
-                } else if (!(vector_data.at(name)[i].binary_data.empty())) {
-                    one_json[name] = vector_data.at(name)[i].binary_data;
+        one_json["id"] = grpc_entities.ids(i);
+        if (grpc_entities.valid_row(i)) {
+            for (const auto& name : field_names) {
+                if (int32_data.find(name) != int32_data.end()) {
+                    one_json[name] = int32_data.at(name)[i];
+                } else if (int64_data.find(name) != int64_data.end()) {
+                    one_json[name] = int64_data.at(name)[i];
+                } else if (float_data.find(name) != float_data.end()) {
+                    one_json[name] = float_data.at(name)[i];
+                } else if (double_data.find(name) != double_data.end()) {
+                    one_json[name] = double_data.at(name)[i];
+                } else if (vector_data.find(name) != vector_data.end()) {
+                    if (!(vector_data.at(name)[i].float_data.empty())) {
+                        one_json[name] = vector_data.at(name)[i].float_data;
+                    } else if (!(vector_data.at(name)[i].binary_data.empty())) {
+                        one_json[name] = vector_data.at(name)[i].binary_data;
+                    }
                 }
             }
         }

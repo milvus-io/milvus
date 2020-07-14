@@ -848,6 +848,17 @@ SqliteMetaImpl::DescribeCollectionIndex(const std::string& collection_id, Collec
         } else {
             return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
         }
+
+        //        auto field_groups =
+        //            ConnectorPtr->select(columns(&hybrid::FieldSchema::index_name_,
+        //            &hybrid::FieldSchema::index_param_),
+        //                                 where(c(&hybrid::FieldSchema::collection_id_) == collection_id and
+        //                                       c(&hybrid::FieldSchema::field_name_) == index.field_name_));
+        //
+        //        if (groups.size() == 1) {
+        //            index.index_name_ = std::get<0>(groups[0]);
+        //            index.extra_params_ = milvus::json::parse(std::get<1>(groups[1]));
+        //        }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when describe index", e.what());
     }

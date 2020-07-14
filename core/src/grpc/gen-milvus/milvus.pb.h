@@ -3310,7 +3310,8 @@ class Entities :
 
   enum : int {
     kIdsFieldNumber = 2,
-    kFieldsFieldNumber = 3,
+    kValidRowFieldNumber = 3,
+    kFieldsFieldNumber = 4,
     kStatusFieldNumber = 1,
   };
   // repeated int64 ids = 2;
@@ -3324,7 +3325,18 @@ class Entities :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
       mutable_ids();
 
-  // repeated .milvus.grpc.FieldValue fields = 3;
+  // repeated bool valid_row = 3;
+  int valid_row_size() const;
+  void clear_valid_row();
+  bool valid_row(int index) const;
+  void set_valid_row(int index, bool value);
+  void add_valid_row(bool value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >&
+      valid_row() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >*
+      mutable_valid_row();
+
+  // repeated .milvus.grpc.FieldValue fields = 4;
   int fields_size() const;
   void clear_fields();
   ::milvus::grpc::FieldValue* mutable_fields(int index);
@@ -3350,6 +3362,8 @@ class Entities :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > ids_;
   mutable std::atomic<int> _ids_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool > valid_row_;
+  mutable std::atomic<int> _valid_row_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::FieldValue > fields_;
   ::milvus::grpc::Status* status_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -9139,7 +9153,37 @@ Entities::mutable_ids() {
   return &ids_;
 }
 
-// repeated .milvus.grpc.FieldValue fields = 3;
+// repeated bool valid_row = 3;
+inline int Entities::valid_row_size() const {
+  return valid_row_.size();
+}
+inline void Entities::clear_valid_row() {
+  valid_row_.Clear();
+}
+inline bool Entities::valid_row(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.Entities.valid_row)
+  return valid_row_.Get(index);
+}
+inline void Entities::set_valid_row(int index, bool value) {
+  valid_row_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.Entities.valid_row)
+}
+inline void Entities::add_valid_row(bool value) {
+  valid_row_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.grpc.Entities.valid_row)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >&
+Entities::valid_row() const {
+  // @@protoc_insertion_point(field_list:milvus.grpc.Entities.valid_row)
+  return valid_row_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< bool >*
+Entities::mutable_valid_row() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.Entities.valid_row)
+  return &valid_row_;
+}
+
+// repeated .milvus.grpc.FieldValue fields = 4;
 inline int Entities::fields_size() const {
   return fields_.size();
 }

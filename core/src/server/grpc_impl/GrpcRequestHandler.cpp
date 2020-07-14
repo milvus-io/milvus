@@ -244,15 +244,6 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
         return;
     }
 
-    //    if (field_names.empty()) {
-    //        if (attrs.size() > 0) {
-    //            auto attr_it = attrs[0].attr_type_.begin();
-    //            for (; attr_it != attrs[0].attr_type_.end(); attr_it++) {
-    //                field_names.emplace_back(attr_it->first);
-    //            }
-    //        }
-    //    }
-
     std::string vector_field_name;
     for (uint64_t i = 0; i < field_names.size(); i++) {
         auto field_name = field_names[i];
@@ -382,15 +373,19 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
         for (auto& vector : vectors) {
             auto grpc_data = grpc_vector_data->add_records();
             if (!vector.float_data_.empty()) {
+                response->add_valid_row(true);
                 grpc_field->set_type(::milvus::grpc::DataType::FLOAT_VECTOR);
                 grpc_data->mutable_float_data()->Resize(vector.float_data_.size(), 0);
                 memcpy(grpc_data->mutable_float_data()->mutable_data(), vector.float_data_.data(),
                        vector.float_data_.size() * sizeof(float));
             } else if (!vector.binary_data_.empty()) {
+                response->add_valid_row(true);
                 grpc_field->set_type(::milvus::grpc::DataType::BINARY_VECTOR);
                 grpc_data->mutable_binary_data()->resize(vector.binary_data_.size());
                 memcpy(grpc_data->mutable_binary_data()->data(), vector.binary_data_.data(),
                        vector.binary_data_.size() * sizeof(uint8_t));
+            } else {
+                response->add_valid_row(false);
             }
         }
     }
