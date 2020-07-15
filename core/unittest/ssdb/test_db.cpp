@@ -168,8 +168,9 @@ TEST_F(SSDBTest, IndexTest) {
     auto& partitions = ss->GetResources<Partition>();
     for (auto& kv : partitions) {
         num = RandomInt(2, 5);
+        auto row_cnt = 100;
         for (auto i = 0; i < num; ++i) {
-            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context).ok());
+            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
         }
         new_total += num;
     }
@@ -238,8 +239,9 @@ TEST_F(SSDBTest, VisitorTest) {
     ID_TYPE partition_id;
     for (auto& kv : partitions) {
         num = RandomInt(1, 3);
+        auto row_cnt = 100;
         for (auto i = 0; i < num; ++i) {
-            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context).ok());
+            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
         }
         new_total += num;
         partition_id = kv.first;
@@ -262,6 +264,8 @@ TEST_F(SSDBTest, VisitorTest) {
     std::cout << segment_handler->GetStatus().ToString() << std::endl;
     ASSERT_TRUE(segment_handler->GetStatus().ok());
 
+    auto row_cnt = ss->GetCollectionCommit()->GetRowCount();
+    auto new_segment_row_cnt = 1024;
     {
         OperationContext context;
         context.lsn = next_lsn();
@@ -300,5 +304,12 @@ TEST_F(SSDBTest, VisitorTest) {
         ASSERT_EQ(file_num, 1);
 
         std::cout << visitor->ToString() << std::endl;
+        status = op->CommitRowCount(new_segment_row_cnt);
+        status = op->Push();
+        ASSERT_TRUE(status.ok());
     }
+    status = Snapshots::GetInstance().GetSnapshot(ss, c1);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), row_cnt + new_segment_row_cnt);
+    std::cout << ss->ToString() << std::endl;
 }
