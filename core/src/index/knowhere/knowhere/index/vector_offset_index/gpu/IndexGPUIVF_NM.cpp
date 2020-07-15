@@ -41,14 +41,11 @@ GPUIVF_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         idx_config.device = gpu_id_;
         int32_t nlist = config[IndexParams::nlist];
         faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-        faiss::gpu::GpuIndexIVFFlat device_index(gpu_res->faiss_res.get(), dim, nlist, metric_type, idx_config);
-        device_index.train(rows, (float*)p_data);
+        auto device_index =
+            new faiss::gpu::GpuIndexIVFFlat(gpu_res->faiss_res.get(), dim, nlist, metric_type, idx_config);
+        device_index->train(rows, (float*)p_data);
 
-        std::shared_ptr<faiss::Index> host_index = nullptr;
-        host_index.reset(faiss::gpu::index_gpu_to_cpu(&device_index));
-
-        auto device_index1 = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, host_index.get());
-        index_.reset(device_index1);
+        index_.reset(device_index);
         res_ = gpu_res;
     } else {
         KNOWHERE_THROW_MSG("Build IVF can't get gpu resource");
@@ -67,44 +64,6 @@ GPUIVF_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 
 void
 GPUIVF_NM::Load(const BinarySet& binary_set) {
-    /*
-    std::lock_guard<std::mutex> lk(mutex_);
-    auto binary = binary_set.GetByName("IVF");
-    MemoryIOReader reader;
-    reader.total = binary->size;
-    reader.data_ = binary->data.get();
-    faiss::Index* index = faiss::read_index_nm(&reader);
-    index_.reset(index);
-    // Construct arranged data from original data
-    auto binary_data = binary_set.GetByName(RAW_DATA);
-    const float* original_data = (const float*) binary_data->data.get();
-    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
-    auto invlists = ivf_index->invlists;
-    auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
-    auto d = ivf_index->d;
-    auto nb = (size_t) (binary_data->size / ails->code_size);
-    arranged_data = new uint8_t[d * sizeof(float) * nb];
-    size_t curr_index = 0;
-    for (int i = 0; i < ails->nlist; i++) {
-        auto list_size = ails->ids[i].size();
-        for (int j = 0; j < list_size; j++) {
-            memcpy(arranged_data + d * sizeof(float) * (curr_index + j), original_data + d * ails->ids[i][j],
-                   d * sizeof(float));
-        }
-        curr_index += list_size;
-    }
-    if (auto temp_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_)) {
-        ResScope rs(temp_res, gpu_id_, false);
-        auto device_index =
-            faiss::gpu::index_cpu_to_gpu_without_codes(temp_res->faiss_res.get(), gpu_id_, index, arranged_data);
-        index_.reset(device_index);
-        res_ = temp_res;
-    } else {
-        KNOWHERE_THROW_MSG("Load error, can't get gpu resource");
-    }
-    delete index;
-    */
-
     // not supported
 }
 

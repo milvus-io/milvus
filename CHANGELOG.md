@@ -21,7 +21,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2692 Milvus hangs during multi-thread concurrent search
 -   \#2739 Fix mishards start failed
 -   \#2752 Milvus formats vectors data to double-precision and return to http client
--   \#2767 fix a bug of getting wrong nprobe limitation in knowhere on GPU version
+-   \#2767 Fix a bug of getting wrong nprobe limitation in knowhere on GPU version
 -   \#2776 Fix too many data copies during creating IVF index
 -   \#2813 To implemente RNSG IP
 
@@ -42,6 +42,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2612 Move all APIs in utils into namespace milvus 
 -   \#2675 Print out system memory size when report invalid cpu cache size 
 -   \#2841 Replace IndexType/EngineType/MetricType
+-   \#2858 Unify index name in db
 
 ## Task
 

@@ -14,18 +14,19 @@
 #include <memory>
 #include <utility>
 
-#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
 
 namespace milvus {
 namespace knowhere {
 
-class IVFSQNR : public IVF {
+class GPUIVFSQNR_NM : public GPUIVF_NM {
  public:
-    IVFSQNR() : IVF() {
+    explicit GPUIVFSQNR_NM(const int& device_id) : GPUIVF_NM(device_id) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8;
     }
 
-    explicit IVFSQNR(std::shared_ptr<faiss::Index> index) : IVF(std::move(index)) {
+    explicit GPUIVFSQNR_NM(std::shared_ptr<faiss::Index> index, const int64_t device_id, ResPtr& res)
+        : GPUIVF_NM(std::move(index), device_id, res) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8;
     }
 
@@ -33,10 +34,10 @@ class IVFSQNR : public IVF {
     Train(const DatasetPtr&, const Config&) override;
 
     VecIndexPtr
-    CopyCpuToGpu(const int64_t, const Config&) override;
+    CopyGpuToCpu(const Config&) override;
 };
 
-using IVFSQNRPtr = std::shared_ptr<IVFSQNR>;
+using GPUIVFSQNRNMPtr = std::shared_ptr<GPUIVFSQNR_NM>;
 
 }  // namespace knowhere
 }  // namespace milvus

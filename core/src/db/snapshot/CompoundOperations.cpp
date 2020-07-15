@@ -239,6 +239,12 @@ NewSegmentOperation::NewSegmentOperation(const OperationContext& context, Scoped
 }
 
 Status
+NewSegmentOperation::CommitRowCount(SIZE_TYPE row_cnt) {
+    row_cnt_ = row_cnt;
+    return Status::OK();
+}
+
+Status
 NewSegmentOperation::DoExecute(Store& store) {
     // PXU TODO:
     // 1. Check all requried field elements have related segment files
@@ -249,7 +255,9 @@ NewSegmentOperation::DoExecute(Store& store) {
     SegmentCommitOperation sc_op(context_, GetAdjustedSS());
     STATUS_CHECK(sc_op(store));
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
+    context_.new_segment_commit->SetRowCount(row_cnt_);
     auto sc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(meta::oUpdate).CreatePtr();
+    sc_ctx_p->AddAttr(RowCountField::Name);
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn, sc_ctx_p);
     /* std::cout << GetRepr() << " POST_SC_MAP=("; */
     /* for (auto id : context_.new_segment_commit->GetMappings()) { */
@@ -295,6 +303,7 @@ NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context, Seg
     auto ctx = context;
     ctx.segment_id = context_.new_segment->GetID();
     ctx.partition_id = context_.new_segment->GetPartitionId();
+    ctx.collection_id = GetStartedSS()->GetCollectionId();
     auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
     STATUS_CHECK(new_sf_op->Push());
     STATUS_CHECK(new_sf_op->GetResource(created));
@@ -355,6 +364,10 @@ MergeOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
 
 Status
 MergeOperation::DoExecute(Store& store) {
+    auto row_cnt = 0;
+    for (auto& stale_seg : context_.stale_segments) {
+        row_cnt += GetStartedSS()->GetSegmentCommitBySegmentId(stale_seg->GetID())->GetRowCount();
+    }
     // PXU TODO:
     // 1. Check all required field elements have related segment files
     // 2. Check Stale and others
@@ -362,6 +375,8 @@ MergeOperation::DoExecute(Store& store) {
     STATUS_CHECK(sc_op(store));
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
     auto sc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(meta::oUpdate).CreatePtr();
+    context_.new_segment_commit->SetRowCount(row_cnt);
+    sc_ctx_p->AddAttr(RowCountField::Name);
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn, sc_ctx_p);
     /* std::cout << GetRepr() << " POST_SC_MAP=("; */
     /* for (auto id : context_.new_segment_commit->GetMappings()) { */
@@ -582,7 +597,6 @@ CreateCollectionOperation::DoExecute(Store& store) {
     }
 
     for (auto& clt : collections) {
-        std::cout << "XXXXXXXXXX " << clt->GetName() << " " << clt->GetID() << std::endl;
         if (!clt->IsDeactive()) {
             return Status(SS_DUPLICATED_ERROR, "Collection has exist in DB");
         }
@@ -613,8 +627,8 @@ CreateCollectionOperation::DoExecute(Store& store) {
         auto& field_schema = field_kv.first;
         auto& field_elements = field_kv.second;
         FieldPtr field;
-        status =
-            store.CreateResource<Field>(Field(field_schema->GetName(), field_idx, field_schema->GetFtype()), field);
+        status = store.CreateResource<Field>(
+            Field(field_schema->GetName(), field_idx, field_schema->GetFtype(), field_schema->GetParams()), field);
         auto f_ctx_p = ResourceContextBuilder<Field>().SetOp(meta::oUpdate).CreatePtr();
         AddStepWithLsn(*field, c_context_.lsn, f_ctx_p);
         MappingT element_ids = {};

@@ -34,6 +34,7 @@
 using ID_TYPE = milvus::engine::snapshot::ID_TYPE;
 using IDS_TYPE = milvus::engine::snapshot::IDS_TYPE;
 using LSN_TYPE = milvus::engine::snapshot::LSN_TYPE;
+using SIZE_TYPE = milvus::engine::snapshot::SIZE_TYPE;
 using MappingT = milvus::engine::snapshot::MappingT;
 using LoadOperationContext = milvus::engine::snapshot::LoadOperationContext;
 using CreateCollectionContext = milvus::engine::snapshot::CreateCollectionContext;
@@ -99,6 +100,31 @@ SFContextBuilder(SegmentFileContext& ctx, ScopedSnapshotT sss) {
 
     ctx.segment_id = sss->GetResources<Segment>().begin()->second->GetID();
     ctx.partition_id = sss->GetResources<Segment>().begin()->second->GetPartitionId();
+}
+
+inline void
+SFContextsBuilder(std::vector<SegmentFileContext>& contexts, ScopedSnapshotT sss) {
+    auto fields = sss->GetResources<Field>();
+    for (auto& field_kv : fields) {
+        for (auto& kv : sss->GetResources<FieldElement>()) {
+            if (kv.second->GetFieldId() != field_kv.first) {
+                continue;
+            }
+            SegmentFileContext ctx;
+            ctx.field_name = field_kv.second->GetName();
+            ctx.field_element_name = kv.second->GetName();
+            contexts.push_back(ctx);
+        }
+    }
+    auto& segments =  sss->GetResources<Segment>();
+    if (segments.size() == 0) {
+        return;
+    }
+
+    for (auto& ctx : contexts) {
+        ctx.segment_id = sss->GetResources<Segment>().begin()->second->GetID();
+        ctx.partition_id = sss->GetResources<Segment>().begin()->second->GetPartitionId();
+    }
 }
 
 struct PartitionCollector : public IteratePartitionHandler {
@@ -228,7 +254,8 @@ CreatePartition(const std::string& collection_name, const PartitionContext& p_co
 }
 
 inline Status
-CreateSegment(ScopedSnapshotT ss, ID_TYPE partition_id, LSN_TYPE lsn, const SegmentFileContext& sf_context) {
+CreateSegment(ScopedSnapshotT ss, ID_TYPE partition_id, LSN_TYPE lsn, const SegmentFileContext& sf_context,
+        SIZE_TYPE row_cnt) {
     OperationContext context;
     context.lsn = lsn;
     context.prev_partition = ss->GetResource<Partition>(partition_id);
@@ -240,6 +267,7 @@ CreateSegment(ScopedSnapshotT ss, ID_TYPE partition_id, LSN_TYPE lsn, const Segm
     nsf_context.segment_id = new_seg->GetID();
     nsf_context.partition_id = new_seg->GetPartitionId();
     STATUS_CHECK(op->CommitNewSegmentFile(nsf_context, seg_file));
+    op->CommitRowCount(row_cnt);
     STATUS_CHECK(op->Push());
 
     return op->GetSnapshot(ss);

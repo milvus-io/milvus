@@ -20,9 +20,11 @@
 #include "db/Types.h"
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/Resources.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/SSSegmentReader.h"
 #include "segment/SSSegmentWriter.h"
 #include "segment/Types.h"
+#include "utils/Json.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
 
@@ -46,8 +48,9 @@ CreateCollection(std::shared_ptr<SSDBImpl> db, const std::string& collection_nam
 
     field_id++;
     /* field vector */
-    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR_FLOAT,
-            milvus::engine::snapshot::JEmpty, field_id);
+    milvus::json vector_param = {{milvus::knowhere::meta::DIM, 4}};
+    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR_FLOAT, vector_param,
+            field_id);
     auto vector_field_element_index = std::make_shared<FieldElement>(collection_id, field_id,
             milvus::engine::DEFAULT_INDEX_NAME, milvus::engine::FieldElementType::FET_INDEX);
 
@@ -63,6 +66,8 @@ TEST_F(SSSegmentTest, SegmentTest) {
     auto next_lsn = [&]() -> decltype(lsn) {
         return ++lsn;
     };
+
+    std::string db_root = "/tmp/milvus_test/db/table";
     std::string c1 = "c1";
     auto status = CreateCollection(db_, c1, next_lsn());
     ASSERT_TRUE(status.ok());
@@ -76,27 +81,77 @@ TEST_F(SSSegmentTest, SegmentTest) {
     SegmentFileContext sf_context;
     SFContextBuilder(sf_context, ss);
 
-    auto& partitions = ss->GetResources<Partition>();
-    for (auto& kv : partitions) {
-        ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context).ok());
-    }
+    std::vector<SegmentFileContext> contexts;
+    SFContextsBuilder(contexts, ss);
 
-    status = Snapshots::GetInstance().GetSnapshot(ss, c1);
-    ASSERT_TRUE(status.ok());
+
+    // std::cout << ss->ToString() << std::endl;
+
+    auto& partitions = ss->GetResources<Partition>();
+    ID_TYPE partition_id;
+    for (auto& kv : partitions) {
+        /* select the first partition */
+        partition_id = kv.first;
+        break;
+    }
 
     std::vector<milvus::segment::doc_id_t> raw_uids = {123};
     std::vector<uint8_t> raw_vectors = {1, 2, 3, 4};
-    auto& segments = ss->GetResources<Segment>();
-    for (auto& kv : segments) {
-        auto segment = kv.second;
-        auto visitor = SegmentVisitor::Build(ss, segment->GetID());
-        milvus::segment::SSSegmentWriter segment_writer(visitor);
 
-//        status = segment_writer.AddVectors("test", raw_vectors, raw_uids);
+    {
+        /* commit new segment */
+        OperationContext context;
+        context.lsn = next_lsn();
+        context.prev_partition = ss->GetResource<Partition>(partition_id);
+        auto op = std::make_shared<NewSegmentOperation>(context, ss);
+        SegmentPtr new_seg;
+        status = op->CommitNewSegment(new_seg);
+        ASSERT_TRUE(status.ok());
+
+        /* commit new segment file */
+        for (auto& cctx : contexts) {
+            SegmentFilePtr seg_file;
+            auto nsf_context = cctx;
+            nsf_context.segment_id = new_seg->GetID();
+            nsf_context.partition_id = new_seg->GetPartitionId();
+            status = op->CommitNewSegmentFile(nsf_context, seg_file);
+        }
+
+        /* build segment visitor */
+        auto ctx = op->GetContext();
+        ASSERT_TRUE(ctx.new_segment);
+        auto visitor = SegmentVisitor::Build(ss, ctx.new_segment, ctx.new_segment_files);
+        ASSERT_TRUE(visitor);
+        ASSERT_EQ(visitor->GetSegment(), new_seg);
+        ASSERT_FALSE(visitor->GetSegment()->IsActive());
+        // std::cout << visitor->ToString() << std::endl;
+        // std::cout << ss->ToString() << std::endl;
+
+        /* write data */
+        milvus::segment::SSSegmentWriter segment_writer(db_root, visitor);
+
+//        status = segment_writer.AddChunk("test", raw_vectors, raw_uids);
+//        ASSERT_TRUE(status.ok())
+//
+//        status = segment_writer.Serialize();
 //        ASSERT_TRUE(status.ok());
 
-        // status = segment_writer.Serialize();
-        ASSERT_TRUE(status.ok());
+        /* read data */
+//        milvus::segment::SSSegmentReader segment_reader(db_root, visitor);
+//
+//        status = segment_reader.Load();
+//        ASSERT_TRUE(status.ok());
+//
+//        milvus::segment::SegmentPtr segment_ptr;
+//        status = segment_reader.GetSegment(segment_ptr);
+//        ASSERT_TRUE(status.ok());
+//
+//        auto& out_uids = segment_ptr->vectors_ptr_->GetUids();
+//        ASSERT_EQ(raw_uids.size(), out_uids.size());
+//        ASSERT_EQ(raw_uids[0], out_uids[0]);
+//        auto& out_vectors = segment_ptr->vectors_ptr_->GetData();
+//        ASSERT_EQ(raw_vectors.size(), out_vectors.size());
+//        ASSERT_EQ(raw_vectors[0], out_vectors[0]);
     }
 
     status = db_->DropCollection(c1);

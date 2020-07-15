@@ -26,6 +26,7 @@
 #include "codecs/snapshot/SSCodec.h"
 #include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
@@ -35,19 +36,22 @@
 namespace milvus {
 namespace segment {
 
-SSSegmentWriter::SSSegmentWriter(const engine::SegmentVisitorPtr& segment_visitor) : segment_visitor_(segment_visitor) {
+SSSegmentWriter::SSSegmentWriter(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor)
+    : dir_root_(dir_root), segment_visitor_(segment_visitor) {
     Initialize();
 }
 
 Status
 SSSegmentWriter::Initialize() {
-    auto& segment_ptr = segment_visitor_->GetSegment();
-    std::string directory = engine::snapshot::GetResPath<engine::snapshot::Segment>(segment_ptr);
+    std::string directory =
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
 
     storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
     storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
     storage::OperationPtr operation_ptr = std::make_shared<storage::DiskOperation>(directory);
     fs_ptr_ = std::make_shared<storage::FSHandler>(reader_ptr, writer_ptr, operation_ptr);
+    fs_ptr_->operation_ptr_->CreateDirectory();
+
     segment_ptr_ = std::make_shared<engine::Segment>();
 
     const engine::SegmentVisitor::IdMapT& field_map = segment_visitor_->GetFieldVisitors();
@@ -55,17 +59,16 @@ SSSegmentWriter::Initialize() {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
         engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
-        if (ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR ||
-            ftype == engine::FIELD_TYPE::VECTOR) {
+        if (ftype == engine::FIELD_TYPE::VECTOR_FLOAT || ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
             json params = field->GetParams();
-            if (params.find(engine::VECTOR_DIMENSION_PARAM) == params.end()) {
+            if (params.find(knowhere::meta::DIM) == params.end()) {
                 std::string msg = "Vector field params must contain: dimension";
                 LOG_SERVER_ERROR_ << msg;
                 return Status(DB_ERROR, msg);
             }
 
-            uint64_t field_width = 0;
-            uint64_t dimension = params[engine::VECTOR_DIMENSION_PARAM];
+            int64_t field_width = 0;
+            int64_t dimension = params[knowhere::meta::DIM];
             if (ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
                 field_width += (dimension / 8);
             } else {
@@ -103,19 +106,22 @@ SSSegmentWriter::Serialize() {
         segment_ptr_->GetFixedFieldData(name, raw_data);
 
         auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
-        std::string file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(element_visitor->GetFile());
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
         STATUS_CHECK(WriteField(file_path, raw_data));
     }
 
-    /* write UID's deleted docs */
+    /* write empty UID's deleted docs */
     auto uid_del_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
-    std::string uid_del_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_del_visitor->GetFile());
-    STATUS_CHECK(WriteDeletedDocs(uid_del_path, segment_ptr_->GetDeletedDocs()));
+    std::string uid_del_path =
+        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_del_visitor->GetFile());
+    STATUS_CHECK(WriteDeletedDocs(uid_del_path));
 
-    /* write UID's bloom filter */
-    auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
-    std::string uid_blf_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_blf_visitor->GetFile());
-    STATUS_CHECK(WriteBloomFilter(uid_blf_path, segment_ptr_->GetBloomFilter()));
+    /* don't write UID's bloom filter */
+    // auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
+    // std::string uid_blf_path =
+    //     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
+    // STATUS_CHECK(WriteBloomFilter(uid_blf_path, segment_ptr_->GetBloomFilter()));
 
     return Status::OK();
 }
@@ -124,10 +130,9 @@ Status
 SSSegmentWriter::WriteField(const std::string& file_path, const engine::FIXED_FIELD_DATA& raw) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
         ss_codec.GetBlockFormat()->write(fs_ptr_, file_path, raw);
     } catch (std::exception& e) {
-        std::string err_msg = "Failed to write vectors: " + std::string(e.what());
+        std::string err_msg = "Failed to write field: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
 
         engine::utils::SendExitSignal();
@@ -176,11 +181,8 @@ SSSegmentWriter::WriteBloomFilter(const std::string& file_path) {
 Status
 SSSegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilterPtr& id_bloom_filter_ptr) {
     try {
-        TimeRecorder recorder("SSSegmentWriter::WriteBloomFilter");
         auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
         ss_codec.GetIdBloomFilterFormat()->write(fs_ptr_, file_path, id_bloom_filter_ptr);
-        recorder.RecordSection("finish writing bloom filter");
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write bloom filter: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -194,11 +196,7 @@ SSSegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFil
 Status
 SSSegmentWriter::WriteDeletedDocs(const std::string& file_path) {
     DeletedDocsPtr deleted_docs_ptr = std::make_shared<DeletedDocs>();
-    auto status = WriteDeletedDocs(file_path, deleted_docs_ptr);
-    if (!status.ok()) {
-        return status;
-    }
-
+    STATUS_CHECK(WriteDeletedDocs(file_path, deleted_docs_ptr));
     segment_ptr_->SetDeletedDocs(deleted_docs_ptr);
     return Status::OK();
 }
@@ -207,7 +205,6 @@ Status
 SSSegmentWriter::WriteDeletedDocs(const std::string& file_path, const DeletedDocsPtr& deleted_docs) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
         ss_codec.GetDeletedDocsFormat()->write(fs_ptr_, file_path, deleted_docs);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());

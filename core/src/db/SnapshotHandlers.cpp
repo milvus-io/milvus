@@ -108,9 +108,17 @@ SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_comm
 
 ///////////////////////////////////////////////////////////////////////////////
 GetEntityByIdSegmentHandler::GetEntityByIdSegmentHandler(const std::shared_ptr<milvus::server::Context>& context,
-                                                         engine::snapshot::ScopedSnapshotT ss, const IDNumbers& ids,
+                                                         engine::snapshot::ScopedSnapshotT ss,
+                                                         const std::string& dir_root, const IDNumbers& ids,
                                                          const std::vector<std::string>& field_names)
-    : BaseT(ss), context_(context), ids_(ids), field_names_(field_names), vector_data_(), attr_type_(), attr_data_() {
+    : BaseT(ss),
+      context_(context),
+      dir_root_(dir_root),
+      ids_(ids),
+      field_names_(field_names),
+      vector_data_(),
+      attr_type_(),
+      attr_data_() {
     for (auto& field_name : field_names_) {
         auto field_ptr = ss_->GetField(field_name);
         auto field_type = field_ptr->GetFtype();
@@ -126,25 +134,26 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     if (segment_visitor == nullptr) {
         return Status(DB_ERROR, "Fail to build segment visitor with id " + std::to_string(segment->GetID()));
     }
-    segment::SSSegmentReader segment_reader(segment_visitor);
+    segment::SSSegmentReader segment_reader(dir_root_, segment_visitor);
+
+    auto uid_field_visitor = segment_visitor->GetFieldVisitor(DEFAULT_UID_NAME);
 
     /* load UID's bloom filter file */
-    auto uid_field_visitor = segment_visitor->GetFieldVisitor(DEFAULT_UID_NAME);
-    auto uid_bf_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_BLOOM_FILTER);
-    std::string uid_bf_path = snapshot::GetResPath<snapshot::SegmentFile>(uid_bf_visitor->GetFile());
+    auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_BLOOM_FILTER);
+    std::string uid_blf_path = snapshot::GetResPath<snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
 
     segment::IdBloomFilterPtr id_bloom_filter_ptr;
-    STATUS_CHECK(segment_reader.LoadBloomFilter(uid_bf_path, id_bloom_filter_ptr));
+    STATUS_CHECK(segment_reader.LoadBloomFilter(uid_blf_path, id_bloom_filter_ptr));
 
     /* load UID's raw data */
     auto uid_raw_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_RAW);
-    std::string uid_raw_path = snapshot::GetResPath<snapshot::SegmentFile>(uid_raw_visitor->GetFile());
+    std::string uid_raw_path = snapshot::GetResPath<snapshot::SegmentFile>(dir_root_, uid_raw_visitor->GetFile());
     std::vector<segment::doc_id_t> uids;
     STATUS_CHECK(segment_reader.LoadUids(uid_raw_path, uids));
 
     /* load UID's deleted docs */
     auto uid_del_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_DELETED_DOCS);
-    std::string uid_del_path = snapshot::GetResPath<snapshot::SegmentFile>(uid_del_visitor->GetFile());
+    std::string uid_del_path = snapshot::GetResPath<snapshot::SegmentFile>(dir_root_, uid_del_visitor->GetFile());
     segment::DeletedDocsPtr deleted_docs_ptr;
     STATUS_CHECK(segment_reader.LoadDeletedDocs(uid_del_path, deleted_docs_ptr));
 
