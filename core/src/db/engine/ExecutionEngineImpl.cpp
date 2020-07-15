@@ -100,7 +100,6 @@ GetIndexDataType(EngineType type) {
         case EngineType::NSG_MIX:
             return codec::ExternalData::ExternalData_RawData;
 
-        case EngineType::FAISS_IVFSQ8:
         case EngineType::HNSW_SQ8NR:
         case EngineType::FAISS_IVFSQ8NR:
             return codec::ExternalData::ExternalData_SQ8;
@@ -807,12 +806,12 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
 
 Status
 ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::GeneralQueryPtr general_query,
-                                      std::unordered_map<std::string, DataType>& attr_type) {
+                                      std::unordered_map<std::string, meta::hybrid::DataType>& attr_type) {
     auto field_name = general_query->leaf->term_query->field_name;
     auto type = attr_type.at(field_name);
 
     switch (type) {
-        case DataType::INT8: {
+        case meta::hybrid::DataType::INT8: {
             auto int8_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int8_t>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not int8_index) {
@@ -827,7 +826,7 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
             bitset = int8_index->In(term_size, term_value.data());
             break;
         }
-        case DataType::INT16: {
+        case meta::hybrid::DataType::INT16: {
             auto int16_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int16_t>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not int16_index) {
@@ -842,7 +841,7 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
             bitset = int16_index->In(term_size, term_value.data());
             break;
         }
-        case DataType::INT32: {
+        case meta::hybrid::DataType::INT32: {
             auto int32_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int32_t>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not int32_index) {
@@ -857,7 +856,7 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
             bitset = int32_index->In(term_size, term_value.data());
             break;
         }
-        case DataType::INT64: {
+        case meta::hybrid::DataType::INT64: {
             auto int64_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int64_t>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not int64_index) {
@@ -872,7 +871,7 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
             bitset = int64_index->In(term_size, term_value.data());
             break;
         }
-        case DataType::FLOAT: {
+        case meta::hybrid::DataType::FLOAT: {
             auto float_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<float>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not float_index) {
@@ -887,7 +886,7 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
             bitset = float_index->In(term_size, term_value.data());
             break;
         }
-        case DataType::DOUBLE: {
+        case meta::hybrid::DataType::DOUBLE: {
             auto double_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<double>>(
                 attr_index_->attr_index_data().at(field_name));
             if (not double_index) {
@@ -909,39 +908,39 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
 }
 
 Status
-ExecutionEngineImpl::ProcessRangeQuery(const engine::DataType data_type, const std::string& operand,
+ExecutionEngineImpl::ProcessRangeQuery(const meta::hybrid::DataType data_type, const std::string& operand,
                                        const query::CompareOperator& com_operator, knowhere::IndexPtr& index_ptr,
                                        faiss::ConcurrentBitsetPtr& bitset) {
     switch (data_type) {
-        case DataType::INT8: {
+        case meta::hybrid::DataType::INT8: {
             auto int8_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int8_t>>(index_ptr);
 
             int8_t value = atoi(operand.c_str());
             bitset = int8_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case DataType::INT16: {
+        case meta::hybrid::DataType::INT16: {
             auto int16_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int16_t>>(index_ptr);
 
             int16_t value = atoi(operand.c_str());
             bitset = int16_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case DataType::INT32: {
+        case meta::hybrid::DataType::INT32: {
             auto int32_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int32_t>>(index_ptr);
 
             int32_t value = atoi(operand.c_str());
             bitset = int32_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case DataType::INT64: {
+        case meta::hybrid::DataType::INT64: {
             auto int64_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int64_t>>(index_ptr);
 
             int64_t value = atoi(operand.c_str());
             bitset = int64_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case DataType::FLOAT: {
+        case meta::hybrid::DataType::FLOAT: {
             auto float_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<float>>(index_ptr);
 
             std::istringstream iss(operand);
@@ -950,7 +949,7 @@ ExecutionEngineImpl::ProcessRangeQuery(const engine::DataType data_type, const s
             bitset = float_index->Range(value, (knowhere::OperatorType)com_operator);
             break;
         }
-        case DataType::DOUBLE: {
+        case meta::hybrid::DataType::DOUBLE: {
             auto double_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<double>>(index_ptr);
 
             std::istringstream iss(operand);
@@ -967,8 +966,8 @@ ExecutionEngineImpl::ProcessRangeQuery(const engine::DataType data_type, const s
 
 Status
 ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
-                                  std::unordered_map<std::string, DataType>& attr_type, std::vector<float>& distances,
-                                  std::vector<int64_t>& search_ids, bool hybrid) {
+                                  std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                                  std::vector<float>& distances, std::vector<int64_t>& search_ids, bool hybrid) {
     faiss::ConcurrentBitsetPtr bitset;
     std::string vector_placeholder;
     auto status = ExecBinaryQuery(search_job->general_query(), bitset, attr_type, vector_placeholder);
@@ -991,7 +990,7 @@ ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
     int64_t topk = vector_query->topk;
     int64_t nq = vector_query->query_vector.float_data.size() / dim_;
 
-    engine::VectorsData vectors;
+    VectorsData vectors;
     vectors.vector_count_ = nq;
     vectors.float_data_ = vector_query->query_vector.float_data;
     vectors.binary_data_ = vector_query->query_vector.binary_data;
@@ -1009,7 +1008,7 @@ ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
 }
 Status
 ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
-                                     std::unordered_map<std::string, DataType>& attr_type,
+                                     std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
                                      std::string& vector_placeholder) {
     Status status = Status::OK();
     if (general_query->leaf == nullptr) {
@@ -1273,7 +1272,7 @@ ExecutionEngineImpl::Search(std::vector<int64_t>& ids, std::vector<float>& dista
     uint64_t nq = job->nq();
     uint64_t topk = job->topk();
 
-    const engine::VectorsData& vectors = job->vectors();
+    const VectorsData& vectors = job->vectors();
 
     ids.resize(topk * nq);
     distances.resize(topk * nq);

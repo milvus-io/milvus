@@ -335,7 +335,7 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
 
 void IndexIVF::search_without_codes (idx_t n, const float *x, 
                                      const uint8_t *arranged_codes, std::vector<size_t> prefix_sum, 
-                                     idx_t k, float *distances, idx_t *labels,
+                                     bool is_sq8, idx_t k, float *distances, idx_t *labels,
                                      ConcurrentBitsetPtr bitset) 
 {
     std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
@@ -348,7 +348,7 @@ void IndexIVF::search_without_codes (idx_t n, const float *x,
     t0 = getmillisecs();
     invlists->prefetch_lists (idx.get(), n * nprobe);
 
-    search_preassigned_without_codes (n, x, arranged_codes, prefix_sum, k, idx.get(), coarse_dis.get(),
+    search_preassigned_without_codes (n, x, arranged_codes, prefix_sum, is_sq8, k, idx.get(), coarse_dis.get(),
                                       distances, labels, false, nullptr, bitset);
     indexIVF_stats.search_time += getmillisecs() - t0;
 }
@@ -584,7 +584,8 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
 
 void IndexIVF::search_preassigned_without_codes (idx_t n, const float *x, 
                                                  const uint8_t *arranged_codes, 
-                                                 std::vector<size_t> prefix_sum,  idx_t k,
+                                                 std::vector<size_t> prefix_sum,  
+                                                 bool is_sq8, idx_t k,
                                                  const idx_t *keys,
                                                  const float *coarse_dis ,
                                                  float *distances, idx_t *labels,
@@ -677,7 +678,8 @@ void IndexIVF::search_preassigned_without_codes (idx_t n, const float *x,
                 ids = sids->get();
             }
 
-            nheap += scanner->scan_codes (list_size, (const uint8_t *) ((const float *)scodes.get() + d * offset),
+            size_t size = is_sq8 ? sizeof(uint8_t) : sizeof(float);
+            nheap += scanner->scan_codes (list_size, (const uint8_t *) (scodes.get() + d * offset * size),
                                           ids, simi, idxi, k, bitset);
 
             return list_size;

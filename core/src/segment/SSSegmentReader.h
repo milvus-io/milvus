@@ -32,7 +32,7 @@ namespace segment {
 
 class SSSegmentReader {
  public:
-    explicit SSSegmentReader(const engine::SegmentVisitorPtr& segment_visitor);
+    explicit SSSegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor);
 
     // TODO(zhiru)
     Status
@@ -70,6 +70,7 @@ class SSSegmentReader {
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
     SegmentPtr segment_ptr_;
+    std::string dir_root_;
 };
 
 using SSSegmentReaderPtr = std::shared_ptr<SSSegmentReader>;

@@ -18,10 +18,10 @@
 #include <string>
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexIVFSQNR.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQNR.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/index/vector_offset_index/IndexIVFSQNR_NM.h"
 
 namespace milvus {
 namespace knowhere {
@@ -65,7 +65,7 @@ GPUIVFSQNR::CopyGpuToCpu(const Config& config) {
 
     std::shared_ptr<faiss::Index> new_index;
     new_index.reset(host_index);
-    return std::make_shared<IVFSQNR>(new_index);
+    return std::make_shared<IVFSQNR_NM>(new_index);
 }
 
 }  // namespace knowhere

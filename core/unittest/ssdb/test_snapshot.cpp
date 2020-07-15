@@ -20,6 +20,17 @@
 #include "ssdb/utils.h"
 #include "db/snapshot/HandlerFactory.h"
 
+Status
+GetFirstCollectionID(ID_TYPE& result_id) {
+    std::vector<ID_TYPE> ids;
+    auto status = Snapshots::GetInstance().GetCollectionIds(ids);
+    if (status.ok()) {
+        result_id = ids.at(0);
+    }
+
+    return status;
+}
+
 TEST_F(SnapshotTest, ResourcesTest) {
     int nprobe = 16;
     milvus::json params = {{"nprobe", nprobe}};
@@ -115,7 +126,8 @@ TEST_F(SnapshotTest, ScopedResourceTest) {
 }
 
 TEST_F(SnapshotTest, ResourceHoldersTest) {
-    ID_TYPE collection_id = 1;
+    ID_TYPE collection_id;
+    ASSERT_TRUE(GetFirstCollectionID(collection_id).ok());
     auto collection = CollectionsHolder::GetInstance().GetResource(collection_id, false);
     auto prev_cnt = collection->ref_count();
     {
@@ -259,6 +271,7 @@ TEST_F(SnapshotTest, DropCollectionTest) {
 
     auto ss_2 = CreateCollection(collection_name, ++lsn);
     status = Snapshots::GetInstance().GetSnapshot(lss, collection_name);
+//    EXPECT_DEATH({assert(1 == 2);}, "nullptr")
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(ss_2->GetID(), lss->GetID());
     ASSERT_NE(prev_ss_id, ss_2->GetID());
@@ -450,9 +463,15 @@ TEST_F(SnapshotTest, IndexTest) {
         return ++lsn;
     };
 
+    std::vector<ID_TYPE> ids;
+    auto status = Snapshots::GetInstance().GetCollectionIds(ids);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    auto collection_id = ids.at(0);
+
     ScopedSnapshotT ss;
-    auto status = Snapshots::GetInstance().GetSnapshot(ss, 1);
-    ASSERT_TRUE(status.ok());
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_id);
+    ASSERT_TRUE(status.ok()) << status.message();
 
     SegmentFileContext sf_context;
     SFContextBuilder(sf_context, ss);
@@ -470,14 +489,10 @@ TEST_F(SnapshotTest, IndexTest) {
 
     build_op->Push();
     status = build_op->GetSnapshot(ss);
-    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(status.ok()) << status.message();
 
     auto filter = [&](SegmentFile::Ptr segment_file) -> bool {
-        if (segment_file->GetSegmentId() == seg_file->GetSegmentId()) {
-            return true;
-        }
-
-        return false;
+        return segment_file->GetSegmentId() == seg_file->GetSegmentId();
     };
 
     auto filter2 = [&](SegmentFile::Ptr segment_file) -> bool {
@@ -490,8 +505,8 @@ TEST_F(SnapshotTest, IndexTest) {
     auto it_found = sf_collector->segment_files_.find(seg_file->GetID());
     ASSERT_NE(it_found, sf_collector->segment_files_.end());
 
-    status = Snapshots::GetInstance().GetSnapshot(ss, 1);
-    ASSERT_TRUE(status.ok());
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
 
     OperationContext drop_ctx;
     drop_ctx.lsn = next_lsn();
@@ -530,8 +545,9 @@ TEST_F(SnapshotTest, IndexTest) {
     auto partitions = ss->GetResources<Partition>();
     for (auto& kv : partitions) {
         num = RandomInt(2, 5);
+        auto row_cnt = 1024;
         for (auto i = 0; i < num; ++i) {
-            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context).ok());
+            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
         }
         new_total += num;
     }
@@ -549,10 +565,7 @@ TEST_F(SnapshotTest, IndexTest) {
     ASSERT_NE(field_element_id, 0);
 
     auto filter3 = [&](SegmentFile::Ptr segment_file) -> bool {
-        if (segment_file->GetFieldElementId() == field_element_id) {
-            return true;
-        }
-        return false;
+        return segment_file->GetFieldElementId() == field_element_id;
     };
     sf_collector = std::make_shared<SegmentFileCollector>(ss, filter3);
     sf_collector->Iterate();
@@ -605,14 +618,34 @@ TEST_F(SnapshotTest, IndexTest) {
 }
 
 TEST_F(SnapshotTest, OperationTest) {
-    Status status;
     std::string to_string;
     LSN_TYPE lsn;
+    Status status;
 
-    ScopedSnapshotT ss;
-    status = Snapshots::GetInstance().GetSnapshot(ss, 1);
-    std::cout << status.ToString() << std::endl;
+    /* ID_TYPE collection_id; */
+    /* ASSERT_TRUE(GetFirstCollectionID(collection_id).ok()); */
+    std::string collection_name("c1");
+    auto ss = CreateCollection(collection_name, ++lsn);
+    ASSERT_TRUE(ss);
+
+    SegmentFileContext sf_context;
+    SFContextBuilder(sf_context, ss);
+
+    auto& partitions = ss->GetResources<Partition>();
+    auto total_row_cnt = 0;
+    for (auto& kv : partitions) {
+        auto num = RandomInt(2, 5);
+        for (auto i = 0; i < num; ++i) {
+            auto row_cnt = RandomInt(100, 200);
+            ASSERT_TRUE(CreateSegment(ss, kv.first, ++lsn, sf_context, row_cnt).ok());
+            total_row_cnt += row_cnt;
+        }
+    }
+
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
     ASSERT_TRUE(status.ok());
+    ASSERT_EQ(total_row_cnt, ss->GetCollectionCommit()->GetRowCount());
+
     auto ss_id = ss->GetID();
     lsn = ss->GetMaxLsn() + 1;
 
@@ -624,11 +657,13 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_TRUE(collection_commit->ToString().empty());
     }
 
-    SegmentFileContext sf_context;
+    OperationContext merge_ctx;
+    auto merge_segment_row_cnt = 0;
+
+    std::set<ID_TYPE> stale_segment_commit_ids;
     SFContextBuilder(sf_context, ss);
 
-    OperationContext merge_ctx;
-    std::set<ID_TYPE> stale_segment_commit_ids;
+    std::cout << ss->ToString() << std::endl;
 
     ID_TYPE new_seg_id;
     ScopedSnapshotT new_ss;
@@ -639,6 +674,7 @@ TEST_F(SnapshotTest, OperationTest) {
         auto build_op = std::make_shared<BuildOperation>(context, ss);
         SegmentFilePtr seg_file;
         status = build_op->CommitNewSegmentFile(sf_context, seg_file);
+        std::cout << status.ToString() << std::endl;
         ASSERT_TRUE(status.ok());
         ASSERT_TRUE(seg_file);
         auto prev_segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
@@ -648,6 +684,7 @@ TEST_F(SnapshotTest, OperationTest) {
         build_op->Push();
         status = build_op->GetSnapshot(ss);
         ASSERT_GT(ss->GetID(), ss_id);
+        ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
 
         auto segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto segment_commit_mappings = segment_commit->GetMappings();
@@ -658,22 +695,36 @@ TEST_F(SnapshotTest, OperationTest) {
         auto seg = ss->GetResource<Segment>(seg_file->GetSegmentId());
         ASSERT_TRUE(seg);
         merge_ctx.stale_segments.push_back(seg);
+        merge_segment_row_cnt += ss->GetSegmentCommitBySegmentId(seg->GetID())->GetRowCount();
+
         stale_segment_commit_ids.insert(segment_commit->GetID());
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    // Check stale snapshot has been deleted from store
-    {
-        auto collection_commit = CollectionCommitsHolder::GetInstance().GetResource(ss_id, false);
-        ASSERT_FALSE(collection_commit);
-    }
+//    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+//    // Check stale snapshot has been deleted from store
+//    {
+//        auto collection_commit = CollectionCommitsHolder::GetInstance().GetResource(ss_id, false);
+//        ASSERT_FALSE(collection_commit);
+//    }
 
     ss_id = ss->GetID();
     ID_TYPE partition_id;
     {
+        std::vector<PartitionPtr> partitions;
+        auto executor = [&](const PartitionPtr& partition,
+                            PartitionIterator* itr) -> Status {
+            if (partition->GetCollectionId() != ss->GetCollectionId()) {
+                return Status::OK();
+            }
+            partitions.push_back(partition);
+            return Status::OK();
+        };
+        auto iterator = std::make_shared<PartitionIterator>(ss, executor);
+        iterator->Iterate();
+
         OperationContext context;
         context.lsn = ++lsn;
-        context.prev_partition = ss->GetResource<Partition>(1);
+        context.prev_partition = ss->GetResource<Partition>(partitions[0]->GetID());
         auto op = std::make_shared<NewSegmentOperation>(context, ss);
         SegmentPtr new_seg;
         status = op->CommitNewSegment(new_seg);
@@ -682,19 +733,29 @@ TEST_F(SnapshotTest, OperationTest) {
         SegmentFilePtr seg_file;
         status = op->CommitNewSegmentFile(sf_context, seg_file);
         ASSERT_TRUE(status.ok());
+
+        auto new_segment_row_cnt = RandomInt(100, 200);
+        status = op->CommitRowCount(new_segment_row_cnt);
+        ASSERT_TRUE(status.ok());
+        total_row_cnt += new_segment_row_cnt;
+
         status = op->Push();
         ASSERT_TRUE(status.ok());
 
         status = op->GetSnapshot(ss);
         ASSERT_GT(ss->GetID(), ss_id);
         ASSERT_TRUE(status.ok());
+        ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
 
         auto segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto segment_commit_mappings = segment_commit->GetMappings();
         MappingT expected_segment_mappings;
         expected_segment_mappings.insert(seg_file->GetID());
         ASSERT_EQ(expected_segment_mappings, segment_commit_mappings);
+
         merge_ctx.stale_segments.push_back(new_seg);
+        merge_segment_row_cnt += ss->GetSegmentCommitBySegmentId(new_seg->GetID())->GetRowCount();
+
         partition_id = segment_commit->GetPartitionId();
         stale_segment_commit_ids.insert(segment_commit->GetID());
         auto partition = ss->GetResource<Partition>(partition_id);
@@ -719,13 +780,16 @@ TEST_F(SnapshotTest, OperationTest) {
         status = op->CommitNewSegmentFile(sf_context, seg_file);
         ASSERT_TRUE(status.ok());
         status = op->Push();
-        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(status.ok()) << status.ToString();
         std::cout << op->ToString() << std::endl;
         status = op->GetSnapshot(ss);
         ASSERT_GT(ss->GetID(), ss_id);
         ASSERT_TRUE(status.ok());
 
         auto segment_commit = ss->GetSegmentCommitBySegmentId(new_seg->GetID());
+        ASSERT_EQ(segment_commit->GetRowCount(), merge_segment_row_cnt);
+        ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
+
         auto new_partition_commit = ss->GetPartitionCommitByPartitionId(partition_id);
         auto new_mappings = new_partition_commit->GetMappings();
         auto prev_mappings = prev_partition_commit->GetMappings();

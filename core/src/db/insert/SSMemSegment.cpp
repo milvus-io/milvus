@@ -23,6 +23,7 @@
 #include "db/meta/MetaTypes.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/Snapshots.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
 #include "segment/SegmentReader.h"
 #include "utils/Log.h"
@@ -33,12 +34,7 @@ namespace engine {
 SSMemSegment::SSMemSegment(int64_t collection_id, int64_t partition_id, const DBOptions& options)
     : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
     current_mem_ = 0;
-    auto status = CreateSegment();
-    if (status.ok()) {
-        std::string directory;
-        utils::CreatePath(segment_.get(), options_, directory);
-        segment_writer_ptr_ = std::make_shared<segment::SegmentWriter>(directory);
-    }
+    CreateSegment();
 
     SetIdentity("SSMemSegment");
     AddCacheInsertDataListener();
@@ -54,6 +50,7 @@ SSMemSegment::CreateSegment() {
         return status;
     }
 
+    // create segment
     snapshot::OperationContext context;
     context.prev_partition = ss->GetResource<snapshot::Partition>(partition_id_);
     operation_ = std::make_shared<snapshot::NewSegmentOperation>(context, ss);
@@ -64,7 +61,58 @@ SSMemSegment::CreateSegment() {
         return status;
     }
 
-    return status;
+    // create segment raw files (placeholder)
+    auto names = ss->GetFieldNames();
+    for (auto& name : names) {
+        snapshot::SegmentFileContext sf_context;
+        sf_context.collection_id = collection_id_;
+        sf_context.partition_id = partition_id_;
+        sf_context.segment_id = segment_->GetID();
+        sf_context.field_name = name;
+        sf_context.field_element_name = engine::DEFAULT_RAW_DATA_NAME;
+
+        snapshot::SegmentFilePtr seg_file;
+        status = operation_->CommitNewSegmentFile(sf_context, seg_file);
+        if (!status.ok()) {
+            std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
+    }
+
+    // create deleted_doc and bloom_filter files (placeholder)
+    {
+        snapshot::SegmentFileContext sf_context;
+        sf_context.collection_id = collection_id_;
+        sf_context.partition_id = partition_id_;
+        sf_context.segment_id = segment_->GetID();
+        sf_context.field_name = engine::DEFAULT_UID_NAME;
+        sf_context.field_element_name = engine::DEFAULT_DELETED_DOCS_NAME;
+
+        snapshot::SegmentFilePtr delete_doc_file, bloom_filter_file;
+        status = operation_->CommitNewSegmentFile(sf_context, delete_doc_file);
+        if (!status.ok()) {
+            std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
+
+        sf_context.field_element_name = engine::DEFAULT_BLOOM_FILTER_NAME;
+        status = operation_->CommitNewSegmentFile(sf_context, bloom_filter_file);
+        if (!status.ok()) {
+            std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
+    }
+
+    auto ctx = operation_->GetContext();
+    auto visitor = SegmentVisitor::Build(ss, ctx.new_segment, ctx.new_segment_files);
+
+    // create segment writer
+    segment_writer_ptr_ = std::make_shared<segment::SSSegmentWriter>(options_.meta_.path_, visitor);
+
+    return Status::OK();
 }
 
 Status
@@ -105,17 +153,16 @@ SSMemSegment::GetSingleEntitySize(size_t& single_size) {
             case meta::hybrid::DataType::INT64:
                 single_size += sizeof(uint64_t);
                 break;
-            case meta::hybrid::DataType::VECTOR:
             case meta::hybrid::DataType::VECTOR_FLOAT:
             case meta::hybrid::DataType::VECTOR_BINARY: {
                 json params = field->GetParams();
-                if (params.find(VECTOR_DIMENSION_PARAM) == params.end()) {
+                if (params.find(knowhere::meta::DIM) == params.end()) {
                     std::string msg = "Vector field params must contain: dimension";
                     LOG_SERVER_ERROR_ << msg;
                     return Status(DB_ERROR, msg);
                 }
 
-                int64_t dimension = params[VECTOR_DIMENSION_PARAM];
+                int64_t dimension = params[knowhere::meta::DIM];
                 if (ftype == meta::hybrid::DataType::VECTOR_BINARY) {
                     single_size += (dimension / 8);
                 } else {
@@ -155,14 +202,22 @@ SSMemSegment::Add(const SSVectorSourcePtr& source) {
 
 Status
 SSMemSegment::Delete(segment::doc_id_t doc_id) {
-    segment::SegmentPtr segment_ptr;
+    engine::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
+
     // Check wither the doc_id is present, if yes, delete it's corresponding buffer
-    auto uids = segment_ptr->vectors_ptr_->GetUids();
-    auto found = std::find(uids.begin(), uids.end(), doc_id);
-    if (found != uids.end()) {
-        auto offset = std::distance(uids.begin(), found);
-        segment_ptr->vectors_ptr_->Erase(offset);
+    engine::FIXED_FIELD_DATA raw_data;
+    auto status = segment_ptr->GetFixedFieldData(engine::DEFAULT_UID_NAME, raw_data);
+    if (!status.ok()) {
+        return Status::OK();
+    }
+
+    int64_t* uids = reinterpret_cast<int64_t*>(raw_data.data());
+    int64_t row_count = segment_ptr->GetRowCount();
+    for (int64_t i = 0; i < row_count; i++) {
+        if (doc_id == uids[i]) {
+            segment_ptr->DeleteEntity(i);
+        }
     }
 
     return Status::OK();
@@ -170,37 +225,31 @@ SSMemSegment::Delete(segment::doc_id_t doc_id) {
 
 Status
 SSMemSegment::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
-    segment::SegmentPtr segment_ptr;
+    engine::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
 
     // Check wither the doc_id is present, if yes, delete it's corresponding buffer
-
     std::vector<segment::doc_id_t> temp;
     temp.resize(doc_ids.size());
     memcpy(temp.data(), doc_ids.data(), doc_ids.size() * sizeof(segment::doc_id_t));
 
     std::sort(temp.begin(), temp.end());
 
-    auto uids = segment_ptr->vectors_ptr_->GetUids();
+    engine::FIXED_FIELD_DATA raw_data;
+    auto status = segment_ptr->GetFixedFieldData(engine::DEFAULT_UID_NAME, raw_data);
+    if (!status.ok()) {
+        return Status::OK();
+    }
 
+    int64_t* uids = reinterpret_cast<int64_t*>(raw_data.data());
+    int64_t row_count = segment_ptr->GetRowCount();
     size_t deleted = 0;
-    size_t loop = uids.size();
-    for (size_t i = 0; i < loop; ++i) {
+    for (int64_t i = 0; i < row_count; ++i) {
         if (std::binary_search(temp.begin(), temp.end(), uids[i])) {
-            segment_ptr->vectors_ptr_->Erase(i - deleted);
+            segment_ptr->DeleteEntity(i - deleted);
             ++deleted;
         }
     }
-    /*
-    for (auto& doc_id : doc_ids) {
-        auto found = std::find(uids.begin(), uids.end(), doc_id);
-        if (found != uids.end()) {
-            auto offset = std::distance(uids.begin(), found);
-            segment_ptr->vectors_ptr_->Erase(offset);
-            uids = segment_ptr->vectors_ptr_->GetUids();
-        }
-    }
-    */
 
     return Status::OK();
 }
@@ -240,7 +289,6 @@ SSMemSegment::Serialize(uint64_t wal_lsn) {
     snapshot::SegmentFilePtr seg_file;
     auto status = operation_->CommitNewSegmentFile(sf_context, seg_file);
 
-    segment_writer_ptr_->SetSegmentName(std::to_string(segment_->GetID()));
     status = segment_writer_ptr_->Serialize();
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to serialize segment: " << segment_->GetID();
@@ -248,7 +296,7 @@ SSMemSegment::Serialize(uint64_t wal_lsn) {
     }
 
     seg_file->SetSize(segment_writer_ptr_->Size());
-    seg_file->SetRowCount(segment_writer_ptr_->VectorCount());
+    seg_file->SetRowCount(segment_writer_ptr_->RowCount());
 
     status = operation_->Push();
 

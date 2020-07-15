@@ -22,7 +22,7 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
-#include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 
@@ -34,6 +34,17 @@
 
 #include "unittest/Helper.h"
 #include "unittest/utils.h"
+
+#define SERIALIZE_AND_LOAD(index_)                                                   \
+    milvus::knowhere::BinarySet bs = index_->Serialize(conf_);                       \
+    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);           \
+    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);         \
+    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);  \
+    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>(); \
+    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});   \
+    bptr->size = dim * rows * sizeof(float);                                         \
+    bs.Append(RAW_DATA, bptr);                                                       \
+    index_->Load(bs);
 
 using ::testing::Combine;
 using ::testing::TestWithParam;
@@ -86,19 +97,32 @@ TEST_F(IVFNMGPUTest, ivf_basic_gpu) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
-    milvus::knowhere::BinarySet bs = index_->Serialize(conf_);
+    index_->SetIndexSize(nq * dim * sizeof(float));
 
-    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
-    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
-    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
-    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
-    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
-    bptr->size = dim * rows * sizeof(float);
-    bs.Append(RAW_DATA, bptr);
-    index_->Load(bs);
+    SERIALIZE_AND_LOAD(index_);
 
     auto result = index_->Query(query_dataset, conf_);
     AssertAnns(result, nq, k);
+
+    auto AssertEqual = [&](milvus::knowhere::DatasetPtr p1, milvus::knowhere::DatasetPtr p2) {
+        auto ids_p1 = p1->Get<int64_t*>(milvus::knowhere::meta::IDS);
+        auto ids_p2 = p2->Get<int64_t*>(milvus::knowhere::meta::IDS);
+
+        for (int i = 0; i < nq * k; ++i) {
+            EXPECT_EQ(*((int64_t*)(ids_p2) + i), *((int64_t*)(ids_p1) + i));
+        }
+    };
+
+    // copy from gpu to cpu
+    {
+        EXPECT_NO_THROW({
+            auto clone_index = milvus::knowhere::cloner::CopyGpuToCpu(index_, conf_);
+            SERIALIZE_AND_LOAD(clone_index);
+            auto clone_result = clone_index->Query(query_dataset, conf_);
+            AssertEqual(result, clone_result);
+            std::cout << "clone G <=> C [" << index_type_ << "] success" << std::endl;
+        });
+    }
 
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
     for (int64_t i = 0; i < nq; ++i) {

@@ -196,7 +196,8 @@ struct IndexIVF: Index, Level1Quantizer {
     /** Similar to search_preassigned, but does not store codes **/
     virtual void search_preassigned_without_codes (idx_t n, const float *x, 
                                                    const uint8_t *arranged_codes, 
-                                                   std::vector<size_t> prefix_sum, idx_t k,
+                                                   std::vector<size_t> prefix_sum, 
+                                                   bool is_sq8, idx_t k,
                                                    const idx_t *assign,
                                                    const float *centroid_dis,
                                                    float *distances, idx_t *labels,
@@ -212,7 +213,7 @@ struct IndexIVF: Index, Level1Quantizer {
     /** Similar to search, but does not store codes **/
     void search_without_codes (idx_t n, const float *x, 
                                const uint8_t *arranged_codes, std::vector<size_t> prefix_sum, 
-                               idx_t k, float *distances, idx_t *labels,
+                               bool is_sq8, idx_t k, float *distances, idx_t *labels,
                                ConcurrentBitsetPtr bitset = nullptr);
 
 #if 0

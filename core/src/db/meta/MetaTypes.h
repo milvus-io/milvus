@@ -17,11 +17,61 @@
 #include <vector>
 
 #include "db/Constants.h"
-#include "db/engine/ExecutionEngine.h"
+#include "knowhere/index/IndexType.h"
 #include "src/version.h"
 
 namespace milvus {
 namespace engine {
+
+// TODO(linxj): replace with VecIndex::IndexType
+enum class EngineType {
+    INVALID = 0,
+    FAISS_IDMAP = 1,
+    FAISS_IVFFLAT = 2,
+    FAISS_IVFSQ8 = 3,
+    NSG_MIX = 4,
+    FAISS_IVFSQ8H = 5,
+    FAISS_PQ = 6,
+#ifdef MILVUS_SUPPORT_SPTAG
+    SPTAG_KDT = 7,
+    SPTAG_BKT = 8,
+#endif
+    FAISS_BIN_IDMAP = 9,
+    FAISS_BIN_IVFFLAT = 10,
+    HNSW = 11,
+    ANNOY = 12,
+    FAISS_IVFSQ8NR = 13,
+    HNSW_SQ8NR = 14,
+    MAX_VALUE = HNSW_SQ8NR,
+};
+
+static std::map<std::string, EngineType> s_map_engine_type = {
+    {knowhere::IndexEnum::INDEX_FAISS_IDMAP, EngineType::FAISS_IDMAP},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, EngineType::FAISS_IVFFLAT},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFPQ, EngineType::FAISS_PQ},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, EngineType::FAISS_IVFSQ8},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, EngineType::FAISS_IVFSQ8NR},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, EngineType::FAISS_IVFSQ8H},
+    {knowhere::IndexEnum::INDEX_NSG, EngineType::NSG_MIX},
+#ifdef MILVUS_SUPPORT_SPTAG
+    {knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, EngineType::SPTAG_KDT},
+    {knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, EngineType::SPTAG_BKT},
+#endif
+    {knowhere::IndexEnum::INDEX_HNSW, EngineType::HNSW},
+    {knowhere::IndexEnum::INDEX_HNSW_SQ8NR, EngineType::HNSW_SQ8NR},
+    {knowhere::IndexEnum::INDEX_ANNOY, EngineType::ANNOY}};
+
+enum class MetricType {
+    L2 = 1,              // Euclidean Distance
+    IP = 2,              // Cosine Similarity
+    HAMMING = 3,         // Hamming Distance
+    JACCARD = 4,         // Jaccard Distance
+    TANIMOTO = 5,        // Tanimoto Distance
+    SUBSTRUCTURE = 6,    // Substructure Distance
+    SUPERSTRUCTURE = 7,  // Superstructure Distance
+    MAX_VALUE = SUPERSTRUCTURE
+};
+
 namespace meta {
 
 constexpr int32_t DEFAULT_ENGINE_TYPE = (int)EngineType::FAISS_IDMAP;
