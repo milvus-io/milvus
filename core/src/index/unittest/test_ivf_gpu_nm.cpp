@@ -22,7 +22,7 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
-#include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 

@@ -12,11 +12,11 @@
 #include <memory>
 #include <string>
 
+#include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQNR.h"
-#include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 

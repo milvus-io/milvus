@@ -19,6 +19,7 @@
 
 #include <faiss/utils/ConcurrentBitset.h>
 
+#include "db/meta/MetaTypes.h"
 #include "query/GeneralQuery.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
@@ -31,67 +32,6 @@ using SearchJobPtr = std::shared_ptr<SearchJob>;
 }  // namespace scheduler
 
 namespace engine {
-
-// TODO(linxj): replace with VecIndex::IndexType
-enum class EngineType {
-    INVALID = 0,
-    FAISS_IDMAP = 1,
-    FAISS_IVFFLAT,
-    FAISS_IVFSQ8,
-    NSG_MIX,
-    FAISS_IVFSQ8H,
-    FAISS_PQ,
-    SPTAG_KDT,
-    SPTAG_BKT,
-    FAISS_BIN_IDMAP,
-    FAISS_BIN_IVFFLAT,
-    HNSW,
-    ANNOY,
-    FAISS_IVFSQ8NR,
-    HNSW_SQ8NR,
-    MAX_VALUE = HNSW_SQ8NR,
-};
-
-static std::map<std::string, EngineType> s_map_engine_type = {{"FLAT", EngineType::FAISS_IDMAP},
-                                                              {"IVFFLAT", EngineType::FAISS_IVFFLAT},
-                                                              {"IVFSQ8", EngineType::FAISS_IVFSQ8},
-                                                              {"RNSG", EngineType::NSG_MIX},
-                                                              {"IVFSQ8H", EngineType::FAISS_IVFSQ8H},
-                                                              {"IVFPQ", EngineType::FAISS_PQ},
-                                                              {"SPTAGKDT", EngineType::SPTAG_KDT},
-                                                              {"SPTAGBKT", EngineType::SPTAG_BKT},
-                                                              {"HNSW", EngineType::HNSW},
-                                                              {"ANNOY", EngineType::ANNOY},
-                                                              {"IVFSQ8NR", EngineType::FAISS_IVFSQ8NR},
-                                                              {"HNSW_SQ8NR", EngineType::HNSW_SQ8NR}};
-
-enum class MetricType {
-    L2 = 1,              // Euclidean Distance
-    IP = 2,              // Cosine Similarity
-    HAMMING = 3,         // Hamming Distance
-    JACCARD = 4,         // Jaccard Distance
-    TANIMOTO = 5,        // Tanimoto Distance
-    SUBSTRUCTURE = 6,    // Substructure Distance
-    SUPERSTRUCTURE = 7,  // Superstructure Distance
-    MAX_VALUE = SUPERSTRUCTURE
-};
-
-enum class DataType {
-    INT8 = 1,
-    INT16 = 2,
-    INT32 = 3,
-    INT64 = 4,
-
-    STRING = 20,
-
-    BOOL = 30,
-
-    FLOAT = 40,
-    DOUBLE = 41,
-
-    VECTOR = 100,
-    UNKNOWN = 9999,
-};
 
 class ExecutionEngine {
  public:
@@ -144,10 +84,11 @@ class ExecutionEngine {
 
     virtual Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
-                    std::unordered_map<std::string, DataType>& attr_type, std::string& vector_placeholder) = 0;
+                    std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                    std::string& vector_placeholder) = 0;
 
     virtual Status
-    HybridSearch(scheduler::SearchJobPtr job, std::unordered_map<std::string, DataType>& attr_type,
+    HybridSearch(scheduler::SearchJobPtr job, std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
                  std::vector<float>& distances, std::vector<int64_t>& search_ids, bool hybrid) = 0;
 
     virtual Status
