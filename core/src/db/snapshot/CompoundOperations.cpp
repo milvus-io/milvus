@@ -373,8 +373,9 @@ MergeOperation::DoExecute(Store& store) {
     SegmentCommitOperation sc_op(context_, GetAdjustedSS());
     STATUS_CHECK(sc_op(store));
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
-    context_.new_segment_commit->SetRowCount(row_cnt);
     auto sc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(meta::oUpdate).CreatePtr();
+    context_.new_segment_commit->SetRowCount(row_cnt);
+    sc_ctx_p->AddAttr(RowCountField::Name);
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn, sc_ctx_p);
     /* std::cout << GetRepr() << " POST_SC_MAP=("; */
     /* for (auto id : context_.new_segment_commit->GetMappings()) { */
