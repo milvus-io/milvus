@@ -115,20 +115,6 @@ SSSegmentReader::LoadVectors(const std::string& file_path, off_t offset, size_t 
 }
 
 Status
-SSSegmentReader::LoadAttrs(const std::string& field_name, off_t offset, size_t num_bytes,
-                           std::vector<uint8_t>& raw_attrs) {
-    try {
-        auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetAttrsFormat()->read_attrs(fs_ptr_, field_name, offset, num_bytes, raw_attrs);
-    } catch (std::exception& e) {
-        std::string err_msg = "Failed to load raw attributes: " + std::string(e.what());
-        LOG_ENGINE_ERROR_ << err_msg;
-        return Status(DB_ERROR, err_msg);
-    }
-    return Status::OK();
-}
-
-Status
 SSSegmentReader::LoadUids(const std::string& file_path, std::vector<doc_id_t>& uids) {
     try {
         auto& ss_codec = codec::SSCodec::instance();

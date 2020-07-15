@@ -38,7 +38,8 @@ using FIXED_FIELD_DATA = std::vector<uint8_t>;
 using FIXEDX_FIELD_MAP = std::unordered_map<std::string, FIXED_FIELD_DATA>;
 using VARIABLE_FIELD_DATA = std::vector<std::string>;
 using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VARIABLE_FIELD_DATA>;
-using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;
+using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;  // field element mapping to index
+using FIELD_INDEX_MAP = std::unordered_map<std::string, VECTOR_INDEX_MAP>;        // field mapping to multiple indice
 
 struct DataChunk {
     uint64_t count_ = 0;
@@ -72,10 +73,10 @@ class Segment {
     GetFixedFieldData(const std::string& field_name, FIXED_FIELD_DATA& data);
 
     Status
-    GetVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index);
+    GetVectorIndex(const std::string& field_name, const std::string& element_name, knowhere::VecIndexPtr& index);
 
     Status
-    SetVectorIndex(const std::string& field_name, const knowhere::VecIndexPtr& index);
+    SetVectorIndex(const std::string& field_name, const std::string& element_name, const knowhere::VecIndexPtr& index);
 
     FIELD_TYPE_MAP&
     GetFieldTypes() {
@@ -89,7 +90,7 @@ class Segment {
     GetVariableFields() {
         return variable_fields_;
     }
-    VECTOR_INDEX_MAP&
+    FIELD_INDEX_MAP&
     GetVectorIndice() {
         return vector_indice_;
     }
@@ -124,7 +125,7 @@ class Segment {
     FIELD_WIDTH_MAP fixed_fields_width_;
     FIXEDX_FIELD_MAP fixed_fields_;
     VARIABLE_FIELD_MAP variable_fields_;
-    VECTOR_INDEX_MAP vector_indice_;
+    FIELD_INDEX_MAP vector_indice_;
 
     uint64_t row_count_ = 0;
 

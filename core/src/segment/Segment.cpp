@@ -176,19 +176,25 @@ Segment::GetFixedFieldData(const std::string& field_name, FIXED_FIELD_DATA& data
 }
 
 Status
-Segment::GetVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index) {
+Segment::GetVectorIndex(const std::string& field_name, const std::string& element_name, knowhere::VecIndexPtr& index) {
     auto iter = vector_indice_.find(field_name);
     if (iter == vector_indice_.end()) {
         return Status(DB_ERROR, "invalid field name: " + field_name);
     }
 
-    index = iter->second;
+    auto iter_index = iter->second.find(element_name);
+    if (iter_index == iter->second.end()) {
+        return Status(DB_ERROR, "invalid field element name: " + element_name);
+    }
+
+    index = iter_index->second;
     return Status::OK();
 }
 
 Status
-Segment::SetVectorIndex(const std::string& field_name, const knowhere::VecIndexPtr& index) {
-    vector_indice_[field_name] = index;
+Segment::SetVectorIndex(const std::string& field_name, const std::string& element_name,
+                        const knowhere::VecIndexPtr& index) {
+    vector_indice_[field_name][element_name] = index;
     return Status::OK();
 }
 

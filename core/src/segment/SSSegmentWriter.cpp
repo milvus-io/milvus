@@ -305,15 +305,21 @@ SSSegmentWriter::RowCount() {
 }
 
 Status
-SSSegmentWriter::SetVectorIndex(const std::string& field_name, const milvus::knowhere::VecIndexPtr& index) {
-    return segment_ptr_->SetVectorIndex(field_name, index);
+SSSegmentWriter::SetVectorIndex(const std::string& field_name, const std::string& element_name,
+                                const milvus::knowhere::VecIndexPtr& index) {
+    return segment_ptr_->SetVectorIndex(field_name, element_name, index);
 }
 
 Status
-SSSegmentWriter::WriteVectorIndex(const std::string& field_name, const std::string& file_path) {
+SSSegmentWriter::WriteVectorIndex(const std::string& field_name, const std::string& element_name,
+                                  const std::string& file_path) {
     try {
         knowhere::VecIndexPtr index;
-        segment_ptr_->GetVectorIndex(field_name, index);
+        auto status = segment_ptr_->GetVectorIndex(field_name, element_name, index);
+        if (!status.ok() || index == nullptr) {
+            return Status(DB_ERROR, "index doesn't exist: " + status.message());
+        }
+
         segment::VectorIndexPtr index_ptr = std::make_shared<segment::VectorIndex>(index);
 
         auto& ss_codec = codec::SSCodec::instance();
