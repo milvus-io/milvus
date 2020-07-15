@@ -60,7 +60,7 @@ set(vector_index_srcs
         knowhere/index/vector_index/IndexIVF.cpp
         knowhere/index/vector_index/IndexIVFPQ.cpp
         knowhere/index/vector_index/IndexIVFSQ.cpp
-        knowhere/index/vector_index/IndexType.cpp
+        knowhere/index/IndexType.cpp
         knowhere/index/vector_index/VecIndexFactory.cpp
         knowhere/index/vector_index/IndexAnnoy.cpp
         )
