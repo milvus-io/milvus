@@ -34,10 +34,6 @@ class SSSegmentReader {
  public:
     explicit SSSegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor);
 
-    // TODO(zhiru)
-    Status
-    LoadCache(bool& in_cache);
-
     Status
     Load();
 

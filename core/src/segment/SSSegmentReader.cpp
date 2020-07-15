@@ -47,12 +47,6 @@ SSSegmentReader::SSSegmentReader(const std::string& dir_root, const engine::Segm
 }
 
 Status
-SSSegmentReader::LoadCache(bool& in_cache) {
-    in_cache = false;
-    return Status::OK();
-}
-
-Status
 SSSegmentReader::Load() {
     try {
         // auto& ss_codec = codec::SSCodec::instance();
