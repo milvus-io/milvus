@@ -108,7 +108,7 @@ cd ${BUILD_OUTPUT_DIR}
 # force update the variables each time
 # make rebuild_cache >/dev/null 2>&1
 
-CMAKE_CMD="cmake --build
+CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
@@ -124,69 +124,39 @@ CMAKE_CMD="cmake --build
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_WITH_FIU=${FIU_ENABLE} \
 ../"
-# echo ${CMAKE_CMD}
+echo ${CMAKE_CMD}
 ${CMAKE_CMD}
-# backup
 
-# -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
-# -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
-# -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
-# -DFAISS_ROOT=${FAISS_ROOT} \
-# -DFAISS_SOURCE=${FAISS_SOURCE} \
-# -DOpenBLAS_SOURCE=AUTO \
-# -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
-# -DBUILD_COVERAGE=${BUILD_COVERAGE} \
-# -DMILVUS_DB_PATH=${DB_PATH} \
-# -DENABLE_CPU_PROFILING=${PROFILING} \
-# -DMILVUS_GPU_VERSION=${GPU_VERSION} \
-# -DFAISS_WITH_MKL=${WITH_MKL} \
-# -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
-# -DMILVUS_WITH_FIU=${FIU_ENABLE} \
-#
+if [[ ${MAKE_CLEAN} == "ON" ]]; then
+  make clean
+fi
 
+if [[ ${RUN_CPPLINT} == "ON" ]]; then
+  # cpplint check
+  make lint
+  if [ $? -ne 0 ]; then
+    echo "ERROR! cpplint check failed"
+    exit 1
+  fi
+  echo "cpplint check passed!"
 
+  clang-format check
+  make check-clang-format
+  if [ $? -ne 0 ]; then
+    echo "ERROR! clang-format check failed"
+    exit 1
+  fi
+  echo "clang-format check passed!"
 
+#    # clang-tidy check
+#    make check-clang-tidy
+#    if [ $? -ne 0 ]; then
+#        echo "ERROR! clang-tidy check failed"
+#        exit 1
+#    fi
+#    echo "clang-tidy check passed!"
+else
 
-
-
-
-
-
-
-
-
-
-
-# if [[ ${MAKE_CLEAN} == "ON" ]]; then
-#   make clean
-# fi
-
-# if [[ ${RUN_CPPLINT} == "ON" ]]; then
-#   # cpplint check
-#   make lint
-#   if [ $? -ne 0 ]; then
-#     echo "ERROR! cpplint check failed"
-#     exit 1
-#   fi
-#   echo "cpplint check passed!"
-
-  # clang-format check
-#   make check-clang-format
-#   if [ $? -ne 0 ]; then
-#     echo "ERROR! clang-format check failed"
-#     exit 1
-#   fi
-#   echo "clang-format check passed!"
-#
-# #    # clang-tidy check
-# #    make check-clang-tidy
-# #    if [ $? -ne 0 ]; then
-# #        echo "ERROR! clang-tidy check failed"
-# #        exit 1
-# #    fi
-# #    echo "clang-tidy check passed!"
-# else
-#
   # compile and build
-make -j 8 install || exit 1
-# fi
+    make -j 8 install || exit 1
+fi
