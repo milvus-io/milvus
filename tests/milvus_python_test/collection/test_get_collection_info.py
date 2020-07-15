@@ -4,14 +4,14 @@ import logging
 import itertools
 from time import sleep
 from multiprocessing import Process
-from milvus import IndexType, MetricType
 from utils import *
 
+collection_id = "info"
 default_fields = gen_default_fields() 
 segment_size = 10
 
 
-class TestInfoCollection:
+class TestInfoBase:
 
     @pytest.fixture(
         scope="function",
@@ -49,7 +49,7 @@ class TestInfoCollection:
         '''
         filter_field = get_filter_field
         vector_field = get_vector_field
-        collection_name = gen_unique_str("test_collection")
+        collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
                 "segment_size": segment_size
@@ -70,7 +70,7 @@ class TestInfoCollection:
         expected: no exception raised
         '''
         segment_size = get_segment_size
-        collection_name = gen_unique_str("test_collection")
+        collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": default_fields["fields"],
                 "segment_size": segment_size
@@ -96,7 +96,7 @@ class TestInfoCollection:
             assert the value returned by get_collection_info method
         expected: False
         '''
-        collection_name = gen_unique_str("test_collection")
+        collection_name = gen_unique_str(collection_id)
         with pytest.raises(Exception) as e:
             res = connect.get_collection_info(connect, collection_name)
 
@@ -110,7 +110,7 @@ class TestInfoCollection:
         '''
         threads_num = 4 
         threads = []
-        collection_name = gen_unique_str("test_collection")
+        collection_name = gen_unique_str(collection_id)
         connect.create_collection(collection_name, fields)
 
         def get_info():
@@ -140,7 +140,7 @@ class TestInfoCollection:
         '''
         filter_field = get_filter_field
         vector_field = get_vector_field
-        collection_name = gen_unique_str("test_collection")
+        collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
                 "segment_size": segment_size
@@ -162,7 +162,7 @@ class TestInfoCollection:
         expected: no exception raised
         '''
         segment_size = get_segment_size
-        collection_name = gen_unique_str("test_collection")
+        collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": default_fields["fields"],
                 "segment_size": segment_size
@@ -172,13 +172,13 @@ class TestInfoCollection:
         # assert segment size
 
 
-class TestInfoCollectionInvalid(object):
+class TestInfoInvalid(object):
     """
     Test get collection info with invalid params
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_collection_names()
+        params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param

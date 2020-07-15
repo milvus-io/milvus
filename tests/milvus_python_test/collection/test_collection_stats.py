@@ -16,7 +16,7 @@ nb = 6000
 nlist = 1024
 collection_id = "collection_stats"
 field_name = "float_vector"
-default_index_name = "insert_index"
+default_index_name = "stats_index"
 entity = gen_entities(1)
 binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
@@ -47,6 +47,17 @@ class TestStatsBase:
             if request.param["index_type"] == "IVFSQ8H":
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_jaccard_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] in ["IVFFLAT", "FLAT"]:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
 
     def test_get_collection_stats_name_not_existed(self, connect, collection):
         '''
@@ -249,6 +260,20 @@ class TestStatsBase:
         logging.getLogger().info(stats)
         assert stats["partitions"][0]["segments"][0]["row_count"] == nb
         assert stats["partitions"][0]["segments"][0]["index_name"] == get_simple_index["index_type"]
+
+    def test_get_collection_stats_after_index_created_jac(self, connect, jac_collection, get_jaccard_index):
+        '''
+        target: test collection info after index created
+        method: create collection, add binary entities, create index and call collection_stats 
+        expected: status ok, index created and shown in segments
+        '''
+        ids = connect.insert(jac_collection, binary_entities)
+        connect.flush([jac_collection])
+        connect.create_index(jac_collection, "binary_vector", default_index_name, get_jaccard_index)
+        stats = connect.get_collection_stats(jac_collection)
+        logging.getLogger().info(stats)
+        assert stats["partitions"][0]["segments"][0]["row_count"] == nb
+        assert stats["partitions"][0]["segments"][0]["index_name"] == get_jaccard_index["index_type"]
 
     def test_get_collection_stats_after_create_different_index(self, connect, collection):
         '''

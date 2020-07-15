@@ -11,7 +11,7 @@ class TestPing:
         method: call the server_version method after connected
         expected: version should be the pymilvus version
         '''
-        status, res = connect.server_version()
+        res = connect.server_version()
         assert res == __version__
 
     def test_server_status(self, connect):
@@ -20,8 +20,8 @@ class TestPing:
         method: call the server_status method after connected
         expected: status returned should be ok
         '''
-        status, msg = connect.server_status()
-        assert status.OK()
+        msg = connect.server_status()
+        assert msg == "OK"
 
     def test_server_cmd_with_params_version(self, connect):
         '''
@@ -30,10 +30,8 @@ class TestPing:
         expected: when cmd = 'version', return version of server;
         '''
         cmd = "version"
-        status, msg = connect._cmd(cmd)
-        logging.getLogger().info(status)
+        msg = connect._cmd(cmd)
         logging.getLogger().info(msg)
-        assert status.OK()
         assert msg == __version__
 
     def test_server_cmd_with_params_others(self, connect):
@@ -43,11 +41,7 @@ class TestPing:
         expected: when cmd = 'version', return version of server;
         '''
         cmd = "rm -rf test"
-        status, msg = connect._cmd(cmd)
-        logging.getLogger().info(status)
-        logging.getLogger().info(msg)
-        assert status.OK()
-        # assert msg == __version__
+        msg = connect._cmd(cmd)
 
     def test_connected(self, connect):
         # assert connect.connected()
@@ -61,10 +55,8 @@ class TestPingDisconnect:
         method: call the server_version method after connected
         expected: version should not be the pymilvus version
         '''
-        res = None
         with pytest.raises(Exception) as e:
-            status, res = connect.server_version()
-        assert res is None
+            res = dis_connect.server_version()
 
     def test_server_status(self, dis_connect):
         '''
@@ -72,7 +64,5 @@ class TestPingDisconnect:
         method: call the server_status method after connected
         expected: status returned should be not ok
         '''
-        status = None
         with pytest.raises(Exception) as e:
-            status, msg = connect.server_status()
-        assert status is None
+            res = dis_connect.server_status()
