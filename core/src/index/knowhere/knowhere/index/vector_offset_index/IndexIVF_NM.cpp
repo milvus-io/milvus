@@ -74,9 +74,9 @@ IVF_NM::Load(const BinarySet& binary_set) {
 
 #ifndef MILVUS_GPU_VERSION
     auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
-    for (int i = 0; i < invlists->nlist; i++) {
+    for (size_t i = 0; i < invlists->nlist; i++) {
         auto list_size = ails->ids[i].size();
-        for (int j = 0; j < list_size; j++) {
+        for (size_t j = 0; j < list_size; j++) {
             memcpy(arranged_data + d * sizeof(float) * (curr_index + j), original_data + d * ails->ids[i][j],
                    d * sizeof(float));
         }
@@ -87,9 +87,9 @@ IVF_NM::Load(const BinarySet& binary_set) {
     auto rol = dynamic_cast<faiss::ReadOnlyArrayInvertedLists*>(invlists);
     auto lengths = rol->readonly_length;
     auto rol_ids = (const int64_t*)rol->pin_readonly_ids->data;
-    for (int i = 0; i < invlists->nlist; i++) {
+    for (size_t i = 0; i < invlists->nlist; i++) {
         auto list_size = lengths[i];
-        for (int j = 0; j < list_size; j++) {
+        for (size_t j = 0; j < list_size; j++) {
             memcpy(arranged_data + d * sizeof(float) * (curr_index + j), original_data + d * rol_ids[curr_index + j],
                    d * sizeof(float));
         }
@@ -104,13 +104,11 @@ void
 IVF_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
 
-    faiss::Index* coarse_quantizer = new faiss::IndexFlatL2(dim);
-    int64_t nlist = config[IndexParams::nlist].get<int64_t>();
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, nlist, metric_type);
-    index->train(rows, (float*)p_data);
-
-    index_.reset(faiss::clone_index(index.get()));
+    faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
+    int64_t nlist = config[IndexParams::nlist].get<int64_t>();
+    index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFFlat(coarse_quantizer, dim, nlist, metric_type));
+    index_->train(rows, (float*)p_data);
 }
 
 void
@@ -313,8 +311,10 @@ IVF_NM::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
     } else {
         ivf_index->parallel_mode = 0;
     }
-    ivf_index->search_without_codes(n, (float*)data, (const uint8_t*)data_.get(), prefix_sum, k, distances, labels,
-                                    bitset_);
+    bool is_sq8 =
+        (index_type_ == IndexEnum::INDEX_FAISS_IVFSQ8 || index_type_ == IndexEnum::INDEX_FAISS_IVFSQ8NR) ? true : false;
+    ivf_index->search_without_codes(n, (float*)data, (const uint8_t*)data_.get(), prefix_sum, is_sq8, k, distances,
+                                    labels, bitset_);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
     LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost

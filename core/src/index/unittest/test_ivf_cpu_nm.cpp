@@ -44,6 +44,9 @@ class IVFNMCPUTest : public DataGen,
  protected:
     void
     SetUp() override {
+#ifdef MILVUS_GPU_VERSION
+        milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
+#endif
         std::tie(index_type_, index_mode_) = GetParam();
         Generate(DIM, NB, NQ);
         index_ = IndexFactoryNM(index_type_, index_mode_);
@@ -52,6 +55,9 @@ class IVFNMCPUTest : public DataGen,
 
     void
     TearDown() override {
+#ifdef MILVUS_GPU_VERSION
+        milvus::knowhere::FaissGpuResourceMgr::GetInstance().Free();
+#endif
     }
 
  protected:
@@ -81,6 +87,8 @@ TEST_P(IVFNMCPUTest, ivf_basic_cpu) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
+    index_->SetIndexSize(nq * dim * sizeof(float));
+
     milvus::knowhere::BinarySet bs = index_->Serialize(conf_);
 
     int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
@@ -95,6 +103,19 @@ TEST_P(IVFNMCPUTest, ivf_basic_cpu) {
     auto result = index_->Query(query_dataset, conf_);
     AssertAnns(result, nq, k);
 
+#ifdef MILVUS_GPU_VERSION
+    // copy from cpu to gpu
+    {
+        EXPECT_NO_THROW({
+            auto clone_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf_);
+            auto clone_result = clone_index->Query(query_dataset, conf_);
+            AssertAnns(clone_result, nq, k);
+            std::cout << "clone C <=> G [" << index_type_ << "] success" << std::endl;
+        });
+        EXPECT_ANY_THROW(milvus::knowhere::cloner::CopyCpuToGpu(index_, -1, milvus::knowhere::Config()));
+    }
+#endif
+
     faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(nb);
     for (int64_t i = 0; i < nq; ++i) {
         concurrent_bitset_ptr->set(i);
@@ -103,4 +124,8 @@ TEST_P(IVFNMCPUTest, ivf_basic_cpu) {
 
     auto result_bs_1 = index_->Query(query_dataset, conf_);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
+
+#ifdef MILVUS_GPU_VERSION
+    milvus::knowhere::FaissGpuResourceMgr::GetInstance().Dump();
+#endif
 }
