@@ -31,8 +31,6 @@
 namespace milvus {
 namespace engine {
 
-extern const char* VECTOR_DIMENSION_PARAM;
-
 using FIELD_TYPE = engine::meta::hybrid::DataType;
 using FIELD_TYPE_MAP = std::unordered_map<std::string, engine::meta::hybrid::DataType>;
 using FIELD_WIDTH_MAP = std::unordered_map<std::string, uint64_t>;

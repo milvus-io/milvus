@@ -23,6 +23,7 @@
 #include "db/meta/MetaTypes.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/Snapshots.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
 #include "segment/SegmentReader.h"
 #include "utils/Log.h"
@@ -152,17 +153,16 @@ SSMemSegment::GetSingleEntitySize(size_t& single_size) {
             case meta::hybrid::DataType::INT64:
                 single_size += sizeof(uint64_t);
                 break;
-            case meta::hybrid::DataType::VECTOR:
             case meta::hybrid::DataType::VECTOR_FLOAT:
             case meta::hybrid::DataType::VECTOR_BINARY: {
                 json params = field->GetParams();
-                if (params.find(VECTOR_DIMENSION_PARAM) == params.end()) {
+                if (params.find(knowhere::meta::DIM) == params.end()) {
                     std::string msg = "Vector field params must contain: dimension";
                     LOG_SERVER_ERROR_ << msg;
                     return Status(DB_ERROR, msg);
                 }
 
-                int64_t dimension = params[VECTOR_DIMENSION_PARAM];
+                int64_t dimension = params[knowhere::meta::DIM];
                 if (ftype == meta::hybrid::DataType::VECTOR_BINARY) {
                     single_size += (dimension / 8);
                 } else {

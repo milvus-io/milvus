@@ -26,6 +26,7 @@
 #include "codecs/snapshot/SSCodec.h"
 #include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
@@ -60,14 +61,14 @@ SSSegmentWriter::Initialize() {
         engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
         if (ftype == engine::FIELD_TYPE::VECTOR_FLOAT || ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
             json params = field->GetParams();
-            if (params.find(engine::VECTOR_DIMENSION_PARAM) == params.end()) {
+            if (params.find(knowhere::meta::DIM) == params.end()) {
                 std::string msg = "Vector field params must contain: dimension";
                 LOG_SERVER_ERROR_ << msg;
                 return Status(DB_ERROR, msg);
             }
 
-            uint64_t field_width = 0;
-            uint64_t dimension = params[engine::VECTOR_DIMENSION_PARAM];
+            int64_t field_width = 0;
+            int64_t dimension = params[knowhere::meta::DIM];
             if (ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
                 field_width += (dimension / 8);
             } else {
@@ -94,52 +95,6 @@ SSSegmentWriter::AddChunk(const engine::DataChunkPtr& chunk_ptr, uint64_t from, 
 
 Status
 SSSegmentWriter::Serialize() {
-//        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
-//
-//        /* write UID's raw data */
-//        auto uid_raw_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
-//        std::string uid_raw_path =
-//            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_raw_visitor->GetFile());
-//        STATUS_CHECK(WriteUids(uid_raw_path, segment_ptr_->vectors_ptr_->GetUids()));
-//
-//        /* write UID's deleted docs */
-//        auto uid_del_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
-//        std::string uid_del_path =
-//            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_del_visitor->GetFile());
-//        STATUS_CHECK(WriteDeletedDocs(uid_del_path));
-//
-//        /* write other data */
-//        Status s;
-//        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
-//        for (auto& f_kv : field_visitors_map) {
-//            auto& fv = f_kv.second;
-//            auto& field = fv->GetField();
-//            for (auto& file_kv : fv->GetElementVistors()) {
-//                auto& fev = file_kv.second;
-//                std::string file_path =
-//                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, fev->GetFile());
-//                if (!s.ok()) {
-//                    LOG_ENGINE_WARNING_ << "Cannot get resource path";
-//                }
-//
-//                auto& segment_file = fev->GetFile();
-//                if (segment_file == nullptr) {
-//                    continue;
-//                }
-//                auto& field_element = fev->GetElement();
-//
-//                if ((field->GetFtype() == engine::FieldType::VECTOR_FLOAT ||
-//                     field->GetFtype() == engine::FieldType::VECTOR_BINARY) &&
-//                    field_element->GetFtype() == engine::FieldElementType::FET_RAW) {
-//                    STATUS_CHECK(WriteVectors(file_path, segment_ptr_->vectors_ptr_->GetData()));
-//                }
-//
-//                /* SS TODO: write attr data ? */
-//            }
-//        }
-//    } catch (std::exception& e) {
-//        return Status(DB_ERROR, e.what());
-//    }
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
     auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
 
@@ -156,17 +111,17 @@ SSSegmentWriter::Serialize() {
         STATUS_CHECK(WriteField(file_path, raw_data));
     }
 
-    /* write UID's deleted docs */
+    /* write empty UID's deleted docs */
     auto uid_del_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
     std::string uid_del_path =
         engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_del_visitor->GetFile());
-    STATUS_CHECK(WriteDeletedDocs(uid_del_path, segment_ptr_->GetDeletedDocs()));
+    STATUS_CHECK(WriteDeletedDocs(uid_del_path));
 
-    /* write UID's bloom filter */
-    auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
-    std::string uid_blf_path =
-        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
-    STATUS_CHECK(WriteBloomFilter(uid_blf_path, segment_ptr_->GetBloomFilter()));
+    /* don't write UID's bloom filter */
+    // auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
+    // std::string uid_blf_path =
+    //     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
+    // STATUS_CHECK(WriteBloomFilter(uid_blf_path, segment_ptr_->GetBloomFilter()));
 
     return Status::OK();
 }
