@@ -595,7 +595,6 @@ CreateCollectionOperation::DoExecute(Store& store) {
     }
 
     for (auto& clt : collections) {
-        std::cout << "XXXXXXXXXX " << clt->GetName() << " " << clt->GetID() << std::endl;
         if (!clt->IsDeactive()) {
             return Status(SS_DUPLICATED_ERROR, "Collection has exist in DB");
         }
