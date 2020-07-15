@@ -206,7 +206,10 @@ SSDBTest::SetUp() {
     milvus::engine::snapshot::Snapshots::GetInstance().Init();
 
     auto options = milvus::engine::DBOptions();
+    options.meta_.path_ = "/tmp/milvus";
+    options.meta_.backend_uri_ = "sqlite://:@:/";
     options.wal_enable_ = false;
+    options.auto_flush_interval_ = 1000;
     db_ = std::make_shared<milvus::engine::SSDBImpl>(options);
 }
 

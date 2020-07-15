@@ -59,7 +59,8 @@ SSSegmentWriter::Initialize() {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
         engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
-        if (ftype == engine::FIELD_TYPE::VECTOR_FLOAT || ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
+        if (ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR_FLOAT ||
+            ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
             json params = field->GetParams();
             if (params.find(knowhere::meta::DIM) == params.end()) {
                 std::string msg = "Vector field params must contain: dimension";
@@ -117,11 +118,11 @@ SSSegmentWriter::Serialize() {
         engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_del_visitor->GetFile());
     STATUS_CHECK(WriteDeletedDocs(uid_del_path));
 
-    /* don't write UID's bloom filter */
-    // auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
-    // std::string uid_blf_path =
-    //     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
-    // STATUS_CHECK(WriteBloomFilter(uid_blf_path, segment_ptr_->GetBloomFilter()));
+    /* write UID's bloom filter */
+    auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
+    std::string uid_blf_path =
+        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
+    STATUS_CHECK(WriteBloomFilter(uid_blf_path));
 
     return Status::OK();
 }
@@ -155,7 +156,7 @@ SSSegmentWriter::WriteBloomFilter(const std::string& file_path) {
         }
 
         segment::IdBloomFilterPtr bloom_filter_ptr;
-        ss_codec.GetIdBloomFilterFormat()->create(fs_ptr_, bloom_filter_ptr);
+        ss_codec.GetIdBloomFilterFormat()->create(fs_ptr_, file_path, bloom_filter_ptr);
 
         recorder.RecordSection("Initializing bloom filter");
 
@@ -180,6 +181,10 @@ SSSegmentWriter::WriteBloomFilter(const std::string& file_path) {
 
 Status
 SSSegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilterPtr& id_bloom_filter_ptr) {
+    if (id_bloom_filter_ptr == nullptr) {
+        return Status(DB_ERROR, "WriteBloomFilter: null pointer");
+    }
+
     try {
         auto& ss_codec = codec::SSCodec::instance();
         ss_codec.GetIdBloomFilterFormat()->write(fs_ptr_, file_path, id_bloom_filter_ptr);
@@ -203,6 +208,10 @@ SSSegmentWriter::WriteDeletedDocs(const std::string& file_path) {
 
 Status
 SSSegmentWriter::WriteDeletedDocs(const std::string& file_path, const DeletedDocsPtr& deleted_docs) {
+    if (deleted_docs == nullptr) {
+        return Status(DB_ERROR, "WriteDeletedDocs: null pointer");
+    }
+
     try {
         auto& ss_codec = codec::SSCodec::instance();
         ss_codec.GetDeletedDocsFormat()->write(fs_ptr_, file_path, deleted_docs);

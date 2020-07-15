@@ -153,6 +153,7 @@ SSMemSegment::GetSingleEntitySize(size_t& single_size) {
             case meta::hybrid::DataType::INT64:
                 single_size += sizeof(uint64_t);
                 break;
+            case meta::hybrid::DataType::VECTOR:
             case meta::hybrid::DataType::VECTOR_FLOAT:
             case meta::hybrid::DataType::VECTOR_BINARY: {
                 json params = field->GetParams();
