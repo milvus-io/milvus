@@ -100,7 +100,6 @@ GetIndexDataType(EngineType type) {
         case EngineType::NSG_MIX:
             return codec::ExternalData::ExternalData_RawData;
 
-        case EngineType::FAISS_IVFSQ8:
         case EngineType::HNSW_SQ8NR:
         case EngineType::FAISS_IVFSQ8NR:
             return codec::ExternalData::ExternalData_SQ8;

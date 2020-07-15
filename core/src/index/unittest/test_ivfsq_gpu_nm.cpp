@@ -24,45 +24,36 @@
 #include "knowhere/common/Timer.h"
 #include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_offset_index/IndexIVFSQNR_NM.h"
 #include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#include "knowhere/index/vector_offset_index/gpu/IndexGPUIVFSQNR_NM.h"
 #include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
 #endif
 
 #include "unittest/Helper.h"
 #include "unittest/utils.h"
 
-#define SERIALIZE_AND_LOAD(index_)                                                   \
-    milvus::knowhere::BinarySet bs = index_->Serialize(conf_);                       \
-    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);           \
-    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);         \
-    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);  \
-    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>(); \
-    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});   \
-    bptr->size = dim * rows * sizeof(float);                                         \
-    bs.Append(RAW_DATA, bptr);                                                       \
-    index_->Load(bs);
-
 using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class IVFNMGPUTest : public DataGen,
-                     public TestWithParam<::std::tuple<milvus::knowhere::IndexType, milvus::knowhere::IndexMode>> {
+class IVFSQNMGPUTest : public DataGen,
+                       public TestWithParam<::std::tuple<milvus::knowhere::IndexType, milvus::knowhere::IndexMode>> {
  protected:
     void
     SetUp() override {
 #ifdef MILVUS_GPU_VERSION
         milvus::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
 #endif
-        index_type_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+        index_type_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
         index_mode_ = milvus::knowhere::IndexMode::MODE_GPU;
         Generate(DIM, NB, NQ);
 #ifdef MILVUS_GPU_VERSION
-        index_ = std::make_shared<milvus::knowhere::GPUIVF_NM>(DEVICEID);
+        index_ = std::make_shared<milvus::knowhere::GPUIVFSQNR_NM>(DEVICEID);
 #endif
         conf_ = ParamGenerator::GetInstance().Gen(index_type_);
     }
@@ -81,8 +72,12 @@ class IVFNMGPUTest : public DataGen,
     milvus::knowhere::IVFPtr index_ = nullptr;
 };
 
+INSTANTIATE_TEST_CASE_P(IVFParameters, IVFSQNMGPUTest,
+                        Values(std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
+                                               milvus::knowhere::IndexMode::MODE_GPU)));
+
 #ifdef MILVUS_GPU_VERSION
-TEST_F(IVFNMGPUTest, ivf_basic_gpu) {
+TEST_P(IVFSQNMGPUTest, ivf_basic_gpu) {
     assert(!xb.empty());
 
     if (index_mode_ != milvus::knowhere::IndexMode::MODE_GPU) {
@@ -93,13 +88,15 @@ TEST_F(IVFNMGPUTest, ivf_basic_gpu) {
     ASSERT_ANY_THROW(index_->Add(base_dataset, conf_));
     ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf_));
 
-    index_->BuildAll(base_dataset, conf_);
+    index_->Train(base_dataset, conf_);
+    index_->AddWithoutIds(base_dataset, conf_);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
     index_->SetIndexSize(nq * dim * sizeof(float));
 
-    SERIALIZE_AND_LOAD(index_);
+    milvus::knowhere::BinarySet bs = index_->Serialize();
+    index_->Load(bs);
 
     auto result = index_->Query(query_dataset, conf_);
     AssertAnns(result, nq, k);
@@ -116,8 +113,9 @@ TEST_F(IVFNMGPUTest, ivf_basic_gpu) {
     // copy from gpu to cpu
     {
         EXPECT_NO_THROW({
-            auto clone_index = milvus::knowhere::cloner::CopyGpuToCpu(index_, conf_);
-            SERIALIZE_AND_LOAD(clone_index);
+            auto clone_index = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
+            milvus::knowhere::BinarySet bs = clone_index->Serialize();
+            clone_index->Load(bs);
             auto clone_result = clone_index->Query(query_dataset, conf_);
             AssertEqual(result, clone_result);
             std::cout << "clone G <=> C [" << index_type_ << "] success" << std::endl;
