@@ -27,7 +27,7 @@ SSVectorSource::SSVectorSource(const DataChunkPtr& chunk) : chunk_(chunk) {
 }
 
 Status
-SSVectorSource::Add(const milvus::segment::SegmentWriterPtr& segment_writer_ptr, const size_t& num_entities_to_add,
+SSVectorSource::Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const size_t& num_entities_to_add,
                     size_t& num_entities_added) {
     // TODO: n = vectors_.vector_count_;???
     uint64_t n = chunk_->count_;
