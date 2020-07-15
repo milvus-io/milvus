@@ -11,12 +11,17 @@
 
 #include "db/meta/backend/MockMetaEngine.h"
 
+#include <chrono>
 #include <utility>
 
 #include "db/meta/MetaFields.h"
 #include "utils/StringHelpFunctions.h"
 
 namespace milvus::engine::meta {
+
+MockMetaEngine::~MockMetaEngine() {
+    std::cout << Trace() << std::endl;
+}
 
 void
 MockMetaEngine::Init() {
@@ -136,13 +141,20 @@ MockMetaEngine::DeleteNoLock(const MetaApplyContext& delete_context, int64_t& re
 
 Status
 MockMetaEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
+    auto c1 = std::chrono::system_clock::now();
     std::lock_guard<std::mutex> lock(mutex_);
-    return QueryNoLock(context, attrs);
+    auto status = QueryNoLock(context, attrs);
+    auto c2 = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(c2 - c1);
+
+    trace_.push_back(std::pair<std::string, long>("Query",duration.count()));
+    return status;
 }
 
 Status
 MockMetaEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts,
                                    std::vector<int64_t>& result_ids) {
+    auto c1 = std::chrono::system_clock::now();
     std::unique_lock<std::mutex> lock(mutex_);
 
     auto status = Status::OK();
@@ -169,8 +181,11 @@ MockMetaEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_cont
 
     if (!status.ok()) {
         RollBackNoLock(pair_entities);
-        return status;
     }
+    auto c2 = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(c2 - c1);
+
+    trace_.push_back(std::pair<std::string, long>("Transaction", duration.count()));
 
     return status;
 }
@@ -216,6 +231,21 @@ MockMetaEngine::TruncateAll() {
     max_ip_map_.clear();
     resources_.clear();
     return Status::OK();
+}
+
+std::string
+MockMetaEngine::Trace() {
+    std::string trace = "\n******************************************\n";
+    long total = 0;
+    for (auto & t : trace_) {
+        total += t.second;
+        trace += t.first + "\t\t" + std::to_string(t.second) + "\n";
+    }
+
+    trace += "\n Total: " + std::to_string(total);
+
+    return trace;
+//    return "";
 }
 
 }  // namespace milvus::engine::meta

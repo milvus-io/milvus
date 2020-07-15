@@ -13,6 +13,7 @@
 
 #include <unistd.h>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <utility>
@@ -233,6 +234,10 @@ static const MetaSchema FIELDELEMENT_SCHEMA(snapshot::FieldElement::Name,
 }  // namespace
 
 /////////////// MySqlEngine ///////////////
+MySqlEngine::~MySqlEngine() {
+    std::cout << Trace() << std::endl;
+}
+
 Status
 MySqlEngine::Initialize() {
     // step 1: create db root path
@@ -335,18 +340,32 @@ MySqlEngine::Initialize() {
 Status
 MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
     try {
+        auto c1 = std::chrono::system_clock::now();
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
         std::string sql;
+        auto sc1 = std::chrono::system_clock::now();
         auto status = MetaHelper::MetaQueryContextToSql(context, sql);
+        auto sc2 = std::chrono::system_clock::now();
+        auto sql_duration = std::chrono::duration_cast<std::chrono::milliseconds>(sc2 - sc1);
+        sql_trace_.emplace_back("Query Sql conversion", sql_duration.count());
+//        auto status = MetaHelper::MetaQueryContextToSql(context, sql);
         if (!status.ok()) {
             return status;
         }
 
+        auto lc1 = std::chrono::system_clock::now();
         std::lock_guard<std::mutex> lock(meta_mutex_);
+        auto lc2 = std::chrono::system_clock::now();
+        auto lock_duration = std::chrono::duration_cast<std::chrono::milliseconds>(lc2 - lc1);
+        lock_trace_.push_back(std::pair<std::string, long>("Query lock", lock_duration.count()));
 
+        auto rc1 = std::chrono::system_clock::now();
         mysqlpp::Query query = connectionPtr->query(sql);
         auto res = query.store();
+        auto rc2 = std::chrono::system_clock::now();
+        auto request_duration = std::chrono::duration_cast<std::chrono::milliseconds>(rc2 - rc1);
+        request_trace_.push_back(std::pair<std::string, long>("Query request", request_duration.count()));
         if (!res) {
             throw Exception(1, "Query res is false");
         }
@@ -359,6 +378,9 @@ MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
             }
             attrs.push_back(attrs_map);
         }
+        auto c2 = std::chrono::system_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(c2 - c1);
+        trace_.push_back(std::pair<std::string, long>("Query", duration.count()));
     } catch (const mysqlpp::BadQuery& er) {
         // Handle any query errors
         //        cerr << "Query error: " << er.what() << endl;
@@ -381,19 +403,32 @@ MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
 Status
 MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
     try {
+        auto c1 = std::chrono::system_clock::now();
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
         mysqlpp::Transaction trans(*connectionPtr, mysqlpp::Transaction::serializable, mysqlpp::Transaction::session);
 
+        auto lc1 = std::chrono::system_clock::now();
         std::lock_guard<std::mutex> lock(meta_mutex_);
+        auto lc2 = std::chrono::system_clock::now();
+        auto lock_duration = std::chrono::duration_cast<std::chrono::milliseconds>(lc2 - lc1);
+        lock_trace_.push_back(std::pair<std::string, long>("Transaction lock", lock_duration.count()));
         for (auto& context : sql_contexts) {
             std::string sql;
+            auto sc1 = std::chrono::system_clock::now();
             auto status = MetaHelper::MetaApplyContextToSql(context, sql);
+            auto sc2 = std::chrono::system_clock::now();
+            auto sql_duration = std::chrono::duration_cast<std::chrono::milliseconds>(sc2 - sc1);
+            sql_trace_.push_back(std::pair<std::string, long>("Transaction Sql conversion", sql_duration.count()));
             if (!status.ok()) {
                 return status;
             }
 
+            auto rc1 = std::chrono::system_clock::now();
             auto query = connectionPtr->query(sql);
             auto res = query.execute();
+            auto rc2 = std::chrono::system_clock::now();
+            auto request_duration = std::chrono::duration_cast<std::chrono::milliseconds>(rc2 - rc1);
+            request_trace_.push_back(std::pair<std::string, long>("Transaction request", request_duration.count()));
             if (context.op_ == oAdd) {
                 auto id = res.insert_id();
                 result_ids.push_back(id);
@@ -403,6 +438,10 @@ MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_context
         }
 
         trans.commit();
+        auto c2 = std::chrono::system_clock::now();
+//        std::chrono::duration<double, std::milli> duration = c2 - c1;
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(c2 - c1);
+        trace_.push_back(std::pair<std::string, long>("Transaction", duration.count()));
         //        std::cout << "[DB] Transaction commit " << std::endl;
     } catch (const mysqlpp::BadQuery& er) {
         // Handle any query errors
@@ -449,6 +488,51 @@ MySqlEngine::TruncateAll() {
 
     std::vector<snapshot::ID_TYPE> ids;
     return ExecuteTransaction(contexts, ids);
+}
+
+std::string
+MySqlEngine::Trace() {
+    std::string trace = "\n*********************** Trace *******************\n";
+    long total = 0;
+    for (auto & t : trace_) {
+        total += t.second;
+//        trace += t.first + "\t\t" + std::to_string(t.second) + "\n";
+    }
+
+    trace += "\n Total: " + std::to_string(total);
+
+    std::string sql_trace = "\n********************* Sql Trace *********************\n";
+    long sql_total = 0;
+    for (auto & t : sql_trace_) {
+        sql_total += t.second;
+//        sql_trace += t.first + "\t\t" + std::to_string(t.second) + "\n";
+    }
+
+    sql_trace += "\n Total: " + std::to_string(sql_total);
+    trace += "\n" + sql_trace;
+
+    std::string lock_trace = "\n********************** Lock Trace ********************\n";
+    long lock_total = 0;
+    for (auto & t : lock_trace_) {
+        lock_total += t.second;
+//        lock_trace += t.first + "\t\t" + std::to_string(t.second) + "\n";
+    }
+
+    lock_trace += "\n Total: " + std::to_string(lock_total);
+    trace += "\n" + lock_trace;
+
+    std::string request_trace = "\n********************** Request Trace ********************\n";
+    long request_total = 0;
+    for (auto & t : lock_trace_) {
+        request_total += t.second;
+//        request_trace += t.first + "\t\t" + std::to_string(t.second) + "\n";
+    }
+
+    request_trace += "\n Total: " + std::to_string(request_total);
+    trace += "\n" + request_trace;
+
+    return trace;
+//    return "";
 }
 
 }  // namespace milvus::engine::meta

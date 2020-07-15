@@ -13,6 +13,7 @@
 #include <fiu-local.h>
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <string>
 #include <set>
 #include <algorithm>
@@ -871,6 +872,7 @@ TEST_F(SnapshotTest, OperationTest) {
 }
 
 TEST_F(SnapshotTest, CompoundTest1) {
+    auto c0 = std::chrono::system_clock::now();
     Status status;
     std::atomic<LSN_TYPE> lsn = 0;
     auto next_lsn = [&]() -> decltype(lsn) {
@@ -1208,6 +1210,9 @@ TEST_F(SnapshotTest, CompoundTest1) {
             std::back_inserter(common_ids));
     expect_segment_file_cnt -= common_ids.size();
     ASSERT_EQ(expect_segment_file_cnt, final_segment_file_cnt);
+    auto c1 = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(c1 - c0);
+    std::cout << "\n\n\nCompound Test total cost " << duration.count() << "ms";
 }
 
 
