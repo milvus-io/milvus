@@ -36,6 +36,7 @@ CollectionCommitOperation::DoExecute(Store& store) {
         if (prev_partition_commit) {
             resource_->GetMappings().erase(prev_partition_commit->GetID());
             row_cnt -= prev_partition_commit->GetRowCount();
+            size -= prev_partition_commit->GetSize();
         }
         resource_->GetMappings().insert(pc->GetID());
         row_cnt += pc->GetRowCount();

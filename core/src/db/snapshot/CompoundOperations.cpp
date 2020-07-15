@@ -34,6 +34,16 @@ BuildOperation::DoExecute(Store& store) {
     STATUS_CHECK(CheckStale(std::bind(&BuildOperation::CheckSegmentStale, this, std::placeholders::_1,
                                       context_.new_segment_files[0]->GetSegmentId())));
 
+    auto update_size = [&](SegmentFilePtr& file) {
+        auto update_ctx = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
+        update_ctx->AddAttr(SizeField::Name);
+        AddStepWithLsn(*file, context_.lsn, update_ctx);
+    };
+
+    for (auto& new_file : context_.new_segment_files) {
+        update_size(new_file);
+    }
+
     SegmentCommitOperation sc_op(context_, GetAdjustedSS());
     STATUS_CHECK(sc_op(store));
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
@@ -252,6 +262,12 @@ NewSegmentOperation::DoExecute(Store& store) {
     /* auto status = PrevSnapshotRequried(); */
     /* if (!status.ok()) return status; */
     // TODO: Check Context
+    for (auto& new_file : context_.new_segment_files) {
+        auto update_ctx = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
+        update_ctx->AddAttr(SizeField::Name);
+        AddStepWithLsn(*new_file, context_.lsn, update_ctx);
+    }
+
     SegmentCommitOperation sc_op(context_, GetAdjustedSS());
     STATUS_CHECK(sc_op(store));
     STATUS_CHECK(sc_op.GetResource(context_.new_segment_commit));
@@ -368,6 +384,17 @@ MergeOperation::DoExecute(Store& store) {
     for (auto& stale_seg : context_.stale_segments) {
         row_cnt += GetStartedSS()->GetSegmentCommitBySegmentId(stale_seg->GetID())->GetRowCount();
     }
+
+    auto update_size = [&](SegmentFilePtr& file) {
+        auto update_ctx = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
+        update_ctx->AddAttr(SizeField::Name);
+        AddStepWithLsn(*file, context_.lsn, update_ctx);
+    };
+
+    for (auto& new_file : context_.new_segment_files) {
+        update_size(new_file);
+    }
+
     // PXU TODO:
     // 1. Check all required field elements have related segment files
     // 2. Check Stale and others

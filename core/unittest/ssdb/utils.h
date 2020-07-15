@@ -268,6 +268,7 @@ CreateSegment(ScopedSnapshotT ss, ID_TYPE partition_id, LSN_TYPE lsn, const Segm
     nsf_context.partition_id = new_seg->GetPartitionId();
     STATUS_CHECK(op->CommitNewSegmentFile(nsf_context, seg_file));
     op->CommitRowCount(row_cnt);
+    seg_file->SetSize(row_cnt * 10);
     STATUS_CHECK(op->Push());
 
     return op->GetSnapshot(ss);
