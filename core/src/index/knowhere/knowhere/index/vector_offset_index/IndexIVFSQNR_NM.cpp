@@ -185,7 +185,6 @@ IVFSQNR_NM::ArrangeCodes(const DatasetPtr& dataset_ptr, const Config& config) {
     auto code_size = sq.code_size;
     auto arranged_data = new uint8_t[code_size * rows + 2 * dim * sizeof(float)];
     std::unique_ptr<faiss::Quantizer> squant(sq.select_quantizer());
-    std::vector<float> residual(dim);
     std::vector<uint8_t> one_code(code_size);
     size_t curr_index = 0;
 
