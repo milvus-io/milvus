@@ -287,6 +287,7 @@ SSMemSegment::Serialize(uint64_t wal_lsn) {
         return status;
     }
 
+    status = operation_->CommitRowCount(segment_writer_ptr_->RowCount());
     status = operation_->Push();
     LOG_ENGINE_DEBUG_ << "New segment " << segment_->GetID() << " serialized, lsn = " << wal_lsn;
     return status;

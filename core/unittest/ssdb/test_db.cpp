@@ -400,5 +400,5 @@ TEST_F(SSDBTest, InsertTest) {
     uint64_t row_count = 0;
     status = db_->GetCollectionRowCount(collection_name, row_count);
     ASSERT_TRUE(status.ok());
-//    ASSERT_EQ(row_count, entity_count);
+    ASSERT_EQ(row_count, entity_count);
 }
