@@ -77,7 +77,7 @@ InsertEntityRequest::OnExecute() {
         fiu_do_on("InsertEntityRequest.OnExecute.id_array_error",
                   vector_datas_it->second.id_array_.resize(entity_count + 1));
         if (!vector_datas_it->second.id_array_.empty()) {
-            if (!vector_datas_it->second.id_array_.size() != (size_t)entity_count) {
+            if (vector_datas_it->second.id_array_.size() != (size_t)entity_count) {
                 std::string msg = "The size of entity ID array must be equal to the size of the entity.";
                 LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Invalid id array: %s", "insert", 0, msg.c_str());
                 return Status(SERVER_ILLEGAL_VECTOR_ID, msg);

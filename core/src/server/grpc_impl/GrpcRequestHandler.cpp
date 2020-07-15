@@ -244,9 +244,17 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
         return;
     }
 
+    auto id_size = vectors.size();
+    std::vector<int64_t> id_array(id_size);
+    for (int64_t i = 0; i < id_size; i++) {
+        id_array[i] = vectors[i].id_array_[0];
+    }
+    response->mutable_ids()->Resize(static_cast<int>(id_size), 0);
+    memcpy(response->mutable_ids()->mutable_data(), id_array.data(), id_size * sizeof(int64_t));
+
     std::string vector_field_name;
-    for (uint64_t i = 0; i < field_names.size(); i++) {
-        auto field_name = field_names[i];
+    bool set_valid_row = false;
+    for (auto field_name : field_names) {
         if (!attrs.empty()) {
             if (attrs[0].attr_type_.find(field_name) != attrs[0].attr_type_.end()) {
                 auto grpc_field = response->add_fields();
@@ -259,6 +267,15 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
                 std::vector<float> float_data;
                 std::vector<double> double_data;
                 for (auto& attr : attrs) {
+                    if (not set_valid_row) {
+                        if (!attr.id_array_.empty()) {
+                            response->add_valid_row(true);
+                        } else {
+                            response->add_valid_row(false);
+                            continue;
+                        }
+                    }
+
                     if (attr.attr_data_.find(field_name) == attr.attr_data_.end()) {
                         continue;
                     }
@@ -352,6 +369,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
                     memcpy(grpc_attr_data->mutable_double_value()->mutable_data(), double_data.data(),
                            double_data.size() * sizeof(double));
                 }
+                set_valid_row = true;
             } else {
                 vector_field_name = field_name;
             }
@@ -359,33 +377,31 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
     }
 
     if (!vector_field_name.empty()) {
-        auto size = vectors.size();
-        response->mutable_ids()->Resize(static_cast<int>(vectors.size()), 0);
-        std::vector<int64_t> id_array(size);
-        for (int64_t i = 0; i < size; i++) {
-            id_array[i] = vectors[i].id_array_[0];
-        }
-        memcpy(response->mutable_ids()->mutable_data(), id_array.data(), size * sizeof(int64_t));
-
         auto grpc_field = response->add_fields();
         grpc_field->set_field_name(vector_field_name);
         ::milvus::grpc::VectorRecord* grpc_vector_data = grpc_field->mutable_vector_record();
         for (auto& vector : vectors) {
             auto grpc_data = grpc_vector_data->add_records();
             if (!vector.float_data_.empty()) {
-                response->add_valid_row(true);
+                if (not set_valid_row) {
+                    response->add_valid_row(true);
+                }
                 grpc_field->set_type(::milvus::grpc::DataType::FLOAT_VECTOR);
                 grpc_data->mutable_float_data()->Resize(vector.float_data_.size(), 0);
                 memcpy(grpc_data->mutable_float_data()->mutable_data(), vector.float_data_.data(),
                        vector.float_data_.size() * sizeof(float));
             } else if (!vector.binary_data_.empty()) {
-                response->add_valid_row(true);
+                if (not set_valid_row) {
+                    response->add_valid_row(true);
+                }
                 grpc_field->set_type(::milvus::grpc::DataType::BINARY_VECTOR);
                 grpc_data->mutable_binary_data()->resize(vector.binary_data_.size());
                 memcpy(grpc_data->mutable_binary_data()->data(), vector.binary_data_.data(),
                        vector.binary_data_.size() * sizeof(uint8_t));
             } else {
-                response->add_valid_row(false);
+                if (not set_valid_row) {
+                    response->add_valid_row(false);
+                }
             }
         }
     }
