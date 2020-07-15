@@ -178,6 +178,26 @@ SSDBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     CHECK_INITIALIZED;
 
     auto ctx = context;
+    // check uid existence/validation
+    bool has_uid = false;
+    for (auto& pair : ctx.fields_schema) {
+        if (pair.first->GetFtype() == meta::hybrid::DataType::UID) {
+            has_uid = true;
+            break;
+        }
+    }
+
+    // add uid field if not specified
+    if (!has_uid) {
+        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, milvus::engine::FieldType::UID);
+        auto bloom_filter_element = std::make_shared<snapshot::FieldElement>(
+            0, 0, DEFAULT_BLOOM_FILTER_NAME, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
+        auto delete_doc_element = std::make_shared<snapshot::FieldElement>(
+            0, 0, DEFAULT_DELETED_DOCS_NAME, milvus::engine::FieldElementType::FET_DELETED_DOCS);
+
+        ctx.fields_schema[uid_field] = {bloom_filter_element, delete_doc_element};
+    }
+
     if (options_.wal_enable_) {
         ctx.lsn = wal_mgr_->CreateCollection(context.collection->GetName());
     }
@@ -624,14 +644,13 @@ SSDBImpl::InsertEntities(const std::string& collection_name, const std::string& 
         record.attr_data = attr_data;
         record.attr_nbytes = attr_nbytes;
         record.attr_data_size = attr_data_size;
+        record.type = wal::MXLogType::Entity;
 
         auto vector_it = entity.vector_data_.begin();
         if (vector_it->second.binary_data_.empty()) {
-            record.type = wal::MXLogType::InsertVector;
             record.data = vector_it->second.float_data_.data();
             record.data_size = vector_it->second.float_data_.size() * sizeof(float);
         } else {
-            record.type = wal::MXLogType::InsertBinary;
             record.data = vector_it->second.binary_data_.data();
             record.data_size = vector_it->second.binary_data_.size() * sizeof(uint8_t);
         }

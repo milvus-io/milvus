@@ -280,29 +280,14 @@ SSMemSegment::Serialize(uint64_t wal_lsn) {
     int64_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
-    snapshot::SegmentFileContext sf_context;
-    sf_context.field_name = "vector";
-    sf_context.field_element_name = "raw";
-    sf_context.collection_id = segment_->GetCollectionId();
-    sf_context.partition_id = segment_->GetPartitionId();
-    sf_context.segment_id = segment_->GetID();
-    snapshot::SegmentFilePtr seg_file;
-    auto status = operation_->CommitNewSegmentFile(sf_context, seg_file);
-
-    status = segment_writer_ptr_->Serialize();
+    auto status = segment_writer_ptr_->Serialize();
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to serialize segment: " << segment_->GetID();
         return status;
     }
 
-    seg_file->SetSize(segment_writer_ptr_->Size());
-    seg_file->SetRowCount(segment_writer_ptr_->RowCount());
-
     status = operation_->Push();
-
-    LOG_ENGINE_DEBUG_ << "New file " << seg_file->GetID() << " of size " << seg_file->GetSize()
-                      << " bytes, lsn = " << wal_lsn;
-
+    LOG_ENGINE_DEBUG_ << "New segment " << segment_->GetID() << " serialized, lsn = " << wal_lsn;
     return status;
 }
 
