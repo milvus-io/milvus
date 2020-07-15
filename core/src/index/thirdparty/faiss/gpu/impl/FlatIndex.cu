@@ -67,11 +67,11 @@ int FlatIndex::getDim() const {
 void
 FlatIndex::reserve(size_t numVecs, cudaStream_t stream) {
 #ifdef FAISS_USE_FLOAT16
-    if (useFloat16_) {
+  if (useFloat16_) {
     rawData_.reserve(numVecs * dim_ * sizeof(half), stream);
-    } else {
+  } else {
         rawData_.reserve(numVecs * dim_ * sizeof(float), stream);
-    }
+  }
 #else
     rawData_.reserve(numVecs * dim_ * sizeof(float), stream);
 #endif
@@ -91,7 +91,6 @@ Tensor<half, 2, true>&
 FlatIndex::getVectorsRef<half>() {
   // Should not call this unless we are in float16 mode
   FAISS_ASSERT(useFloat16_);
-
   return getVectorsFloat16Ref();
 }
 #endif
@@ -306,7 +305,7 @@ FlatIndex::add(const float* data, int numVecs, cudaStream_t stream) {
     rawData_.append((char*) devDataHalf.data(),
                     devDataHalf.getSizeInBytes(),
                     stream,
-               true /* reserve exactly */);
+                    true /* reserve exactly */);
   } else {
     rawData_.append((char*) data,
                     (size_t) dim_ * numVecs * sizeof(float),

@@ -536,10 +536,11 @@ IVFPQ::precomputeCodesT_() {
       convertTensor<float, half, 3>(resources_,
                                     resources_->getDefaultStreamCurrentDevice(),
                                     coarsePQProductTransposed);
-    return;
+  } else {
+    precomputedCode_ = std::move(coarsePQProductTransposed);
   }
 #else
-    precomputedCode_ = std::move(coarsePQProductTransposed);
+  precomputedCode_ = std::move(coarsePQProductTransposed);
 #endif
 
 }
@@ -548,7 +549,7 @@ void
 IVFPQ::precomputeCodes_() {
 #ifdef FAISS_USE_FLOAT16
   if (quantizer_->getUseFloat16()) {
-      precomputeCodesT_<half>();
+    precomputeCodesT_<half>();
   } else {
     precomputeCodesT_<float>();
   }
@@ -794,7 +795,7 @@ IVFPQ::runPQNoPrecomputedCodes_(
                                      k,
                                      outDistances,
                                      outIndices);
-  }
+    }
 #else
     runPQNoPrecomputedCodesT_<float>(queries,
                                      bitset,

@@ -407,7 +407,7 @@ runPQCodeDistancesMM(Tensor<float, 3, true>& pqCentroids,
 
     outCodeDistancesF = outCodeDistancesFloatMem;
   } else {
-      outCodeDistancesF = outCodeDistances.toTensor<float>();
+    outCodeDistancesF = outCodeDistances.toTensor<float>();
   }
 #else
   outCodeDistancesF = outCodeDistances.toTensor<float>();
