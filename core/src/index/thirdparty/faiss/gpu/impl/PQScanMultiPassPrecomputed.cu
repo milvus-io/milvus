@@ -258,6 +258,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
       smem = sizeof(half);
     }
 #endif
+
     smem *= numSubQuantizers * numSubQuantizerCodes;
     FAISS_ASSERT(smem <= getMaxSharedMemPerBlockCurrentDevice());
 
@@ -278,6 +279,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
           prefixSumOffsets,                                             \
           allDistances);                                                \
     } while (0)
+
 #ifdef  FAISS_USE_FLOAT16
 #define RUN_PQ(NUM_SUB_Q)                       \
     do {                                        \
@@ -293,6 +295,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
         RUN_PQ_OPT(NUM_SUB_Q, float, float4);   \
     }while(0)
 #endif
+
     switch (bytesPerCode) {
       case 1:
         RUN_PQ(1);

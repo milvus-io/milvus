@@ -115,4 +115,5 @@ inline __device__ half shfl_xor(half v,
 }
 #endif // CUDA_VERSION
 #endif
+
 } } // namespace

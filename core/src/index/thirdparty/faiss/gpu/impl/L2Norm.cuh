@@ -25,4 +25,5 @@ void runL2Norm(Tensor<half, 2, true>& input,
                bool normSquared,
                cudaStream_t stream);
 #endif
+
 } } // namespace

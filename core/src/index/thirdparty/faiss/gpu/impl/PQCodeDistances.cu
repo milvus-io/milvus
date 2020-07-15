@@ -25,12 +25,14 @@ namespace faiss { namespace gpu {
 template <typename T>
 struct Converter {
 };
+
 #ifdef FAISS_USE_FLOAT16
 template <>
 struct Converter<half> {
   inline static __device__ half to(float v) { return __float2half(v); }
 };
 #endif
+
 template <>
 struct Converter<float> {
   inline static __device__ float to(float v) { return v; }
@@ -404,12 +406,13 @@ runPQCodeDistancesMM(Tensor<float, 3, true>& pqCentroids,
       stream);
 
     outCodeDistancesF = outCodeDistancesFloatMem;
+  } else {
+      outCodeDistancesF = outCodeDistances.toTensor<float>();
   }
+#else
+  outCodeDistancesF = outCodeDistances.toTensor<float>();
 #endif
 
-    if (!useFloat16Lookup) {
-        outCodeDistancesF = outCodeDistances.toTensor<float>();
-    }
   // Transpose -2(sub q)(q * c)(code) to -2(q * c)(sub q)(code) (which
   // is where we build our output distances)
   auto outCodeDistancesView = outCodeDistancesF.view<3>(
@@ -498,7 +501,7 @@ runPQCodeDistances(Tensor<float, 3, true>& pqCentroids,
         queries, kQueriesPerBlock,                                      \
         coarseCentroids, pqCentroids,                                   \
         topQueryToCentroid, outCodeDistancesT);                         \
-    }else{                                                              \
+    } else {                                                              \
      auto outCodeDistancesT = outCodeDistances.toTensor<float>();       \
                                                                         \
       pqCodeDistances<float, DIMS, L2><<<grid, block, smem, stream>>>(  \

@@ -73,7 +73,6 @@ struct ConvertTo<float4> {
 #endif
 };
 
-//#ifdef FAISS_USE_FLOAT16
 #ifdef FAISS_USE_FLOAT16
 template <>
 struct ConvertTo<half> {
@@ -97,7 +96,6 @@ struct ConvertTo<Half4> {
   static inline __device__ Half4 to(Half4 v) { return v; }
 };
 #endif
-//#endif
 
 // Tensor conversion
 template <typename From, typename To>

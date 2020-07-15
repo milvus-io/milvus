@@ -369,6 +369,7 @@ runIPDistance(GpuResources* resources,
                        outDistances,
                        outIndices);
 }
+
 #ifdef FAISS_USE_FLOAT16
 void
 runIPDistance(GpuResources* resources,
@@ -443,4 +444,5 @@ runL2Distance(GpuResources* resources,
                       ignoreOutDistances);
 }
 #endif
+
 } } // namespace

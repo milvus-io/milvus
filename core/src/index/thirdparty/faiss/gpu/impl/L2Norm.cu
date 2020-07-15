@@ -308,6 +308,7 @@ void runL2Norm(Tensor<float, 2, true>& input,
       inputCast, inputRowMajor, outputCast, normSquared, stream);
   }
 }
+
 #ifdef FAISS_USE_FLOAT16
 void runL2Norm(Tensor<half, 2, true>& input,
                bool inputRowMajor,
@@ -326,4 +327,5 @@ void runL2Norm(Tensor<half, 2, true>& input,
   }
 }
 #endif
+
 } } // namespace

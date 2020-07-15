@@ -281,6 +281,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
 #else
     auto smem = sizeof(float);
 #endif
+
     smem *= numSubQuantizers * numSubQuantizerCodes;
     FAISS_ASSERT(smem <= getMaxSharedMemPerBlockCurrentDevice());
 

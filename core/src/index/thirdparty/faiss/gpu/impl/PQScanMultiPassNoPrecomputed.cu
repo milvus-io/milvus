@@ -248,7 +248,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
                metric == MetricType::METRIC_L2);
 
   bool l2Distance = metric == MetricType::METRIC_L2;
-
+  // Calculate offset lengths, so we know where to write out
 #ifndef FAISS_USE_FLOAT16
     FAISS_ASSERT(!useFloat16Lookup);
 #endif
@@ -304,6 +304,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
           prefixSumOffsets,                                             \
           allDistances);                                                \
     } while (0)
+
 #ifdef FAISS_USE_FLOAT16
 #define RUN_PQ(NUM_SUB_Q)                       \
     do {                                        \
@@ -319,6 +320,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
       RUN_PQ_OPT(NUM_SUB_Q, float, float4);     \
     } while (0)
 #endif // FAISS_USE_FLOAT16
+
     switch (bytesPerCode) {
       case 1:
         RUN_PQ(1);

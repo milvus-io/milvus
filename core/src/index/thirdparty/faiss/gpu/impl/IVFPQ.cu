@@ -161,6 +161,7 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
   // Calculate the residual for each closest centroid
   DeviceTensor<float, 2, true> residuals(
     mem, {vecs.getSize(0), vecs.getSize(1)}, stream);
+
 #ifdef FAISS_USE_FLOAT16
   if (quantizer_->getUseFloat16()) {
     auto& coarseCentroids = quantizer_->getVectorsFloat16Ref();
@@ -173,6 +174,7 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
     auto& coarseCentroids = quantizer_->getVectorsFloat32Ref();
     runCalcResidual(vecs, coarseCentroids, listIds, residuals, stream);
 #endif
+
   // Residuals are in the form
   // (vec x numSubQuantizer x dimPerSubQuantizer)
   // transpose to
@@ -536,20 +538,23 @@ IVFPQ::precomputeCodesT_() {
                                     coarsePQProductTransposed);
     return;
   }
+#else
+    precomputedCode_ = std::move(coarsePQProductTransposed);
 #endif
 
-    precomputedCode_ = std::move(coarsePQProductTransposed);
 }
 
 void
 IVFPQ::precomputeCodes_() {
-  if (quantizer_->getUseFloat16()) {
 #ifdef FAISS_USE_FLOAT16
-    precomputeCodesT_<half>();
-#endif
+  if (quantizer_->getUseFloat16()) {
+      precomputeCodesT_<half>();
   } else {
     precomputeCodesT_<float>();
   }
+#else
+  precomputeCodesT_<float>();
+#endif
 }
 
 void
@@ -772,7 +777,6 @@ IVFPQ::runPQNoPrecomputedCodes_(
   int k,
   Tensor<float, 2, true>& outDistances,
   Tensor<long, 2, true>& outIndices) {
-
 #ifdef FAISS_USE_FLOAT16
     if (quantizer_->getUseFloat16()) {
     runPQNoPrecomputedCodesT_<half>(queries,
