@@ -516,29 +516,6 @@ macro(build_prometheus)
             "${PROMETHEUS_PUSH_STATIC_LIB}"
             "${PROMETHEUS_PULL_STATIC_LIB}")
 
-            # GIT_REPOSITORY
-            # ${PROMETHEUS_SOURCE_URL}
-            # GIT_TAG
-            # ${PROMETHEUS_VERSION}
-            # GIT_SHALLOW
-            # TRUE
-            # ${EP_LOG_OPTIONS}
-            # CMAKE_ARGS
-            # ${PROMETHEUS_CMAKE_ARGS}
-            # BUILD_COMMAND
-            # ${MAKE}
-            # ${MAKE_BUILD_ARGS}
-            # BUILD_IN_SOURCE
-            # 1
-            # INSTALL_COMMAND
-            # ${MAKE}
-            # "DESTDIR=${PROMETHEUS_PREFIX}"
-            # install
-            # BUILD_BYPRODUCTS
-            # "${PROMETHEUS_CORE_STATIC_LIB}"
-            # "${PROMETHEUS_PUSH_STATIC_LIB}"
-            # "${PROMETHEUS_PULL_STATIC_LIB}")
-            #
     file(MAKE_DIRECTORY "${PROMETHEUS_PREFIX}/push/include")
     add_library(prometheus-cpp-push STATIC IMPORTED)
     set_target_properties(prometheus-cpp-push
