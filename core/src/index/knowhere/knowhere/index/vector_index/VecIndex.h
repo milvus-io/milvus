@@ -20,7 +20,7 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Typedef.h"
 #include "knowhere/index/Index.h"
-#include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 
 namespace milvus {
 namespace knowhere {

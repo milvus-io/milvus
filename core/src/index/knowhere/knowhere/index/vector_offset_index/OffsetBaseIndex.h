@@ -17,7 +17,7 @@
 #include <faiss/Index.h>
 
 #include "knowhere/common/BinarySet.h"
-#include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 
 namespace milvus {
 namespace knowhere {
