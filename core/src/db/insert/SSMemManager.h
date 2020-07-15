@@ -18,21 +18,13 @@
 #include <vector>
 
 #include "db/Types.h"
+#include "segment/Segment.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-extern const char* ENTITY_ID_FIELD;
-extern const char* VECTOR_DIMENSION_PARAM;
 extern const char* VECTOR_FIELD;
-
-struct DataChunk {
-    uint64_t count_ = 0;
-    std::unordered_map<std::string, std::vector<uint8_t>> fields_data_;
-};
-
-using DataChunkPtr = std::shared_ptr<DataChunk>;
 
 class SSMemManager {
  public:
