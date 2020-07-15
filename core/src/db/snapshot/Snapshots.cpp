@@ -153,7 +153,7 @@ Snapshots::Init() {
     auto& collection_ids = op->GetIDs();
     SnapshotHolderPtr holder;
     // TODO
-    for (auto collection_id : collection_ids) {
+    for (auto& collection_id : collection_ids) {
         /* GetHolder(collection_id, holder); */
         auto& store = Store::GetInstance();
         LoadHolder(store, collection_id, holder);
