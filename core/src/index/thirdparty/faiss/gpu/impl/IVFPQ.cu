@@ -801,7 +801,6 @@ IVFPQ::runPQNoPrecomputedCodes_(
                                      outIndices);
 #endif
 
-
 }
 
 } } // namespace

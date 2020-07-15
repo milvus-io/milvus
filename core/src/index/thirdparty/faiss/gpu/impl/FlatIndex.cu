@@ -62,13 +62,14 @@ int FlatIndex::getDim() const {
 
 void
 FlatIndex::reserve(size_t numVecs, cudaStream_t stream) {
-#ifdef FAISS_USE_FLOAT16
-    if (useFloat16_) {
-    rawData_.reserve(numVecs * dim_ * sizeof(half), stream);
-  }
-#endif
 
-    rawData_.reserve(numVecs * dim_ * sizeof(float), stream);
+    if (useFloat16_) {
+#ifdef FAISS_USE_FLOAT16
+    rawData_.reserve(numVecs * dim_ * sizeof(half), stream);
+#endif
+    }else{
+        rawData_.reserve(numVecs * dim_ * sizeof(float), stream);
+    }
 }
 
 template <>

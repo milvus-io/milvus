@@ -319,7 +319,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
       RUN_PQ_OPT(NUM_SUB_Q, float, float4);     \
     } while (0)
 #endif // FAISS_USE_FLOAT16
-        switch (bytesPerCode) {
+    switch (bytesPerCode) {
       case 1:
         RUN_PQ(1);
         break;
