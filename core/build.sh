@@ -1,4 +1,4 @@
-# #!/bin/bash
+#!/bin/bash
 #
 BUILD_OUTPUT_DIR="cmake_build"
 BUILD_TYPE="Debug"
@@ -97,8 +97,7 @@ usage:
   esac
 done
 
-if [ ! -d ${BUILD_OUTPUT_DIR} ]
-then
+if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
   mkdir ${BUILD_OUTPUT_DIR}
 fi
 
@@ -106,7 +105,7 @@ cd ${BUILD_OUTPUT_DIR}
 
 # remove make cache since build.sh -l use default variables
 # force update the variables each time
-# make rebuild_cache >/dev/null 2>&1
+make rebuild_cache >/dev/null 2>&1
 
 CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
