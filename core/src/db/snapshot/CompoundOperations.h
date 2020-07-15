@@ -119,6 +119,12 @@ class NewSegmentOperation : public CompoundBaseOperation<NewSegmentOperation> {
 
     Status
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
+
+    Status
+    CommitRowCount(SIZE_TYPE row_cnt);
+
+ protected:
+    SIZE_TYPE row_cnt_ = 0;
 };
 
 class MergeOperation : public CompoundBaseOperation<MergeOperation> {

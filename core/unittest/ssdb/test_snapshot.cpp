@@ -545,8 +545,9 @@ TEST_F(SnapshotTest, IndexTest) {
     auto partitions = ss->GetResources<Partition>();
     for (auto& kv : partitions) {
         num = RandomInt(2, 5);
+        auto row_cnt = 1024;
         for (auto i = 0; i < num; ++i) {
-            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context).ok());
+            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
         }
         new_total += num;
     }
@@ -619,14 +620,32 @@ TEST_F(SnapshotTest, IndexTest) {
 TEST_F(SnapshotTest, OperationTest) {
     std::string to_string;
     LSN_TYPE lsn;
+    Status status;
 
-    ID_TYPE collection_id;
-    ASSERT_TRUE(GetFirstCollectionID(collection_id).ok());
+    /* ID_TYPE collection_id; */
+    /* ASSERT_TRUE(GetFirstCollectionID(collection_id).ok()); */
+    std::string collection_name("c1");
+    auto ss = CreateCollection(collection_name, ++lsn);
+    ASSERT_TRUE(ss);
 
-    ScopedSnapshotT ss;
-    auto status = Snapshots::GetInstance().GetSnapshot(ss, collection_id);
-    std::cout << status.ToString() << std::endl;
+    SegmentFileContext sf_context;
+    SFContextBuilder(sf_context, ss);
+
+    auto& partitions = ss->GetResources<Partition>();
+    auto total_row_cnt = 0;
+    for (auto& kv : partitions) {
+        auto num = RandomInt(2, 5);
+        for (auto i = 0; i < num; ++i) {
+            auto row_cnt = RandomInt(100, 200);
+            ASSERT_TRUE(CreateSegment(ss, kv.first, ++lsn, sf_context, row_cnt).ok());
+            total_row_cnt += row_cnt;
+        }
+    }
+
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
     ASSERT_TRUE(status.ok());
+    ASSERT_EQ(total_row_cnt, ss->GetCollectionCommit()->GetRowCount());
+
     auto ss_id = ss->GetID();
     lsn = ss->GetMaxLsn() + 1;
 
@@ -638,11 +657,13 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_TRUE(collection_commit->ToString().empty());
     }
 
-    SegmentFileContext sf_context;
+    OperationContext merge_ctx;
+    auto merge_segment_row_cnt = 0;
+
+    std::set<ID_TYPE> stale_segment_commit_ids;
     SFContextBuilder(sf_context, ss);
 
-    OperationContext merge_ctx;
-    std::set<ID_TYPE> stale_segment_commit_ids;
+    std::cout << ss->ToString() << std::endl;
 
     ID_TYPE new_seg_id;
     ScopedSnapshotT new_ss;
@@ -653,6 +674,7 @@ TEST_F(SnapshotTest, OperationTest) {
         auto build_op = std::make_shared<BuildOperation>(context, ss);
         SegmentFilePtr seg_file;
         status = build_op->CommitNewSegmentFile(sf_context, seg_file);
+        std::cout << status.ToString() << std::endl;
         ASSERT_TRUE(status.ok());
         ASSERT_TRUE(seg_file);
         auto prev_segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
@@ -662,6 +684,7 @@ TEST_F(SnapshotTest, OperationTest) {
         build_op->Push();
         status = build_op->GetSnapshot(ss);
         ASSERT_GT(ss->GetID(), ss_id);
+        ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
 
         auto segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto segment_commit_mappings = segment_commit->GetMappings();
@@ -672,6 +695,8 @@ TEST_F(SnapshotTest, OperationTest) {
         auto seg = ss->GetResource<Segment>(seg_file->GetSegmentId());
         ASSERT_TRUE(seg);
         merge_ctx.stale_segments.push_back(seg);
+        merge_segment_row_cnt += ss->GetSegmentCommitBySegmentId(seg->GetID())->GetRowCount();
+
         stale_segment_commit_ids.insert(segment_commit->GetID());
     }
 
@@ -708,19 +733,29 @@ TEST_F(SnapshotTest, OperationTest) {
         SegmentFilePtr seg_file;
         status = op->CommitNewSegmentFile(sf_context, seg_file);
         ASSERT_TRUE(status.ok());
+
+        auto new_segment_row_cnt = RandomInt(100, 200);
+        status = op->CommitRowCount(new_segment_row_cnt);
+        ASSERT_TRUE(status.ok());
+        total_row_cnt += new_segment_row_cnt;
+
         status = op->Push();
         ASSERT_TRUE(status.ok());
 
         status = op->GetSnapshot(ss);
         ASSERT_GT(ss->GetID(), ss_id);
         ASSERT_TRUE(status.ok());
+        ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
 
         auto segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto segment_commit_mappings = segment_commit->GetMappings();
         MappingT expected_segment_mappings;
         expected_segment_mappings.insert(seg_file->GetID());
         ASSERT_EQ(expected_segment_mappings, segment_commit_mappings);
+
         merge_ctx.stale_segments.push_back(new_seg);
+        merge_segment_row_cnt += ss->GetSegmentCommitBySegmentId(new_seg->GetID())->GetRowCount();
+
         partition_id = segment_commit->GetPartitionId();
         stale_segment_commit_ids.insert(segment_commit->GetID());
         auto partition = ss->GetResource<Partition>(partition_id);
@@ -752,6 +787,9 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_TRUE(status.ok());
 
         auto segment_commit = ss->GetSegmentCommitBySegmentId(new_seg->GetID());
+        ASSERT_EQ(segment_commit->GetRowCount(), merge_segment_row_cnt);
+        ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
+
         auto new_partition_commit = ss->GetPartitionCommitByPartitionId(partition_id);
         auto new_mappings = new_partition_commit->GetMappings();
         auto prev_mappings = prev_partition_commit->GetMappings();
