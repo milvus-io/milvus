@@ -17,11 +17,55 @@
 #include <vector>
 
 #include "db/Constants.h"
-#include "db/engine/ExecutionEngine.h"
 #include "src/version.h"
 
 namespace milvus {
 namespace engine {
+
+// TODO(linxj): replace with VecIndex::IndexType
+enum class EngineType {
+    INVALID = 0,
+    FAISS_IDMAP = 1,
+    FAISS_IVFFLAT,
+    FAISS_IVFSQ8,
+    NSG_MIX,
+    FAISS_IVFSQ8H,
+    FAISS_PQ,
+    SPTAG_KDT,
+    SPTAG_BKT,
+    FAISS_BIN_IDMAP,
+    FAISS_BIN_IVFFLAT,
+    HNSW,
+    ANNOY,
+    FAISS_IVFSQ8NR,
+    HNSW_SQ8NR,
+    MAX_VALUE = HNSW_SQ8NR,
+};
+
+static std::map<std::string, EngineType> s_map_engine_type = {{"FLAT", EngineType::FAISS_IDMAP},
+                                                              {"IVFFLAT", EngineType::FAISS_IVFFLAT},
+                                                              {"IVFSQ8", EngineType::FAISS_IVFSQ8},
+                                                              {"RNSG", EngineType::NSG_MIX},
+                                                              {"IVFSQ8H", EngineType::FAISS_IVFSQ8H},
+                                                              {"IVFPQ", EngineType::FAISS_PQ},
+                                                              {"SPTAGKDT", EngineType::SPTAG_KDT},
+                                                              {"SPTAGBKT", EngineType::SPTAG_BKT},
+                                                              {"HNSW", EngineType::HNSW},
+                                                              {"ANNOY", EngineType::ANNOY},
+                                                              {"IVFSQ8NR", EngineType::FAISS_IVFSQ8NR},
+                                                              {"HNSW_SQ8NR", EngineType::HNSW_SQ8NR}};
+
+enum class MetricType {
+    L2 = 1,              // Euclidean Distance
+    IP = 2,              // Cosine Similarity
+    HAMMING = 3,         // Hamming Distance
+    JACCARD = 4,         // Jaccard Distance
+    TANIMOTO = 5,        // Tanimoto Distance
+    SUBSTRUCTURE = 6,    // Substructure Distance
+    SUPERSTRUCTURE = 7,  // Superstructure Distance
+    MAX_VALUE = SUPERSTRUCTURE
+};
+
 namespace meta {
 
 constexpr int32_t DEFAULT_ENGINE_TYPE = (int)EngineType::FAISS_IDMAP;
