@@ -114,6 +114,11 @@ Index *ToCPUCloner::clone_Index_Without_Codes(const Index *index)
         IndexIVFFlat *res = new IndexIVFFlat();
         ifl->copyToWithoutCodes(res);
         return res;
+    } else if(auto ifl =
+              dynamic_cast<const GpuIndexIVFScalarQuantizer *>(index)) {
+        IndexIVFScalarQuantizer *res = new IndexIVFScalarQuantizer();
+        ifl->copyToWithoutCodes(res);
+        return res;
     } else {
         return Cloner::clone_Index(index);
     }
@@ -296,6 +301,28 @@ Index *ToGpuCloner::clone_Index_Without_Codes(const Index *index, const uint8_t 
                                 ifl->nlist,
                                 ifl->metric_type,
                                 config);
+        if(reserveVecs > 0 && ifl->ntotal == 0) {
+            res->reserveMemory(reserveVecs);
+        }
+
+        res->copyFromWithoutCodes(ifl, arranged_data);
+        return res;
+    } else if(auto ifl =
+              dynamic_cast<const faiss::IndexIVFScalarQuantizer *>(index)) {
+        GpuIndexIVFScalarQuantizerConfig config;
+        config.device = device;
+        config.indicesOptions = indicesOptions;
+        config.flatConfig.useFloat16 = useFloat16CoarseQuantizer;
+        config.flatConfig.storeTransposed = storeTransposed;
+
+        GpuIndexIVFScalarQuantizer *res =
+            new GpuIndexIVFScalarQuantizer(resources,
+                                           ifl->d,
+                                           ifl->nlist,
+                                           ifl->sq.qtype,
+                                           ifl->metric_type,
+                                           ifl->by_residual,
+                                           config);
         if(reserveVecs > 0 && ifl->ntotal == 0) {
             res->reserveMemory(reserveVecs);
         }
