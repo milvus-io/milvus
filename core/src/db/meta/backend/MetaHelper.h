@@ -11,32 +11,23 @@
 
 #pragma once
 
-#include <memory>
-#include <utility>
+#include <string>
 
-#include <faiss/IndexBinary.h>
+#include "db/meta/backend/MetaContext.h"
+#include "utils/Status.h"
 
-#include "knowhere/common/BinarySet.h"
-#include "knowhere/common/Dataset.h"
-#include "knowhere/index/IndexType.h"
+namespace milvus::engine::meta {
 
-namespace milvus {
-namespace knowhere {
-
-class FaissBaseBinaryIndex {
- protected:
-    explicit FaissBaseBinaryIndex(std::shared_ptr<faiss::IndexBinary> index) : index_(std::move(index)) {
-    }
-
-    virtual BinarySet
-    SerializeImpl(const IndexType& type);
-
-    virtual void
-    LoadImpl(const BinarySet& index_binary, const IndexType& type);
+class MetaHelper {
+ private:
+    MetaHelper() = default;
 
  public:
-    std::shared_ptr<faiss::IndexBinary> index_ = nullptr;
+    static Status
+    MetaQueryContextToSql(const MetaQueryContext& context, std::string& sql);
+
+    static Status
+    MetaApplyContextToSql(const MetaApplyContext& context, std::string& sql);
 };
 
-}  // namespace knowhere
-}  // namespace milvus
+}  // namespace milvus::engine::meta

@@ -11,32 +11,29 @@
 
 #pragma once
 
-#include <memory>
+#include <string>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
-#include <faiss/IndexBinary.h>
+namespace milvus::engine::meta {
 
-#include "knowhere/common/BinarySet.h"
-#include "knowhere/common/Dataset.h"
-#include "knowhere/index/IndexType.h"
+enum MetaContextOp { oAdd = 1, oUpdate, oDelete };
 
-namespace milvus {
-namespace knowhere {
-
-class FaissBaseBinaryIndex {
- protected:
-    explicit FaissBaseBinaryIndex(std::shared_ptr<faiss::IndexBinary> index) : index_(std::move(index)) {
-    }
-
-    virtual BinarySet
-    SerializeImpl(const IndexType& type);
-
-    virtual void
-    LoadImpl(const BinarySet& index_binary, const IndexType& type);
-
- public:
-    std::shared_ptr<faiss::IndexBinary> index_ = nullptr;
+struct MetaQueryContext {
+    std::string table_;
+    bool all_required_ = true;
+    std::vector<std::string> query_fields_;
+    std::unordered_map<std::string, std::string> filter_attrs_;
 };
 
-}  // namespace knowhere
-}  // namespace milvus
+struct MetaApplyContext {
+    std::string table_;
+    MetaContextOp op_;
+    int64_t id_;
+    std::unordered_map<std::string, std::string> attrs_;
+    std::unordered_map<std::string, std::string> filter_attrs_;
+    std::string sql_;
+};
+
+}  // namespace milvus::engine::meta

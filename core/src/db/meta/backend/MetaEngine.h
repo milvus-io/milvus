@@ -16,35 +16,27 @@
 #include <unordered_map>
 #include <vector>
 
-#include "db/IDGenerator.h"
-#include "db/engine/ExecutionEngine.h"
-#include "db/insert/SSMemManager.h"
-#include "segment/SSSegmentWriter.h"
-#include "segment/Segment.h"
+#include "db/meta/backend/MetaContext.h"
+#include "db/snapshot/ResourceTypes.h"
 #include "utils/Status.h"
 
-namespace milvus {
-namespace engine {
+namespace milvus::engine::meta {
 
-// TODO(zhiru): this class needs to be refactored once attributes are added
+using AttrsMap = std::unordered_map<std::string, std::string>;
+using AttrsMapList = std::vector<AttrsMap>;
 
-class SSVectorSource {
+class MetaEngine {
  public:
-    explicit SSVectorSource(const DataChunkPtr& chunk);
+    virtual Status
+    Query(const MetaQueryContext& context, AttrsMapList& attrs) = 0;
 
-    Status
-    Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const size_t& num_attrs_to_add, size_t& num_attrs_added);
+    virtual Status
+    ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) = 0;
 
-    bool
-    AllAdded();
+    virtual Status
+    TruncateAll() = 0;
+};
 
- private:
-    DataChunkPtr chunk_;
+using MetaEnginePtr = std::shared_ptr<MetaEngine>;
 
-    size_t current_num_added_ = 0;
-};  // SSVectorSource
-
-using SSVectorSourcePtr = std::shared_ptr<SSVectorSource>;
-
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::meta
