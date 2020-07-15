@@ -34,7 +34,7 @@ namespace segment {
 
 class SSSegmentWriter {
  public:
-    explicit SSSegmentWriter(const engine::SegmentVisitorPtr& segment_visitor);
+    explicit SSSegmentWriter(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor);
 
     Status
     AddChunk(const engine::DataChunkPtr& chunk_ptr);
@@ -86,6 +86,7 @@ class SSSegmentWriter {
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
     engine::SegmentPtr segment_ptr_;
+    std::string dir_root_;
 };
 
 using SSSegmentWriterPtr = std::shared_ptr<SSSegmentWriter>;

@@ -32,9 +32,11 @@
 namespace milvus {
 namespace segment {
 
-SSSegmentReader::SSSegmentReader(const engine::SegmentVisitorPtr& segment_visitor) : segment_visitor_(segment_visitor) {
+SSSegmentReader::SSSegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor)
+    : dir_root_(dir_root), segment_visitor_(segment_visitor) {
     auto& segment_ptr = segment_visitor_->GetSegment();
-    std::string directory = engine::snapshot::GetResPath<engine::snapshot::Segment>(segment_ptr);
+    std::string directory =
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor->GetSegment());
 
     storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
     storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
@@ -55,36 +57,39 @@ SSSegmentReader::Load() {
     try {
         // auto& ss_codec = codec::SSCodec::instance();
 
-        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
 
         /* load UID's raw data */
         auto uid_raw_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
         std::string uid_raw_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_raw_visitor->GetFile());
-        std::vector<segment::doc_id_t> uids;
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_raw_visitor->GetFile());
         STATUS_CHECK(LoadUids(uid_raw_path, segment_ptr_->vectors_ptr_->GetMutableUids()));
 
         /* load UID's deleted docs */
         auto uid_del_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string uid_del_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(uid_del_visitor->GetFile());
-        segment::DeletedDocsPtr deleted_docs_ptr;
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_del_visitor->GetFile());
         STATUS_CHECK(LoadDeletedDocs(uid_del_path, segment_ptr_->deleted_docs_ptr_));
 
         /* load other data */
+        Status s;
+        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
         for (auto& f_kv : field_visitors_map) {
-            auto& field_visitor = f_kv.second;
-            auto& field = field_visitor->GetField();
-            for (auto& file_kv : field_visitor->GetElementVistors()) {
-                auto& field_element_visitor = file_kv.second;
+            auto& fv = f_kv.second;
+            auto& field = fv->GetField();
+            for (auto& file_kv : fv->GetElementVistors()) {
+                auto& fev = file_kv.second;
+                std::string file_path =
+                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, fev->GetFile());
+                if (!s.ok()) {
+                    LOG_ENGINE_WARNING_ << "Cannot get resource path";
+                }
 
-                auto& segment_file = field_element_visitor->GetFile();
+                auto& segment_file = fev->GetFile();
                 if (segment_file == nullptr) {
                     continue;
                 }
-                auto file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_file);
-                auto& field_element = field_element_visitor->GetElement();
+                auto& field_element = fev->GetElement();
 
                 if ((field->GetFtype() == engine::FieldType::VECTOR_FLOAT ||
                      field->GetFtype() == engine::FieldType::VECTOR_BINARY) &&
