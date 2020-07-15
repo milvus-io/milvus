@@ -254,8 +254,10 @@ GetIndexName(int32_t index_type) {
         {(int32_t)engine::EngineType::FAISS_IVFSQ8NR, "IVFSQ8NR"},
         {(int32_t)engine::EngineType::FAISS_IVFSQ8H, "IVFSQ8H"},
         {(int32_t)engine::EngineType::FAISS_PQ, "PQ"},
+#ifdef MILVUS_SUPPORT_SPTAG
         {(int32_t)engine::EngineType::SPTAG_KDT, "KDT"},
         {(int32_t)engine::EngineType::SPTAG_BKT, "BKT"},
+#endif
         {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, "IDMAP"},
         {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "IVFFLAT"},
         {(int32_t)engine::EngineType::HNSW_SQ8NR, "HNSW_SQ8NR"},
