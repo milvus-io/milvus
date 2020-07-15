@@ -389,29 +389,6 @@ class HardDeleteOperation : public Operations {
     ID_TYPE id_;
 };
 
-template <>
-class HardDeleteOperation<Collection> : public Operations {
- public:
-    explicit HardDeleteOperation(ID_TYPE id)
-        : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::W_Leaf), id_(id) {
-    }
-
-    const Status&
-    ApplyToStore(Store& store) override {
-        if (done_) {
-            Done(store);
-            return status_;
-        }
-        auto status = store.RemoveCollection(id_);
-        SetStatus(status);
-        Done(store);
-        return status_;
-    }
-
- protected:
-    ID_TYPE id_;
-};
-
 using OperationsPtr = std::shared_ptr<Operations>;
 
 }  // namespace snapshot
