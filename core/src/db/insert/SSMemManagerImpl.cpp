@@ -22,9 +22,7 @@
 namespace milvus {
 namespace engine {
 
-const char* ENTITY_ID_FIELD = "id";                // hard code
-const char* VECTOR_DIMENSION_PARAM = "dimension";  // hard code
-const char* VECTOR_FIELD = "vector";               // hard code
+const char* VECTOR_FIELD = "vector";  // hard code
 
 SSMemCollectionPtr
 SSMemManagerImpl::GetMemByTable(int64_t collection_id, int64_t partition_id) {
@@ -81,8 +79,8 @@ SSMemManagerImpl::ValidateChunk(int64_t collection_id, int64_t partition_id, con
 
     std::vector<std::string> field_names = ss->GetFieldNames();
     for (auto& name : field_names) {
-        auto iter = chunk->fields_data_.find(name);
-        if (iter == chunk->fields_data_.end()) {
+        auto iter = chunk->fixed_fields_.find(name);
+        if (iter == chunk->fixed_fields_.end()) {
             std::string err_msg = "Missed chunk field: " + name;
             LOG_ENGINE_ERROR_ << err_msg;
             return Status(DB_ERROR, err_msg);

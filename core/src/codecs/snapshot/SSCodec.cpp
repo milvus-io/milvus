@@ -36,6 +36,7 @@ SSCodec::instance() {
 }
 
 SSCodec::SSCodec() {
+    block_format_ptr_ = std::make_shared<SSBlockFormat>();
     vectors_format_ptr_ = std::make_shared<SSVectorsFormat>();
     attrs_format_ptr_ = std::make_shared<SSAttrsFormat>();
     vector_index_format_ptr_ = std::make_shared<SSVectorIndexFormat>();
@@ -43,6 +44,11 @@ SSCodec::SSCodec() {
     deleted_docs_format_ptr_ = std::make_shared<SSDeletedDocsFormat>();
     id_bloom_filter_format_ptr_ = std::make_shared<SSIdBloomFilterFormat>();
     vector_compress_format_ptr_ = std::make_shared<SSVectorCompressFormat>();
+}
+
+SSBlockFormatPtr
+SSCodec::GetBlockFormat() {
+    return block_format_ptr_;
 }
 
 SSVectorsFormatPtr
