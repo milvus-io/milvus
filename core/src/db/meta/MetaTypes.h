@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "db/Constants.h"
+#include "knowhere/index/IndexType.h"
 #include "src/version.h"
 
 namespace milvus {
@@ -44,20 +45,21 @@ enum class EngineType {
     MAX_VALUE = HNSW_SQ8NR,
 };
 
-static std::map<std::string, EngineType> s_map_engine_type = {{"FLAT", EngineType::FAISS_IDMAP},
-                                                              {"IVFFLAT", EngineType::FAISS_IVFFLAT},
-                                                              {"IVFSQ8", EngineType::FAISS_IVFSQ8},
-                                                              {"RNSG", EngineType::NSG_MIX},
-                                                              {"IVFSQ8H", EngineType::FAISS_IVFSQ8H},
-                                                              {"IVFPQ", EngineType::FAISS_PQ},
+static std::map<std::string, EngineType> s_map_engine_type = {
+    {knowhere::IndexEnum::INDEX_FAISS_IDMAP, EngineType::FAISS_IDMAP},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, EngineType::FAISS_IVFFLAT},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFPQ, EngineType::FAISS_PQ},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, EngineType::FAISS_IVFSQ8},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, EngineType::FAISS_IVFSQ8NR},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, EngineType::FAISS_IVFSQ8H},
+    {knowhere::IndexEnum::INDEX_NSG, EngineType::NSG_MIX},
 #ifdef MILVUS_SUPPORT_SPTAG
-                                                              {"SPTAGKDT", EngineType::SPTAG_KDT},
-                                                              {"SPTAGBKT", EngineType::SPTAG_BKT},
+    {knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, EngineType::SPTAG_KDT},
+    {knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, EngineType::SPTAG_BKT},
 #endif
-                                                              {"HNSW", EngineType::HNSW},
-                                                              {"ANNOY", EngineType::ANNOY},
-                                                              {"IVFSQ8NR", EngineType::FAISS_IVFSQ8NR},
-                                                              {"HNSW_SQ8NR", EngineType::HNSW_SQ8NR}};
+    {knowhere::IndexEnum::INDEX_HNSW, EngineType::HNSW},
+    {knowhere::IndexEnum::INDEX_HNSW_SQ8NR, EngineType::HNSW_SQ8NR},
+    {knowhere::IndexEnum::INDEX_ANNOY, EngineType::ANNOY}};
 
 enum class MetricType {
     L2 = 1,              // Euclidean Distance
