@@ -65,13 +65,15 @@ struct SegmentsToSearchCollector : public snapshot::IterateHandler<snapshot::Seg
 struct GetEntityByIdSegmentHandler : public snapshot::IterateHandler<snapshot::Segment> {
     using ResourceT = snapshot::Segment;
     using BaseT = snapshot::IterateHandler<ResourceT>;
-    GetEntityByIdSegmentHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss, const IDNumbers& ids,
+    GetEntityByIdSegmentHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
+                                const std::string& dir_root, const IDNumbers& ids,
                                 const std::vector<std::string>& field_names);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
     const server::ContextPtr context_;
+    const std::string dir_root_;
     const engine::IDNumbers ids_;
     const std::vector<std::string> field_names_;
     std::vector<engine::VectorsData> vector_data_;

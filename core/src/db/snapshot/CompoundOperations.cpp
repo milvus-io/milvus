@@ -295,6 +295,7 @@ NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context, Seg
     auto ctx = context;
     ctx.segment_id = context_.new_segment->GetID();
     ctx.partition_id = context_.new_segment->GetPartitionId();
+    ctx.collection_id = GetStartedSS()->GetCollectionId();
     auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
     STATUS_CHECK(new_sf_op->Push());
     STATUS_CHECK(new_sf_op->GetResource(created));
