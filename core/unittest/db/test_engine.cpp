@@ -116,6 +116,7 @@ TEST_F(EngineTest, FACTORY_TEST) {
         ASSERT_TRUE(engine_ptr != nullptr);
     }
 
+#ifdef MILVUS_SUPPORT_SPTAG
     {
         auto engine_ptr = milvus::engine::EngineFactory::Build(
             512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
@@ -150,6 +151,7 @@ TEST_F(EngineTest, FACTORY_TEST) {
             milvus::engine::MetricType::L2, index_params));
         fiu_disable("ExecutionEngineImpl.throw_exception");
     }
+#endif
 }
 
 TEST_F(EngineTest, ENGINE_IMPL_TEST) {
