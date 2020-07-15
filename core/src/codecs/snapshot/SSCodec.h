@@ -19,6 +19,7 @@
 
 #include "codecs/snapshot/SSAttrsFormat.h"
 #include "codecs/snapshot/SSAttrsIndexFormat.h"
+#include "codecs/snapshot/SSBlockFormat.h"
 #include "codecs/snapshot/SSDeletedDocsFormat.h"
 #include "codecs/snapshot/SSIdBloomFilterFormat.h"
 #include "codecs/snapshot/SSVectorCompressFormat.h"
@@ -32,6 +33,9 @@ class SSCodec {
  public:
     static SSCodec&
     instance();
+
+    SSBlockFormatPtr
+    GetBlockFormat();
 
     SSVectorsFormatPtr
     GetVectorsFormat();
@@ -58,6 +62,7 @@ class SSCodec {
     SSCodec();
 
  private:
+    SSBlockFormatPtr block_format_ptr_;
     SSVectorsFormatPtr vectors_format_ptr_;
     SSAttrsFormatPtr attrs_format_ptr_;
     SSVectorIndexFormatPtr vector_index_format_ptr_;

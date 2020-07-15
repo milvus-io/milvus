@@ -20,7 +20,7 @@
 #include "db/insert/SSVectorSource.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Resources.h"
-#include "segment/SegmentWriter.h"
+#include "segment/SSSegmentWriter.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -78,7 +78,7 @@ class SSMemSegment : public server::CacheConfigHandler {
     size_t current_mem_;
 
     //    ExecutionEnginePtr execution_engine_;
-    segment::SegmentWriterPtr segment_writer_ptr_;
+    segment::SSSegmentWriterPtr segment_writer_ptr_;
 };  // SSMemTableFile
 
 using SSMemSegmentPtr = std::shared_ptr<SSMemSegment>;

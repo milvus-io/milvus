@@ -127,8 +127,8 @@ TEST_F(SSSegmentTest, SegmentTest) {
         /* write data */
         milvus::segment::SSSegmentWriter segment_writer(db_root, visitor);
 
-        status = segment_writer.AddVectors("test", raw_vectors, raw_uids);
-        ASSERT_TRUE(status.ok());
+//        status = segment_writer.AddVectors("test", raw_vectors, raw_uids);
+//        ASSERT_TRUE(status.ok());
 
         status = segment_writer.Serialize();
         ASSERT_TRUE(status.ok());
