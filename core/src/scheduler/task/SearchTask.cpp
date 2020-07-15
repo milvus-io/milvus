@@ -127,11 +127,11 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, Segmen
         //            auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
         //            query::GeneralQueryPtr general_query = search_job->general_query();
         //            if (general_query != nullptr) {
-        //                std::unordered_map<std::string, engine::DataType> types;
+        //                std::unordered_map<std::string, DataType> types;
         //                auto attr_type = search_job->attr_type();
         //                auto type_it = attr_type.begin();
         //                for (; type_it != attr_type.end(); type_it++) {
-        //                    types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
+        //                    types.insert(std::make_pair(type_it->first, (DataType)(type_it->second)));
         //                }
         //                index_engine_ =
         //                    EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
@@ -250,11 +250,11 @@ XSearchTask::Execute() {
             }
             Status s;
             if (general_query != nullptr) {
-                std::unordered_map<std::string, engine::DataType> types;
+                std::unordered_map<std::string, DataType> types;
                 auto attr_type = search_job->attr_type();
                 auto type_it = attr_type.begin();
                 for (; type_it != attr_type.end(); type_it++) {
-                    types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
+                    types.insert(std::make_pair(type_it->first, (DataType)(type_it->second)));
                 }
 
                 auto query_ptr = search_job->query_ptr();

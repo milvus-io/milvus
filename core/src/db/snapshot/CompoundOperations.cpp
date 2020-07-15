@@ -303,6 +303,7 @@ NewSegmentOperation::CommitNewSegmentFile(const SegmentFileContext& context, Seg
     auto ctx = context;
     ctx.segment_id = context_.new_segment->GetID();
     ctx.partition_id = context_.new_segment->GetPartitionId();
+    ctx.collection_id = GetStartedSS()->GetCollectionId();
     auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
     STATUS_CHECK(new_sf_op->Push());
     STATUS_CHECK(new_sf_op->GetResource(created));
@@ -626,8 +627,8 @@ CreateCollectionOperation::DoExecute(Store& store) {
         auto& field_schema = field_kv.first;
         auto& field_elements = field_kv.second;
         FieldPtr field;
-        status =
-            store.CreateResource<Field>(Field(field_schema->GetName(), field_idx, field_schema->GetFtype()), field);
+        status = store.CreateResource<Field>(
+            Field(field_schema->GetName(), field_idx, field_schema->GetFtype(), field_schema->GetParams()), field);
         auto f_ctx_p = ResourceContextBuilder<Field>().SetOp(meta::oUpdate).CreatePtr();
         AddStepWithLsn(*field, c_context_.lsn, f_ctx_p);
         MappingT element_ids = {};

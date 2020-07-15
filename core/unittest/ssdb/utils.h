@@ -102,6 +102,31 @@ SFContextBuilder(SegmentFileContext& ctx, ScopedSnapshotT sss) {
     ctx.partition_id = sss->GetResources<Segment>().begin()->second->GetPartitionId();
 }
 
+inline void
+SFContextsBuilder(std::vector<SegmentFileContext>& contexts, ScopedSnapshotT sss) {
+    auto fields = sss->GetResources<Field>();
+    for (auto& field_kv : fields) {
+        for (auto& kv : sss->GetResources<FieldElement>()) {
+            if (kv.second->GetFieldId() != field_kv.first) {
+                continue;
+            }
+            SegmentFileContext ctx;
+            ctx.field_name = field_kv.second->GetName();
+            ctx.field_element_name = kv.second->GetName();
+            contexts.push_back(ctx);
+        }
+    }
+    auto& segments =  sss->GetResources<Segment>();
+    if (segments.size() == 0) {
+        return;
+    }
+
+    for (auto& ctx : contexts) {
+        ctx.segment_id = sss->GetResources<Segment>().begin()->second->GetID();
+        ctx.partition_id = sss->GetResources<Segment>().begin()->second->GetPartitionId();
+    }
+}
+
 struct PartitionCollector : public IteratePartitionHandler {
     using ResourceT = Partition;
     using BaseT = IteratePartitionHandler;

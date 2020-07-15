@@ -23,8 +23,6 @@
 namespace milvus {
 namespace engine {
 
-const char* VECTOR_DIMENSION_PARAM = "dimension";  // hard code
-
 Status
 Segment::AddField(const std::string& field_name, FIELD_TYPE field_type, uint64_t field_width) {
     if (field_types_.find(field_name) != field_types_.end()) {

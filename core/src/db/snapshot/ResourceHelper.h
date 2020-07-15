@@ -13,57 +13,65 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "db/snapshot/Resources.h"
 #include "utils/Status.h"
 
 namespace milvus::engine::snapshot {
 
+static const char* COLLECTION_PREFIX = "C_";
+static const char* PARTITION_PREFIX = "P_";
+static const char* SEGMENT_PREFIX = "S_";
+static const char* SEGMENT_FILE_PREFIX = "F_";
+
 template <class ResourceT>
 inline std::string
-GetResPath(const typename ResourceT::Ptr& res_ptr) {
+GetResPath(const std::string& root, const typename ResourceT::Ptr& res_ptr) {
     return std::string();
 }
 
 template <>
 inline std::string
-GetResPath<Collection>(const Collection::Ptr& res_ptr) {
+GetResPath<Collection>(const std::string& root, const Collection::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << res_ptr->GetID();
+    ss << root << "/";
+    ss << COLLECTION_PREFIX << res_ptr->GetID();
 
     return ss.str();
 }
 
 template <>
 inline std::string
-GetResPath<Partition>(const Partition::Ptr& res_ptr) {
+GetResPath<Partition>(const std::string& root, const Partition::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << res_ptr->GetCollectionId() << "/";
-    ss << res_ptr->GetID();
+    ss << root << "/";
+    ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
+    ss << PARTITION_PREFIX << res_ptr->GetID();
 
     return ss.str();
 }
 
 template <>
 inline std::string
-GetResPath<Segment>(const Segment::Ptr& res_ptr) {
+GetResPath<Segment>(const std::string& root, const Segment::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << res_ptr->GetCollectionId() << "/";
-    ss << res_ptr->GetPartitionId() << "/";
-    ss << res_ptr->GetID();
+    ss << root << "/";
+    ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
+    ss << PARTITION_PREFIX << res_ptr->GetPartitionId() << "/";
+    ss << SEGMENT_PREFIX << res_ptr->GetID();
 
     return ss.str();
 }
 
 template <>
 inline std::string
-GetResPath<SegmentFile>(const SegmentFile::Ptr& res_ptr) {
+GetResPath<SegmentFile>(const std::string& root, const SegmentFile::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << res_ptr->GetCollectionId() << "/";
-    ss << res_ptr->GetPartitionId() << "/";
-    ss << res_ptr->GetSegmentId() << "/";
-    ss << res_ptr->GetID();
+    ss << root << "/";
+    ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
+    ss << PARTITION_PREFIX << res_ptr->GetPartitionId() << "/";
+    ss << SEGMENT_PREFIX << res_ptr->GetSegmentId() << "/";
+    ss << SEGMENT_FILE_PREFIX << res_ptr->GetID();
 
     return ss.str();
 }

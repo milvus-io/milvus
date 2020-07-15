@@ -234,7 +234,7 @@ Snapshot::ToString() const {
         ss << to_matrix_string(fc_m, row_element_size, 2);
         for (auto& fe_id : fc_m) {
             auto fe = GetResource<FieldElement>(fe_id);
-            ss << "\n\tFieldElement: id=" << fe_id << ",name=" << fe->GetName();
+            ss << "\n\tFieldElement: id=" << fe_id << ",name=" << fe->GetName() << " CID=" << fe->GetCollectionId();
         }
     }
 
