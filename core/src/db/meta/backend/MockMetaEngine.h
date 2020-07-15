@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "db/meta/backend/MetaEngine.h"
@@ -24,6 +25,7 @@ namespace milvus::engine::meta {
 class MockMetaEngine : public MetaEngine {
  private:
     using TableRaw = std::unordered_map<std::string, std::string>;
+    using TableEntity = std::pair<std::string, TableRaw>;
 
  public:
     MockMetaEngine() {
@@ -49,13 +51,16 @@ class MockMetaEngine : public MetaEngine {
     QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs);
 
     Status
-    AddNoLock(const MetaApplyContext& add_context, int64_t& result_id);
+    AddNoLock(const MetaApplyContext& add_context, int64_t& result_id, TableRaw& pre_raw);
 
     Status
-    UpdateNoLock(const MetaApplyContext& add_context, int64_t& result_id);
+    UpdateNoLock(const MetaApplyContext& add_context, int64_t& result_id, TableRaw& pre_raw);
 
     Status
-    DeleteNoLock(const MetaApplyContext& add_context, int64_t& result_id);
+    DeleteNoLock(const MetaApplyContext& add_context, int64_t& result_id, TableRaw& pre_raw);
+
+    Status
+    RollBackNoLock(const std::vector<std::pair<MetaContextOp, TableEntity>>& pre_raws);
 
  private:
     std::mutex mutex_;

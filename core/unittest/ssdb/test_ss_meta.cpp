@@ -34,7 +34,8 @@ TEST_F(SSMetaTest, ApplyTest) {
     collection->SetID(result_id);
 
     collection->Activate();
-    auto c2_ctx = ResourceContextBuilder<Collection>().SetResource(collection).SetOp(Op::oUpdate).CreatePtr();
+    auto c2_ctx = ResourceContextBuilder<Collection>().SetResource(collection)
+        .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
     status = meta_.Apply<Collection>(c2_ctx, result_id);
     ASSERT_TRUE(status.ok()) << status.ToString();
     ASSERT_GT(result_id, 0);
