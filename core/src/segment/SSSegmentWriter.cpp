@@ -317,7 +317,7 @@ SSSegmentWriter::WriteVectorIndex(const std::string& field_name, const std::stri
         knowhere::VecIndexPtr index;
         auto status = segment_ptr_->GetVectorIndex(field_name, element_name, index);
         if (!status.ok() || index == nullptr) {
-            return Status(DB_ERROR, "index doesn't exist: " + status.message());
+            return Status(DB_ERROR, "Index doesn't exist: " + status.message());
         }
 
         segment::VectorIndexPtr index_ptr = std::make_shared<segment::VectorIndex>(index);
