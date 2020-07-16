@@ -217,6 +217,7 @@ Snapshot::ToString() const {
     ss << "****************************** Snapshot " << GetID() << " ******************************";
     ss << "\nCollection: id=" << GetCollectionId() << ",name=\"" << GetName() << "\"";
     ss << ", CollectionCommit: id=" << GetCollectionCommit()->GetID();
+    ss << ",size=" << GetCollectionCommit()->GetSize();
     ss << ",rows=" << GetCollectionCommit()->GetRowCount() << ",mappings=";
     auto& cc_m = GetCollectionCommit()->GetMappings();
     ss << to_matrix_string(cc_m, row_element_size, 2);
@@ -243,6 +244,7 @@ Snapshot::ToString() const {
         auto p = GetResource<Partition>(p_c->GetPartitionId());
         ss << "\nPartition: id=" << p->GetID() << ",name=\"" << p->GetName() << "\"";
         ss << ", PartitionCommit: id=" << p_c->GetID();
+        ss << ",size=" << p_c->GetSize();
         ss << ",rows=" << p_c->GetRowCount() << ",mappings=";
         auto& pc_m = p_c->GetMappings();
         ss << to_matrix_string(pc_m, row_element_size, 2);
@@ -251,12 +253,14 @@ Snapshot::ToString() const {
             auto se = GetResource<Segment>(sc->GetSegmentId());
             ss << "\n  Segment: id=" << se->GetID();
             ss << ", SegmentCommit: id=" << sc->GetID();
+            ss << ",size=" << sc->GetSize();
             ss << ",rows=" << sc->GetRowCount() << ",mappings=";
             auto& sc_m = sc->GetMappings();
             ss << to_matrix_string(sc_m, row_element_size, 2);
             for (auto& sf_id : sc_m) {
                 auto sf = GetResource<SegmentFile>(sf_id);
                 ss << "\n\tSegmentFile: id=" << sf_id << ",field_element_id=" << sf->GetFieldElementId();
+                ss << ",size=" << sf->GetSize();
             }
         }
     }
