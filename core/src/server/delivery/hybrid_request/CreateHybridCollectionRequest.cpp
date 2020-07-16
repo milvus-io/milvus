@@ -97,6 +97,9 @@ CreateHybridCollectionRequest::OnExecute() {
             if (field_type.second == engine::meta::hybrid::DataType::FLOAT_VECTOR ||
                 field_type.second == engine::meta::hybrid::DataType::BINARY_VECTOR) {
                 vector_param = milvus::json::parse(field_param);
+                if (index_params.contains("index_type")) {
+                    vector_param["index_type"] = index_params["index_type"];
+                }
                 if (vector_param.contains("dimension")) {
                     dimension = vector_param["dimension"].get<uint16_t>();
                 } else {

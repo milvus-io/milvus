@@ -222,6 +222,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     GetEntitiesByIdHelper(const std::string& collection_id, const IDNumbers& id_array,
+                          const std::vector<std::string>& field_names,
                           std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                           std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs,
                           meta::FilesHolder& files_holder);

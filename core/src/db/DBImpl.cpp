@@ -1398,7 +1398,7 @@ DBImpl::GetEntitiesByID(const std::string& collection_id, const milvus::engine::
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
-    status = GetEntitiesByIdHelper(collection_id, id_array, attr_type, vectors, attrs, files_holder);
+    status = GetEntitiesByIdHelper(collection_id, id_array, field_names, attr_type, vectors, attrs, files_holder);
     cache::CpuCacheMgr::GetInstance()->PrintInfo();
 
     return status;
@@ -1588,6 +1588,7 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
 
 Status
 DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::engine::IDNumbers& id_array,
+                              const std::vector<std::string>& field_names,
                               std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                               std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs,
                               milvus::engine::meta::FilesHolder& files_holder) {
@@ -1615,15 +1616,16 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
         segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
 
         for (IDNumbers::iterator it = temp_ids.begin(); it != temp_ids.end();) {
-            int64_t vector_id = *it;
+            int64_t entity_id = *it;
             // each id must has a VectorsData
             // if vector not found for an id, its VectorsData's vector_count = 0, else 1
-            AttrsData& attr_ref = map_id2attr[vector_id];
-            VectorsData& vector_ref = map_id2vector[vector_id];
+            AttrsData& attr_ref = map_id2attr[entity_id];
+            VectorsData& vector_ref = map_id2vector[entity_id];
             attr_ref.attr_type_ = attr_type;
+            attr_ref.attr_count_ = 0;
 
             // Check if the id is present in bloom filter.
-            if (id_bloom_filter_ptr->Check(vector_id)) {
+            if (id_bloom_filter_ptr->Check(entity_id)) {
                 // Load uids and check if the id is indeed present. If yes, find its offset.
                 std::vector<segment::doc_id_t> uids;
                 auto status = segment_reader.LoadUids(uids);
@@ -1631,7 +1633,7 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
                     return status;
                 }
 
-                auto found = std::find(uids.begin(), uids.end(), vector_id);
+                auto found = std::find(uids.begin(), uids.end(), entity_id);
                 if (found != uids.end()) {
                     auto offset = std::distance(uids.begin(), found);
 
@@ -1646,72 +1648,77 @@ DBImpl::GetEntitiesByIdHelper(const std::string& collection_id, const milvus::en
 
                     auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
                     if (deleted == deleted_docs.end()) {
-                        // Load raw vector
-                        bool is_binary = utils::IsBinaryMetricType(file.metric_type_);
-                        size_t single_vector_bytes = is_binary ? file.dimension_ / 8 : file.dimension_ * sizeof(float);
-                        std::vector<uint8_t> raw_vector;
-                        status =
-                            segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
-                        if (!status.ok()) {
-                            LOG_ENGINE_ERROR_ << status.message();
-                            return status;
-                        }
-
                         std::unordered_map<std::string, std::vector<uint8_t>> raw_attrs;
-                        auto attr_it = attr_type.begin();
-                        for (; attr_it != attr_type.end(); attr_it++) {
-                            size_t num_bytes;
-                            switch (attr_it->second) {
-                                case engine::meta::hybrid::DataType::INT8: {
-                                    num_bytes = sizeof(int8_t);
-                                    break;
+
+                        for (const auto& field_name : field_names) {
+                            if (attr_type.find(field_name) == attr_type.end()) {
+                                // Load raw vector
+                                bool is_binary = utils::IsBinaryMetricType(file.metric_type_);
+                                size_t single_vector_bytes =
+                                    is_binary ? file.dimension_ / 8 : file.dimension_ * sizeof(float);
+                                std::vector<uint8_t> raw_vector;
+                                status = segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes,
+                                                                    raw_vector);
+                                if (!status.ok()) {
+                                    LOG_ENGINE_ERROR_ << status.message();
+                                    return status;
                                 }
-                                case engine::meta::hybrid::DataType::INT16: {
-                                    num_bytes = sizeof(int16_t);
-                                    break;
+                                vector_ref.vector_count_ = 1;
+                                if (is_binary) {
+                                    vector_ref.binary_data_.swap(raw_vector);
+                                } else {
+                                    std::vector<float> float_vector;
+                                    float_vector.resize(file.dimension_);
+                                    memcpy(float_vector.data(), raw_vector.data(), single_vector_bytes);
+                                    vector_ref.float_data_.swap(float_vector);
                                 }
-                                case engine::meta::hybrid::DataType::INT32: {
-                                    num_bytes = sizeof(int32_t);
-                                    break;
+                            } else {
+                                size_t num_bytes;
+                                switch (attr_type.at(field_name)) {
+                                    case engine::meta::hybrid::DataType::INT8: {
+                                        num_bytes = sizeof(int8_t);
+                                        break;
+                                    }
+                                    case engine::meta::hybrid::DataType::INT16: {
+                                        num_bytes = sizeof(int16_t);
+                                        break;
+                                    }
+                                    case engine::meta::hybrid::DataType::INT32: {
+                                        num_bytes = sizeof(int32_t);
+                                        break;
+                                    }
+                                    case engine::meta::hybrid::DataType::INT64: {
+                                        num_bytes = sizeof(int64_t);
+                                        break;
+                                    }
+                                    case engine::meta::hybrid::DataType::FLOAT: {
+                                        num_bytes = sizeof(float);
+                                        break;
+                                    }
+                                    case engine::meta::hybrid::DataType::DOUBLE: {
+                                        num_bytes = sizeof(double);
+                                        break;
+                                    }
+                                    default: {
+                                        std::string msg = "Field type of " + field_name + " is wrong";
+                                        return Status{DB_ERROR, msg};
+                                    }
                                 }
-                                case engine::meta::hybrid::DataType::INT64: {
-                                    num_bytes = sizeof(int64_t);
-                                    break;
+                                std::vector<uint8_t> raw_attr;
+                                status = segment_reader.LoadAttrs(field_name, offset * num_bytes, num_bytes, raw_attr);
+                                if (!status.ok()) {
+                                    LOG_ENGINE_ERROR_ << status.message();
+                                    return status;
                                 }
-                                case engine::meta::hybrid::DataType::FLOAT: {
-                                    num_bytes = sizeof(float);
-                                    break;
-                                }
-                                case engine::meta::hybrid::DataType::DOUBLE: {
-                                    num_bytes = sizeof(double);
-                                    break;
-                                }
-                                default: {
-                                    std::string msg = "Field type of " + attr_it->first + " is wrong";
-                                    return Status{DB_ERROR, msg};
-                                }
+                                raw_attrs.insert(std::make_pair(field_name, raw_attr));
                             }
-                            std::vector<uint8_t> raw_attr;
-                            status = segment_reader.LoadAttrs(attr_it->first, offset * num_bytes, num_bytes, raw_attr);
-                            if (!status.ok()) {
-                                LOG_ENGINE_ERROR_ << status.message();
-                                return status;
-                            }
-                            raw_attrs.insert(std::make_pair(attr_it->first, raw_attr));
                         }
 
-                        vector_ref.vector_count_ = 1;
-                        if (is_binary) {
-                            vector_ref.binary_data_.swap(raw_vector);
-                        } else {
-                            std::vector<float> float_vector;
-                            float_vector.resize(file.dimension_);
-                            memcpy(float_vector.data(), raw_vector.data(), single_vector_bytes);
-                            vector_ref.float_data_.swap(float_vector);
+                        if (!raw_attrs.empty()) {
+                            attr_ref.attr_count_ = 1;
+                            attr_ref.attr_data_ = raw_attrs;
+                            attr_ref.id_array_.emplace_back(entity_id);
                         }
-
-                        attr_ref.attr_count_ = 1;
-                        attr_ref.attr_data_ = raw_attrs;
                         temp_ids.erase(it);
                         continue;
                     }

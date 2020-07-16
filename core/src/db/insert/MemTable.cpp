@@ -159,18 +159,18 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
         return status;
     }
 
-    {
-        status = Attr::InstanceStructuredIndex::CreateStructuredIndex(collection_id_, meta_);
-        if (!status.ok()) {
-            return status;
-        }
-    }
-
     status = meta_->UpdateCollectionFlushLSN(collection_id_, wal_lsn);
     if (!status.ok()) {
         std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
+    }
+
+    {
+        status = Attr::InstanceStructuredIndex::CreateStructuredIndex(collection_id_, meta_);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << status.ToString();
+        }
     }
 
     recorder.RecordSection("Finished flushing");
