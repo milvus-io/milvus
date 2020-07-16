@@ -12,8 +12,10 @@
 #include "db/SSDBImpl.h"
 #include "cache/CpuCacheMgr.h"
 #include "db/IDGenerator.h"
+#include "db/SnapshotVisitor.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
@@ -680,16 +682,46 @@ SSDBImpl::HybridQuery(const server::ContextPtr& context, const std::string& coll
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    auto handler = std::make_shared<HybridQueryHelperSegmentHandler>(nullptr, ss, partition_patterns);
-    handler->Iterate();
-    STATUS_CHECK(handler->GetStatus());
+    /* collect all valid segment */
+    std::vector<SegmentVisitor::Ptr> segment_visitors;
+    auto exec = [&] (const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
+        auto p_id = segment->GetPartitionId();
+        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
+        auto& p_name = p_ptr->GetName();
 
-    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", handler->segments_.size());
+        /* check partition match pattern */
+        bool match = false;
+        if (partition_patterns.empty()) {
+            match = true;
+        } else {
+            for (auto &pattern : partition_patterns) {
+                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
+                    match = true;
+                    break;
+                }
+            }
+        }
+
+        if (match) {
+            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
+            if (!visitor) {
+                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
+            }
+            segment_visitors.push_back(visitor);
+        }
+        return Status::OK();
+    };
+
+    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
+    segment_iter->Iterate();
+    STATUS_CHECK(segment_iter->GetStatus());
+
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
 
     VectorsData vectors;
     scheduler::SearchJobPtr job =
         std::make_shared<scheduler::SearchJob>(query_ctx, general_query, query_ptr, attr_type, vectors);
-    for (auto& segment : handler->segments_) {
+    for (auto& sv: segment_visitors) {
         // job->AddSegment(segment);
     }
 

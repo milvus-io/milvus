@@ -29,10 +29,12 @@ namespace milvus {
 namespace scheduler {
 
 enum class JobType {
-    INVALID,
-    SEARCH,
-    DELETE,
-    BUILD,
+    INVALID = -1,
+    SEARCH = 0,
+    DELETE = 1,
+    BUILD = 2,
+
+    SS_SEARCH = 10,
 };
 
 using JobId = std::uint64_t;
