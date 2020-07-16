@@ -612,8 +612,7 @@ CreateCollectionOperation::DoExecute(Store& store) {
         return Status(SS_DUPLICATED_ERROR, emsg.str());
     }
 
-    auto status = store.CreateResource<Collection>(Collection(c_context_.collection->GetName()),
-            collection);
+    auto status = store.CreateResource<Collection>(Collection(c_context_.collection->GetName()), collection);
     if (!status.ok()) {
         std::cerr << status.ToString() << std::endl;
         return status;
