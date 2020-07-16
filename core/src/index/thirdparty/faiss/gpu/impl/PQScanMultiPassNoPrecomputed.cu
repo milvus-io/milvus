@@ -281,7 +281,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
     //auto smem = useFloat16Lookup ? sizeof(half) : sizeof(float);
     auto smem = sizeof(float);
 #ifdef FAISS_USE_FLOAT16
-    if (useFloat16Lookup)
+    if (useFloat16Lookup) {
        smem = sizeof(half);
     }
 #endif
