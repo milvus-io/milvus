@@ -30,6 +30,8 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2783 Wrong result returned if searching with tags
 -   \#2790 Distances returned by calling `search` is inaccurate
 -   \#2818 Wrong result returned by `get_entity_by_id`
+-   \#2823 Server crashed during inserting, and can not restart
+-   \#2845 Server crashed after calling `delete_entity_by_id`
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC

@@ -40,6 +40,7 @@ HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<milvus::server::C
       partition_list_(partition_list),
       general_query_(general_query),
       query_ptr_(query_ptr),
+      json_params_(json_params),
       field_names_(field_names),
       result_(result) {
 }
@@ -93,9 +94,9 @@ HybridSearchRequest::OnExecute() {
                 std::make_pair(field_schema.field_name_, (engine::meta::hybrid::DataType)field_schema.field_type_));
         }
 
-        if (json_params.contains("fields")) {
-            if (json_params["fields"].is_array()) {
-                for (auto& name : json_params["fields"]) {
+        if (json_params_.contains("fields")) {
+            if (json_params_["fields"].is_array()) {
+                for (auto& name : json_params_["fields"]) {
                     field_names_.emplace_back(name.get<std::string>());
                 }
             }

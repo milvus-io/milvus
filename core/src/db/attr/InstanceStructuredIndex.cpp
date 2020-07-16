@@ -75,8 +75,10 @@ InstanceStructuredIndex::CreateStructuredIndex(const std::string& collection_id,
 
         auto attr_it = attrs.begin();
         for (; attr_it != attrs.end(); attr_it++) {
-            attr_datas.insert(std::make_pair(attr_it->first, attr_it->second->GetMutableData()));
-            attr_sizes.insert(std::make_pair(attr_it->first, attr_it->second->GetCount()));
+            if (attr_it->second->GetCount() != 0) {
+                attr_datas.insert(std::make_pair(attr_it->first, attr_it->second->GetMutableData()));
+                attr_sizes.insert(std::make_pair(attr_it->first, attr_it->second->GetCount()));
+            }
         }
 
         std::unordered_map<std::string, knowhere::IndexPtr> attr_indexes;
@@ -100,6 +102,10 @@ InstanceStructuredIndex::GenStructuredIndex(
     const std::unordered_map<std::string, std::vector<uint8_t>>& attr_datas,
     std::unordered_map<std::string, int64_t>& attr_sizes,
     std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) {
+    if (attr_sizes.empty() || attr_datas.empty()) {
+        return Status{SERVER_UNEXPECTED_ERROR, "attributes data is null when generate structured index"};
+    }
+
     for (auto& field_name : field_names) {
         knowhere::IndexPtr index_ptr = nullptr;
         switch (attr_types.at(field_name)) {
