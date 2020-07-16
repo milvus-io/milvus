@@ -149,12 +149,40 @@ SSSegmentReader::GetSegment(engine::SegmentPtr& segment_ptr) {
 Status
 SSSegmentReader::LoadVectorIndex(const std::string& field_name, segment::VectorIndexPtr& vector_index_ptr) {
     try {
+        auto& ss_codec = codec::SSCodec::instance();
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
-        auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, raw_visitor->GetFile());
-        //        auto& ss_codec = codec::SSCodec::instance();
-        //        ss_codec.GetVectorIndexFormat()->read(fs_ptr_, location, external_data, vector_index_ptr);
+        knowhere::BinarySet index_data;
+        knowhere::BinaryPtr raw_data, compress_data;
+
+        auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (index_visitor) {
+            std::string file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, index_visitor->GetFile());
+            ss_codec.GetVectorIndexFormat()->read_index(fs_ptr_, file_path, index_data);
+        }
+
+        engine::FIXED_FIELD_DATA fixed_data;
+        auto status = segment_ptr_->GetFixedFieldData(field_name, fixed_data);
+        if (status.ok()) {
+            ss_codec.GetVectorIndexFormat()->convert_raw(fixed_data, raw_data);
+        } else if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW)) {
+            std::string file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+
+            ss_codec.GetVectorIndexFormat()->read_raw(fs_ptr_, file_path, raw_data);
+        }
+
+        if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8)) {
+            std::string file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+            ss_codec.GetVectorIndexFormat()->read_compress(fs_ptr_, file_path, compress_data);
+        }
+
+        knowhere::VecIndexPtr index;
+        std::string index_name = index_visitor->GetElement()->GetName();
+        ss_codec.GetVectorIndexFormat()->construct_index(index_name, index_data, raw_data, compress_data, index);
+
+        vector_index_ptr = std::make_shared<segment::VectorIndex>(index);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;

@@ -67,10 +67,7 @@ class SSSegmentWriter {
     SetVectorIndex(const std::string& field_name, const knowhere::VecIndexPtr& index);
 
     Status
-    WriteVectorIndex(const std::string& field_name, const std::string& file_path);
-
-    Status
-    WriteVectorIndice();
+    WriteVectorIndex(const std::string& field_name);
 
  private:
     Status

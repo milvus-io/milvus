@@ -24,7 +24,6 @@
 #include "codecs/snapshot/SSIdBloomFilterFormat.h"
 #include "codecs/snapshot/SSVectorCompressFormat.h"
 #include "codecs/snapshot/SSVectorIndexFormat.h"
-#include "codecs/snapshot/SSVectorsFormat.h"
 
 namespace milvus {
 namespace codec {
@@ -36,9 +35,6 @@ class SSCodec {
 
     SSBlockFormatPtr
     GetBlockFormat();
-
-    SSVectorsFormatPtr
-    GetVectorsFormat();
 
     SSAttrsFormatPtr
     GetAttrsFormat();
@@ -63,7 +59,6 @@ class SSCodec {
 
  private:
     SSBlockFormatPtr block_format_ptr_;
-    SSVectorsFormatPtr vectors_format_ptr_;
     SSAttrsFormatPtr attrs_format_ptr_;
     SSVectorIndexFormatPtr vector_index_format_ptr_;
     SSAttrsIndexFormatPtr attrs_index_format_ptr_;

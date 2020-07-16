@@ -105,9 +105,6 @@ SSSegmentWriter::Serialize() {
     // write UID's bloom filter
     STATUS_CHECK(WriteBloomFilter());
 
-    // write vector indice
-    STATUS_CHECK(WriteVectorIndice());
-
     return Status::OK();
 }
 
@@ -324,7 +321,7 @@ SSSegmentWriter::SetVectorIndex(const std::string& field_name, const milvus::kno
 }
 
 Status
-SSSegmentWriter::WriteVectorIndex(const std::string& field_name, const std::string& file_path) {
+SSSegmentWriter::WriteVectorIndex(const std::string& field_name) {
     try {
         knowhere::VecIndexPtr index;
         auto status = segment_ptr_->GetVectorIndex(field_name, index);
@@ -332,66 +329,29 @@ SSSegmentWriter::WriteVectorIndex(const std::string& field_name, const std::stri
             return Status(DB_ERROR, "Index doesn't exist: " + status.message());
         }
 
-        segment::VectorIndexPtr index_ptr = std::make_shared<segment::VectorIndex>(index);
-
-        auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
-        ss_codec.GetVectorIndexFormat()->write(fs_ptr_, file_path, index_ptr);
-    } catch (std::exception& e) {
-        std::string err_msg = "Failed to write vector index: " + std::string(e.what());
-        LOG_ENGINE_ERROR_ << err_msg;
-
-        engine::utils::SendExitSignal();
-        return Status(SERVER_WRITE_ERROR, err_msg);
-    }
-
-    return Status::OK();
-}
-
-Status
-SSSegmentWriter::WriteVectorIndice() {
-    try {
-        auto& ss_codec = codec::SSCodec::instance();
-        fs_ptr_->operation_ptr_->CreateDirectory();
-
         auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
-        auto& indice = segment_ptr_->GetVectorIndice();
+        auto field = segment_visitor_->GetFieldVisitor(field_name);
+        if (field == nullptr) {
+            return Status(DB_ERROR, "Invalid filed name: " + field_name);
+        }
 
-        for (auto& pair : indice) {
-            auto field = segment_visitor_->GetFieldVisitor(pair.first);
-            if (field == nullptr) {
-                return Status(DB_ERROR, "Invalid filed name: " + pair.first);
-            }
+        auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (element_visitor == nullptr) {
+            return Status(DB_ERROR, "Invalid filed name: " + field_name);
+        }
 
-            auto& index = pair.second;
-            auto index_type = index->index_type();
-            if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
-                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
-                auto element = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
-                if (element == nullptr) {
-                    return Status(DB_ERROR, "Invalid filed element type: " + pair.first);
-                }
+        auto& ss_codec = codec::SSCodec::instance();
+        fs_ptr_->operation_ptr_->CreateDirectory();
 
-                std::string index_path =
-                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element->GetFile());
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+        ss_codec.GetVectorIndexFormat()->write_index(fs_ptr_, file_path, index);
 
-                auto binaryset = index->Serialize(knowhere::Config());
-                auto sq8_data = binaryset.Erase(SQ8_DATA);
-
-                auto index_ptr = std::make_shared<VectorIndex>(index);
-                ss_codec.GetVectorCompressFormat()->write(fs_ptr_, index_path, sq8_data);
-            } else {
-                auto element = field->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-                if (element == nullptr) {
-                    return Status(DB_ERROR, "Invalid filed element type: " + pair.first);
-                }
-
-                std::string index_path =
-                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element->GetFile());
-
-                auto index_ptr = std::make_shared<VectorIndex>(index);
-                ss_codec.GetVectorIndexFormat()->write(fs_ptr_, index_path, index_ptr);
-            }
+        element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+        if (element_visitor != nullptr) {
+            file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+            ss_codec.GetVectorIndexFormat()->write_compress(fs_ptr_, file_path, index);
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
@@ -403,6 +363,62 @@ SSSegmentWriter::WriteVectorIndice() {
 
     return Status::OK();
 }
+//
+// Status
+// SSSegmentWriter::WriteVectorIndice() {
+//    try {
+//        auto& ss_codec = codec::SSCodec::instance();
+//        fs_ptr_->operation_ptr_->CreateDirectory();
+//
+//        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+//        auto& indice = segment_ptr_->GetVectorIndice();
+//
+//        for (auto& pair : indice) {
+//            auto field = segment_visitor_->GetFieldVisitor(pair.first);
+//            if (field == nullptr) {
+//                return Status(DB_ERROR, "Invalid filed name: " + pair.first);
+//            }
+//
+//            auto& index = pair.second;
+//            auto index_type = index->index_type();
+//            if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
+//                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
+//                auto element = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+//                if (element == nullptr) {
+//                    return Status(DB_ERROR, "Invalid filed element type: " + pair.first);
+//                }
+//
+//                std::string index_path =
+//                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element->GetFile());
+//
+//                auto binaryset = index->Serialize(knowhere::Config());
+//                auto sq8_data = binaryset.Erase(SQ8_DATA);
+//
+//                auto index_ptr = std::make_shared<VectorIndex>(index);
+//                ss_codec.GetVectorCompressFormat()->write(fs_ptr_, index_path, sq8_data);
+//            } else {
+//                auto element = field->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+//                if (element == nullptr) {
+//                    return Status(DB_ERROR, "Invalid filed element type: " + pair.first);
+//                }
+//
+//                std::string index_path =
+//                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element->GetFile());
+//
+//                auto index_ptr = std::make_shared<VectorIndex>(index);
+//                ss_codec.GetVectorIndexFormat()->write(fs_ptr_, index_path, index_ptr);
+//            }
+//        }
+//    } catch (std::exception& e) {
+//        std::string err_msg = "Failed to write vector index: " + std::string(e.what());
+//        LOG_ENGINE_ERROR_ << err_msg;
+//
+//        engine::utils::SendExitSignal();
+//        return Status(SERVER_WRITE_ERROR, err_msg);
+//    }
+//
+//    return Status::OK();
+//}
 
 }  // namespace segment
 }  // namespace milvus

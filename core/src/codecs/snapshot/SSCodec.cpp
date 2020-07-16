@@ -24,7 +24,6 @@
 #include "SSDeletedDocsFormat.h"
 #include "SSIdBloomFilterFormat.h"
 #include "SSVectorIndexFormat.h"
-#include "SSVectorsFormat.h"
 
 namespace milvus {
 namespace codec {
@@ -37,7 +36,6 @@ SSCodec::instance() {
 
 SSCodec::SSCodec() {
     block_format_ptr_ = std::make_shared<SSBlockFormat>();
-    vectors_format_ptr_ = std::make_shared<SSVectorsFormat>();
     attrs_format_ptr_ = std::make_shared<SSAttrsFormat>();
     vector_index_format_ptr_ = std::make_shared<SSVectorIndexFormat>();
     attrs_index_format_ptr_ = std::make_shared<SSAttrsIndexFormat>();
@@ -49,11 +47,6 @@ SSCodec::SSCodec() {
 SSBlockFormatPtr
 SSCodec::GetBlockFormat() {
     return block_format_ptr_;
-}
-
-SSVectorsFormatPtr
-SSCodec::GetVectorsFormat() {
-    return vectors_format_ptr_;
 }
 
 SSAttrsFormatPtr
