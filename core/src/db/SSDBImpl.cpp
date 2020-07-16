@@ -675,7 +675,7 @@ SSDBImpl::HybridQuery(const server::ContextPtr& context, const std::string& coll
                       engine::QueryResult& result) {
     CHECK_INITIALIZED;
 
-    auto query_ctx = context->Child("Query");
+    milvus::server::ContextChild tracer(context, "Query");
 
     TimeRecorder rc("HybridQuery");
 
@@ -720,7 +720,7 @@ SSDBImpl::HybridQuery(const server::ContextPtr& context, const std::string& coll
 
     VectorsData vectors;
     scheduler::SearchJobPtr job =
-        std::make_shared<scheduler::SearchJob>(query_ctx, general_query, query_ptr, attr_type, vectors);
+        std::make_shared<scheduler::SearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
     for (auto& sv: segment_visitors) {
         // job->AddSegment(segment);
     }
@@ -760,7 +760,7 @@ SSDBImpl::HybridQuery(const server::ContextPtr& context, const std::string& coll
 
     rc.ElapseFromBegin("Engine query totally cost");
 
-    query_ctx->GetTraceContext()->GetSpan()->Finish();
+    tracer.Context()->GetTraceContext()->GetSpan()->Finish();
 
     return Status::OK();
 }
