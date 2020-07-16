@@ -43,6 +43,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2675 Print out system memory size when report invalid cpu cache size 
 -   \#2841 Replace IndexType/EngineType/MetricType
 -   \#2858 Unify index name in db
+-   \#2884 Using BlockingQueue in JobMgr
 
 ## Task
 
