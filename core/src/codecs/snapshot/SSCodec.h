@@ -17,11 +17,10 @@
 
 #pragma once
 
-#include "codecs/snapshot/SSAttrsFormat.h"
-#include "codecs/snapshot/SSAttrsIndexFormat.h"
 #include "codecs/snapshot/SSBlockFormat.h"
 #include "codecs/snapshot/SSDeletedDocsFormat.h"
 #include "codecs/snapshot/SSIdBloomFilterFormat.h"
+#include "codecs/snapshot/SSStructuredIndexFormat.h"
 #include "codecs/snapshot/SSVectorCompressFormat.h"
 #include "codecs/snapshot/SSVectorIndexFormat.h"
 
@@ -36,14 +35,11 @@ class SSCodec {
     SSBlockFormatPtr
     GetBlockFormat();
 
-    SSAttrsFormatPtr
-    GetAttrsFormat();
-
     SSVectorIndexFormatPtr
     GetVectorIndexFormat();
 
-    SSAttrsIndexFormatPtr
-    GetAttrsIndexFormat();
+    SSStructuredIndexFormatPtr
+    GetStructuredIndexFormat();
 
     SSDeletedDocsFormatPtr
     GetDeletedDocsFormat();
@@ -59,9 +55,8 @@ class SSCodec {
 
  private:
     SSBlockFormatPtr block_format_ptr_;
-    SSAttrsFormatPtr attrs_format_ptr_;
+    SSStructuredIndexFormatPtr structured_index_format_ptr_;
     SSVectorIndexFormatPtr vector_index_format_ptr_;
-    SSAttrsIndexFormatPtr attrs_index_format_ptr_;
     SSDeletedDocsFormatPtr deleted_docs_format_ptr_;
     SSIdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
     SSVectorCompressFormatPtr vector_compress_format_ptr_;
