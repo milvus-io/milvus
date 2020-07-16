@@ -37,9 +37,9 @@ class MetaAdapter {
  public:
     MetaAdapter() {
         engine_ = std::make_shared<MockMetaEngine>();
-        //        DBMetaOptions options;
-        //        options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
-        //        engine_ = std::make_shared<MySqlEngine>(options);
+        //                DBMetaOptions options;
+        //                options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
+        //                engine_ = std::make_shared<MySqlEngine>(options);
     }
 
     SessionPtr
@@ -89,6 +89,8 @@ class MetaAdapter {
     template <typename ResourceT>
     Status
     Apply(snapshot::ResourceContextPtr<ResourceT> resp, int64_t& result_id) {
+        result_id = 0;
+
         auto session = CreateSession();
         session->Apply<ResourceT>(resp);
 
