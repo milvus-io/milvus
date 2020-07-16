@@ -44,12 +44,6 @@ namespace snapshot {
 
 class Store {
  public:
-    using MockIDST =
-        std::tuple<ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE>;
-    using MockResourcesT = std::tuple<CollectionCommit::MapT, Collection::MapT, SchemaCommit::MapT, FieldCommit::MapT,
-                                      Field::MapT, FieldElement::MapT, PartitionCommit::MapT, Partition::MapT,
-                                      SegmentCommit::MapT, Segment::MapT, SegmentFile::MapT>;
-
     static Store&
     GetInstance() {
         static Store store;
@@ -131,20 +125,6 @@ class Store {
         return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
     }
 
-    Status
-    GetCollections(const std::string& name, std::vector<CollectionPtr>& returns_v) {
-        return meta::MetaAdapter::GetInstance().SelectBy<Collection, std::string>(NameField::Name, name, returns_v);
-    }
-
-    Status
-    RemoveCollection(ID_TYPE id) {
-        auto rc_ctx_p =
-            ResourceContextBuilder<Collection>().SetTable(Collection::Name).SetOp(meta::oDelete).SetID(id).CreatePtr();
-
-        int64_t result_id;
-        return meta::MetaAdapter::GetInstance().Apply<Collection>(rc_ctx_p, result_id);
-    }
-
     template <typename ResourceT>
     Status
     RemoveResource(ID_TYPE id) {
@@ -189,36 +169,9 @@ class Store {
         return ids;
     }
 
-    Status
-    CreateCollection(Collection&& collection, CollectionPtr& return_v) {
-        auto status = CreateResource<Collection>(std::move(collection), return_v);
-        if (!status.ok()) {
-            return status;
-        }
-
-        return Status::OK();
-    }
-
-    template <typename ResourceT>
-    Status
-    UpdateResource(ResourceT&& resource, typename ResourceT::Ptr& return_v) {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-        auto& resources = std::get<typename ResourceT::MapT>(resources_);
-        auto res = std::make_shared<ResourceT>(resource);
-        auto& id = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(ids_);
-        res->ResetCnt();
-        resources[res->GetID()] = res;
-        lock.unlock();
-        GetResource<ResourceT>(res->GetID(), return_v);
-        /* std::cout << ">>> [Update] " << ResourceT::Name << " " << id; */
-        /* std::cout << " " << std::boolalpha << res->IsActive() << std::endl; */
-        return Status::OK();
-    }
-
     template <typename ResourceT>
     Status
     CreateResource(ResourceT&& resource, typename ResourceT::Ptr& return_v) {
-        //        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto res_p = std::make_shared<ResourceT>(resource);
         auto res_ctx_p = ResourceContextBuilder<ResourceT>().SetOp(meta::oAdd).SetResource(res_p).CreatePtr();
 
@@ -232,10 +185,6 @@ class Store {
         return_v->SetID(result_id);
         return_v->ResetCnt();
 
-        //        lock.unlock();
-        //        auto status = GetResource<ResourceT>(res->GetID(), return_v);
-        /* std::cout << ">>> [Create] " << ResourceT::Name << " " << id; */
-        /* std::cout << " " << std::boolalpha << res->IsActive() << std::endl; */
         return Status::OK();
     }
 
@@ -275,7 +224,7 @@ class Store {
             auto tc = Collection(name.str());
             tc.Activate();
             CollectionPtr c;
-            CreateCollection(std::move(tc), c);
+            CreateResource<Collection>(std::move(tc), c);
             all_records.push_back(c);
 
             MappingT schema_c_m;
@@ -386,12 +335,6 @@ class Store {
             }
         }
     }
-
-    MockResourcesT resources_;
-    MockIDST ids_;
-    std::map<std::string, ID_TYPE> name_ids_;
-    std::unordered_map<std::type_index, std::function<ID_TYPE(std::any const&)>> any_flush_vistors_;
-    mutable std::shared_timed_mutex mutex_;
 };
 
 }  // namespace snapshot

@@ -259,7 +259,7 @@ Operations::RollBack() {
 }
 
 Operations::~Operations() {
-    if (!status_.ok()) {
+    if (!status_.ok() || !done_) {
         RollBack();
     }
 }
