@@ -60,7 +60,7 @@ int FlatIndex::getDim() const {
     return vectors_.getSize(1);
   }
 #else
-   return vectors_.getSize(1);
+  return vectors_.getSize(1);
 #endif
 }
 

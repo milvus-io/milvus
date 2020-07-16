@@ -41,9 +41,9 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2561 Clean util dependencies with other modules
 -   \#2612 Move all APIs in utils into namespace milvus 
 -   \#2675 Print out system memory size when report invalid cpu cache size 
+-   \#2828 Add "FAISS_USE_FLOAT16" to control whether support half float or not in Faiss
 -   \#2841 Replace IndexType/EngineType/MetricType
 -   \#2858 Unify index name in db
--   \#2828 Add "FAISS_USE_FLOAT16" to control whether support half float or not in Faiss
 
 ## Task
 
