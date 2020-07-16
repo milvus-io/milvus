@@ -248,22 +248,22 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
 std::string
 GetIndexName(int32_t index_type) {
     static std::map<int32_t, std::string> index_type_name = {
-        {(int32_t)engine::EngineType::FAISS_IDMAP, "FLAT"},
-        {(int32_t)engine::EngineType::FAISS_IVFFLAT, "IVF_FLAT"},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8, "IVF_SQ8"},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8NR, "IVF_SQ8NR"},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8H, "IVF_SQ8_HYBRID"},
-        {(int32_t)engine::EngineType::FAISS_PQ, "IVF_PQ"},
+        {(int32_t)engine::EngineType::FAISS_IDMAP, milvus::knowhere::IndexEnum::INDEX_FAISS_IDMAP},
+        {(int32_t)engine::EngineType::FAISS_IVFFLAT, milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8, milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8NR, milvus::knowhere::IndexEnum::INDEX_HNSW_SQ8NR},
+        {(int32_t)engine::EngineType::FAISS_IVFSQ8H, milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H},
+        {(int32_t)engine::EngineType::FAISS_PQ, milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ},
 #ifdef MILVUS_SUPPORT_SPTAG
-        {(int32_t)engine::EngineType::SPTAG_KDT, "SPTAG_KDT_RNT"},
-        {(int32_t)engine::EngineType::SPTAG_BKT, "SPTAG_BKT_RNT"},
+        {(int32_t)engine::EngineType::SPTAG_KDT, milvus::knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT},
+        {(int32_t)engine::EngineType::SPTAG_BKT, milvus::knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT},
 #endif
-        {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, "BIN_FLAT"},
-        {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "BIN_IVF_FLAT"},
-        {(int32_t)engine::EngineType::HNSW_SQ8NR, "HNSW_SQ8NR"},
-        {(int32_t)engine::EngineType::HNSW, "HNSW"},
-        {(int32_t)engine::EngineType::NSG_MIX, "NSG"},
-        {(int32_t)engine::EngineType::ANNOY, "ANNOY"}};
+        {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP},
+        {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT},
+        {(int32_t)engine::EngineType::HNSW_SQ8NR, milvus::knowhere::IndexEnum::INDEX_HNSW_SQ8NR},
+        {(int32_t)engine::EngineType::HNSW, milvus::knowhere::IndexEnum::INDEX_HNSW},
+        {(int32_t)engine::EngineType::NSG_MIX, milvus::knowhere::IndexEnum::INDEX_NSG},
+        {(int32_t)engine::EngineType::ANNOY, milvus::knowhere::IndexEnum::INDEX_ANNOY}};
 
     if (index_type_name.find(index_type) == index_type_name.end()) {
         return "Unknow";
