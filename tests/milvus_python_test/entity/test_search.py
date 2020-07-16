@@ -407,8 +407,6 @@ class TestSearchBase:
         index_param = get_simple_index["index_param"]
         index_type = get_simple_index["index_type"]
         logging.getLogger().info(get_simple_index)
-        if index_type in [IndexType.RNSG]:
-            pytest.skip("rnsg not support in ip")
         vectors, ids = self.init_data(connect, ip_collection)
         status = connect.create_index(ip_collection, index_type, index_param)
         query_vec = [vectors[0]]
