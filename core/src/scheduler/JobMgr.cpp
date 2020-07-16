@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -67,8 +68,13 @@ JobMgr::worker_function() {
             break;
         }
 
-        auto tasks = build_task(job);
+        auto search_job = std::dynamic_pointer_cast<SearchJob>(job);
+        if (search_job != nullptr) {
+            search_job->GetResultIds().resize(search_job->nq(), -1);
+            search_job->GetResultDistances().resize(search_job->nq(), std::numeric_limits<float>::max());
+        }
 
+        auto tasks = build_task(job);
         for (auto& task : tasks) {
             OptimizerInst::GetInstance()->Run(task);
         }
