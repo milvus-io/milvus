@@ -10,6 +10,8 @@
 
 namespace faiss { namespace gpu {
 
+#ifdef FAISS_USE_FLOAT16
+
 // warp Q to thread Q:
 // 1, 1
 // 32, 2
@@ -90,5 +92,7 @@ void runWarpSelect(Tensor<half, 2, true>& in,
     }
   }
 }
+
+#endif // FAISS_USE_FLOAT16
 
 } } // namespace
