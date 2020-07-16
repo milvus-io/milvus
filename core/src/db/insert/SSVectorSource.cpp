@@ -27,10 +27,10 @@ SSVectorSource::SSVectorSource(const DataChunkPtr& chunk) : chunk_(chunk) {
 }
 
 Status
-SSVectorSource::Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const size_t& num_entities_to_add,
-                    size_t& num_entities_added) {
+SSVectorSource::Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const int64_t& num_entities_to_add,
+                    int64_t& num_entities_added) {
     // TODO: n = vectors_.vector_count_;???
-    uint64_t n = chunk_->count_;
+    int64_t n = chunk_->count_;
     num_entities_added = current_num_added_ + num_entities_to_add <= n ? num_entities_to_add : n - current_num_added_;
 
     auto status = segment_writer_ptr->AddChunk(chunk_, current_num_added_, num_entities_added);

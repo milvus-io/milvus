@@ -23,7 +23,7 @@
 
 #include "codecs/Codec.h"
 #include "db/SnapshotVisitor.h"
-#include "segment/Types.h"
+#include "segment/Segment.h"
 #include "storage/FSHandler.h"
 #include "utils/Status.h"
 
@@ -38,31 +38,45 @@ class SSSegmentReader {
     Load();
 
     Status
-    LoadVectors(const std::string& file_path, off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors);
+    LoadField(const std::string& field_name, std::vector<uint8_t>& raw);
 
     Status
-    LoadUids(const std::string& file_path, std::vector<int64_t>& uids);
+    LoadField(const std::string& field_name, off_t offset, size_t num_bytes, std::vector<uint8_t>& raw);
 
     Status
-    LoadVectorIndex(const std::string& location, codec::ExternalData external_data,
-                    segment::VectorIndexPtr& vector_index_ptr);
+    LoadFields();
 
     Status
-    LoadBloomFilter(const std::string file_path, segment::IdBloomFilterPtr& id_bloom_filter_ptr);
+    LoadUids(std::vector<int64_t>& uids);
 
     Status
-    LoadDeletedDocs(const std::string& file_path, segment::DeletedDocsPtr& deleted_docs_ptr);
+    LoadVectorIndex(const std::string& field_name, segment::VectorIndexPtr& vector_index_ptr);
 
     Status
-    GetSegment(SegmentPtr& segment_ptr);
+    LoadVectorIndice();
+
+    Status
+    LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
+
+    Status
+    LoadBloomFilter();
+
+    Status
+    LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr);
+
+    Status
+    LoadDeletedDocs();
 
     Status
     ReadDeletedDocsSize(size_t& size);
 
+    Status
+    GetSegment(engine::SegmentPtr& segment_ptr);
+
  private:
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
-    SegmentPtr segment_ptr_;
+    engine::SegmentPtr segment_ptr_;
     std::string dir_root_;
 };
 

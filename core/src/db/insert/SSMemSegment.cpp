@@ -116,7 +116,7 @@ SSMemSegment::CreateSegment() {
 }
 
 Status
-SSMemSegment::GetSingleEntitySize(size_t& single_size) {
+SSMemSegment::GetSingleEntitySize(int64_t& single_size) {
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
     if (!status.ok()) {
@@ -180,7 +180,7 @@ SSMemSegment::GetSingleEntitySize(size_t& single_size) {
 
 Status
 SSMemSegment::Add(const SSVectorSourcePtr& source) {
-    size_t single_entity_mem_size = 0;
+    int64_t single_entity_mem_size = 0;
     auto status = GetSingleEntitySize(single_entity_mem_size);
     if (!status.ok()) {
         return status;
@@ -188,8 +188,8 @@ SSMemSegment::Add(const SSVectorSourcePtr& source) {
 
     size_t mem_left = GetMemLeft();
     if (mem_left >= single_entity_mem_size) {
-        size_t num_entities_to_add = std::ceil(mem_left / single_entity_mem_size);
-        size_t num_entities_added;
+        int64_t num_entities_to_add = std::ceil(mem_left / single_entity_mem_size);
+        int64_t num_entities_added;
 
         auto status = source->Add(segment_writer_ptr_, num_entities_to_add, num_entities_added);
 
@@ -255,19 +255,19 @@ SSMemSegment::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
     return Status::OK();
 }
 
-size_t
+int64_t
 SSMemSegment::GetCurrentMem() {
     return current_mem_;
 }
 
-size_t
+int64_t
 SSMemSegment::GetMemLeft() {
     return (MAX_TABLE_FILE_MEM - current_mem_);
 }
 
 bool
 SSMemSegment::IsFull() {
-    size_t single_entity_mem_size = 0;
+    int64_t single_entity_mem_size = 0;
     auto status = GetSingleEntitySize(single_entity_mem_size);
     if (!status.ok()) {
         return true;

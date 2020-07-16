@@ -139,23 +139,16 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     auto uid_field_visitor = segment_visitor->GetFieldVisitor(DEFAULT_UID_NAME);
 
     /* load UID's bloom filter file */
-    auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_BLOOM_FILTER);
-    std::string uid_blf_path = snapshot::GetResPath<snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
-
     segment::IdBloomFilterPtr id_bloom_filter_ptr;
-    STATUS_CHECK(segment_reader.LoadBloomFilter(uid_blf_path, id_bloom_filter_ptr));
+    STATUS_CHECK(segment_reader.LoadBloomFilter(id_bloom_filter_ptr));
 
     /* load UID's raw data */
-    auto uid_raw_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_RAW);
-    std::string uid_raw_path = snapshot::GetResPath<snapshot::SegmentFile>(dir_root_, uid_raw_visitor->GetFile());
-    std::vector<segment::doc_id_t> uids;
-    STATUS_CHECK(segment_reader.LoadUids(uid_raw_path, uids));
+    std::vector<int64_t> uids;
+    STATUS_CHECK(segment_reader.LoadUids(uids));
 
     /* load UID's deleted docs */
-    auto uid_del_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_DELETED_DOCS);
-    std::string uid_del_path = snapshot::GetResPath<snapshot::SegmentFile>(dir_root_, uid_del_visitor->GetFile());
     segment::DeletedDocsPtr deleted_docs_ptr;
-    STATUS_CHECK(segment_reader.LoadDeletedDocs(uid_del_path, deleted_docs_ptr));
+    STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
 
     auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
 

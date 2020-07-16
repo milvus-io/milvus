@@ -18,6 +18,7 @@
 #include "segment/SSSegmentReader.h"
 
 #include <memory>
+#include <utility>
 
 #include "Vectors.h"
 #include "codecs/snapshot/SSCodec.h"
@@ -43,69 +44,32 @@ SSSegmentReader::SSSegmentReader(const std::string& dir_root, const engine::Segm
     storage::OperationPtr operation_ptr = std::make_shared<storage::DiskOperation>(directory);
     fs_ptr_ = std::make_shared<storage::FSHandler>(reader_ptr, writer_ptr, operation_ptr);
 
-    segment_ptr_ = std::make_shared<Segment>();
+    segment_ptr_ = std::make_shared<engine::Segment>();
 }
 
 Status
 SSSegmentReader::Load() {
-    try {
-        // auto& ss_codec = codec::SSCodec::instance();
+    STATUS_CHECK(LoadFields());
 
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+    STATUS_CHECK(LoadBloomFilter());
 
-        /* load UID's raw data */
-        auto uid_raw_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
-        std::string uid_raw_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_raw_visitor->GetFile());
-        STATUS_CHECK(LoadUids(uid_raw_path, segment_ptr_->vectors_ptr_->GetMutableUids()));
+    STATUS_CHECK(LoadDeletedDocs());
 
-        /* load UID's deleted docs */
-        auto uid_del_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
-        std::string uid_del_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_del_visitor->GetFile());
-        STATUS_CHECK(LoadDeletedDocs(uid_del_path, segment_ptr_->deleted_docs_ptr_));
+    STATUS_CHECK(LoadVectorIndice());
 
-        /* load other data */
-        Status s;
-        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
-        for (auto& f_kv : field_visitors_map) {
-            auto& fv = f_kv.second;
-            auto& field = fv->GetField();
-            for (auto& file_kv : fv->GetElementVistors()) {
-                auto& fev = file_kv.second;
-                std::string file_path =
-                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, fev->GetFile());
-                if (!s.ok()) {
-                    LOG_ENGINE_WARNING_ << "Cannot get resource path";
-                }
-
-                auto& segment_file = fev->GetFile();
-                if (segment_file == nullptr) {
-                    continue;
-                }
-                auto& field_element = fev->GetElement();
-
-                if ((field->GetFtype() == engine::FieldType::VECTOR_FLOAT ||
-                     field->GetFtype() == engine::FieldType::VECTOR_BINARY) &&
-                    field_element->GetFtype() == engine::FieldElementType::FET_RAW) {
-                    STATUS_CHECK(LoadVectors(file_path, 0, INT64_MAX, segment_ptr_->vectors_ptr_->GetMutableData()));
-                }
-
-                /* SS TODO: load attr data ? */
-            }
-        }
-    } catch (std::exception& e) {
-        return Status(DB_ERROR, e.what());
-    }
     return Status::OK();
 }
 
 Status
-SSSegmentReader::LoadVectors(const std::string& file_path, off_t offset, size_t num_bytes,
-                             std::vector<uint8_t>& raw_vectors) {
+SSSegmentReader::LoadField(const std::string& field_name, std::vector<uint8_t>& raw) {
     try {
+        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, raw_visitor->GetFile());
+
         auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetVectorsFormat()->read_vectors(fs_ptr_, file_path, offset, num_bytes, raw_vectors);
+        ss_codec.GetBlockFormat()->read(fs_ptr_, file_path, raw);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -115,41 +79,126 @@ SSSegmentReader::LoadVectors(const std::string& file_path, off_t offset, size_t 
 }
 
 Status
-SSSegmentReader::LoadUids(const std::string& file_path, std::vector<doc_id_t>& uids) {
+SSSegmentReader::LoadField(const std::string& field_name, off_t offset, size_t num_bytes, std::vector<uint8_t>& raw) {
     try {
+        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, raw_visitor->GetFile());
+
         auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetVectorsFormat()->read_uids(fs_ptr_, file_path, uids);
+        ss_codec.GetBlockFormat()->read(fs_ptr_, file_path, offset, num_bytes, raw);
     } catch (std::exception& e) {
-        std::string err_msg = "Failed to load uids: " + std::string(e.what());
+        std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
+
     return Status::OK();
 }
 
 Status
-SSSegmentReader::GetSegment(SegmentPtr& segment_ptr) {
+SSSegmentReader::LoadFields() {
+    engine::FIXEDX_FIELD_MAP& field_map = segment_ptr_->GetFixedFields();
+    auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+    for (auto& iter : field_visitors_map) {
+        const engine::snapshot::FieldPtr& field = iter.second->GetField();
+        std::string name = field->GetName();
+        engine::FIXED_FIELD_DATA raw_data;
+        segment_ptr_->GetFixedFieldData(name, raw_data);
+
+        auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+        STATUS_CHECK(LoadField(file_path, raw_data));
+
+        field_map.insert(std::make_pair(name, raw_data));
+    }
+
+    return Status::OK();
+}
+
+Status
+SSSegmentReader::LoadUids(std::vector<int64_t>& uids) {
+    std::vector<uint8_t> raw;
+    auto status = LoadField(engine::DEFAULT_UID_NAME, raw);
+    if (!status.ok()) {
+        LOG_ENGINE_ERROR_ << status.message();
+        return status;
+    }
+
+    if (raw.size() % sizeof(int64_t) != 0) {
+        std::string err_msg = "Failed to load uids: illegal file size";
+        LOG_ENGINE_ERROR_ << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    uids.clear();
+    uids.resize(raw.size() / sizeof(int64_t));
+    memcpy(uids.data(), raw.data(), raw.size());
+
+    return Status::OK();
+}
+
+Status
+SSSegmentReader::GetSegment(engine::SegmentPtr& segment_ptr) {
     segment_ptr = segment_ptr_;
     return Status::OK();
 }
 
 Status
-SSSegmentReader::LoadVectorIndex(const std::string& location, codec::ExternalData external_data,
-                                 segment::VectorIndexPtr& vector_index_ptr) {
+SSSegmentReader::LoadVectorIndex(const std::string& field_name, segment::VectorIndexPtr& vector_index_ptr) {
     try {
-        auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetVectorIndexFormat()->read(fs_ptr_, location, external_data, vector_index_ptr);
+        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, raw_visitor->GetFile());
+        //        auto& ss_codec = codec::SSCodec::instance();
+        //        ss_codec.GetVectorIndexFormat()->read(fs_ptr_, location, external_data, vector_index_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
+
     return Status::OK();
 }
 
 Status
-SSSegmentReader::LoadBloomFilter(const std::string file_path, segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+SSSegmentReader::LoadVectorIndice() {
+    auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+    for (auto& iter : field_visitors_map) {
+        const engine::snapshot::FieldPtr& field = iter.second->GetField();
+        std::string name = field->GetName();
+
+        auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (element_visitor == nullptr) {
+            continue;
+        }
+
+        if (field->GetFtype() == engine::FIELD_TYPE::VECTOR || field->GetFtype() == engine::FIELD_TYPE::VECTOR_FLOAT ||
+            field->GetFtype() == engine::FIELD_TYPE::VECTOR_BINARY) {
+            std::string file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+
+            segment::VectorIndexPtr vector_index_ptr;
+            STATUS_CHECK(LoadVectorIndex(name, vector_index_ptr));
+
+            segment_ptr_->SetVectorIndex(name, vector_index_ptr->GetVectorIndex());
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+SSSegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     try {
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+
         auto& ss_codec = codec::SSCodec::instance();
         ss_codec.GetIdBloomFilterFormat()->read(fs_ptr_, file_path, id_bloom_filter_ptr);
     } catch (std::exception& e) {
@@ -161,8 +210,25 @@ SSSegmentReader::LoadBloomFilter(const std::string file_path, segment::IdBloomFi
 }
 
 Status
-SSSegmentReader::LoadDeletedDocs(const std::string& file_path, segment::DeletedDocsPtr& deleted_docs_ptr) {
+SSSegmentReader::LoadBloomFilter() {
+    segment::IdBloomFilterPtr id_bloom_filter_ptr;
+    auto status = LoadBloomFilter(id_bloom_filter_ptr);
+    if (!status.ok()) {
+        return status;
+    }
+
+    segment_ptr_->SetBloomFilter(id_bloom_filter_ptr);
+    return Status::OK();
+}
+
+Status
+SSSegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
     try {
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+
         auto& ss_codec = codec::SSCodec::instance();
         ss_codec.GetDeletedDocsFormat()->read(fs_ptr_, file_path, deleted_docs_ptr);
     } catch (std::exception& e) {
@@ -170,6 +236,18 @@ SSSegmentReader::LoadDeletedDocs(const std::string& file_path, segment::DeletedD
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
+    return Status::OK();
+}
+
+Status
+SSSegmentReader::LoadDeletedDocs() {
+    segment::DeletedDocsPtr deleted_docs_ptr;
+    auto status = LoadDeletedDocs(deleted_docs_ptr);
+    if (!status.ok()) {
+        return status;
+    }
+
+    segment_ptr_->SetDeletedDocs(deleted_docs_ptr);
     return Status::OK();
 }
 

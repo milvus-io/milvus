@@ -24,12 +24,12 @@ namespace milvus {
 namespace engine {
 
 Status
-Segment::AddField(const std::string& field_name, FIELD_TYPE field_type, uint64_t field_width) {
+Segment::AddField(const std::string& field_name, FIELD_TYPE field_type, int64_t field_width) {
     if (field_types_.find(field_name) != field_types_.end()) {
         return Status(DB_ERROR, "duplicate field: " + field_name);
     }
 
-    uint64_t real_field_width = 0;
+    int64_t real_field_width = 0;
     switch (field_type) {
         case FIELD_TYPE::BOOL:
             real_field_width = sizeof(bool);
@@ -56,7 +56,7 @@ Segment::AddField(const std::string& field_name, FIELD_TYPE field_type, uint64_t
         case FIELD_TYPE::VECTOR:
         case FIELD_TYPE::VECTOR_FLOAT:
         case FIELD_TYPE::VECTOR_BINARY: {
-            if (field_width == 0) {
+            if (field_width <= 0) {
                 std::string msg = "vecor field dimension required: " + field_name;
                 LOG_SERVER_ERROR_ << msg;
                 return Status(DB_ERROR, msg);
@@ -83,8 +83,9 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr) {
 }
 
 Status
-Segment::AddChunk(const DataChunkPtr& chunk_ptr, uint64_t from, uint64_t to) {
-    if (chunk_ptr == nullptr || from > chunk_ptr->count_ || to > chunk_ptr->count_ || from >= to) {
+Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
+    if (chunk_ptr == nullptr || from < 0 || to < 0 || from > chunk_ptr->count_ || to > chunk_ptr->count_ ||
+        from >= to) {
         return Status(DB_ERROR, "invalid input");
     }
 
@@ -101,14 +102,14 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, uint64_t from, uint64_t to) {
     }
 
     // consume
-    uint64_t add_count = to - from;
+    int64_t add_count = to - from;
     for (auto& width_iter : fixed_fields_width_) {
         auto input = chunk_ptr->fixed_fields_.find(width_iter.first);
         auto& data = fixed_fields_[width_iter.first];
         size_t origin_bytes = data.size();
-        uint64_t add_bytes = add_count * width_iter.second;
-        uint64_t previous_bytes = row_count_ * width_iter.second;
-        uint64_t target_bytes = previous_bytes + add_bytes;
+        int64_t add_bytes = add_count * width_iter.second;
+        int64_t previous_bytes = row_count_ * width_iter.second;
+        int64_t target_bytes = previous_bytes + add_bytes;
         data.resize(target_bytes);
         if (input == chunk_ptr->fixed_fields_.end()) {
             // this field is not provided, complicate by 0
@@ -129,9 +130,9 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, uint64_t from, uint64_t to) {
 }
 
 Status
-Segment::DeleteEntity(int32_t offset) {
+Segment::DeleteEntity(int64_t offset) {
     for (auto& pair : fixed_fields_) {
-        uint64_t width = fixed_fields_width_[pair.first];
+        int64_t width = fixed_fields_width_[pair.first];
         if (width != 0) {
             auto step = offset * width;
             FIXED_FIELD_DATA& data = pair.second;
@@ -154,7 +155,7 @@ Segment::GetFieldType(const std::string& field_name, FIELD_TYPE& type) {
 }
 
 Status
-Segment::GetFixedFieldWidth(const std::string& field_name, uint64_t width) {
+Segment::GetFixedFieldWidth(const std::string& field_name, int64_t& width) {
     auto iter = fixed_fields_width_.find(field_name);
     if (iter == fixed_fields_width_.end()) {
         return Status(DB_ERROR, "invalid field name: " + field_name);
@@ -176,25 +177,19 @@ Segment::GetFixedFieldData(const std::string& field_name, FIXED_FIELD_DATA& data
 }
 
 Status
-Segment::GetVectorIndex(const std::string& field_name, const std::string& element_name, knowhere::VecIndexPtr& index) {
+Segment::GetVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index) {
     auto iter = vector_indice_.find(field_name);
     if (iter == vector_indice_.end()) {
         return Status(DB_ERROR, "invalid field name: " + field_name);
     }
 
-    auto iter_index = iter->second.find(element_name);
-    if (iter_index == iter->second.end()) {
-        return Status(DB_ERROR, "invalid field element name: " + element_name);
-    }
-
-    index = iter_index->second;
+    index = iter->second;
     return Status::OK();
 }
 
 Status
-Segment::SetVectorIndex(const std::string& field_name, const std::string& element_name,
-                        const knowhere::VecIndexPtr& index) {
-    vector_indice_[field_name][element_name] = index;
+Segment::SetVectorIndex(const std::string& field_name, const knowhere::VecIndexPtr& index) {
+    vector_indice_[field_name] = index;
     return Status::OK();
 }
 

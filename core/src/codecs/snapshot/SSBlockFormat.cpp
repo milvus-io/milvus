@@ -49,6 +49,37 @@ SSBlockFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& file
 }
 
 void
+SSBlockFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset,
+                    int64_t num_bytes, std::vector<uint8_t>& raw) {
+    if (offset < 0 || num_bytes <= 0) {
+        std::string err_msg = "Invalid input to read: " + file_path;
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
+    }
+
+    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+        std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
+    }
+
+    size_t total_num_bytes;
+    fs_ptr->reader_ptr_->read(&total_num_bytes, sizeof(size_t));
+
+    offset += sizeof(size_t);  // Beginning of file is num_bytes
+    if (offset + num_bytes > total_num_bytes) {
+        std::string err_msg = "Invalid input to read: " + file_path;
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
+    }
+
+    raw.resize(num_bytes);
+    fs_ptr->reader_ptr_->seekg(offset);
+    fs_ptr->reader_ptr_->read(raw.data(), num_bytes);
+    fs_ptr->reader_ptr_->close();
+}
+
+void
 SSBlockFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                      const std::vector<uint8_t>& raw) {
     if (!fs_ptr->writer_ptr_->open(file_path.c_str())) {
