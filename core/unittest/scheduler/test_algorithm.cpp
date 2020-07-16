@@ -59,7 +59,7 @@ class AlgorithmTest : public testing::Test {
     ResourceMgrPtr res_mgr_;
 };
 
-TEST_F(AlgorithmTest, SHORTESTPATH_INVALID_PATH_TEST){
+TEST_F(AlgorithmTest, SHORTESTPATH_INVALID_PATH_TEST) {
     std::vector<std::string> sp;
     uint64_t cost;
     // disk to disk is invalid
@@ -78,18 +78,17 @@ TEST_F(AlgorithmTest, SHORTESTPATH_INVALID_PATH_TEST){
     // gpu0 to gpu1 is invalid
     cost = ShortestPath(gpu_0_.lock(), gpu_1_.lock(), res_mgr_, sp);
     ASSERT_TRUE(sp.empty());
-
 }
 
 TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
     std::vector<std::string> sp;
     uint64_t cost;
-    
+
     //disk to gpu0
     //disk -> cpu0 -> cpu1 -> gpu0
     std::cout << "************************************\n";
     cost = ShortestPath(disk_.lock(), gpu_0_.lock(), res_mgr_, sp);
-    ASSERT_TRUE(sp.size() == 4);
+    ASSERT_EQ(sp.size(), 4);
     while (!sp.empty()) {
         std::cout << sp[sp.size() - 1] << " ";
         sp.pop_back();
@@ -100,7 +99,7 @@ TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
     //disk -> cpu0 -> cpu2 -> gpu1
     std::cout << "************************************\n";
     cost = ShortestPath(disk_.lock(), gpu_1_.lock(), res_mgr_, sp);
-    ASSERT_TRUE(sp.size() == 4);
+    ASSERT_EQ(sp.size(), 4);
     while (!sp.empty()) {
         std::cout << sp[sp.size() - 1] << " ";
         sp.pop_back();
@@ -111,7 +110,7 @@ TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
     // disk -> cpu0
     std::cout << "************************************\n";
     cost = ShortestPath(disk_.lock(), cpu_0_.lock(), res_mgr_, sp);
-    ASSERT_TRUE(sp.size() == 2);
+    ASSERT_EQ(sp.size(), 2);
     while (!sp.empty()) {
         std::cout << sp[sp.size() - 1] << " ";
         sp.pop_back();
@@ -122,7 +121,7 @@ TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
     // disk -> cpu0 -> cpu1
     std::cout << "************************************\n";
     cost = ShortestPath(disk_.lock(), cpu_1_.lock(), res_mgr_, sp);
-    ASSERT_TRUE(sp.size() == 3);
+    ASSERT_EQ(sp.size(), 3);
     while (!sp.empty()) {
         std::cout << sp[sp.size() - 1] << " ";
         sp.pop_back();
@@ -133,7 +132,7 @@ TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
     // disk -> cpu0 -> cpu2
     std::cout << "************************************\n";
     cost = ShortestPath(disk_.lock(), cpu_2_.lock(), res_mgr_, sp);
-    ASSERT_TRUE(sp.size() == 3);
+    ASSERT_EQ(sp.size(), 3);
     while (!sp.empty()) {
         std::cout << sp[sp.size() - 1] << " ";
         sp.pop_back();
@@ -144,7 +143,7 @@ TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
     // cpu0 -> cpu1 -> gpu0
     std::cout << "************************************\n";
     cost = ShortestPath(cpu_0_.lock(), gpu_0_.lock(), res_mgr_, sp);
-    ASSERT_TRUE(sp.size() == 3);
+    ASSERT_EQ(sp.size(), 3);
     while (!sp.empty()) {
         std::cout << sp[sp.size() - 1] << " ";
         sp.pop_back();
@@ -155,7 +154,7 @@ TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
     // cpu0 -> cpu1
     std::cout << "************************************\n";
     cost = ShortestPath(cpu_0_.lock(), cpu_1_.lock(), res_mgr_, sp);
-    ASSERT_TRUE(sp.size() == 2);
+    ASSERT_EQ(sp.size(), 2);
     while (!sp.empty()) {
         std::cout << sp[sp.size() - 1] << " ";
         sp.pop_back();
@@ -166,24 +165,23 @@ TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
     // cpu0 -> cpu2
     std::cout << "************************************\n";
     cost = ShortestPath(cpu_0_.lock(), cpu_2_.lock(), res_mgr_, sp);
-    // ASSERT_TRUE(sp.size() == 2);
-    while (!sp.empty()) {
-        std::cout << sp[sp.size() - 1] << " ";
-        sp.pop_back();
-    }
-    std::cout << std::endl;
-    
-    // cpu0 to gpu1
-    // cpu0 -> cpu2 -> gpu1
-    std::cout << "************************************\n";
-    cost = ShortestPath(cpu_0_.lock(), gpu_1_.lock(), res_mgr_, sp);
-    // ASSERT_TRUE(sp.size() == 3);
+    // ASSERT_EQ(sp.size(), 2);
     while (!sp.empty()) {
         std::cout << sp[sp.size() - 1] << " ";
         sp.pop_back();
     }
     std::cout << std::endl;
 
+    // cpu0 to gpu1
+    // cpu0 -> cpu2 -> gpu1
+    std::cout << "************************************\n";
+    cost = ShortestPath(cpu_0_.lock(), gpu_1_.lock(), res_mgr_, sp);
+    // ASSERT_EQ(sp.size(), 3);
+    while (!sp.empty()) {
+        std::cout << sp[sp.size() - 1] << " ";
+        sp.pop_back();
+    }
+    std::cout << std::endl;
 }
 
 }  // namespace scheduler
