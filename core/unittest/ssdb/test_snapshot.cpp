@@ -646,6 +646,8 @@ TEST_F(SnapshotTest, OperationTest) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(total_row_cnt, ss->GetCollectionCommit()->GetRowCount());
 
+    auto total_size = ss->GetCollectionCommit()->GetSize();
+
     auto ss_id = ss->GetID();
     lsn = ss->GetMaxLsn() + 1;
 
@@ -681,10 +683,16 @@ TEST_F(SnapshotTest, OperationTest) {
         auto prev_segment_commit_mappings = prev_segment_commit->GetMappings();
         ASSERT_FALSE(prev_segment_commit->ToString().empty());
 
+        auto new_size = RandomInt(1000, 20000);
+        seg_file->SetSize(new_size);
+        total_size += new_size;
+
         build_op->Push();
         status = build_op->GetSnapshot(ss);
+        ASSERT_TRUE(status.ok());
         ASSERT_GT(ss->GetID(), ss_id);
         ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
+        ASSERT_EQ(ss->GetCollectionCommit()->GetSize(), total_size);
 
         auto segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto segment_commit_mappings = segment_commit->GetMappings();
@@ -739,6 +747,10 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_TRUE(status.ok());
         total_row_cnt += new_segment_row_cnt;
 
+        auto new_size = new_segment_row_cnt * 5;
+        seg_file->SetSize(new_size);
+        total_size += new_size;
+
         status = op->Push();
         ASSERT_TRUE(status.ok());
 
@@ -746,6 +758,7 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_GT(ss->GetID(), ss_id);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
+        ASSERT_EQ(ss->GetCollectionCommit()->GetSize(), total_size);
 
         auto segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto segment_commit_mappings = segment_commit->GetMappings();
@@ -779,15 +792,27 @@ TEST_F(SnapshotTest, OperationTest) {
         SegmentFilePtr seg_file;
         status = op->CommitNewSegmentFile(sf_context, seg_file);
         ASSERT_TRUE(status.ok());
+
+        auto new_size = RandomInt(1000, 20000);
+        seg_file->SetSize(new_size);
+        auto stale_size = 0;
+        for (auto& stale_seg : merge_ctx.stale_segments) {
+            stale_size += ss->GetSegmentCommitBySegmentId(stale_seg->GetID())->GetSize();
+        }
+        total_size += new_size;
+        total_size -= stale_size;
+
         status = op->Push();
         ASSERT_TRUE(status.ok()) << status.ToString();
         std::cout << op->ToString() << std::endl;
         status = op->GetSnapshot(ss);
         ASSERT_GT(ss->GetID(), ss_id);
         ASSERT_TRUE(status.ok());
+        ASSERT_EQ(total_size, ss->GetCollectionCommit()->GetSize());
 
         auto segment_commit = ss->GetSegmentCommitBySegmentId(new_seg->GetID());
         ASSERT_EQ(segment_commit->GetRowCount(), merge_segment_row_cnt);
+        ASSERT_EQ(segment_commit->GetSize(), new_size);
         ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
 
         auto new_partition_commit = ss->GetPartitionCommitByPartitionId(partition_id);

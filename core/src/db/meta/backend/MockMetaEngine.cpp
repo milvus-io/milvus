@@ -73,7 +73,7 @@ MockMetaEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs
 }
 
 Status
-MockMetaEngine::AddNoLock(const MetaApplyContext& add_context, int64_t& result_id) {
+MockMetaEngine::AddNoLock(const MetaApplyContext& add_context, int64_t& result_id, TableRaw& pre_raw) {
     if (max_ip_map_.find(add_context.table_) == max_ip_map_.end() ||
         resources_.find(add_context.table_) == resources_.end()) {
         max_ip_map_[add_context.table_] = 0;
@@ -90,22 +90,24 @@ MockMetaEngine::AddNoLock(const MetaApplyContext& add_context, int64_t& result_i
 
     new_raw[F_ID] = std::to_string(max_id + 1);
     resources_[add_context.table_].push_back(new_raw);
+    pre_raw = new_raw;
     result_id = max_id + 1;
 
     return Status::OK();
 }
 
 Status
-MockMetaEngine::UpdateNoLock(const MetaApplyContext& update_context, int64_t& retult_id) {
+MockMetaEngine::UpdateNoLock(const MetaApplyContext& update_context, int64_t& result_id, TableRaw& pre_raw) {
     const std::string id_str = std::to_string(update_context.id_);
 
     auto& target_collection = resources_[update_context.table_];
     for (auto& attrs : target_collection) {
         if (attrs[F_ID] == id_str) {
+            pre_raw = attrs;
             for (auto& kv : update_context.attrs_) {
                 attrs[kv.first] = kv.second;
             }
-            retult_id = update_context.id_;
+            result_id = update_context.id_;
             return Status::OK();
         }
     }
@@ -115,12 +117,14 @@ MockMetaEngine::UpdateNoLock(const MetaApplyContext& update_context, int64_t& re
 }
 
 Status
-MockMetaEngine::DeleteNoLock(const MetaApplyContext& delete_context, int64_t& retult_id) {
+MockMetaEngine::DeleteNoLock(const MetaApplyContext& delete_context, int64_t& result_id, TableRaw& pre_raw) {
     const std::string id_str = std::to_string(delete_context.id_);
     auto& target_collection = resources_[delete_context.table_];
 
     for (auto iter = target_collection.begin(); iter != target_collection.end(); iter++) {
         if ((*iter)[F_ID] == id_str) {
+            pre_raw = *iter;
+            result_id = std::stol(iter->at(F_ID));
             target_collection.erase(iter);
             return Status::OK();
         }
@@ -141,18 +145,17 @@ MockMetaEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_cont
                                    std::vector<int64_t>& result_ids) {
     std::unique_lock<std::mutex> lock(mutex_);
 
-    auto duplicated_id_map = max_ip_map_;
-    auto duplicated_resource = resources_;
-
     auto status = Status::OK();
+    std::vector<std::pair<MetaContextOp, TableEntity>> pair_entities;
+    TableRaw raw;
     for (auto& context : sql_contexts) {
         int64_t id;
         if (context.op_ == oAdd) {
-            status = AddNoLock(context, id);
+            status = AddNoLock(context, id, raw);
         } else if (context.op_ == oUpdate) {
-            status = UpdateNoLock(context, id);
+            status = UpdateNoLock(context, id, raw);
         } else if (context.op_ == oDelete) {
-            status = DeleteNoLock(context, id);
+            status = DeleteNoLock(context, id, raw);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, "Unknown resource context");
         }
@@ -161,12 +164,48 @@ MockMetaEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_cont
             break;
         }
         result_ids.push_back(id);
+        pair_entities.emplace_back(context.op_, TableEntity(context.table_, raw));
     }
 
     if (!status.ok()) {
-        max_ip_map_ = duplicated_id_map;
-        resources_ = duplicated_resource;
+        RollBackNoLock(pair_entities);
         return status;
+    }
+
+    return status;
+}
+
+Status
+MockMetaEngine::RollBackNoLock(const std::vector<std::pair<MetaContextOp, TableEntity>>& pre_entities) {
+    for (auto& o_e : pre_entities) {
+        auto table = o_e.second.first;
+        if (o_e.first == oAdd) {
+            auto id = std::stol(o_e.second.second.at(F_ID));
+            max_ip_map_[table] = id - 1;
+            auto& table_res = resources_[table];
+            for (size_t i = 0; i < table_res.size(); i++) {
+                auto store_id = std::stol(table_res[i].at(F_ID));
+                if (store_id == id) {
+                    table_res.erase(table_res.begin() + i, table_res.begin() + i + 1);
+                    break;
+                }
+            }
+        } else if (o_e.first == oUpdate) {
+            auto id = std::stol(o_e.second.second.at(F_ID));
+            auto& table_res = resources_[table];
+            for (size_t j = 0; j < table_res.size(); j++) {
+                auto store_id = std::stol(table_res[j].at(F_ID));
+                if (store_id == id) {
+                    table_res.erase(table_res.begin() + j, table_res.begin() + j + 1);
+                    table_res.push_back(o_e.second.second);
+                    break;
+                }
+            }
+        } else if (o_e.first == oDelete) {
+            resources_[o_e.second.first].push_back(o_e.second.second);
+        } else {
+            continue;
+        }
     }
 
     return Status::OK();

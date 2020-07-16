@@ -20,6 +20,7 @@
 #include <string>
 
 #include "db/SSDBImpl.h"
+#include "db/meta/MetaAdapter.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/EventExecutor.h"
@@ -36,6 +37,7 @@ using IDS_TYPE = milvus::engine::snapshot::IDS_TYPE;
 using LSN_TYPE = milvus::engine::snapshot::LSN_TYPE;
 using SIZE_TYPE = milvus::engine::snapshot::SIZE_TYPE;
 using MappingT = milvus::engine::snapshot::MappingT;
+using State = milvus::engine::snapshot::State;
 using LoadOperationContext = milvus::engine::snapshot::LoadOperationContext;
 using CreateCollectionContext = milvus::engine::snapshot::CreateCollectionContext;
 using SegmentFileContext = milvus::engine::snapshot::SegmentFileContext;
@@ -76,6 +78,8 @@ using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
 using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
 using SSDBImpl = milvus::engine::SSDBImpl;
 using Status = milvus::Status;
+
+using MetaAdapter = milvus::engine::meta::MetaAdapter;
 
 inline int
 RandomInt(int start, int end) {
@@ -268,6 +272,7 @@ CreateSegment(ScopedSnapshotT ss, ID_TYPE partition_id, LSN_TYPE lsn, const Segm
     nsf_context.partition_id = new_seg->GetPartitionId();
     STATUS_CHECK(op->CommitNewSegmentFile(nsf_context, seg_file));
     op->CommitRowCount(row_cnt);
+    seg_file->SetSize(row_cnt * 10);
     STATUS_CHECK(op->Push());
 
     return op->GetSnapshot(ss);
@@ -310,6 +315,18 @@ class SSSegmentTest : public BaseTest {
  protected:
     std::shared_ptr<SSDBImpl> db_;
 
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+class SSMetaTest : public BaseTest {
+ protected:
+    MetaAdapter meta_ = MetaAdapter::GetInstance();
+
+ protected:
     void
     SetUp() override;
     void

@@ -15,7 +15,8 @@ set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_segment.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_meta.cpp)
 
 add_executable(test_ssdb
         ${common_files}
@@ -33,19 +34,19 @@ add_executable(test_ssdb
         ${db_merge_files}
         ${db_wal_files}
         ${db_snapshot_files}
-        ${grpc_server_files}
-        ${grpc_service_files}
+        # ${grpc_server_files}
+        # ${grpc_service_files}
         ${metrics_files}
         ${query_files}
         ${segment_files}
         ${scheduler_files}
-        ${server_files}
-        ${server_init_files}
+        # ${server_files}
+        # ${server_init_files}
         ${server_context_files}
-        ${server_delivery_files}
+        # ${server_delivery_files}
         ${storage_files}
         ${tracing_files}
-        ${web_server_files}
+        # ${web_server_files}
         ${wrapper_files}
         ${thirdparty_files}
         ${test_files}

@@ -172,11 +172,6 @@ SnapshotTest::SetUp() {
 
 void
 SnapshotTest::TearDown() {
-    milvus::engine::snapshot::IDS_TYPE ids;
-    milvus::engine::snapshot::Snapshots::GetInstance().GetCollectionIds(ids);
-    for (auto id : ids) {
-        milvus::engine::snapshot::Snapshots::GetInstance().DropCollection(id, 0);
-    }
     // TODO: Temp to delay some time. OperationExecutor should wait all resources be destructed before stop
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
@@ -259,6 +254,16 @@ SSSegmentTest::TearDown() {
     milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
 
     BaseTest::TearDown();
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void
+SSMetaTest::SetUp() {
+    meta_.TruncateAll();
+}
+
+void
+SSMetaTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
