@@ -95,7 +95,8 @@ class ResourceContext {
 template <typename T>
 class ResourceContextBuilder {
  public:
-    ResourceContextBuilder() = default;
+    ResourceContextBuilder() : table_(T::Name), op_(meta::oAdd) {
+    }
 
     ResourceContextBuilder<T>&
     SetResource(typename T::Ptr res) {
