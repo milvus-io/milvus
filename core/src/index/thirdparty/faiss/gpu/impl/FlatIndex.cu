@@ -60,7 +60,7 @@ int FlatIndex::getDim() const {
     return vectors_.getSize(1);
   }
 #else
-    return vectors_.getSize(1);
+   return vectors_.getSize(1);
 #endif
 }
 
@@ -70,10 +70,10 @@ FlatIndex::reserve(size_t numVecs, cudaStream_t stream) {
   if (useFloat16_) {
     rawData_.reserve(numVecs * dim_ * sizeof(half), stream);
   } else {
-        rawData_.reserve(numVecs * dim_ * sizeof(float), stream);
+    rawData_.reserve(numVecs * dim_ * sizeof(float), stream);
   }
 #else
-    rawData_.reserve(numVecs * dim_ * sizeof(float), stream);
+  rawData_.reserve(numVecs * dim_ * sizeof(float), stream);
 #endif
 }
 
@@ -229,7 +229,7 @@ FlatIndex::computeResidual(Tensor<float, 2, true>& vecs,
                            Tensor<int, 1, true>& listIds,
                            Tensor<float, 2, true>& residuals) {
 #ifdef FAISS_USE_FLOAT16
-    if (useFloat16_) {
+  if (useFloat16_) {
     runCalcResidual(vecs,
                     getVectorsFloat16Ref(),
                     listIds,
@@ -243,11 +243,11 @@ FlatIndex::computeResidual(Tensor<float, 2, true>& vecs,
                     resources_->getDefaultStreamCurrentDevice());
   }
 #else
-    runCalcResidual(vecs,
-                    getVectorsFloat32Ref(),
-                    listIds,
-                    residuals,
-                    resources_->getDefaultStreamCurrentDevice());
+  runCalcResidual(vecs,
+                  getVectorsFloat32Ref(),
+                  listIds,
+                  residuals,
+                  resources_->getDefaultStreamCurrentDevice());
 #endif
 }
 
@@ -267,13 +267,12 @@ FlatIndex::reconstruct(Tensor<int, 1, true>& listIds,
                    resources_->getDefaultStreamCurrentDevice());
   }
 #else
-    runReconstruct(listIds,
-                   getVectorsFloat32Ref(),
-                   vecs,
-                   resources_->getDefaultStreamCurrentDevice());
+  runReconstruct(listIds,
+                 getVectorsFloat32Ref(),
+                 vecs,
+                 resources_->getDefaultStreamCurrentDevice());
 #endif
 }
-
 void
 FlatIndex::reconstruct(Tensor<int, 2, true>& listIds,
                        Tensor<float, 3, true>& vecs) {
@@ -312,6 +311,7 @@ FlatIndex::add(const float* data, int numVecs, cudaStream_t stream) {
                     stream,
                     true /* reserve exactly */);
   }
+
 #else
   rawData_.append((char*) data,
           (size_t) dim_ * numVecs * sizeof(float),

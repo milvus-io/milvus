@@ -27,6 +27,12 @@ GpuIndexIVF::GpuIndexIVF(GpuResources* resources,
     nlist(nlistIn),
     nprobe(1),
     quantizer(nullptr) {
+#ifndef FAISS_USE_FLOAT16
+    FAISS_THROW_IF_NOT_MSG(!ivfConfig_.flatConfig.useFloat16 &&
+                           !ivfConfig_.flatConfig.useFloat16Accumulator,
+                           "float16 unsupported; need CUDA SDK >= 7.5");
+#endif
+
   init_();
 
   // Only IP and L2 are supported for now

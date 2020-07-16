@@ -32,6 +32,11 @@
      ivfFlatConfig_(config),
      reserveMemoryVecs_(0),
      index_(nullptr) {
+#ifndef FAISS_USE_FLOAT16
+     FAISS_THROW_IF_NOT_MSG(!ivfFlatConfig_.useFloat16IVFStorage,
+                            "float16 unsupported; need CUDA SDK >= 7.5");
+#endif
+
    copyFrom(index);
  }
  
@@ -47,7 +52,12 @@
  
    // faiss::Index params
    this->is_trained = false;
- 
+
+#ifndef FAISS_USE_FLOAT16
+     FAISS_THROW_IF_NOT_MSG(!ivfFlatConfig_.useFloat16IVFStorage,
+                            "float16 unsupported; need CUDA SDK >= 7.5");
+#endif
+
    // We haven't trained ourselves, so don't construct the IVFFlat
    // index yet
  }

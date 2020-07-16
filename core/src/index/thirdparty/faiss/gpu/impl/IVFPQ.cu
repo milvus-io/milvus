@@ -710,7 +710,7 @@ IVFPQ::runPQPrecomputedCodes_(
   }
 #endif
 
-  if(!useFloat16LookupTables_) {
+  if (!useFloat16LookupTables_) {
     term2 = NoTypeTensor<3, true>(precomputedCode_);
     term3 = NoTypeTensor<3, true>(term3Transposed);
   }
@@ -779,7 +779,7 @@ IVFPQ::runPQNoPrecomputedCodes_(
   Tensor<float, 2, true>& outDistances,
   Tensor<long, 2, true>& outIndices) {
 #ifdef FAISS_USE_FLOAT16
-    if (quantizer_->getUseFloat16()) {
+  if (quantizer_->getUseFloat16()) {
     runPQNoPrecomputedCodesT_<half>(queries,
                                     bitset,
                                     coarseDistances,
@@ -787,7 +787,7 @@ IVFPQ::runPQNoPrecomputedCodes_(
                                     k,
                                     outDistances,
                                     outIndices);
-    } else {
+  } else {
     runPQNoPrecomputedCodesT_<float>(queries,
                                      bitset,
                                      coarseDistances,
