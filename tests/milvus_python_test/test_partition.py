@@ -5,13 +5,12 @@ import threading
 import logging
 from multiprocessing import Pool, Process
 import pytest
-from milvus import IndexType, MetricType
 from utils import *
 
 
 dim = 128
 index_file_size = 10
-collection_id = "test_partition"
+collection_id = "partition"
 nprobe = 1
 tag = "1970-01-01"
 TIMEOUT = 120

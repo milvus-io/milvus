@@ -578,10 +578,7 @@ class TestCollectionMultiCollections:
         for i in range(collection_num):
             collection_name = gen_unique_str(collection_id)
             collection_list.append(collection_name)
-            fields = {
-                    "fields": update_fields_metric_type(default_fields, "JACCARD"),
-                    "segment_size": segment_size
-            }
+            fields = update_fields_metric_type(default_fields, "JACCARD")
             connect.create_collection(collection_name, fields)
             res = connect.insert(collection_name, entities)
         connect.flush(collection_list)
@@ -610,10 +607,7 @@ class TestCollectionMultiCollections:
         for i in range(int(collection_num / 2), collection_num):
             collection_name = gen_unique_str(collection_id)
             collection_list.append(collection_name)
-            fields = {
-                    "fields": update_fields_metric_type(default_fields, "JACCARD"),
-                    "segment_size": segment_size
-            }
+            fields = update_fields_metric_type(default_fields, "JACCARD")
             connect.create_collection(collection_name, fields)
             res = connect.insert(collection_name, binary_entities)
         connect.flush(collection_list)
