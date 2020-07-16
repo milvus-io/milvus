@@ -876,7 +876,7 @@ TEST_F(WebControllerTest, INDEX) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto result_index_json = nlohmann::json::parse(response->readBodyToString()->c_str());
     ASSERT_TRUE(result_index_json.contains("index_type"));
-    ASSERT_EQ("IVFFLAT", result_index_json["index_type"].get<std::string>());
+    ASSERT_EQ("IVF_FLAT", result_index_json["index_type"].get<std::string>());
     ASSERT_TRUE(result_index_json.contains("params"));
 
     // check index params
