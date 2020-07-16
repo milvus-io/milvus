@@ -54,7 +54,7 @@ SSCodec::GetVectorIndexFormat() {
 
 SSStructuredIndexFormatPtr
 SSCodec::GetStructuredIndexFormat() {
-    return attrs_index_format_ptr_;
+    return structured_index_format_ptr_;
 }
 
 SSDeletedDocsFormatPtr
