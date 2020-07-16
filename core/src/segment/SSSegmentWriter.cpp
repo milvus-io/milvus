@@ -218,7 +218,7 @@ SSSegmentWriter::WriteDeletedDocs() {
 Status
 SSSegmentWriter::WriteDeletedDocs(const std::string& file_path, const DeletedDocsPtr& deleted_docs) {
     if (deleted_docs == nullptr) {
-        return Status(DB_ERROR, "WriteDeletedDocs: null pointer");
+        return Status::OK();
     }
 
     try {
