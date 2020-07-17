@@ -359,8 +359,6 @@ TEST_F(SSDBTest, VisitorTest) {
 }
 
 TEST_F(SSDBTest, InsertTest) {
-    sleep(2);
-
     CreateCollectionContext context;
     context.lsn = 0;
     std::string collection_name = "TEST";
