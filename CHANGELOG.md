@@ -6,9 +6,10 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Bug
 -   \#2487 Enlarge timeout value for creating collection
+-   \#2487 HotFix release lock failed on NAS
 -   \#2557 Fix random crash of INSERT_DUPLICATE_ID case
 -   \#2578 Result count doesn't match target vectors count
--   \#2585 IVF_PQ on GPU with using metric_type IP
+-   \#2585 Support IVF_PQ IP on GPU
 -   \#2598 Fix Milvus docker image report illegal instruction
 -   \#2617 Fix HNSW and RNSG index files size
 -   \#2637 Suit the range of HNSW parameters
@@ -19,11 +20,11 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2739 Fix mishards start failed
 -   \#2752 Milvus formats vectors data to double-precision and return to http client
 -   \#2767 Fix a bug of getting wrong nprobe limitation in knowhere on GPU version
--   \#2768 After building the index,the number of vectors increases
+-   \#2768 After building the index, the number of vectors increases
 -   \#2774 Server down during loading data
 -   \#2776 Fix too many data copies during creating IVF index
 -   \#2813 To implemente RNSG IP
--   \#2487 HotFix release lock failed on NAS
+-   \#2890 Fix the wrong index size
 
 ## Feature
 
