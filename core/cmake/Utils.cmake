@@ -4,17 +4,6 @@ MACRO(get_current_time CURRENT_TIME)
     string(REGEX REPLACE "\n" "" ${CURRENT_TIME} ${${CURRENT_TIME}})
 ENDMACRO(get_current_time)
 
-
-        # if (NOT DEFINED CMAKE_BUILD_TYPE)
-        #     set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build.")
-        # endif ()
-        # message(STATUS "test cmake_build_type: ${CMAKE_BUILD_TYPE}")
-        # if (CMAKE_BUILD_TYPE STREQUAL "Release")
-        #     set(BUILD_TYPE "Release")
-        # else ()
-        #     set(BUILD_TYPE "Debug")
-        # endif ()
-
 # get build type
 MACRO(get_build_type)
     cmake_parse_arguments(BUILD_TYPE "" "TARGET;DEFAULT" "" ${ARGN})
@@ -84,4 +73,9 @@ MACRO(get_milvus_version)
     endif()
 ENDMACRO(get_milvus_version)
 
-
+# set definition
+MACRO(set_milvus_definition DEF_PASS_CMAKE MILVUS_DEF)
+    if (${DEF_PASS_CMAKE} STREQUAL "ON")
+        add_compile_definitions(${MILVUS_DEF})
+    endif()
+ENDMACRO(set_milvus_definition)

@@ -17,52 +17,26 @@ message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Utils)
 
-# Build time
 get_current_time(BUILD_TIME)
 message(STATUS "Build time = ${BUILD_TIME}")
-
-# Build type
-get_build_type(TARGET BUILD_TYPE DEFAULT "Release")
+get_build_type(TARGET BUILD_TYPE 
+        DEFAULT "Release")
 message(STATUS "Build type = ${BUILD_TYPE}")
-
-# Set Milvus version by branch name
-get_milvus_version(TARGET MILVUS_VERSION DEFAULT "0.10.0")
+get_milvus_version(TARGET MILVUS_VERSION 
+        DEFAULT "0.10.0")
 message(STATUS "Build version = ${MILVUS_VERSION}")
-
-# Last commit
 get_last_commit_id(LAST_COMMIT_ID)
 message(STATUS "LAST_COMMIT_ID = ${LAST_COMMIT_ID}")
 
-# Set version
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h @ONLY)
 
 # unset(CMAKE_EXPORT_COMPILE_COMMANDS CACHE)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-
 project(milvus VERSION "${MILVUS_VERSION}")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
-
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
-    message(STATUS "Building milvus_engine on x86 architecture")
-    set(MILVUS_BUILD_ARCH x86_64)
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "(ppc)")
-    message(STATUS "Building milvus_engine on ppc architecture")
-    set(MILVUS_BUILD_ARCH ppc64le)
-else ()
-    message(WARNING "Unknown processor type")
-    message(WARNING "CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
-    set(MILVUS_BUILD_ARCH unknown)
-endif ()
-
-# Ensure that a default make is set
-if ("${MAKE}" STREQUAL "")
-    if (NOT MSVC)
-        find_program(MAKE make)
-    endif ()
-endif ()
 
 find_path(MYSQL_INCLUDE_DIR
         NAMES "mysql.h"
@@ -83,17 +57,7 @@ include(DefineOptions)
 include(BuildUtils)
 include(ThirdPartyPackages)
 
-if (MILVUS_USE_CCACHE)
-    find_program(CCACHE_FOUND ccache)
-    if (CCACHE_FOUND)
-        message(STATUS "Using ccache: ${CCACHE_FOUND}")
-        set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_FOUND})
-        set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE_FOUND})
-        # let ccache preserve C++ comments, because some of them may be
-        # meaningful to the compiler
-        set(ENV{CCACHE_COMMENTS} "1")
-    endif (CCACHE_FOUND)
-endif ()
+using_ccache_if_defined(MILVUS_USE_CCACHE)
 
 if (MILVUS_GPU_VERSION)
     message(STATUS "Building Milvus GPU version")
@@ -105,18 +69,10 @@ else ()
     message(STATUS "Building Milvus CPU version")
 endif ()
 
-if (MILVUS_WITH_PROMETHEUS)
-    add_compile_definitions("MILVUS_WITH_PROMETHEUS")
-endif ()
+set_milvus_definition(MILVUS_WITH_PROMETHEUS, "MILVUS_WITH_PROMETHEUS")
+set_milvus_definition(ENABLE_CPU_PROFILING, "ENABLE_CPU_PROFILING")
+set_milvus_definition(MILVUS_WITH_FIU, "FIU_ENABLE")
 
-message("ENABLE_CPU_PROFILING = ${ENABLE_CPU_PROFILING}")
-if (ENABLE_CPU_PROFILING STREQUAL "ON")
-    ADD_DEFINITIONS(-DENABLE_CPU_PROFILING)
-endif()
-
-if (MILVUS_WITH_FIU)
-    add_compile_definitions("FIU_ENABLE")
-endif ()
 
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
