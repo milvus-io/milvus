@@ -885,31 +885,32 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
     CHECK_NULLPTR_RETURN(request);
     try {
-        std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
-        std::unordered_map<std::string, milvus::json> index_param;
-        std::unordered_map<std::string, milvus::json> extra_param;
+        milvus::server::HybridCollectionSchema collection_schema;
         Status status = request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(),
-                                                                  field_types, index_param, extra_param);
+                                                                  collection_schema);
         if (!status.ok()) {
             SET_RESPONSE(response->mutable_status(), status, context);
             return ::grpc::Status::OK;
         }
 
         response->set_collection_name(request->collection_name());
-        auto field_it = field_types.begin();
-        for (; field_it != field_types.end(); field_it++) {
+        auto field_it = collection_schema.field_types_.begin();
+        for (; field_it != collection_schema.field_types_.end(); field_it++) {
             auto field = response->add_fields();
             field->set_name(field_it->first);
             field->set_type((milvus::grpc::DataType)field_it->second);
-            for (auto& json_param : index_param.at(field_it->first).items()) {
+            for (auto& json_param : collection_schema.index_params_.at(field_it->first).items()) {
                 auto grpc_index_param = field->add_index_params();
                 grpc_index_param->set_key(json_param.key());
                 grpc_index_param->set_value(json_param.value());
             }
-            auto grpc_extra_param = field->add_extra_params();
-            grpc_extra_param->set_key(EXTRA_PARAM_KEY);
-            grpc_extra_param->set_value(extra_param.at(field_it->first).dump());
+            auto grpc_field_param = field->add_extra_params();
+            grpc_field_param->set_key(EXTRA_PARAM_KEY);
+            grpc_field_param->set_value(collection_schema.field_params_.at(field_it->first).dump());
         }
+        auto grpc_extra_param = response->add_extra_params();
+        grpc_extra_param->set_key(EXTRA_PARAM_KEY);
+        grpc_extra_param->set_value(collection_schema.extra_params_.dump());
         LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
         SET_RESPONSE(response->mutable_status(), status, context);
     } catch (std::exception& ex) {
@@ -1609,10 +1610,11 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     Status status;
 
-    std::unordered_map<std::string, milvus::json> index_params;
-    std::unordered_map<std::string, milvus::json> extra_params;
-    status = request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(), field_type_,
-                                                       index_params, extra_params);
+    HybridCollectionSchema collection_schema;
+    status =
+        request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(), collection_schema);
+
+    field_type_ = collection_schema.field_types_;
 
     auto grpc_entity = response->mutable_entities();
     if (!status.ok()) {

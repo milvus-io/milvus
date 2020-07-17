@@ -162,6 +162,7 @@ Utils::PrintMapping(const milvus::Mapping& mapping) {
                   << "\t field index params:" << field->index_params << "\t field extra params: " << field->extra_params
                   << std::endl;
     }
+    std::cout << "Collection extra params: " << mapping.extra_params << std::endl;
     BLOCK_SPLITER
 }
 

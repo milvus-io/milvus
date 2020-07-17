@@ -672,12 +672,15 @@ ClientProxy::GetCollectionInfo(const std::string& collection_name, Mapping& mapp
             JSON json_extra_params;
             for (int64_t j = 0; j < grpc_field.extra_params_size(); j++) {
                 JSON json_param;
-                json_param[grpc_field.extra_params(j).key()] = grpc_field.extra_params(j).value();
+                json_param = JSON::parse(grpc_field.extra_params(j).value());
                 json_extra_params.emplace_back(json_param);
             }
             field_ptr->extra_params = json_extra_params.dump();
             field_ptr->field_type = (DataType)grpc_field.type();
             mapping.fields.emplace_back(field_ptr);
+        }
+        if (!grpc_mapping.extra_params().empty()) {
+            mapping.extra_params = grpc_mapping.extra_params(0).value();
         }
         return status;
     } catch (std::exception& ex) {

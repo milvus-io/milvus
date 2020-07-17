@@ -109,6 +109,7 @@ CreateHybridCollectionRequest::OnExecute() {
 
         collection_info.collection_id_ = collection_name_;
         collection_info.dimension_ = dimension;
+        std::cout << extra_params_.dump() << std::endl;
         if (extra_params_.contains("segment_size")) {
             auto segment_size = extra_params_["segment_size"].get<int64_t>();
             collection_info.index_file_size_ = segment_size;

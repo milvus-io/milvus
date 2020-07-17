@@ -793,13 +793,12 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
                                 std::string& result_str) {
     Status status;
 
-    std::unordered_map<std::string, milvus::json> index_params;
-    std::unordered_map<std::string, milvus::json> collection_extra_params;
-    status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name, field_type_, index_params,
-                                                       collection_extra_params);
+    milvus::server::HybridCollectionSchema collection_schema;
+    status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name, collection_schema);
     if (!status.ok()) {
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }
+    field_type_ = collection_schema.field_types_;
 
     milvus::json extra_params;
     if (json.contains("fields")) {
