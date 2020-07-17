@@ -86,15 +86,6 @@ ExitOnWriteError(Status& status);
 
 void
 EraseFromCache(const std::string& item_key);
-
-Status
-CreatePath(const snapshot::Segment* segment, const DBOptions& options, std::string& path);
-
-Status
-CreatePath(const snapshot::Partition* partition, const DBOptions& options, std::string& path);
-
-Status
-CreatePath(const snapshot::Collection* collection, const DBOptions& options, std::string& path);
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

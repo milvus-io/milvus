@@ -42,10 +42,10 @@ class SSMemSegment : public server::CacheConfigHandler {
     Status
     Delete(const std::vector<segment::doc_id_t>& doc_ids);
 
-    size_t
+    int64_t
     GetCurrentMem();
 
-    size_t
+    int64_t
     GetMemLeft();
 
     bool
@@ -66,7 +66,7 @@ class SSMemSegment : public server::CacheConfigHandler {
     CreateSegment();
 
     Status
-    GetSingleEntitySize(size_t& single_size);
+    GetSingleEntitySize(int64_t& single_size);
 
  private:
     int64_t collection_id_;
@@ -75,7 +75,7 @@ class SSMemSegment : public server::CacheConfigHandler {
     std::shared_ptr<snapshot::NewSegmentOperation> operation_;
     snapshot::SegmentPtr segment_;
     DBOptions options_;
-    size_t current_mem_;
+    int64_t current_mem_;
 
     //    ExecutionEnginePtr execution_engine_;
     segment::SSSegmentWriterPtr segment_writer_ptr_;
