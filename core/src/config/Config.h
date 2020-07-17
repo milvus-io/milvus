@@ -278,6 +278,8 @@ class Config {
     Status
     CheckGpuResourceConfigEnable(const std::string& value);
     Status
+    CheckGpuResourceConfigCacheEnable(const std::string& value);
+    Status
     CheckGpuResourceConfigCacheCapacity(const std::string& value);
     Status
     CheckGpuResourceConfigCacheThreshold(const std::string& value);
@@ -400,6 +402,8 @@ class Config {
     Status
     GetGpuResourceConfigEnable(bool& value);
     Status
+    GetGpuResourceConfigCacheEnable(bool& value);
+    Status
     GetGpuResourceConfigCacheCapacity(int64_t& value);
     Status
     GetGpuResourceConfigCacheThreshold(float& value);
@@ -513,6 +517,8 @@ class Config {
     /* gpu resource config */
     Status
     SetGpuResourceConfigEnable(const std::string& value);
+    Status
+    SetGpuResourceConfigCacheEnable(const std::string& value);
     Status
     SetGpuResourceConfigCacheCapacity(const std::string& value);
     Status
