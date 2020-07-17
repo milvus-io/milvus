@@ -1222,7 +1222,6 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         const auto& field = request->fields(i);
         auto field_name = field.field_name();
 
-        field_names.emplace_back(field_name);
         std::vector<uint8_t> temp_data;
         if (grpc_int32_size > 0) {
             temp_data.resize(grpc_int32_size * sizeof(int32_t));
@@ -1246,8 +1245,9 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
             CopyRowRecords(field.vector_record().records(), request->entity_id_array(), vector_data);
             vectors.insert(std::make_pair(field_name, vector_data));
             row_num = field.vector_record().records_size();
-            break;
+            continue;
         }
+        field_names.emplace_back(field_name);
         attr_datas.emplace_back(temp_data);
     }
 
