@@ -361,7 +361,7 @@ TEST_F(SSDBTest, VisitorTest) {
 TEST_F(SSDBTest, InsertTest) {
     CreateCollectionContext context;
     context.lsn = 0;
-    std::string collection_name = "TEST";
+    std::string collection_name = "INSERT_TEST";
     auto collection_schema = std::make_shared<Collection>(collection_name);
     context.collection = collection_schema;
 
@@ -399,4 +399,53 @@ TEST_F(SSDBTest, InsertTest) {
     status = db_->GetCollectionRowCount(collection_name, row_count);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(row_count, entity_count);
+}
+
+TEST_F(SSDBTest, MergeTest) {
+    CreateCollectionContext context;
+    context.lsn = 0;
+    std::string collection_name = "MERGE_TEST";
+    auto collection_schema = std::make_shared<Collection>(collection_name);
+    context.collection = collection_schema;
+
+    nlohmann::json params;
+    params[milvus::knowhere::meta::DIM] = COLLECTION_DIM;
+    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR, params);
+    context.fields_schema[vector_field] = {};
+
+    std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type = {
+        {"field_0", milvus::engine::FieldType::INT32},
+        {"field_1", milvus::engine::FieldType::INT64},
+        {"field_2", milvus::engine::FieldType::FLOAT},
+    };
+
+    std::vector<std::string> field_names;
+    for (auto& pair : attr_type) {
+        auto field = std::make_shared<Field>(pair.first, 0, pair.second);
+        context.fields_schema[field] = {};
+        field_names.push_back(pair.first);
+    }
+
+    auto status = db_->CreateCollection(context);
+    ASSERT_TRUE(status.ok());
+
+    const uint64_t entity_count = 100;
+    milvus::engine::Entity entity;
+    BuildEntity(entity_count, 0, entity);
+
+    int64_t repeat = 2;
+    for (int32_t i = 0; i < repeat; i++) {
+        status = db_->InsertEntities(collection_name, "", field_names, entity, attr_type);
+        ASSERT_TRUE(status.ok());
+
+        status = db_->Flush();
+        ASSERT_TRUE(status.ok());
+    }
+
+    sleep(2); // wait to merge
+
+    uint64_t row_count = 0;
+    status = db_->GetCollectionRowCount(collection_name, row_count);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(row_count, entity_count * repeat);
 }

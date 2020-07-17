@@ -15,8 +15,8 @@
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/Snapshots.h"
 #include "metrics/Metrics.h"
-#include "segment/SegmentReader.h"
-#include "segment/SegmentWriter.h"
+#include "segment/SSSegmentReader.h"
+#include "segment/SSSegmentWriter.h"
 #include "utils/Log.h"
 
 #include <memory>
@@ -40,7 +40,7 @@ SSMergeTask::Execute() {
     for (auto& id : segments_) {
         auto seg = snapshot_->GetResource<snapshot::Segment>(id);
         if (!seg) {
-            return Status(DB_ERROR, "snapshot segment is null");
+            return Status(DB_ERROR, "Snapshot segment is null");
         }
 
         context.stale_segments.push_back(seg);
@@ -57,15 +57,78 @@ SSMergeTask::Execute() {
         return status;
     }
 
-    // TODO: merge each field, each field create a new SegmentFile
-    snapshot::SegmentFileContext sf_context;
-    sf_context.field_name = "vector";
-    sf_context.field_element_name = "ivfsq8";
-    sf_context.segment_id = 1;
-    sf_context.partition_id = 1;
-    sf_context.segment_id = new_seg->GetID();
-    snapshot::SegmentFilePtr seg_file;
-    status = op->CommitNewSegmentFile(sf_context, seg_file);
+    // create segment raw files (placeholder)
+    auto names = snapshot_->GetFieldNames();
+    for (auto& name : names) {
+        snapshot::SegmentFileContext sf_context;
+        sf_context.collection_id = new_seg->GetCollectionId();
+        sf_context.partition_id = new_seg->GetPartitionId();
+        sf_context.segment_id = new_seg->GetID();
+        sf_context.field_name = name;
+        sf_context.field_element_name = engine::DEFAULT_RAW_DATA_NAME;
+
+        snapshot::SegmentFilePtr seg_file;
+        status = op->CommitNewSegmentFile(sf_context, seg_file);
+        if (!status.ok()) {
+            std::string err_msg = "SSMergeTask create segment failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
+    }
+
+    // create deleted_doc and bloom_filter files (placeholder)
+    {
+        snapshot::SegmentFileContext sf_context;
+        sf_context.collection_id = new_seg->GetCollectionId();
+        sf_context.partition_id = new_seg->GetPartitionId();
+        sf_context.segment_id = new_seg->GetID();
+        sf_context.field_name = engine::DEFAULT_UID_NAME;
+        sf_context.field_element_name = engine::DEFAULT_DELETED_DOCS_NAME;
+
+        snapshot::SegmentFilePtr delete_doc_file, bloom_filter_file;
+        status = op->CommitNewSegmentFile(sf_context, delete_doc_file);
+        if (!status.ok()) {
+            std::string err_msg = "SSMergeTask create bloom filter segment file failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
+
+        sf_context.field_element_name = engine::DEFAULT_BLOOM_FILTER_NAME;
+        status = op->CommitNewSegmentFile(sf_context, bloom_filter_file);
+        if (!status.ok()) {
+            std::string err_msg = "SSMergeTask create deleted-doc segment file failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
+    }
+
+    auto ctx = op->GetContext();
+    auto visitor = SegmentVisitor::Build(snapshot_, ctx.new_segment, ctx.new_segment_files);
+
+    // create segment writer
+    segment::SSSegmentWriterPtr segment_writer_ptr =
+        std::make_shared<segment::SSSegmentWriter>(options_.meta_.path_, visitor);
+
+    // merge
+    for (auto& id : segments_) {
+        auto seg = snapshot_->GetResource<snapshot::Segment>(id);
+
+        auto read_visitor = SegmentVisitor::Build(snapshot_, id);
+        segment::SSSegmentReaderPtr segment_reader_ptr =
+            std::make_shared<segment::SSSegmentReader>(options_.meta_.path_, read_visitor);
+        status = segment_writer_ptr->Merge(segment_reader_ptr);
+        if (!status.ok()) {
+            std::string err_msg = "SSMergeTask merge failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
+    }
+
+    status = segment_writer_ptr->Serialize();
+    if (!status.ok()) {
+        LOG_ENGINE_ERROR_ << "Failed to serialize segment: " << new_seg->GetID();
+        return status;
+    }
 
     status = op->Push();
 

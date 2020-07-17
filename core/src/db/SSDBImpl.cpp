@@ -1150,7 +1150,7 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 std::set<std::string> flushed_collections;
                 for (auto id : collection_ids) {
                     snapshot::ScopedSnapshotT ss;
-                    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
+                    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, id);
                     if (!status.ok()) {
                         LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
                         return status;

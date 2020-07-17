@@ -73,6 +73,12 @@ class SSSegmentReader {
     Status
     GetSegment(engine::SegmentPtr& segment_ptr);
 
+    Status
+    GetSegmentID(int64_t& id);
+
+    std::string
+    GetSegmentPath();
+
  private:
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;

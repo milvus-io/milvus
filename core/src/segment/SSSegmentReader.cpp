@@ -17,6 +17,7 @@
 
 #include "segment/SSSegmentReader.h"
 
+#include <boost/filesystem.hpp>
 #include <memory>
 #include <utility>
 
@@ -141,12 +142,6 @@ SSSegmentReader::LoadUids(std::vector<int64_t>& uids) {
 }
 
 Status
-SSSegmentReader::GetSegment(engine::SegmentPtr& segment_ptr) {
-    segment_ptr = segment_ptr_;
-    return Status::OK();
-}
-
-Status
 SSSegmentReader::LoadVectorIndex(const std::string& field_name, segment::VectorIndexPtr& vector_index_ptr) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
@@ -253,9 +248,12 @@ Status
 SSSegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
     try {
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
-        auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
+        auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+        if (!boost::filesystem::exists(file_path)) {
+            return Status::OK();  // file doesn't exist
+        }
 
         auto& ss_codec = codec::SSCodec::instance();
         ss_codec.GetDeletedDocsFormat()->read(fs_ptr_, file_path, deleted_docs_ptr);
@@ -291,5 +289,32 @@ SSSegmentReader::ReadDeletedDocsSize(size_t& size) {
     }
     return Status::OK();
 }
+
+Status
+SSSegmentReader::GetSegment(engine::SegmentPtr& segment_ptr) {
+    segment_ptr = segment_ptr_;
+    return Status::OK();
+}
+
+Status
+SSSegmentReader::GetSegmentID(int64_t& id) {
+    if (segment_visitor_) {
+        auto segment = segment_visitor_->GetSegment();
+        if (segment) {
+            id = segment->GetID();
+            return Status::OK();
+        }
+    }
+
+    return Status(DB_ERROR, "SSSegmentWriter::GetSegmentID: null pointer");
+}
+
+std::string
+SSSegmentReader::GetSegmentPath() {
+    std::string seg_path =
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
+    return seg_path;
+}
+
 }  // namespace segment
 }  // namespace milvus

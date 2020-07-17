@@ -52,10 +52,7 @@ class SSSegmentWriter {
     Serialize();
 
     Status
-    GetSegment(engine::SegmentPtr& segment_ptr);
-
-    Status
-    Merge(const SSSegmentReaderPtr& segment_to_merge);
+    Merge(const SSSegmentReaderPtr& segment_reader);
 
     size_t
     Size();
@@ -68,6 +65,15 @@ class SSSegmentWriter {
 
     Status
     WriteVectorIndex(const std::string& field_name);
+
+    Status
+    GetSegment(engine::SegmentPtr& segment_ptr);
+
+    Status
+    GetSegmentID(int64_t& id);
+
+    std::string
+    GetSegmentPath();
 
  private:
     Status
