@@ -17,7 +17,7 @@ As an open source vector similarity search engine, Milvus is easy-to-use, highly
 Milvus has the following architecture:
 
 ![arch](https://github.com/milvus-io/docs/blob/v0.9.1/assets/milvus_arch.png)
-For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/overview.md). Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/v0.10.0/release_notes.md).
+For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/overview.md). Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://www.milvus.io/docs/release_notes.md).
 
 Milvus is an [LF AI Foundation](https://lfai.foundation/) incubation project. Learn more at [lfai.foundation](https://lfai.foundation/).
 
@@ -25,11 +25,11 @@ Milvus is an [LF AI Foundation](https://lfai.foundation/) incubation project. Le
 
 ### Install Milvus
 
-See the [Milvus install guide](https://www.milvus.io/docs/v0.10.0/install_milvus.md) to install Milvus using Docker. To install Milvus from source code, see [build from source](INSTALL.md).
+See the [Milvus install guide](https://www.milvus.io/docs/install_milvus.md) to install Milvus using Docker. To install Milvus from source code, see [build from source](INSTALL.md).
 
 ### Try example programs
 
-Try an example program with Milvus using [Python](https://www.milvus.io/docs/v0.10.0/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
+Try an example program with Milvus using [Python](https://www.milvus.io/docs/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
 
 ## Supported clients
 
