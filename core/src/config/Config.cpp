@@ -1607,8 +1607,8 @@ Config::CheckGpuResourceConfigEnable(const std::string& value) {
 Status
 Config::CheckGpuResourceConfigCacheEnable(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
-        std::string msg = "Invalid gpu resource config: "
-            + value + ". Possible reason: gpu.cache.enable is not a boolean.";
+        std::string msg =
+            "Invalid gpu resource config: " + value + ". Possible reason: gpu.cache.enable is not a boolean.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -2317,8 +2317,8 @@ Config::GetGpuResourceConfigEnable(bool& value) {
 
 Status
 Config::GetGpuResourceConfigCacheEnable(bool& value) {
-    std::string str = GetConfigStr(CONFIG_GPU_RESOURCE,
-            CONFIG_GPU_RESOURCE_CACHE_ENABLE, CONFIG_GPU_RESOURCE_CACHE_ENABLE_DEFAULT);
+    std::string str =
+        GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_ENABLE, CONFIG_GPU_RESOURCE_CACHE_ENABLE_DEFAULT);
     STATUS_CHECK(CheckGpuResourceConfigCacheEnable(str));
     STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
