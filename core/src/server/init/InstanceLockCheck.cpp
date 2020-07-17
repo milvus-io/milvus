@@ -76,8 +76,16 @@ InstanceLockCheck::Check(const std::string& path) {
 void
 InstanceLockCheck::Release() {
     auto fd = open(InstanceLockCheck::GetInstance()->lk_path.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0640);
-    if (fd < 0)
+    if (fd < 0) {
+        std::string msg;
+        if (errno == EROFS) {
+            // Not using locking for read-only lock file
+            msg += "Lock file is read-only.";
+        }
+        msg += "Could not open file for release: " + InstanceLockCheck::GetInstance()->lk_path + ", " + strerror(errno);
+        LOG_SERVER_ERROR_ << msg;
         return;
+    }
     close(fd);
 }
 
