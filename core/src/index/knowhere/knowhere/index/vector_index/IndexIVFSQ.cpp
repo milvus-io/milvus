@@ -71,8 +71,10 @@ IVFSQ::UpdateIndexSize() {
     auto ivfsq_index = dynamic_cast<faiss::IndexIVFScalarQuantizer*>(index_.get());
     auto nb = ivfsq_index->invlists->compute_ntotal();
     auto code_size = ivfsq_index->code_size;
-    // ivf codes, ivf ids and quantizer
-    index_size_ = nb * code_size + nb * sizeof(int64_t) + ivfsq_index->nlist * ivfsq_index->d * sizeof(float);
+    auto nlist = ivfsq_index->nlist;
+    auto d = ivfsq_index->d;
+    // ivf codes, ivf ids, sq trained vectors and quantizer
+    index_size_ = nb * code_size + nb * sizeof(int64_t) + 2 * d * sizeof(float) + nlist * d * sizeof(float);
 }
 
 }  // namespace knowhere
