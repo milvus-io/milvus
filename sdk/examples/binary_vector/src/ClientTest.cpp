@@ -69,6 +69,12 @@ TestProcess(std::shared_ptr<milvus::Connection> connection, const milvus::Mappin
         milvus_sdk::Utils::PrintCollectionParam(mapping);
     }
 
+    {
+        milvus::Mapping get_mapping;
+        stat = connection->GetCollectionInfo(mapping.collection_name, get_mapping);
+        std::cout << "GetCollectionInfo function call status: " << stat.message() << std::endl;
+    }
+
     std::vector<std::pair<int64_t, milvus::VectorData>> search_entity_array;
     {  // insert vectors
         for (int i = 0; i < ADD_ENTITY_LOOP; i++) {
@@ -162,7 +168,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         field_ptr2->field_name = "field_vec";
         JSON index_param_2;
         index_param_2["name"] = "index_3";
-        index_param_2["index_type"] = "IVFFLAT";
         field_ptr2->index_params = index_param_2.dump();
         JSON extra_params;
         extra_params["dimension"] = 128;
@@ -171,7 +176,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
         milvus::Mapping mapping = {"collection_1", {field_ptr1, field_ptr2}};
 
-        JSON json_params = {{"nlist", 1024}};
+        JSON json_params = {{"index_type", "IVF_FLAT"}, {"nlist", 1024}};
         milvus::IndexParam index_param = {mapping.collection_name, "field_2", "index_3", json_params.dump()};
 
         TestProcess(connection, mapping, index_param);

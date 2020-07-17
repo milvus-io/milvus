@@ -51,9 +51,15 @@ enum class EngineType {
 };
 
 static std::map<std::string, EngineType> s_map_engine_type = {
-    {"FLAT", EngineType::FAISS_IDMAP},   {"IVFFLAT", EngineType::FAISS_IVFFLAT}, {"IVFSQ8", EngineType::FAISS_IVFSQ8},
-    {"RNSG", EngineType::NSG_MIX},       {"IVFSQ8H", EngineType::FAISS_IVFSQ8H}, {"IVFPQ", EngineType::FAISS_PQ},
-    {"SPTAGKDT", EngineType::SPTAG_KDT}, {"SPTAGBKT", EngineType::SPTAG_BKT},    {"HNSW", EngineType::HNSW},
+    {"FLAT", EngineType::FAISS_IDMAP},
+    {"IVF_FLAT", EngineType::FAISS_IVFFLAT},
+    {"IVF_SQ8", EngineType::FAISS_IVFSQ8},
+    {"NSG", EngineType::NSG_MIX},
+    {"IVF_SQ8_HYBRID", EngineType::FAISS_IVFSQ8H},
+    {"IVF_PQ", EngineType::FAISS_PQ},
+    {"SPTAG_KDT_RNT", EngineType::SPTAG_KDT},
+    {"SPTAG_BKT_RNT", EngineType::SPTAG_BKT},
+    {"HNSW", EngineType::HNSW},
     {"ANNOY", EngineType::ANNOY},
 };
 

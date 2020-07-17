@@ -84,9 +84,12 @@ CreateIndexRequest::OnExecute() {
             }
         }
 
-        int32_t index_type;
+        int32_t index_type = 0;
         if (json_params_.contains("index_type")) {
             auto index_type_str = json_params_["index_type"].get<std::string>();
+            if (engine::s_map_engine_type.find(index_type_str) == engine::s_map_engine_type.end()) {
+                return Status(SERVER_INVALID_ARGUMENT, "Set wrong index type");
+            }
             index_type = (int32_t)engine::s_map_engine_type.at(index_type_str);
         }
 

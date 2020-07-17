@@ -116,7 +116,6 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     field_ptr4->field_type = milvus::DataType::FLOAT_VECTOR;
     JSON index_param_4;
     index_param_4["name"] = "index_3";
-    index_param_4["index_type"] = "IVFFLAT";
     field_ptr4->index_params = index_param_4.dump();
     JSON extra_params_4;
     extra_params_4["dimension"] = COLLECTION_DIMENSION;
@@ -260,7 +259,7 @@ void
 ClientTest::CreateIndex(const std::string& collection_name, int64_t nlist) {
     milvus_sdk::TimeRecorder rc("Create index");
     std::cout << "Wait until create all index done" << std::endl;
-    JSON json_params = {{"nlist", nlist}, {"index_type", "IVFFLAT"}};
+    JSON json_params = {{"nlist", nlist}, {"index_type", "IVF_FLAT"}};
     milvus::IndexParam index1 = {collection_name, "field_vec", "index_3", json_params.dump()};
     milvus_sdk::Utils::PrintIndexParam(index1);
     milvus::Status stat = conn_->CreateIndex(index1);
