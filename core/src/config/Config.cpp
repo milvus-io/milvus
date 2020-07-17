@@ -2771,8 +2771,7 @@ Config::SetGpuResourceConfigEnable(const std::string& value) {
 Status
 Config::SetGpuResourceConfigCacheEnable(const std::string& value) {
     STATUS_CHECK(CheckGpuResourceConfigCacheEnable(value));
-    STATUS_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_ENABLE, value));
-    return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_ENABLE, value);
+    return SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_ENABLE, value);
 }
 
 Status
