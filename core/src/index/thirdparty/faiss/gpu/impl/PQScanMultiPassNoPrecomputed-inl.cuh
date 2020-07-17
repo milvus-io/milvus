@@ -515,8 +515,6 @@ runPQScanMultiPassNoPrecomputed(Tensor<float, 2, true>& queries,
 #ifdef FAISS_USE_FLOAT16
   if (useFloat16Lookup) {
         codeDistanceTypeSize = sizeof(half);
-  } else {
-        codeDistanceTypeSize = sizeof(float);
   }
 #endif
 
