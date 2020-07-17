@@ -136,6 +136,8 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     milvus::json index_params_;
     int64_t gpu_num_ = 0;
+
+    bool gpu_cache_enable_ = false;
 };
 
 }  // namespace engine
