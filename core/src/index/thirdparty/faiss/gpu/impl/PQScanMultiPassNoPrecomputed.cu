@@ -282,7 +282,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
     auto smem = sizeof(float);
 #ifdef FAISS_USE_FLOAT16
     if (useFloat16Lookup) {
-      smem = sizeof(half);
+       smem = sizeof(half);
     }
 #endif
 
@@ -515,8 +515,8 @@ void runPQScanMultiPassNoPrecomputed(Tensor<float, 2, true>& queries,
 
   int codeDistanceTypeSize = sizeof(float);
 #ifdef FAISS_USE_FLOAT16
-    if (useFloat16Lookup) {
-    codeDistanceTypeSize = sizeof(half);
+  if (useFloat16Lookup) {
+     codeDistanceTypeSize = sizeof(half);
   }
 #else
     FAISS_ASSERT(!useFloat16Lookup);
