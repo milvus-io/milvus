@@ -29,7 +29,7 @@ See the [Milvus install guide](https://www.milvus.io/docs/install_milvus.md) to 
 
 ### Try example programs
 
-Try an example program with Milvus using [Python](https://www.milvus.io/docs/xample_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
+Try an example program with Milvus using [Python](https://www.milvus.io/docs/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
 
 ## Supported clients
 
