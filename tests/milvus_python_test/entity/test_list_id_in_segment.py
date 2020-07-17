@@ -286,7 +286,7 @@ class TestGetVectorIdsIP:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
+            if request.param["index_type"] not in ivf():
                 pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
         else:
             pytest.skip("Only support CPU mode")

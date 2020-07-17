@@ -11,6 +11,7 @@ dim = 128
 default_segment_size = 1024
 drop_collection_interval_time = 3
 segment_size = 10
+collection_id = "logic"
 vectors = gen_vectors(100, dim)
 default_fields = gen_default_fields() 
 
@@ -129,15 +130,15 @@ class TestCollectionLogic(object):
             connect.drop_collection(name)
 
     def gen_params(self):
-        collection_name = gen_unique_str("test_collection")
+        collection_name = gen_unique_str("collection_id")
         top_k = 1
         vectors = gen_vectors(2, dim)
         param = {'collection_name': collection_name,
                  'dimension': dim,
-                 'metric_type': MetricType.L2,
+                 'metric_type': "L2",
                  'nprobe': 1,
                  'top_k': top_k,
-                 'index_type': IndexType.IVF_SQ8,
+                 'index_type': "IVF_SQ8",
                  'index_param': {
                         'nlist': 16384
                  },
