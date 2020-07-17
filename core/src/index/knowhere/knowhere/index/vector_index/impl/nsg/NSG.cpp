@@ -872,6 +872,21 @@ NsgIndex::SetKnnGraph(Graph& g) {
     knng = std::move(g);
 }
 
+int64_t NsgIndex::GetSize() {
+    int64_t ret = 0;
+    ret += sizeof(*this);
+    ret += ntotal * dimension * sizeof(float);
+    ret += ntotal * sizeof(int64_t);
+    ret += sizeof(*distance_);
+    for (auto i = 0; i < nsg.capacity(); ++ i) {
+        ret += nsg[i].capacity() * sizeof(node_t);
+    }
+    for (auto i = 0; i < knng.capacity(); ++ i) {
+        ret += knng[i].capacity() * sizeof(node_t);
+    }
+    return ret;
+}
+
 }  // namespace impl
 }  // namespace knowhere
 }  // namespace milvus

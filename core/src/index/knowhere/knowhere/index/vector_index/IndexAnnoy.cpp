@@ -167,7 +167,7 @@ IndexAnnoy::UpdateIndexSize() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    index_size_ = 0;
+    index_size_ = index_->cal_size();
 }
 
 }  // namespace knowhere
