@@ -48,7 +48,7 @@ class TestCollectionCount:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == "IVFSQ8H":
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in cpu mode")
         return request.param
 
@@ -203,7 +203,7 @@ class TestCollectionCountIP:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == "IVFSQ8H":
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in cpu mode")
         return request.param
 
@@ -354,7 +354,7 @@ class TestCollectionCountBinary:
         params=gen_simple_index()
     )
     def get_hamming_index(self, request, connect):
-        if request.param["index_type"] in ["IVFFLAT", "FLAT"]:
+        if request.param["index_type"] in binary_support():
             return request.param
         else:
             pytest.skip("Skip index")
@@ -520,7 +520,7 @@ class TestCollectionMultiCollections:
         params=gen_simple_index()
     )
     def get_hamming_index(self, request, connect):
-        if request.param["index_type"] in ["IVFFLAT", "FLAT"]:
+        if request.param["index_type"] in binary_support():
             return request.param
         else:
             pytest.skip("Skip index")
@@ -565,7 +565,7 @@ class TestCollectionMultiCollections:
             res = connect.count_entities(collection_list[i])
             assert res == insert_count
 
-    def test_collection_count_multi_collections_binary(self, connect, insert_count):
+    def test_collection_count_multi_collections_binary(self, connect, jac_collection, insert_count):
         '''
         target: test collection rows_count is correct or not with multiple collections of JACCARD
         method: create collection and add entities in it,
@@ -573,6 +573,8 @@ class TestCollectionMultiCollections:
         expected: the count is equal to the length of entities
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
+        res = connect.insert(jac_collection, entities)
+        # logging.getLogger().info(entities)
         collection_list = []
         collection_num = 20
         for i in range(collection_num):

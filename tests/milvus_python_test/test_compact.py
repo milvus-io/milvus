@@ -207,10 +207,10 @@ class TestCompactBase:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")) == "GPU":
-            if not request.param["index_type"].startswith("IVF"):
+            if not request.param["index_type"] not in ivf():
                 pytest.skip("Only support index_type: idmap/ivf")
         if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] == "IVFSQ8H":
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 

@@ -44,7 +44,7 @@ class TestStatsBase:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] == "IVFSQ8H":
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
@@ -54,7 +54,7 @@ class TestStatsBase:
     )
     def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if request.param["index_type"] in ["IVFFLAT", "FLAT"]:
+        if request.param["index_type"] in binary_support():
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -283,7 +283,7 @@ class TestStatsBase:
         '''
         ids = connect.insert(collection, entities)
         connect.flush([collection])
-        for index_type in ["IVFFLAT", "IVFSQ8"]:
+        for index_type in ["IVF_FLAT", "IVF_SQ8"]:
             connect.create_index(collection, field_name, default_index_name, {"index_type": index_type, "nlist": 1024})
             stats = connect.get_collection_stats(collection)
             logging.getLogger().info(stats)
@@ -326,14 +326,14 @@ class TestStatsBase:
             res = connect.insert(collection_name, entities)
             connect.flush(collection_list)
             if i % 2:
-                connect.create_index(collection_name, field_name, default_index_name, {"index_type": "IVFSQ8", "nlist": 1024})
+                connect.create_index(collection_name, field_name, default_index_name, {"index_type": "IVF_SQ8", "nlist": 1024})
             else:
-                connect.create_index(collection_name, field_name, default_index_name, {"index_type": "IVFFLAT", "nlist": 1024})
+                connect.create_index(collection_name, field_name, default_index_name, {"index_type": "IVF_FLAT", "nlist": 1024})
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
             assert stats["partitions"][0]["segments"][0]["row_count"] == nb
             if i % 2:
-                assert stats["partitions"][0]["segments"][0]["index_name"] == "IVFSQ8"
+                assert stats["partitions"][0]["segments"][0]["index_name"] == "IVF_SQ8"
             else:
-                assert stats["partitions"][0]["segments"][0]["index_name"] == "IVFFLAT"
+                assert stats["partitions"][0]["segments"][0]["index_name"] == "IVF_FLAT"
             connect.drop_collection(collection_list[i])

@@ -3,6 +3,7 @@ import pytest
 import logging
 import itertools
 from time import sleep
+import threading
 from multiprocessing import Process
 from utils import *
 
@@ -111,7 +112,7 @@ class TestInfoBase:
         threads_num = 4 
         threads = []
         collection_name = gen_unique_str(collection_id)
-        connect.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, default_fields)
 
         def get_info():
             res = connect.get_collection_info(connect, collection_name)

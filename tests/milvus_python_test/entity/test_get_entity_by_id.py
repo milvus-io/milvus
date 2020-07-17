@@ -41,11 +41,8 @@ class TestGetBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        # if str(connect._cmd("mode")) == "GPU":
-        #     if request.param["index_type"] not in ["IVFSQ8", "IVFFLAT", "FLAT", "IVFPQ", "IVFSQ8H"]:
-        #         pytest.skip("Only support index_type: idmap/ivf")
         if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] == "IVFSQ8H":
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
         return request.param
 
