@@ -85,7 +85,7 @@ class TestSearchBase:
     )
     def get_index(self, request, connect):
         if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] == "IVFSQ8H":
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
         return request.param
 
@@ -95,7 +95,7 @@ class TestSearchBase:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] == "IVFSQ8H":
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
         return request.param
 
@@ -105,7 +105,7 @@ class TestSearchBase:
     )
     def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if request.param["index_type"] in ["IVFFLAT", "FLAT"]:
+        if request.param["index_type"] in binary_support():
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -116,7 +116,7 @@ class TestSearchBase:
     )
     def get_hamming_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if request.param["index_type"] in ["IVFFLAT", "FLAT"]:
+        if request.param["index_type"] in binary_support():
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -881,7 +881,7 @@ class TestSearchInvalid(object):
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] == "IVFSQ8H":
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
         return request.param
 
