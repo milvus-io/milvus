@@ -12,11 +12,7 @@
 #include <fiu-control.h>
 #include <fiu-local.h>
 #include <gtest/gtest.h>
-#ifdef ENABLE_CPU_PROFILING
-#include <gperftools/profiler.h>
-#endif
 
-#include <chrono>
 #include <string>
 #include <set>
 #include <algorithm>
@@ -338,12 +334,6 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
 }
 
 TEST_F(SnapshotTest, PartitionTest) {
-#ifdef ENABLE_CPU_PROFILING
-    static int n = 0;
-    std::string fname = "/tmp/SnapshotTest_partitiontest.profiling";
-    ProfilerStart(fname.c_str());
-#endif
-    tr_.RecordSection("PartitionTest Start");
     std::string collection_name("c1");
     LSN_TYPE lsn = 1;
     auto ss = CreateCollection(collection_name, ++lsn);
@@ -438,12 +428,6 @@ TEST_F(SnapshotTest, PartitionTest) {
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(curr_ss->NumberOfPartitions(), total_partition_num - i - 1);
     }
-
-    tr_.RecordSection("PartitionTest done");
-    tr_.ElapseFromBegin("Total cose");
-#ifdef ENABLE_CPU_PROFILING
-    ProfilerStop();
-#endif
 }
 
 TEST_F(SnapshotTest, PartitionTest2) {
@@ -634,7 +618,6 @@ TEST_F(SnapshotTest, IndexTest) {
 }
 
 TEST_F(SnapshotTest, OperationTest) {
-    auto c0 = std::chrono::system_clock::now();
     std::string to_string;
     LSN_TYPE lsn;
     Status status;
@@ -888,12 +871,6 @@ TEST_F(SnapshotTest, OperationTest) {
 }
 
 TEST_F(SnapshotTest, CompoundTest1) {
-    auto tr0 = milvus::TimeRecorder("CompoundTest1");
-#ifdef ENABLE_CPU_PROFILING
-    static int n = 0;
-    std::string fname = "/tmp/SnapshotTest_CompoundTest1-mysql.profiling";
-    ProfilerStart(fname.c_str());
-#endif
     Status status;
     std::atomic<LSN_TYPE> lsn = 0;
     auto next_lsn = [&]() -> decltype(lsn) {
@@ -1225,17 +1202,12 @@ TEST_F(SnapshotTest, CompoundTest1) {
     size_t expect_segment_file_cnt;
     expect_segment_file_cnt = expect_segments.size();
     expect_segment_file_cnt += built_segs.size();
-//    std::cout << latest_ss->ToString() << std::endl;
+    std::cout << latest_ss->ToString() << std::endl;
     std::vector<int> common_ids;
     std::set_intersection(merged_segs.begin(), merged_segs.end(), built_segs.begin(), built_segs.end(),
             std::back_inserter(common_ids));
     expect_segment_file_cnt -= common_ids.size();
     ASSERT_EQ(expect_segment_file_cnt, final_segment_file_cnt);
-#ifdef ENABLE_CPU_PROFILING
-    ProfilerStop();
-#endif
-
-    tr0.ElapseFromBegin("CompoundTest1 End");
 }
 
 

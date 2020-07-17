@@ -17,13 +17,10 @@
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Utils.h"
 #include "utils/Status.h"
-#include "utils/CommonUtil.h"
-#include "utils/TimeRecorder.h"
 
 #include <stdlib.h>
 #include <time.h>
 #include <any>
-#include <chrono>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -40,10 +37,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#ifdef ENABLE_CPU_PROFILING
-#include <gperftools/profiler.h>
-#endif
 
 namespace milvus {
 namespace engine {
@@ -117,7 +110,6 @@ class Store {
         // TODO: Get active collection
         std::vector<CollectionPtr> resources;
         auto status = meta::MetaAdapter::GetInstance().SelectBy<Collection>(NameField::Name, name, resources);
-
         if (!status.ok()) {
             return status;
         }
@@ -143,7 +135,7 @@ class Store {
     }
 
     IDS_TYPE
-    AllActiveCollectionIds(bool reversed = true) {
+    AllActiveCollectionIds(bool reversed = true) const {
         IDS_TYPE ids;
         IDS_TYPE selected_ids;
         meta::MetaAdapter::GetInstance().SelectResourceIDs<Collection, std::string>(selected_ids, "", "");
@@ -160,7 +152,7 @@ class Store {
     }
 
     IDS_TYPE
-    AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) {
+    AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
         IDS_TYPE ids, selected_ids;
         meta::MetaAdapter::GetInstance().SelectResourceIDs<CollectionCommit, int64_t>(
             selected_ids, meta::F_COLLECTON_ID, collection_id);
@@ -197,9 +189,7 @@ class Store {
 
     void
     DoReset() {
-        auto tr = TimeRecorder("DoReset");
         auto status = meta::MetaAdapter::GetInstance().TruncateAll();
-        tr.ElapseFromBegin("DoReset Done, TruncateAll");
         if (!status.ok()) {
             std::cout << "TruncateAll failed: " << status.ToString() << std::endl;
         }

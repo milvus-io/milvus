@@ -13,7 +13,6 @@
 
 #include <unistd.h>
 
-#include <chrono>
 #include <memory>
 #include <string>
 #include <utility>
@@ -338,14 +337,12 @@ MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
         std::string sql;
-        auto sc1 = std::chrono::system_clock::now();
         auto status = MetaHelper::MetaQueryContextToSql(context, sql);
         if (!status.ok()) {
             return status;
         }
 
         std::lock_guard<std::mutex> lock(meta_mutex_);
-        query_count_ += 1;
 
         mysqlpp::Query query = connectionPtr->query(sql);
         auto res = query.store();
@@ -362,7 +359,6 @@ MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
             }
             attrs.push_back(attrs_map);
         }
-
     } catch (const mysqlpp::BadQuery& er) {
         // Handle any query errors
         //        cerr << "Query error: " << er.what() << endl;
@@ -389,11 +385,8 @@ MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_context
         mysqlpp::Transaction trans(*connectionPtr, mysqlpp::Transaction::serializable, mysqlpp::Transaction::session);
 
         std::lock_guard<std::mutex> lock(meta_mutex_);
-        transaction_count_ += 1;
-
         for (auto& context : sql_contexts) {
             std::string sql;
-            auto sc1 = std::chrono::system_clock::now();
             auto status = MetaHelper::MetaApplyContextToSql(context, sql);
             if (!status.ok()) {
                 return status;

@@ -15,6 +15,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -41,7 +42,8 @@ class MetaSession {
  public:
     template <typename ResourceT, typename U>
     Status
-    Select(const std::string& field, const U& value, const std::vector<std::string>& target_attrs, std::vector<typename ResourceT::Ptr>& resources);
+    Select(const std::string& field, const U& value, const std::vector<std::string>& target_attrs,
+           std::vector<typename ResourceT::Ptr>& resources);
 
     template <typename ResourceT>
     Status
@@ -90,7 +92,8 @@ class MetaSession {
 
 template <typename T, typename U>
 Status
-MetaSession::Select(const std::string& field, const U& value, const std::vector<std::string>& target_attrs, std::vector<typename T::Ptr>& resources) {
+MetaSession::Select(const std::string& field, const U& value, const std::vector<std::string>& target_attrs,
+                    std::vector<typename T::Ptr>& resources) {
     MetaQueryContext context;
     context.table_ = T::Name;
 

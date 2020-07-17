@@ -36,10 +36,10 @@ class MetaAdapter {
 
  public:
     MetaAdapter() {
-//        engine_ = std::make_shared<MockMetaEngine>();
-                        DBMetaOptions options;
-                        options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
-                        engine_ = std::make_shared<MySqlEngine>(options);
+        engine_ = std::make_shared<MockMetaEngine>();
+        //                        DBMetaOptions options;
+        //                        options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
+        //                        engine_ = std::make_shared<MySqlEngine>(options);
     }
 
     SessionPtr

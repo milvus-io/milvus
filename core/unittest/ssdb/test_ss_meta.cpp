@@ -9,8 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <chrono>
-
 #include "db/meta/MetaFields.h"
 #include "db/meta/backend/MetaContext.h"
 #include "db/snapshot/ResourceContext.h"
@@ -52,7 +50,6 @@ TEST_F(SSMetaTest, ApplyTest) {
 
 TEST_F(SSMetaTest, SessionTest) {
     ID_TYPE result_id;
-    auto c0 = std::chrono::system_clock::now();
 
     auto collection = std::make_shared<Collection>("meta_test_c1");
     auto c_ctx = ResourceContextBuilder<Collection>().SetResource(collection).CreatePtr();
@@ -75,7 +72,8 @@ TEST_F(SSMetaTest, SessionTest) {
     ASSERT_GT(result_id, 0);
     field->SetID(result_id);
 
-    auto field_element = std::make_shared<FieldElement>(collection->GetID(), field->GetID(), "meta_test_f1_fe1", FEType::FET_RAW);
+    auto field_element = std::make_shared<FieldElement>(collection->GetID(), field->GetID(),
+        "meta_test_f1_fe1", FEType::FET_RAW);
     auto fe_ctx = ResourceContextBuilder<FieldElement>().SetResource(field_element).CreatePtr();
     status = meta_.Apply<FieldElement>(fe_ctx, result_id);
     ASSERT_TRUE(status.ok()) << status.ToString();
@@ -115,10 +113,6 @@ TEST_F(SSMetaTest, SessionTest) {
     ASSERT_EQ(result_ids.at(1), partition->GetID());
     ASSERT_EQ(result_ids.at(2), field->GetID());
     ASSERT_EQ(result_ids.at(3), field_element->GetID());
-
-    auto c1 = std::chrono::system_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(c1 - c0);
-    std::cout << "Session Test total cost " << duration.count() << "ms";
 }
 
 TEST_F(SSMetaTest, SelectTest) {

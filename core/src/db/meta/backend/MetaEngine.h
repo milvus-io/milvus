@@ -35,9 +35,6 @@ class MetaEngine {
 
     virtual Status
     TruncateAll() = 0;
-//
-//    virtual std::string
-//    Trace() = 0;
 };
 
 using MetaEnginePtr = std::shared_ptr<MetaEngine>;

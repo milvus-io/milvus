@@ -51,9 +51,6 @@ class MySqlEngine : public MetaEngine {
     std::shared_ptr<meta::MySQLConnectionPool> mysql_connection_pool_;
     bool safe_grab_ = false;  // Safely graps a connection from mysql pool
 
-    long query_count_ = 0;
-    long transaction_count_ = 0;
-
     std::mutex meta_mutex_;
 };
 

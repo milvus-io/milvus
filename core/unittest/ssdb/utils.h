@@ -297,9 +297,6 @@ class SnapshotTest : public BaseTest {
     SetUp() override;
     void
     TearDown() override;
-
- protected:
-    milvus::TimeRecorder tr_ = milvus::TimeRecorder("SnapshotTest");
 };
 
 ///////////////////////////////////////////////////////////////////////////////

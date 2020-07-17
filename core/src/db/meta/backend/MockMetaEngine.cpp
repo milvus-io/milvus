@@ -31,13 +31,14 @@ MockMetaEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs
         return Status(0, "Empty");
     }
 
-    auto select_target_attrs = [](const TableRaw& raw, AttrsMapList& des, const std::vector<std::string>& target_attrs) {
+    auto select_target_attrs = [](const TableRaw& raw, AttrsMapList& des,
+                                  const std::vector<std::string>& target_attrs) {
         if (target_attrs.empty()) {
             return;
         }
 
         auto m = std::unordered_map<std::string, std::string>();
-        for (auto& attr: target_attrs) {
+        for (auto& attr : target_attrs) {
             auto iter = raw.find(attr);
             if (iter != raw.end()) {
                 m.insert(std::make_pair(iter->first, iter->second));
@@ -52,7 +53,7 @@ MockMetaEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs
 
     bool selected = true;
     if (!context.filter_attrs_.empty()) {
-        for (auto & raw : candidate_raws) {
+        for (auto& raw : candidate_raws) {
             for (auto& filter_attr : context.filter_attrs_) {
                 auto iter = raw.find(filter_attr.first);
                 if (iter == raw.end() || iter->second != filter_attr.second) {
@@ -73,7 +74,7 @@ MockMetaEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs
         if (context.all_required_) {
             attrs = candidate_raws;
         } else {
-            for (auto& attr: candidate_raws) {
+            for (auto& attr : candidate_raws) {
                 select_target_attrs(attr, attrs, context.query_fields_);
             }
         }

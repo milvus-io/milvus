@@ -151,7 +151,6 @@ void
 SnapshotTest::SetUp() {
     BaseTest::SetUp();
     milvus::engine::snapshot::Store::GetInstance().Mock();
-
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
     milvus::engine::snapshot::EventExecutor::GetInstance().Start();
     milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
@@ -167,10 +166,8 @@ SnapshotTest::SetUp() {
     milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
 
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
-    tr_.RecordSection("Snapshot Reset");
 
     milvus::engine::snapshot::Snapshots::GetInstance().Init();
-    tr_.RecordSection("Snapshot Init");
 }
 
 void
