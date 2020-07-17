@@ -27,6 +27,8 @@ class VisitedList {
         }
     };
 
+    int GetSize() { return sizeof(*this) + sizeof(*mass) * numelements; }
+
     ~VisitedList() { delete[] mass; }
 };
 
@@ -75,6 +77,13 @@ class VisitedListPool {
             delete rez;
         }
     };
+
+    int GetSize() {
+        VisitedList *rez = new VisitedList(numelements);
+        auto pool_size = pool.size() * (sizeof(rez) + rez->GetSize());
+        delete rez;
+        return pool_size + sizeof(*this);
+    }
 };
 }
 
