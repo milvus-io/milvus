@@ -251,7 +251,7 @@ if (DEFINED ENV{MILVUS_PROMETHEUS_URL})
     set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
 else ()
     set(PROMETHEUS_SOURCE_URL
-            https://github.com/jupp0r/prometheus-cpp.git)
+        "https://github.com/milvus-io/prometheus-cpp/archive/${PROMETHEUS_VERSION}.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_SQLITE_URL})
@@ -494,15 +494,14 @@ macro(build_prometheus)
             -DCMAKE_BUILD_TYPE=Release)
 
     externalproject_add(prometheus_ep
-            GIT_REPOSITORY
+            URL
             ${PROMETHEUS_SOURCE_URL}
-            GIT_TAG
-            ${PROMETHEUS_VERSION}
-            GIT_SHALLOW
-            TRUE
             ${EP_LOG_OPTIONS}
             CMAKE_ARGS
             ${PROMETHEUS_CMAKE_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
             BUILD_COMMAND
             ${MAKE}
             ${MAKE_BUILD_ARGS}
