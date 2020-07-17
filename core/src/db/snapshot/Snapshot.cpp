@@ -29,7 +29,7 @@ Snapshot::UnRefAll() {
     std::apply([this](auto&... resource) { ((DoUnRef(resource)), ...); }, resources_);
 }
 
-Snapshot::Snapshot(Store& store, ID_TYPE ss_id) {
+Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
     auto& collection_commits_holder = CollectionCommitsHolder::GetInstance();
     auto& collections_holder = CollectionsHolder::GetInstance();
     auto& schema_commits_holder = SchemaCommitsHolder::GetInstance();

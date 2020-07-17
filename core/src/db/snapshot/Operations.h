@@ -114,19 +114,19 @@ class Operations : public std::enable_shared_from_this<Operations> {
     }
 
     virtual Status
-    OnExecute(Store&);
+    OnExecute(StorePtr);
     virtual Status
-    PreExecute(Store&);
+    PreExecute(StorePtr);
     virtual Status
-    DoExecute(Store&);
+    DoExecute(StorePtr);
     virtual Status
-    PostExecute(Store&);
+    PostExecute(StorePtr);
 
     virtual Status
     GetSnapshot(ScopedSnapshotT& ss) const;
 
     virtual Status
-    operator()(Store& store);
+    operator()(StorePtr store);
     virtual Status
     Push(bool sync = true);
 
@@ -134,13 +134,13 @@ class Operations : public std::enable_shared_from_this<Operations> {
     PreCheck();
 
     virtual const Status&
-    ApplyToStore(Store& store);
+    ApplyToStore(StorePtr);
 
     const Status&
     WaitToFinish();
 
     void
-    Done(Store& store);
+    Done(StorePtr store);
 
     void
     SetStatus(const Status& status);
@@ -288,12 +288,12 @@ class LoadOperation : public Operations {
     }
 
     const Status&
-    ApplyToStore(Store& store) override {
+    ApplyToStore(StorePtr store) override {
         if (done_) {
             Done(store);
             return status_;
         }
-        auto status = store.GetResource<ResourceT>(context_.id, resource_);
+        auto status = store->GetResource<ResourceT>(context_.id, resource_);
         SetStatus(status);
         Done(store);
         return status_;
@@ -346,8 +346,8 @@ class SoftDeleteOperation : public Operations {
     }
 
     Status
-    DoExecute(Store& store) override {
-        auto status = store.GetResource<ResourceT>(id_, resource_);
+    DoExecute(StorePtr store) override {
+        auto status = store->GetResource<ResourceT>(id_, resource_);
         if (!status.ok()) {
             return status;
         }
@@ -376,10 +376,10 @@ class HardDeleteOperation : public Operations {
     }
 
     const Status&
-    ApplyToStore(Store& store) override {
+    ApplyToStore(StorePtr store) override {
         if (done_)
             return status_;
-        auto status = store.RemoveResource<ResourceT>(id_);
+        auto status = store->RemoveResource<ResourceT>(id_);
         SetStatus(status);
         Done(store);
         return status_;

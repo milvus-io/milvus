@@ -32,12 +32,12 @@ class SnapshotHolder {
         return collection_id_;
     }
     Status
-    Add(Store&, ID_TYPE);
+    Add(StorePtr, ID_TYPE);
 
     Status
     Get(ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true) const;
     Status
-    Load(Store& store, ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true);
+    Load(StorePtr store, ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true);
 
     Status
     SetGCHandler(GCHandler gc_handler) {
@@ -54,7 +54,7 @@ class SnapshotHolder {
     /* Status */
     /* LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc); */
     Status
-    LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc, Store& store);
+    LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc, StorePtr store);
 
     void
     ReadyForRelease(Snapshot::Ptr ss) {

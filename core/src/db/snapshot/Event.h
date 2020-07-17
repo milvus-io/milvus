@@ -18,20 +18,21 @@
 
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "db/snapshot/Store.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
 
-class Event {
+class MetaEvent {
  public:
     virtual Status
-    Process() = 0;
+    Process(StorePtr) = 0;
 };
 
 template <class ResourceT>
-class ResourceGCEvent : public Event {
+class ResourceGCEvent : public MetaEvent {
  public:
     using Ptr = std::shared_ptr<ResourceGCEvent>;
 
@@ -41,9 +42,7 @@ class ResourceGCEvent : public Event {
     ~ResourceGCEvent() = default;
 
     Status
-    Process() override {
-        auto& store = Store::GetInstance();
-
+    Process(StorePtr store) override {
         /* mark resource as 'deleted' in meta */
         auto sd_op = std::make_shared<SoftDeleteOperation<ResourceT>>(res_->GetID());
         STATUS_CHECK((*sd_op)(store));

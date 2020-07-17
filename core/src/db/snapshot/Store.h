@@ -42,13 +42,13 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-class Store {
+class Store : public std::enable_shared_from_this<Store> {
  public:
-    static Store&
-    GetInstance() {
-        static Store store;
-        return store;
-    }
+    /* static Store& */
+    /* GetInstance() { */
+    /*     static Store store; */
+    /*     return store; */
+    /* } */
 
     template <typename OpT>
     Status
@@ -85,7 +85,7 @@ class Store {
     template <typename OpT>
     void
     Apply(OpT& op) {
-        op.ApplyToStore(*this);
+        op.ApplyToStore(this->shared_from_this());
     }
 
     template <typename ResourceT>
@@ -203,9 +203,6 @@ class Store {
     }
 
  private:
-    Store() {
-    }
-
     void
     DoMock() {
         Status status;
@@ -336,6 +333,8 @@ class Store {
         }
     }
 };
+
+using StorePtr = std::shared_ptr<Store>;
 
 }  // namespace snapshot
 }  // namespace engine

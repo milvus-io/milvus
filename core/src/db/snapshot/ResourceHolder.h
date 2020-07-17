@@ -48,8 +48,8 @@ class ResourceHolder {
     }
 
     ScopedT
-    GetResource(Store& store, ID_TYPE id, bool scoped = true) {
-        return Load(Store::GetInstance(), id, scoped);
+    GetResource(StorePtr store, ID_TYPE id, bool scoped = true) {
+        return Load(store, id, scoped);
     }
 
     ScopedT
@@ -76,9 +76,8 @@ class ResourceHolder {
         return ReleaseNoLock(id);
     }
 
-    // TODO: Resource should be loaded into holder in OperationExecutor thread
     ScopedT
-    Load(Store& store, ID_TYPE id, bool scoped = true) {
+    Load(StorePtr store, ID_TYPE id, bool scoped = true) {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             auto cit = id_map_.find(id);
@@ -94,14 +93,6 @@ class ResourceHolder {
             return ScopedT();
         }
         return ScopedT(ret, scoped);
-    }
-
-    virtual bool
-    HardDelete(ID_TYPE id) {
-        auto op = std::make_shared<HardDeleteOperation<ResourceT>>(id);
-        // TODO:
-        (*op)(Store::GetInstance());
-        return true;
     }
 
     virtual void
@@ -153,7 +144,7 @@ class ResourceHolder {
     }
 
     virtual ResourcePtr
-    DoLoad(Store& store, ID_TYPE id) {
+    DoLoad(StorePtr store, ID_TYPE id) {
         LoadOperationContext context;
         context.id = id;
         auto op = std::make_shared<LoadOperation<ResourceT>>(context);

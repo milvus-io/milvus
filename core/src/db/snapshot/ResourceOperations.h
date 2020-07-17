@@ -29,7 +29,7 @@ class CollectionCommitOperation : public CommitOperation<CollectionCommit> {
     }
 
     Status
-    DoExecute(Store&) override;
+    DoExecute(StorePtr) override;
 };
 
 class PartitionCommitOperation : public CommitOperation<PartitionCommit> {
@@ -41,7 +41,7 @@ class PartitionCommitOperation : public CommitOperation<PartitionCommit> {
     GetPrevResource() const override;
 
     Status
-    DoExecute(Store&) override;
+    DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -53,7 +53,7 @@ class PartitionOperation : public CommitOperation<Partition> {
     PartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
 
     Status
-    DoExecute(Store& store) override;
+    DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -71,7 +71,7 @@ class SegmentCommitOperation : public CommitOperation<SegmentCommit> {
     GetPrevResource() const override;
 
     Status
-    DoExecute(Store&) override;
+    DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -83,7 +83,7 @@ class SegmentOperation : public CommitOperation<Segment> {
     SegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
     Status
-    DoExecute(Store& store) override;
+    DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -95,7 +95,7 @@ class SegmentFileOperation : public CommitOperation<SegmentFile> {
     SegmentFileOperation(const SegmentFileContext& sc, ScopedSnapshotT prev_ss);
 
     Status
-    DoExecute(Store& store) override;
+    DoExecute(StorePtr) override;
 
  protected:
     SegmentFileContext context_;
@@ -110,10 +110,7 @@ class FieldCommitOperation : public CommitOperation<FieldCommit> {
     GetPrevResource() const override;
 
     Status
-    DoExecute(Store&) override;
-
-    /* Status */
-    /* PreCheck() override; */
+    DoExecute(StorePtr) override;
 };
 
 class SchemaCommitOperation : public CommitOperation<SchemaCommit> {
@@ -125,7 +122,7 @@ class SchemaCommitOperation : public CommitOperation<SchemaCommit> {
     GetPrevResource() const override;
 
     Status
-    DoExecute(Store&) override;
+    DoExecute(StorePtr) override;
 };
 
 template <>
@@ -136,16 +133,16 @@ class LoadOperation<Collection> : public Operations {
     }
 
     const Status&
-    ApplyToStore(Store& store) override {
+    ApplyToStore(StorePtr store) override {
         if (done_) {
             Done(store);
             return status_;
         }
         Status status;
         if (context_.id == 0 && context_.name != "") {
-            status = store.GetCollection(context_.name, resource_);
+            status = store->GetCollection(context_.name, resource_);
         } else {
-            status = store.GetResource<Collection>(context_.id, resource_);
+            status = store->GetResource<Collection>(context_.id, resource_);
         }
         SetStatus(status);
         Done(store);

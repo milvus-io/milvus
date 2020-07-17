@@ -36,7 +36,7 @@ SnapshotHolder::~SnapshotHolder() {
 }
 
 Status
-SnapshotHolder::Load(Store& store, ScopedSnapshotT& ss, ID_TYPE id, bool scoped) {
+SnapshotHolder::Load(StorePtr store, ScopedSnapshotT& ss, ID_TYPE id, bool scoped) {
     Status status;
     if (id > max_id_) {
         CollectionCommitPtr cc;
@@ -121,7 +121,7 @@ SnapshotHolder::IsActive(Snapshot::Ptr& ss) {
 }
 
 Status
-SnapshotHolder::Add(Store& store, ID_TYPE id) {
+SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
     Status status;
     {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -173,7 +173,7 @@ SnapshotHolder::Add(Store& store, ID_TYPE id) {
 }
 
 Status
-SnapshotHolder::LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc, Store& store) {
+SnapshotHolder::LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc, StorePtr store) {
     assert(collection_commit_id > max_id_);
     LoadOperationContext context;
     context.id = collection_commit_id;
