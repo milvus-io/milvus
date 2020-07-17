@@ -297,9 +297,10 @@ RequestHandler::CreateHybridCollection(const std::shared_ptr<Context>& context, 
 Status
 RequestHandler::DescribeHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                          std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-                                         std::unordered_map<std::string, milvus::json>& index_params) {
+                                         std::unordered_map<std::string, milvus::json>& index_params,
+                                         std::unordered_map<std::string, milvus::json>& extra_params) {
     BaseRequestPtr request_ptr =
-        DescribeHybridCollectionRequest::Create(context, collection_name, field_types, index_params);
+        DescribeHybridCollectionRequest::Create(context, collection_name, field_types, index_params, extra_params);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();

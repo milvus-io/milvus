@@ -887,8 +887,13 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
     try {
         std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
         std::unordered_map<std::string, milvus::json> index_param;
+        std::unordered_map<std::string, milvus::json> extra_param;
         Status status = request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(),
-                                                                  field_types, index_param);
+                                                                  field_types, index_param, extra_param);
+        if (!status.ok()) {
+            SET_RESPONSE(response->mutable_status(), status, context);
+            return ::grpc::Status::OK;
+        }
 
         response->set_collection_name(request->collection_name());
         auto field_it = field_types.begin();
@@ -901,11 +906,14 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
                 grpc_index_param->set_key(json_param.key());
                 grpc_index_param->set_value(json_param.value());
             }
+            auto grpc_extra_param = field->add_extra_params();
+            grpc_extra_param->set_key(EXTRA_PARAM_KEY);
+            grpc_extra_param->set_value(extra_param.at(field_it->first).dump());
         }
         LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
         SET_RESPONSE(response->mutable_status(), status, context);
     } catch (std::exception& ex) {
-        Status status = Status{SERVER_UNEXPECTED_ERROR, ""};
+        Status status = Status{SERVER_UNEXPECTED_ERROR, "Parsing json string wrong"};
         SET_RESPONSE(response->mutable_status(), status, context);
     }
     return ::grpc::Status::OK;
@@ -1602,8 +1610,9 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     Status status;
 
     std::unordered_map<std::string, milvus::json> index_params;
+    std::unordered_map<std::string, milvus::json> extra_params;
     status = request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(), field_type_,
-                                                       index_params);
+                                                       index_params, extra_params);
 
     auto grpc_entity = response->mutable_entities();
     if (!status.ok()) {

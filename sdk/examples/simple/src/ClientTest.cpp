@@ -131,6 +131,11 @@ ClientTest::CreateCollection(const std::string& collection_name) {
 
 void
 ClientTest::GetCollectionInfo(const std::string& collection_name) {
+    milvus::Mapping mapping;
+    milvus::Status stat = conn_->GetCollectionInfo(collection_name, mapping);
+    std::cout << "GetCollectionInfo function call result: " << std::endl;
+    milvus_sdk::Utils::PrintMapping(mapping);
+    std::cout << "GetCollectionInfo function call status: " << stat.message() << std::endl;
 }
 
 void

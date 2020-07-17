@@ -30,20 +30,23 @@ namespace server {
 DescribeHybridCollectionRequest::DescribeHybridCollectionRequest(
     const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
     std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-    std::unordered_map<std::string, milvus::json>& index_params)
+    std::unordered_map<std::string, milvus::json>& index_params,
+    std::unordered_map<std::string, milvus::json>& extra_params)
     : BaseRequest(context, BaseRequest::kDescribeHybridCollection),
       collection_name_(collection_name),
       field_types_(field_types),
-      index_params_(index_params) {
+      index_params_(index_params),
+      extra_params_(extra_params) {
 }
 
 BaseRequestPtr
 DescribeHybridCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
                                         const std::string& collection_name,
                                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-                                        std::unordered_map<std::string, milvus::json>& index_params) {
+                                        std::unordered_map<std::string, milvus::json>& index_params,
+                                        std::unordered_map<std::string, milvus::json>& extra_params) {
     return std::shared_ptr<BaseRequest>(
-        new DescribeHybridCollectionRequest(context, collection_name, field_types, index_params));
+        new DescribeHybridCollectionRequest(context, collection_name, field_types, index_params, extra_params));
 }
 
 Status
@@ -63,9 +66,12 @@ DescribeHybridCollectionRequest::OnExecute() {
         }
 
         for (const auto& schema : fields_schema.fields_schema_) {
-            field_types_.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
-            milvus::json json_param = milvus::json::parse(schema.index_param_);
-            index_params_.insert(std::make_pair(schema.field_name_, json_param));
+            auto field_name = schema.field_name_;
+            field_types_.insert(std::make_pair(field_name, (engine::meta::hybrid::DataType)schema.field_type_));
+            milvus::json json_index_param = milvus::json::parse(schema.index_param_);
+            index_params_.insert(std::make_pair(field_name, json_index_param));
+            milvus::json json_extra_param = milvus::json::parse(schema.field_params_);
+            extra_params_.insert(std::make_pair(field_name, json_extra_param));
         }
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());

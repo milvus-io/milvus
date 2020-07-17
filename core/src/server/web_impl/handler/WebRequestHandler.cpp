@@ -794,7 +794,9 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
     Status status;
 
     std::unordered_map<std::string, milvus::json> index_params;
-    status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name, field_type_, index_params);
+    std::unordered_map<std::string, milvus::json> collection_extra_params;
+    status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name, field_type_, index_params,
+                                                       collection_extra_params);
     if (!status.ok()) {
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }

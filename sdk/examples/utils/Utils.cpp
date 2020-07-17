@@ -154,6 +154,18 @@ Utils::PrintIndexParam(const milvus::IndexParam& index_param) {
 }
 
 void
+Utils::PrintMapping(const milvus::Mapping& mapping) {
+    BLOCK_SPLITER
+    std::cout << "Collection name: " << mapping.collection_name << std::endl;
+    for (const auto& field : mapping.fields) {
+        std::cout << "field name: " << field->field_name << "\t field type: " << (int32_t)field->field_type
+                  << "\t field index params:" << field->index_params << "\t field extra params: " << field->extra_params
+                  << std::endl;
+    }
+    BLOCK_SPLITER
+}
+
+void
 Utils::BuildEntities(int64_t from, int64_t to, milvus::FieldValue& field_value, std::vector<int64_t>& entity_ids,
                      int64_t dimension) {
     if (to <= from) {
