@@ -49,6 +49,10 @@ SSMergeSimpleStrategy::RegroupSegments(const snapshot::ScopedSnapshotT& ss, cons
                 continue;
             }
         }
+
+        if (!ids.empty()) {
+            groups.push_back(ids);
+        }
     }
 
     return Status::OK();
