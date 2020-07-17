@@ -155,6 +155,7 @@ set(grpc_lib
         )
 
 set(unittest_libs
+        ${unittest_libs}
         sqlite
         libboost_system.a
         libboost_filesystem.a
@@ -171,6 +172,14 @@ set(unittest_libs
         fiu
         ${grpc_lib}
         )
+
+if (ENABLE_CPU_PROFILING)
+    set(unittest_libs
+            gperftools
+            libunwind
+            ${unittest_libs}
+            )
+endif ()
 
 if (MILVUS_WITH_AWS)
     set(s3_client_lib

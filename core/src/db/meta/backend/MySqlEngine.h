@@ -29,7 +29,7 @@ class MySqlEngine : public MetaEngine {
         Initialize();
     }
 
-    ~MySqlEngine();
+    ~MySqlEngine() = default;
 
     Status
     Query(const MetaQueryContext& context, AttrsMapList& attrs) override;
@@ -39,9 +39,6 @@ class MySqlEngine : public MetaEngine {
 
     Status
     TruncateAll() override;
-
-    std::string
-    Trace();
 
  private:
     Status
@@ -54,11 +51,10 @@ class MySqlEngine : public MetaEngine {
     std::shared_ptr<meta::MySQLConnectionPool> mysql_connection_pool_;
     bool safe_grab_ = false;  // Safely graps a connection from mysql pool
 
+    long query_count_ = 0;
+    long transaction_count_ = 0;
+
     std::mutex meta_mutex_;
-    std::vector<std::pair<std::string, long>> trace_;
-    std::vector<std::pair<std::string, long>> sql_trace_;
-    std::vector<std::pair<std::string, long>> lock_trace_;
-    std::vector<std::pair<std::string, long>> request_trace_;
 };
 
 }  // namespace milvus::engine::meta

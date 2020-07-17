@@ -32,7 +32,7 @@ class MockMetaEngine : public MetaEngine {
         Init();
     }
 
-    ~MockMetaEngine();
+    ~MockMetaEngine() = default;
 
     Status
     Query(const MetaQueryContext& context, AttrsMapList& attrs) override;
@@ -42,9 +42,6 @@ class MockMetaEngine : public MetaEngine {
 
     Status
     TruncateAll() override;
-
-    std::string
-    Trace();
 
  private:
     void
@@ -69,7 +66,6 @@ class MockMetaEngine : public MetaEngine {
     std::mutex mutex_;
     std::unordered_map<std::string, int64_t> max_ip_map_;
     std::unordered_map<std::string, std::vector<TableRaw>> resources_;
-    std::vector<std::pair<std::string, long>> trace_;
 };
 
 }  // namespace milvus::engine::meta

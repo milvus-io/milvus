@@ -19,10 +19,6 @@
 
 namespace milvus::engine::meta {
 
-MockMetaEngine::~MockMetaEngine() {
-    std::cout << Trace() << std::endl;
-}
-
 void
 MockMetaEngine::Init() {
     max_ip_map_.clear();
@@ -35,34 +31,56 @@ MockMetaEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs
         return Status(0, "Empty");
     }
 
-    auto filter_lambda = [](const AttrsMapList& store_attrs, AttrsMapList& candidate_attrs,
-                            std::pair<std::string, std::string> filter) {
-        candidate_attrs.clear();
-        for (auto& store_attr : store_attrs) {
-            auto attr = store_attr.find(filter.first);
-            if (attr->second == filter.second) {
-                candidate_attrs.push_back(store_attr);
+    auto select_target_attrs = [](const TableRaw& raw, AttrsMapList& des, const std::vector<std::string>& target_attrs) {
+        if (target_attrs.empty()) {
+            return;
+        }
+
+        auto m = std::unordered_map<std::string, std::string>();
+        for (auto& attr: target_attrs) {
+            auto iter = raw.find(attr);
+            if (iter != raw.end()) {
+                m.insert(std::make_pair(iter->first, iter->second));
             }
+        }
+        if (!m.empty()) {
+            des.push_back(m);
         }
     };
 
-    auto table_attrs = resources_.find(context.table_);
-    AttrsMapList candidate_attrs = table_attrs->second;
-    AttrsMapList result_attrs;
+    auto& candidate_raws = resources_[context.table_];
 
+    bool selected = true;
     if (!context.filter_attrs_.empty()) {
-        for (auto& filter_attr : context.filter_attrs_) {
-            filter_lambda(candidate_attrs, result_attrs, filter_attr);
-            candidate_attrs.clear();
-            candidate_attrs = result_attrs;
+        for (auto & raw : candidate_raws) {
+            for (auto& filter_attr : context.filter_attrs_) {
+                auto iter = raw.find(filter_attr.first);
+                if (iter == raw.end() || iter->second != filter_attr.second) {
+                    selected = false;
+                    break;
+                }
+            }
+            if (selected) {
+                if (context.all_required_) {
+                    attrs.push_back(raw);
+                } else {
+                    select_target_attrs(raw, attrs, context.query_fields_);
+                }
+            }
+            selected = true;
         }
-
     } else {
-        result_attrs = table_attrs->second;
+        if (context.all_required_) {
+            attrs = candidate_raws;
+        } else {
+            for (auto& attr: candidate_raws) {
+                select_target_attrs(attr, attrs, context.query_fields_);
+            }
+        }
     }
 
-    for (auto& raw_attrs : result_attrs) {
-        for (auto& kv : raw_attrs) {
+    for (auto& result_raw : attrs) {
+        for (auto& kv : result_raw) {
             if (*kv.second.begin() == '\'' && *kv.second.rbegin() == '\'') {
                 std::string v = kv.second;
                 StringHelpFunctions::TrimStringQuote(v, "\'");
@@ -70,9 +88,6 @@ MockMetaEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs
             }
         }
     }
-
-    // TODO: filter select field here
-    attrs = result_attrs;
 
     return Status::OK();
 }
@@ -141,20 +156,13 @@ MockMetaEngine::DeleteNoLock(const MetaApplyContext& delete_context, int64_t& re
 
 Status
 MockMetaEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
-    auto c1 = std::chrono::system_clock::now();
     std::lock_guard<std::mutex> lock(mutex_);
-    auto status = QueryNoLock(context, attrs);
-    auto c2 = std::chrono::system_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(c2 - c1);
-
-    trace_.push_back(std::pair<std::string, long>("Query",duration.count()));
-    return status;
+    return QueryNoLock(context, attrs);
 }
 
 Status
 MockMetaEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts,
                                    std::vector<int64_t>& result_ids) {
-    auto c1 = std::chrono::system_clock::now();
     std::unique_lock<std::mutex> lock(mutex_);
 
     auto status = Status::OK();
@@ -182,10 +190,6 @@ MockMetaEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_cont
     if (!status.ok()) {
         RollBackNoLock(pair_entities);
     }
-    auto c2 = std::chrono::system_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(c2 - c1);
-
-    trace_.push_back(std::pair<std::string, long>("Transaction", duration.count()));
 
     return status;
 }
@@ -231,21 +235,6 @@ MockMetaEngine::TruncateAll() {
     max_ip_map_.clear();
     resources_.clear();
     return Status::OK();
-}
-
-std::string
-MockMetaEngine::Trace() {
-    std::string trace = "\n******************************************\n";
-    long total = 0;
-    for (auto & t : trace_) {
-        total += t.second;
-        trace += t.first + "\t\t" + std::to_string(t.second) + "\n";
-    }
-
-    trace += "\n Total: " + std::to_string(total);
-
-    return trace;
-//    return "";
 }
 
 }  // namespace milvus::engine::meta
