@@ -95,7 +95,8 @@ class Snapshot : public ReferenceProxy {
 
     Status
     GetPartitionId(const std::string& name, ID_TYPE& id) const {
-        auto it = partition_names_map_.find(name);
+        std::string real_name = name.empty() ? DEFAULT_PARTITON_TAG : name;
+        auto it = partition_names_map_.find(real_name);
         if (it == partition_names_map_.end()) {
             return Status(SS_NOT_FOUND_ERROR, "Specified partition name not found");
         }
