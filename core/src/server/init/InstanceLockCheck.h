@@ -24,6 +24,12 @@ class InstanceLockCheck {
 
     static void
     Release();
+
+    static InstanceLockCheck*
+    GetInstance();
+
+ public:
+    std::string lk_path;
 };  // InstanceLockCheck
 
 }  // namespace server

@@ -23,7 +23,11 @@
 namespace milvus {
 namespace server {
 
-static std::string lk_path;
+InstanceLockCheck*
+InstanceLockCheck::GetInstance() {
+    static InstanceLockCheck lk;
+    return &lk;
+}
 
 Status
 InstanceLockCheck::Check(const std::string& path) {
@@ -39,7 +43,7 @@ InstanceLockCheck::Check(const std::string& path) {
         msg += "Could not open file: " + lock_path + ", " + strerror(errno);
         return Status(SERVER_UNEXPECTED_ERROR, msg);
     }
-    lk_path = lock_path;
+    InstanceLockCheck::GetInstance()->lk_path = lock_path;
 
     // Acquire a write lock
     struct flock fl;
@@ -71,7 +75,7 @@ InstanceLockCheck::Check(const std::string& path) {
 
 void
 InstanceLockCheck::Release() {
-    auto fd = open(lk_path.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0640);
+    auto fd = open(InstanceLockCheck::GetInstance()->lk_path.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0640);
     close(fd);
 }
 
