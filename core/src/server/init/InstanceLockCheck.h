@@ -21,6 +21,15 @@ class InstanceLockCheck {
  public:
     static Status
     Check(const std::string& path);
+
+    static void
+    Release();
+
+    static InstanceLockCheck*
+    GetInstance();
+
+ public:
+    std::string lk_path;
 };  // InstanceLockCheck
 
 }  // namespace server

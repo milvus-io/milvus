@@ -23,6 +23,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2774 Server down during loading data
 -   \#2776 Fix too many data copies during creating IVF index
 -   \#2813 To implemente RNSG IP
+-   \#2487 HotFix release lock failed on NAS
 
 ## Feature
 

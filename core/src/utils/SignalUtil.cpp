@@ -11,6 +11,7 @@
 
 #include "utils/SignalUtil.h"
 #include "src/server/Server.h"
+#include "src/server/init/InstanceLockCheck.h"
 #include "utils/Log.h"
 
 #include <execinfo.h>
@@ -22,6 +23,8 @@ namespace server {
 
 void
 SignalUtil::HandleSignal(int signum) {
+    InstanceLockCheck::Release();
+    LOG_SERVER_INFO_ << "Release lock!" << signum;
     switch (signum) {
         case SIGINT:
         case SIGUSR2: {
