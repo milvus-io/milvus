@@ -118,7 +118,6 @@ IVFConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMod
     } else {
         CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
     }
-    CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
 
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }

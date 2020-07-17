@@ -62,5 +62,13 @@ IVFSQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 #endif
 }
 
+void
+IVFSQ::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = 0;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

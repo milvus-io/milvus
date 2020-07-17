@@ -73,5 +73,13 @@ IVFPQ::GenParams(const Config& config) {
     return params;
 }
 
+void
+IVFPQ::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = 0;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

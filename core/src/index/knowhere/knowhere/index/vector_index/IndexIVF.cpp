@@ -239,6 +239,14 @@ IVF::Seal() {
     SealImpl();
 }
 
+void
+IVF::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = 0;
+}
+
 VecIndexPtr
 IVF::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 #ifdef MILVUS_GPU_VERSION

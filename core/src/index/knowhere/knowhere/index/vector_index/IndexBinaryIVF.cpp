@@ -146,6 +146,14 @@ BinaryIVF::Dim() {
 }
 
 void
+BinaryIVF::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = 0;
+}
+
+void
 BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSORWITHIDS(dataset_ptr)
 

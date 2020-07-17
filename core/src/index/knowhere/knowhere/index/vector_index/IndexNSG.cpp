@@ -172,5 +172,13 @@ NSG::Dim() {
     return index_->dimension;
 }
 
+void
+NSG::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = 0;
+}
+
 }  // namespace knowhere
 }  // namespace milvus
