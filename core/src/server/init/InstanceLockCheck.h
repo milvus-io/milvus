@@ -21,6 +21,9 @@ class InstanceLockCheck {
  public:
     static Status
     Check(const std::string& path);
+
+    static void
+    Release();
 };  // InstanceLockCheck
 
 }  // namespace server

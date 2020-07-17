@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/SignalUtil.h"
+#include "init/InstanceLockCheck.h"
 #include "src/server/Server.h"
 #include "utils/Log.h"
 
@@ -22,6 +23,7 @@ namespace server {
 
 void
 SignalUtil::HandleSignal(int signum) {
+    InstanceLockCheck::Release();
     switch (signum) {
         case SIGINT:
         case SIGUSR2: {
