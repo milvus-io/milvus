@@ -291,9 +291,9 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
     } while (0)
 #else
 #define RUN_PQ(NUM_SUB_Q)                       \
-    do{                                         \
-        RUN_PQ_OPT(NUM_SUB_Q, float, float4);   \
-    }while(0)
+    do {                                        \
+      RUN_PQ_OPT(NUM_SUB_Q, float, float4);     \
+    } while (0)
 #endif
 
     switch (bytesPerCode) {
