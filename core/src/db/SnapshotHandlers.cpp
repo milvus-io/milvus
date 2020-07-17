@@ -156,24 +156,30 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
         AttrsData& attr_ref = attr_data_[id];
         VectorsData& vector_ref = vector_data_[id];
 
-        /* fast check using bloom filter */
+        // fast check using bloom filter
         if (!id_bloom_filter_ptr->Check(id)) {
             continue;
         }
 
-        /* check if id really exists in uids */
+        // check if id really exists in uids
         auto found = std::find(uids.begin(), uids.end(), id);
         if (found == uids.end()) {
             continue;
         }
 
-        /* check if this id is deleted */
+        // check if this id is deleted
         auto offset = std::distance(uids.begin(), found);
         auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
         if (deleted != deleted_docs.end()) {
             continue;
         }
 
+        // get data from each field
+        auto& field_visitors_map = segment_visitor->GetFieldVisitors();
+        for (auto& iter : field_visitors_map) {
+            const engine::snapshot::FieldPtr& field = iter.second->GetField();
+            std::string name = field->GetName();
+        }
         //        std::unordered_map<std::string, std::vector<uint8_t>> raw_attrs;
         //        for (size_t i = 0; i < field_names_.size(); i++) {
         //            auto& field_name = field_names_[i];

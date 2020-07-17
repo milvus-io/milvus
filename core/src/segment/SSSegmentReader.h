@@ -80,6 +80,10 @@ class SSSegmentReader {
     GetSegmentPath();
 
  private:
+    Status
+    Initialize();
+
+ private:
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
     engine::SegmentPtr segment_ptr_;

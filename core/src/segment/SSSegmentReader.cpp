@@ -26,6 +26,7 @@
 #include "db/Types.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
@@ -36,9 +37,13 @@ namespace segment {
 
 SSSegmentReader::SSSegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor)
     : dir_root_(dir_root), segment_visitor_(segment_visitor) {
-    auto& segment_ptr = segment_visitor_->GetSegment();
+    Initialize();
+}
+
+Status
+SSSegmentReader::Initialize() {
     std::string directory =
-        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor->GetSegment());
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
 
     storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
     storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
@@ -46,6 +51,35 @@ SSSegmentReader::SSSegmentReader(const std::string& dir_root, const engine::Segm
     fs_ptr_ = std::make_shared<storage::FSHandler>(reader_ptr, writer_ptr, operation_ptr);
 
     segment_ptr_ = std::make_shared<engine::Segment>();
+
+    const engine::SegmentVisitor::IdMapT& field_map = segment_visitor_->GetFieldVisitors();
+    for (auto& iter : field_map) {
+        const engine::snapshot::FieldPtr& field = iter.second->GetField();
+        std::string name = field->GetName();
+        engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
+        if (ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR_FLOAT ||
+            ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
+            json params = field->GetParams();
+            if (params.find(knowhere::meta::DIM) == params.end()) {
+                std::string msg = "Vector field params must contain: dimension";
+                LOG_SERVER_ERROR_ << msg;
+                return Status(DB_ERROR, msg);
+            }
+
+            int64_t field_width = 0;
+            int64_t dimension = params[knowhere::meta::DIM];
+            if (ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
+                field_width += (dimension / 8);
+            } else {
+                field_width += (dimension * sizeof(float));
+            }
+            segment_ptr_->AddField(name, ftype, field_width);
+        } else {
+            segment_ptr_->AddField(name, ftype);
+        }
+    }
+
+    return Status::OK();
 }
 
 Status

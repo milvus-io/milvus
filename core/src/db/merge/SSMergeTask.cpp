@@ -106,7 +106,7 @@ SSMergeTask::Execute() {
     auto visitor = SegmentVisitor::Build(snapshot_, ctx.new_segment, ctx.new_segment_files);
 
     // create segment writer
-    segment::SSSegmentWriterPtr segment_writer_ptr =
+    segment::SSSegmentWriterPtr segment_writer =
         std::make_shared<segment::SSSegmentWriter>(options_.meta_.path_, visitor);
 
     // merge
@@ -114,9 +114,9 @@ SSMergeTask::Execute() {
         auto seg = snapshot_->GetResource<snapshot::Segment>(id);
 
         auto read_visitor = SegmentVisitor::Build(snapshot_, id);
-        segment::SSSegmentReaderPtr segment_reader_ptr =
+        segment::SSSegmentReaderPtr segment_reader =
             std::make_shared<segment::SSSegmentReader>(options_.meta_.path_, read_visitor);
-        status = segment_writer_ptr->Merge(segment_reader_ptr);
+        status = segment_writer->Merge(segment_reader);
         if (!status.ok()) {
             std::string err_msg = "SSMergeTask merge failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
@@ -124,7 +124,7 @@ SSMergeTask::Execute() {
         }
     }
 
-    status = segment_writer_ptr->Serialize();
+    status = segment_writer->Serialize();
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to serialize segment: " << new_seg->GetID();
         return status;

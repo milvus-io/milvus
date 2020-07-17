@@ -81,7 +81,12 @@ class SSDBImpl {
     ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names);
 
     Status
-    DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& field_element_name);
+    InsertEntities(const std::string& collection_name, const std::string& partition_name,
+                   const std::vector<std::string>& field_names, Entity& entity,
+                   std::unordered_map<std::string, meta::hybrid::DataType>& attr_types);
+
+    Status
+    DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids);
 
     Status
     Flush(const std::string& collection_name);
@@ -96,22 +101,29 @@ class SSDBImpl {
     Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
                   const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vector_data,
-                  /*std::vector<meta::hybrid::DataType>& attr_type,*/ std::vector<engine::AttrsData>& attr_data);
+                  std::vector<meta::hybrid::DataType>& attr_type, std::vector<engine::AttrsData>& attr_data);
 
     Status
-    InsertEntities(const std::string& collection_name, const std::string& partition_name,
-                   const std::vector<std::string>& field_names, Entity& entity,
-                   std::unordered_map<std::string, meta::hybrid::DataType>& attr_types);
+    GetEntityIDs(const std::string& collection_id, int64_t segment_id, IDNumbers& entity_ids);
 
     Status
-    DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids);
+    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                const std::string& field_name, const CollectionIndex& index);
 
     Status
-    HybridQuery(const server::ContextPtr& context, const std::string& collection_name,
-                const std::vector<std::string>& partition_patterns, query::GeneralQueryPtr general_query,
-                query::QueryPtr query_ptr, std::vector<std::string>& field_names,
-                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                engine::QueryResult& result);
+    DescribeIndex(const std::string& collection_id, const std::string& field_name, CollectionIndex& index);
+
+    Status
+    DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& element_name);
+
+    Status
+    DropIndex(const std::string& collection_id);
+
+    Status
+    Query(const server::ContextPtr& context, const std::string& collection_name,
+          const std::vector<std::string>& partition_patterns, query::GeneralQueryPtr general_query,
+          query::QueryPtr query_ptr, std::vector<std::string>& field_names,
+          std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, engine::QueryResult& result);
 
  private:
     void
@@ -130,7 +142,7 @@ class SSDBImpl {
     StartBuildIndexTask();
 
     void
-    BackgroundWaitBuildIndex();
+    BackgroundBuildIndexTask();
 
     void
     BackgroundIndexThread();
@@ -141,6 +153,9 @@ class SSDBImpl {
     void
     BackgroundWalThread();
 
+    Status
+    ExecWalRecord(const wal::MXLogRecord& record);
+
     void
     StartMergeTask(const std::set<std::string>& merge_collection_names, bool force_merge_all = false);
 
@@ -149,9 +164,6 @@ class SSDBImpl {
 
     void
     WaitMergeFileFinish();
-
-    Status
-    ExecWalRecord(const wal::MXLogRecord& record);
 
     void
     SuspendIfFirst();
