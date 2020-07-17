@@ -11,94 +11,36 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-
 cmake_minimum_required(VERSION 3.12)
 message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(Utils)
 
-# get build time
-MACRO(GET_CURRENT_TIME CURRENT_TIME)
-    execute_process(COMMAND "date" +"%Y-%m-%d %H:%M.%S" OUTPUT_VARIABLE ${CURRENT_TIME})
-ENDMACRO(GET_CURRENT_TIME)
-
-GET_CURRENT_TIME(BUILD_TIME)
-string(REGEX REPLACE "\n" "" BUILD_TIME ${BUILD_TIME})
+# Build time
+get_current_time(BUILD_TIME)
 message(STATUS "Build time = ${BUILD_TIME}")
 
-if (NOT DEFINED CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build.")
-endif ()
-
-# get Milvus version via branch name
-set(GIT_BRANCH_NAME_REGEX "[0-9]+\\.[0-9]+\\.[0-9]")
-
-MACRO(GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
-    execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | sed 's/.*(\\(.*\\))/\\1/' | sed 's/.*, //' | sed 's=[a-zA-Z]*\/==g'"
-            OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
-    if (NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
-        execute_process(COMMAND "git" rev-parse --abbrev-ref HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
-    endif ()
-    if (NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
-        execute_process(COMMAND "git" symbolic-ref --short -q HEAD HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
-    endif ()
-ENDMACRO(GET_GIT_BRANCH_NAME)
-
-GET_GIT_BRANCH_NAME(GIT_BRANCH_NAME)
-message(STATUS "GIT_BRANCH_NAME = ${GIT_BRANCH_NAME}")
-if (NOT GIT_BRANCH_NAME STREQUAL "")
-    string(REGEX REPLACE "\n" "" GIT_BRANCH_NAME ${GIT_BRANCH_NAME})
-endif ()
-
-set(MILVUS_VERSION "${GIT_BRANCH_NAME}")
-string(REGEX MATCH "${GIT_BRANCH_NAME_REGEX}" MILVUS_VERSION "${MILVUS_VERSION}")
-
-# get last commit id
-MACRO(GET_LAST_COMMIT_ID LAST_COMMIT_ID)
-    execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | awk '{print $2}'"
-            OUTPUT_VARIABLE ${LAST_COMMIT_ID})
-ENDMACRO(GET_LAST_COMMIT_ID)
-
-GET_LAST_COMMIT_ID(LAST_COMMIT_ID)
-message(STATUS "LAST_COMMIT_ID = ${LAST_COMMIT_ID}")
-if (NOT LAST_COMMIT_ID STREQUAL "")
-    string(REGEX REPLACE "\n" "" LAST_COMMIT_ID ${LAST_COMMIT_ID})
-    set(LAST_COMMIT_ID "${LAST_COMMIT_ID}")
-else ()
-    set(LAST_COMMIT_ID "Unknown")
-endif ()
-
-# set build type
-if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(BUILD_TYPE "Release")
-else ()
-    set(BUILD_TYPE "Debug")
-endif ()
+# Build type
+get_build_type(TARGET BUILD_TYPE DEFAULT "Release")
 message(STATUS "Build type = ${BUILD_TYPE}")
 
-project(milvus VERSION "${MILVUS_VERSION}")
-project(milvus_engine LANGUAGES CXX)
-
-unset(CMAKE_EXPORT_COMPILE_COMMANDS CACHE)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-set(MILVUS_VERSION_MAJOR "${milvus_VERSION_MAJOR}")
-set(MILVUS_VERSION_MINOR "${milvus_VERSION_MINOR}")
-set(MILVUS_VERSION_PATCH "${milvus_VERSION_PATCH}")
-
-if (MILVUS_VERSION_MAJOR STREQUAL ""
-        OR MILVUS_VERSION_MINOR STREQUAL ""
-        OR MILVUS_VERSION_PATCH STREQUAL "")
-    message(WARNING "Failed to determine Milvus version from git branch name")
-    set(MILVUS_VERSION "0.10.0")
-endif ()
-
+# Set Milvus version by branch name
+get_milvus_version(TARGET MILVUS_VERSION DEFAULT "0.10.0")
 message(STATUS "Build version = ${MILVUS_VERSION}")
+
+# Last commit
+get_last_commit_id(LAST_COMMIT_ID)
+message(STATUS "LAST_COMMIT_ID = ${LAST_COMMIT_ID}")
+
+# Set version
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h @ONLY)
 
-message(STATUS "Milvus version: "
-        "${MILVUS_VERSION_MAJOR}.${MILVUS_VERSION_MINOR}.${MILVUS_VERSION_PATCH} "
-        "(full: '${MILVUS_VERSION}')")
+# unset(CMAKE_EXPORT_COMPILE_COMMANDS CACHE)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+
+project(milvus VERSION "${MILVUS_VERSION}")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
@@ -207,12 +149,12 @@ endif ()
 
 if (MILVUS_GPU_VERSION)
     set(GPU_ENABLE "true")
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template 
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template
         ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml
         @ONLY)
 else ()
     set(GPU_ENABLE "false")
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template 
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template
         ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml
         @ONLY)
 endif ()
