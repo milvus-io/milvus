@@ -150,7 +150,9 @@ BaseTest::TearDown() {
 void
 SnapshotTest::SetUp() {
     BaseTest::SetUp();
-    auto store = std::make_shared<Store>();
+    /* auto uri = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
+    auto uri = "mock://:@:/";
+    auto store = Store::Build(uri);
     milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
     milvus::engine::snapshot::EventExecutor::Init(store);
@@ -186,7 +188,9 @@ SnapshotTest::TearDown() {
 void
 SSDBTest::SetUp() {
     BaseTest::SetUp();
-    auto store = std::make_shared<Store>();
+    /* auto uri = "mysql://root:123456@127.0.0.1:3306/milvus"; */
+    auto uri = "mock://:@:/";
+    auto store = Store::Build(uri);
     milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
     milvus::engine::snapshot::EventExecutor::Init(store);
@@ -226,7 +230,8 @@ SSDBTest::TearDown() {
 void
 SSSegmentTest::SetUp() {
     BaseTest::SetUp();
-    auto store = std::make_shared<Store>();
+    auto uri = "mock://:@:/";
+    auto store = Store::Build(uri);
     milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
 
@@ -267,7 +272,9 @@ SSSegmentTest::TearDown() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 SSMetaTest::SetUp() {
-    meta_.TruncateAll();
+    auto engine = std::make_shared<milvus::engine::meta::MockMetaEngine>();
+    meta_ = std::make_shared<milvus::engine::meta::MetaAdapter>(engine);
+    meta_->TruncateAll();
 }
 
 void

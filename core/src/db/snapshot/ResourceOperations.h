@@ -28,8 +28,7 @@ class CollectionCommitOperation : public CommitOperation<CollectionCommit> {
         return prev_ss_->GetCollectionCommit();
     }
 
-    Status
-    DoExecute(StorePtr) override;
+    Status DoExecute(StorePtr) override;
 };
 
 class PartitionCommitOperation : public CommitOperation<PartitionCommit> {
@@ -40,8 +39,7 @@ class PartitionCommitOperation : public CommitOperation<PartitionCommit> {
     PartitionCommitPtr
     GetPrevResource() const override;
 
-    Status
-    DoExecute(StorePtr) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -52,8 +50,7 @@ class PartitionOperation : public CommitOperation<Partition> {
     using BaseT = CommitOperation<Partition>;
     PartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(StorePtr) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -70,8 +67,7 @@ class SegmentCommitOperation : public CommitOperation<SegmentCommit> {
     SegmentCommit::Ptr
     GetPrevResource() const override;
 
-    Status
-    DoExecute(StorePtr) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -82,8 +78,7 @@ class SegmentOperation : public CommitOperation<Segment> {
     using BaseT = CommitOperation<Segment>;
     SegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(StorePtr) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -94,8 +89,7 @@ class SegmentFileOperation : public CommitOperation<SegmentFile> {
     using BaseT = CommitOperation<SegmentFile>;
     SegmentFileOperation(const SegmentFileContext& sc, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(StorePtr) override;
+    Status DoExecute(StorePtr) override;
 
  protected:
     SegmentFileContext context_;
@@ -109,8 +103,7 @@ class FieldCommitOperation : public CommitOperation<FieldCommit> {
     FieldCommit::Ptr
     GetPrevResource() const override;
 
-    Status
-    DoExecute(StorePtr) override;
+    Status DoExecute(StorePtr) override;
 };
 
 class SchemaCommitOperation : public CommitOperation<SchemaCommit> {
@@ -121,8 +114,7 @@ class SchemaCommitOperation : public CommitOperation<SchemaCommit> {
     SchemaCommit::Ptr
     GetPrevResource() const override;
 
-    Status
-    DoExecute(StorePtr) override;
+    Status DoExecute(StorePtr) override;
 };
 
 template <>

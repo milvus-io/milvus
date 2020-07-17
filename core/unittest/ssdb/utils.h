@@ -80,7 +80,7 @@ using SSDBImpl = milvus::engine::SSDBImpl;
 using Status = milvus::Status;
 using Store = milvus::engine::snapshot::Store;
 
-using MetaAdapter = milvus::engine::meta::MetaAdapter;
+using MetaAdapterPtr = milvus::engine::meta::MetaAdapterPtr;
 
 inline int
 RandomInt(int start, int end) {
@@ -325,7 +325,7 @@ class SSSegmentTest : public BaseTest {
 ///////////////////////////////////////////////////////////////////////////////
 class SSMetaTest : public BaseTest {
  protected:
-    MetaAdapter meta_ = MetaAdapter::GetInstance();
+    MetaAdapterPtr meta_;
 
  protected:
     void

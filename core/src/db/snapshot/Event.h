@@ -27,8 +27,7 @@ namespace snapshot {
 
 class MetaEvent {
  public:
-    virtual Status
-    Process(StorePtr) = 0;
+    virtual Status Process(StorePtr) = 0;
 };
 
 template <class ResourceT>

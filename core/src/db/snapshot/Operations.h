@@ -113,14 +113,10 @@ class Operations : public std::enable_shared_from_this<Operations> {
         return type_;
     }
 
-    virtual Status
-    OnExecute(StorePtr);
-    virtual Status
-    PreExecute(StorePtr);
-    virtual Status
-    DoExecute(StorePtr);
-    virtual Status
-    PostExecute(StorePtr);
+    virtual Status OnExecute(StorePtr);
+    virtual Status PreExecute(StorePtr);
+    virtual Status DoExecute(StorePtr);
+    virtual Status PostExecute(StorePtr);
 
     virtual Status
     GetSnapshot(ScopedSnapshotT& ss) const;
@@ -133,8 +129,7 @@ class Operations : public std::enable_shared_from_this<Operations> {
     virtual Status
     PreCheck();
 
-    virtual const Status&
-    ApplyToStore(StorePtr);
+    virtual const Status& ApplyToStore(StorePtr);
 
     const Status&
     WaitToFinish();
