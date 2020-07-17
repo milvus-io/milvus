@@ -78,7 +78,7 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR(dataset_ptr)
 
     try {
         auto elems = rows * config[meta::TOPK].get<int64_t>();
@@ -139,7 +139,7 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     b_params.out_degree = config[IndexParams::out_degree];
     b_params.search_length = config[IndexParams::search_length];
 
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR_WITH_IDS(dataset_ptr)
 
     impl::NsgIndex::Metric_Type metric;
     auto metric_str = config[Metric::TYPE].get<std::string>();

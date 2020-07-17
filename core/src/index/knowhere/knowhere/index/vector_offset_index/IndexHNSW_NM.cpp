@@ -79,7 +79,7 @@ IndexHNSW_NM::Load(const BinarySet& index_binary) {
 void
 IndexHNSW_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
-        GETTENSOR(dataset_ptr)
+        GET_TENSOR_DIMS_ROWS(dataset_ptr)
 
         hnswlib_nm::SpaceInterface<float>* space;
         if (config[Metric::TYPE] == Metric::L2) {
@@ -106,7 +106,7 @@ IndexHNSW_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 
     std::lock_guard<std::mutex> lk(mutex_);
 
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR_WO_IDS(dataset_ptr)
 
     auto base = index_->getCurrentElementCount();
     auto pp_data = const_cast<void*>(p_data);
@@ -123,7 +123,7 @@ IndexHNSW_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR(dataset_ptr)
 
     size_t k = config[meta::TOPK].get<int64_t>();
     size_t id_size = sizeof(int64_t) * k;

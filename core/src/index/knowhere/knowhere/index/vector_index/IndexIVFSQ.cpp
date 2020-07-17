@@ -35,7 +35,7 @@ namespace knowhere {
 
 void
 IVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR(dataset_ptr)
 
     // std::stringstream index_type;
     // index_type << "IVF" << config[IndexParams::nlist] << ","

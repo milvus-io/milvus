@@ -68,7 +68,7 @@ IDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR_WO_IDS(dataset_ptr)
     index_->add_with_ids(rows, (float*)p_data, p_ids);
 }
 
@@ -96,7 +96,7 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_ROWS_DATA(dataset_ptr)
 
     int64_t k = config[meta::TOPK].get<int64_t>();
     auto elems = rows * k;

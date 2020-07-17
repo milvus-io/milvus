@@ -33,7 +33,7 @@ namespace knowhere {
 
 void
 GPUIVFSQNR_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR(dataset_ptr)
     gpu_id_ = config[knowhere::meta::DEVICEID];
 
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
