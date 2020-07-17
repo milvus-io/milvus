@@ -78,6 +78,7 @@ using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
 using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
 using SSDBImpl = milvus::engine::SSDBImpl;
 using Status = milvus::Status;
+using Store = milvus::engine::snapshot::Store;
 
 using MetaAdapter = milvus::engine::meta::MetaAdapter;
 

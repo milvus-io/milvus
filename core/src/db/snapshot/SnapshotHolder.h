@@ -32,7 +32,7 @@ class SnapshotHolder {
         return collection_id_;
     }
     Status
-    Add(ID_TYPE id);
+    Add(Store&, ID_TYPE);
 
     Status
     Get(ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true) const;

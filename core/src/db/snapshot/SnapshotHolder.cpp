@@ -43,7 +43,7 @@ SnapshotHolder::Load(Store& store, ScopedSnapshotT& ss, ID_TYPE id, bool scoped)
         status = LoadNoLock(id, cc, store);
         if (!status.ok())
             return status;
-        status = Add(id);
+        status = Add(store, id);
         if (!status.ok())
             return status;
     }
@@ -121,7 +121,7 @@ SnapshotHolder::IsActive(Snapshot::Ptr& ss) {
 }
 
 Status
-SnapshotHolder::Add(ID_TYPE id) {
+SnapshotHolder::Add(Store& store, ID_TYPE id) {
     Status status;
     {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -140,7 +140,7 @@ SnapshotHolder::Add(ID_TYPE id) {
     }
     Snapshot::Ptr oldest_ss;
     {
-        auto ss = std::make_shared<Snapshot>(id);
+        auto ss = std::make_shared<Snapshot>(store, id);
 
         std::unique_lock<std::mutex> lock(mutex_);
         if (!IsActive(ss)) {

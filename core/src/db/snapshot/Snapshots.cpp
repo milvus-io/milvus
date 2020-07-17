@@ -141,21 +141,18 @@ Snapshots::LoadNoLock(Store& store, ID_TYPE collection_id, SnapshotHolderPtr& ho
     holder = std::make_shared<SnapshotHolder>(collection_id,
                                               std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
     for (auto c_c_id : collection_commit_ids) {
-        holder->Add(c_c_id);
+        holder->Add(store, c_c_id);
     }
     return Status::OK();
 }
 
-void
-Snapshots::Init() {
+Status
+Snapshots::Init(Store& store) {
     auto op = std::make_shared<GetCollectionIDsOperation>();
-    op->Push();
+    STATUS_CHECK((*op)(store));
     auto& collection_ids = op->GetIDs();
     SnapshotHolderPtr holder;
-    // TODO
     for (auto& collection_id : collection_ids) {
-        /* GetHolder(collection_id, holder); */
-        auto& store = Store::GetInstance();
         LoadHolder(store, collection_id, holder);
     }
 }

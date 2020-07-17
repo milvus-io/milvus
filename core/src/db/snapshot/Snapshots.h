@@ -64,15 +64,13 @@ class Snapshots {
     Status
     Reset();
 
-    void
-    Init();
+    Status
+    Init(Store&);
 
  private:
     void
     SnapshotGCCallback(Snapshot::Ptr ss_ptr);
-    Snapshots() {
-        Init();
-    }
+    Snapshots() = default;
     Status
     DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn);
 

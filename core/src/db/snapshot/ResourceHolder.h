@@ -48,11 +48,12 @@ class ResourceHolder {
     }
 
     ScopedT
-    GetResource(ID_TYPE id, bool scoped = true) {
-        // TODO: Temp to use Load here. Will be removed when resource is loaded just post Compound
-        // Operations.
+    GetResource(Store& store, ID_TYPE id, bool scoped = true) {
         return Load(Store::GetInstance(), id, scoped);
+    }
 
+    ScopedT
+    GetResource(ID_TYPE id, bool scoped = true) {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             auto cit = id_map_.find(id);

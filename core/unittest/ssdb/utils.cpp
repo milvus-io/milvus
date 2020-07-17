@@ -167,7 +167,7 @@ SnapshotTest::SetUp() {
 
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
 
-    milvus::engine::snapshot::Snapshots::GetInstance().Init();
+    milvus::engine::snapshot::Snapshots::GetInstance().Init(Store::GetInstance());
 }
 
 void
@@ -198,7 +198,7 @@ SSDBTest::SetUp() {
     milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
     milvus::engine::snapshot::Store::GetInstance().DoReset();
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
-    milvus::engine::snapshot::Snapshots::GetInstance().Init();
+    milvus::engine::snapshot::Snapshots::GetInstance().Init(Store::GetInstance());
 
     auto options = milvus::engine::DBOptions();
     options.wal_enable_ = false;
@@ -236,7 +236,7 @@ SSSegmentTest::SetUp() {
 
     milvus::engine::snapshot::Store::GetInstance().DoReset();
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
-    milvus::engine::snapshot::Snapshots::GetInstance().Init();
+    milvus::engine::snapshot::Snapshots::GetInstance().Init(Store::GetInstance());
 
     auto options = milvus::engine::DBOptions();
     options.wal_enable_ = false;
