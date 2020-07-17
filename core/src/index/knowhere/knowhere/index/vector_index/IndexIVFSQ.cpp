@@ -16,6 +16,7 @@
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuCloner.h>
 #endif
+#include <faiss/IndexScalarQuantizer.h>
 #include <faiss/clone_index.h>
 #include <faiss/index_factory.h>
 
@@ -67,7 +68,11 @@ IVFSQ::UpdateIndexSize() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    index_size_ = 0;
+    auto ivfsq_index = dynamic_cast<faiss::IndexIVFScalarQuantizer*>(index_.get());
+    auto nb = ivfsq_index->invlists->compute_ntotal();
+    auto code_size = ivfsq_index->code_size;
+    // ivf codes, ivf ids and quantizer
+    index_size_ = nb * code_size + nb * sizeof(int64_t) + ivfsq_index->nlist * ivfsq_index->d * sizeof(float);
 }
 
 }  // namespace knowhere

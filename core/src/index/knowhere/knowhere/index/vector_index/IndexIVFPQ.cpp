@@ -78,7 +78,17 @@ IVFPQ::UpdateIndexSize() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    index_size_ = 0;
+    auto ivfpq_index = dynamic_cast<faiss::IndexIVFPQ*>(index_.get());
+    auto nb = ivfpq_index->invlists->compute_ntotal();
+    auto code_size = ivfpq_index->code_size;
+    auto pq = ivfpq_index->pq;
+    auto nlist = ivfpq_index->nlist;
+    auto d = ivfpq_index->d;
+
+    // ivf codes, ids, quantizer and pq trained vector
+    int64_t capacity = nb * code_size + nb * sizeof(int64_t) + 2 * d * sizeof(float) + nlist * d * sizeof(float);
+    int64_t precomputed_table = nlist * pq.M * pq.ksub * sizeof(float);
+    index_size_ = capacity + precomputed_table;
 }
 
 }  // namespace knowhere

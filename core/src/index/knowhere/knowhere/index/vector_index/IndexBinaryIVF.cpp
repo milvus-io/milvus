@@ -150,7 +150,12 @@ BinaryIVF::UpdateIndexSize() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    index_size_ = 0;
+    auto bin_ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
+    auto nb = bin_ivf_index->invlists->compute_ntotal();
+    auto nlist = bin_ivf_index->nlist;
+    auto d = bin_ivf_index->d;
+    // binary ivf codes, ids and quantizer
+    index_size_ = nb * d + nb * sizeof(int64_t) + nlist * d * sizeof(float);
 }
 
 void
