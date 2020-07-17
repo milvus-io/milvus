@@ -9,6 +9,8 @@
 
 namespace faiss { namespace gpu {
 
+#ifdef FAISS_USE_FLOAT16
 WARP_SELECT_IMPL(half, false, 1024, 8);
+#endif
 
 } } // namespace
