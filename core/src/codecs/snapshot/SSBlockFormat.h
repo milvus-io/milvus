@@ -27,6 +27,15 @@
 namespace milvus {
 namespace codec {
 
+struct ReadRange {
+    ReadRange(int64_t offset, int64_t num_bytes) : offset_(offset), num_bytes_(num_bytes) {
+    }
+    int64_t offset_;
+    int64_t num_bytes_;
+};
+
+using ReadRanges = std::vector<ReadRange>;
+
 class SSBlockFormat {
  public:
     SSBlockFormat() = default;
@@ -36,6 +45,10 @@ class SSBlockFormat {
 
     void
     read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset, int64_t num_bytes,
+         std::vector<uint8_t>& raw);
+
+    void
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
          std::vector<uint8_t>& raw);
 
     void

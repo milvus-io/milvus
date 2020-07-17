@@ -114,25 +114,6 @@ SSSegmentReader::LoadField(const std::string& field_name, std::vector<uint8_t>& 
 }
 
 Status
-SSSegmentReader::LoadField(const std::string& field_name, off_t offset, size_t num_bytes, std::vector<uint8_t>& raw) {
-    try {
-        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
-        auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, raw_visitor->GetFile());
-
-        auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetBlockFormat()->read(fs_ptr_, file_path, offset, num_bytes, raw);
-    } catch (std::exception& e) {
-        std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
-        LOG_ENGINE_ERROR_ << err_msg;
-        return Status(DB_ERROR, err_msg);
-    }
-
-    return Status::OK();
-}
-
-Status
 SSSegmentReader::LoadFields() {
     engine::FIXEDX_FIELD_MAP& field_map = segment_ptr_->GetFixedFields();
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
@@ -148,6 +129,54 @@ SSSegmentReader::LoadFields() {
         STATUS_CHECK(LoadField(file_path, raw_data));
 
         field_map.insert(std::make_pair(name, raw_data));
+    }
+
+    return Status::OK();
+}
+
+Status
+SSSegmentReader::LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets,
+                              std::vector<uint8_t>& raw) {
+    try {
+        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, raw_visitor->GetFile());
+
+        int64_t field_width = 0;
+        segment_ptr_->GetFixedFieldWidth(field_name, field_width);
+        if (field_width <= 0) {
+            return Status(DB_ERROR, "Invalid field width");
+        }
+
+        codec::ReadRanges ranges;
+        for (auto offset : offsets) {
+            ranges.push_back(codec::ReadRange(offset, field_width));
+        }
+        auto& ss_codec = codec::SSCodec::instance();
+        ss_codec.GetBlockFormat()->read(fs_ptr_, file_path, ranges, raw);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
+        LOG_ENGINE_ERROR_ << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    return Status::OK();
+}
+
+Status
+SSSegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, const std::vector<int64_t>& offsets,
+                                    engine::DataChunkPtr& data_chunk) {
+    data_chunk = std::make_shared<engine::DataChunk>();
+    data_chunk->count_ = offsets.size();
+    for (auto& name : fields_name) {
+        engine::FIXED_FIELD_DATA raw_data;
+        auto status = LoadEntities(name, offsets, raw_data);
+        if (!status.ok()) {
+            return status;
+        }
+
+        data_chunk->fixed_fields_[name] = raw_data;
     }
 
     return Status::OK();

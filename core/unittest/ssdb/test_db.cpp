@@ -45,8 +45,39 @@ CreateCollection(std::shared_ptr<SSDBImpl> db, const std::string& collection_nam
 
 static constexpr int64_t COLLECTION_DIM = 128;
 
+milvus::Status
+CreateCollection2(std::shared_ptr<SSDBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
+    CreateCollectionContext context;
+    context.lsn = lsn;
+    auto collection_schema = std::make_shared<Collection>(collection_name);
+    context.collection = collection_schema;
+
+    nlohmann::json params;
+    params[milvus::knowhere::meta::DIM] = COLLECTION_DIM;
+    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR, params);
+    context.fields_schema[vector_field] = {};
+
+    std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type = {
+        {"field_0", milvus::engine::FieldType::INT32},
+        {"field_1", milvus::engine::FieldType::INT64},
+        {"field_2", milvus::engine::FieldType::DOUBLE},
+    };
+
+    std::vector<std::string> field_names;
+    for (auto& pair : attr_type) {
+        auto field = std::make_shared<Field>(pair.first, 0, pair.second);
+        context.fields_schema[field] = {};
+        field_names.push_back(pair.first);
+    }
+
+    return db->CreateCollection(context);
+}
+
 void
-BuildEntity(uint64_t n, uint64_t batch_index, milvus::engine::Entity& entity) {
+BuildEntities(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& data_chunk) {
+    data_chunk = std::make_shared<milvus::engine::DataChunk>();
+    data_chunk->count_ = n;
+
     milvus::engine::VectorsData vectors;
     vectors.vector_count_ = n;
     vectors.float_data_.clear();
@@ -58,8 +89,12 @@ BuildEntity(uint64_t n, uint64_t batch_index, milvus::engine::Entity& entity) {
 
         vectors.id_array_.push_back(n * batch_index + i);
     }
-    entity.vector_data_.insert(std::make_pair("field_3", vectors));
-    std::vector<int64_t> value_0;
+
+    milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["vector"];
+    raw.resize(vectors.float_data_.size() * sizeof(float));
+    memcpy(raw.data(), vectors.float_data_.data(), vectors.float_data_.size() * sizeof(float));
+
+    std::vector<int32_t> value_0;
     std::vector<int64_t> value_1;
     std::vector<double> value_2;
     value_0.resize(n);
@@ -67,23 +102,30 @@ BuildEntity(uint64_t n, uint64_t batch_index, milvus::engine::Entity& entity) {
     value_2.resize(n);
 
     std::default_random_engine e;
-    std::uniform_real_distribution<float> u(0, 1);
+    std::uniform_real_distribution<double> u(0, 1);
     for (uint64_t i = 0; i < n; ++i) {
         value_0[i] = i;
         value_1[i] = i + n;
         value_2[i] = u(e);
     }
-    entity.entity_count_ = n;
-    size_t attr_size = n * (sizeof(int64_t) + sizeof(double) + sizeof(int64_t));
-    std::vector<uint8_t> attr_value(attr_size, 0);
-    size_t offset = 0;
-    memcpy(attr_value.data(), value_0.data(), n * sizeof(int64_t));
-    offset += n * sizeof(int64_t);
-    memcpy(attr_value.data() + offset, value_1.data(), n * sizeof(int64_t));
-    offset += n * sizeof(int64_t);
-    memcpy(attr_value.data() + offset, value_2.data(), n * sizeof(double));
 
-    entity.attr_value_ = attr_value;
+    {
+        milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["field_0"];
+        raw.resize(value_0.size() * sizeof(int32_t));
+        memcpy(raw.data(), value_0.data(), value_0.size() * sizeof(int32_t));
+    }
+
+    {
+        milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["field_1"];
+        raw.resize(value_1.size() * sizeof(int64_t));
+        memcpy(raw.data(), value_1.data(), value_1.size() * sizeof(int64_t));
+    }
+
+    {
+        milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["field_2"];
+        raw.resize(value_2.size() * sizeof(double));
+        memcpy(raw.data(), value_2.data(), value_2.size() * sizeof(double));
+    }
 }
 }  // namespace
 
@@ -359,37 +401,15 @@ TEST_F(SSDBTest, VisitorTest) {
 }
 
 TEST_F(SSDBTest, InsertTest) {
-    CreateCollectionContext context;
-    context.lsn = 0;
-    std::string collection_name = "INSERT_TEST";
-    auto collection_schema = std::make_shared<Collection>(collection_name);
-    context.collection = collection_schema;
-
-    nlohmann::json params;
-    params[milvus::knowhere::meta::DIM] = COLLECTION_DIM;
-    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR, params);
-    context.fields_schema[vector_field] = {};
-
-    std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type = {
-        {"field_0", milvus::engine::FieldType::INT32},
-        {"field_1", milvus::engine::FieldType::INT64},
-        {"field_2", milvus::engine::FieldType::FLOAT},
-    };
-
-    std::vector<std::string> field_names;
-    for (auto& pair : attr_type) {
-        auto field = std::make_shared<Field>(pair.first, 0, pair.second);
-        context.fields_schema[field] = {};
-        field_names.push_back(pair.first);
-    }
-
-    auto status = db_->CreateCollection(context);
+    std::string collection_name = "MERGE_TEST";
+    auto status = CreateCollection2(db_, collection_name, 0);
     ASSERT_TRUE(status.ok());
 
     const uint64_t entity_count = 100;
-    milvus::engine::Entity entity;
-    BuildEntity(entity_count, 0, entity);
-    status = db_->InsertEntities(collection_name, "", field_names, entity, attr_type);
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities(entity_count, 0, data_chunk);
+
+    status = db_->InsertEntities(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
     status = db_->Flush();
@@ -402,40 +422,17 @@ TEST_F(SSDBTest, InsertTest) {
 }
 
 TEST_F(SSDBTest, MergeTest) {
-    CreateCollectionContext context;
-    context.lsn = 0;
     std::string collection_name = "MERGE_TEST";
-    auto collection_schema = std::make_shared<Collection>(collection_name);
-    context.collection = collection_schema;
-
-    nlohmann::json params;
-    params[milvus::knowhere::meta::DIM] = COLLECTION_DIM;
-    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR, params);
-    context.fields_schema[vector_field] = {};
-
-    std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type = {
-        {"field_0", milvus::engine::FieldType::INT32},
-        {"field_1", milvus::engine::FieldType::INT64},
-        {"field_2", milvus::engine::FieldType::FLOAT},
-    };
-
-    std::vector<std::string> field_names;
-    for (auto& pair : attr_type) {
-        auto field = std::make_shared<Field>(pair.first, 0, pair.second);
-        context.fields_schema[field] = {};
-        field_names.push_back(pair.first);
-    }
-
-    auto status = db_->CreateCollection(context);
+    auto status = CreateCollection2(db_, collection_name, 0);
     ASSERT_TRUE(status.ok());
 
     const uint64_t entity_count = 100;
-    milvus::engine::Entity entity;
-    BuildEntity(entity_count, 0, entity);
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities(entity_count, 0, data_chunk);
 
     int64_t repeat = 2;
     for (int32_t i = 0; i < repeat; i++) {
-        status = db_->InsertEntities(collection_name, "", field_names, entity, attr_type);
+        status = db_->InsertEntities(collection_name, "", data_chunk);
         ASSERT_TRUE(status.ok());
 
         status = db_->Flush();

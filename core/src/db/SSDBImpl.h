@@ -81,9 +81,7 @@ class SSDBImpl {
     ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names);
 
     Status
-    InsertEntities(const std::string& collection_name, const std::string& partition_name,
-                   const std::vector<std::string>& field_names, Entity& entity,
-                   std::unordered_map<std::string, meta::hybrid::DataType>& attr_types);
+    InsertEntities(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk);
 
     Status
     DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids);
@@ -100,8 +98,7 @@ class SSDBImpl {
 
     Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                  const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vector_data,
-                  std::vector<meta::hybrid::DataType>& attr_type, std::vector<engine::AttrsData>& attr_data);
+                  const std::vector<std::string>& field_names, DataChunkPtr& data_chunk);
 
     Status
     GetEntityIDs(const std::string& collection_id, int64_t segment_id, IDNumbers& entity_ids);

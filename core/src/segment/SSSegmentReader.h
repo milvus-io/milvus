@@ -41,10 +41,14 @@ class SSSegmentReader {
     LoadField(const std::string& field_name, std::vector<uint8_t>& raw);
 
     Status
-    LoadField(const std::string& field_name, off_t offset, size_t num_bytes, std::vector<uint8_t>& raw);
+    LoadFields();
 
     Status
-    LoadFields();
+    LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets, std::vector<uint8_t>& raw);
+
+    Status
+    LoadFieldsEntities(const std::vector<std::string>& fields_name, const std::vector<int64_t>& offsets,
+                       engine::DataChunkPtr& data_chunk);
 
     Status
     LoadUids(std::vector<int64_t>& uids);
