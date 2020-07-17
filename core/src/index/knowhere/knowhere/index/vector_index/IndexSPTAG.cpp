@@ -219,7 +219,7 @@ CPUSPTAGRNG::UpdateIndexSize() {
     if (!index_ptr_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    index_size_ = 0;
+    index_size_ = index_ptr_->GetIndexSize();
 }
 
 // void

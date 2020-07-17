@@ -1401,7 +1401,7 @@ protected:
   int64_t cal_size() {
      int64_t ret = 0;
      ret += sizeof(*this);
-     ret += _roots.capacity() * sizeof(S);
+     ret += _roots.size() * sizeof(S);
      ret += std::max(_n_nodes, _nodes_size) * _s;
      return ret;
    }

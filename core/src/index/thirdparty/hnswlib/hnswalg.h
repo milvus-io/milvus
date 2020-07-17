@@ -1133,8 +1133,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         ret += sizeof(*this);
         ret += sizeof(*space);
         ret += visited_list_pool_->GetSize();
-        ret += link_list_locks_.capacity() * sizeof(std::mutex);
-        ret += element_levels_.capacity() * sizeof(int);
+        ret += link_list_locks_.size() * sizeof(std::mutex);
+        ret += element_levels_.size() * sizeof(int);
         ret += max_elements_ * size_data_per_element_;
         ret += max_elements_ * sizeof(void*);
         for (auto i = 0; i < max_elements_; ++ i) {
