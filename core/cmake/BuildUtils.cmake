@@ -203,6 +203,18 @@ function(ADD_THIRDPARTY_LIB LIB_NAME)
     endif()
 endfunction()
 
+MACRO (import_mysql_inc)
+    find_path (MYSQL_INCLUDE_DIR
+        NAMES "mysql.h"
+        PATH_SUFFIXES "mysql")
+
+    if (${MYSQL_INCLUDE_DIR} STREQUAL "MYSQL_INCLUDE_DIR-NOTFOUND")
+        message(FATAL_ERROR "Could not found MySQL include directory")
+    else ()
+        include_directories(${MYSQL_INCLUDE_DIR})
+    endif ()
+ENDMACRO (import_mysql_inc)
+
 MACRO(using_ccache_if_defined MILVUS_USE_CCACHE)
     if (MILVUS_USE_CCACHE)
         find_program(CCACHE_FOUND ccache)
@@ -215,4 +227,5 @@ MACRO(using_ccache_if_defined MILVUS_USE_CCACHE)
             set(ENV{CCACHE_COMMENTS} "1")
         endif (CCACHE_FOUND)
     endif ()
-MACRO(using_ccache_if_defined)
+ENDMACRO(using_ccache_if_defined)
+

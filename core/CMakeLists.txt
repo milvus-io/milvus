@@ -17,6 +17,7 @@ message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Utils)
 
+# **************************** Build time, type and code version ****************************
 get_current_time(BUILD_TIME)
 message(STATUS "Build time = ${BUILD_TIME}")
 get_build_type(TARGET BUILD_TYPE 
@@ -33,31 +34,28 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in ${CMAKE_CURRENT_SOUR
 # unset(CMAKE_EXPORT_COMPILE_COMMANDS CACHE)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# **************************** Project ****************************
 project(milvus VERSION "${MILVUS_VERSION}")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
-
-find_path(MYSQL_INCLUDE_DIR
-        NAMES "mysql.h"
-        PATH_SUFFIXES "mysql")
-if (${MYSQL_INCLUDE_DIR} STREQUAL "MYSQL_INCLUDE_DIR-NOTFOUND")
-    message(FATAL_ERROR "Could not found MySQL include directory")
-else ()
-    include_directories(${MYSQL_INCLUDE_DIR})
-endif ()
 
 set(MILVUS_SOURCE_DIR ${PROJECT_SOURCE_DIR})
 set(MILVUS_BINARY_DIR ${PROJECT_BINARY_DIR})
 set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
 set(MILVUS_THIRDPARTY_SRC ${PROJECT_SOURCE_DIR}/thirdparty)
 
+# **************************** Dependencies ****************************
+include(BuildUtils)
+import_mysql_inc()
+
 include(ExternalProject)
 include(DefineOptions)
-include(BuildUtils)
 include(ThirdPartyPackages)
 
 using_ccache_if_defined(MILVUS_USE_CCACHE)
+
+# **************************** Compiler arguments ****************************
 
 if (MILVUS_GPU_VERSION)
     message(STATUS "Building Milvus GPU version")
@@ -73,20 +71,19 @@ set_milvus_definition(MILVUS_WITH_PROMETHEUS, "MILVUS_WITH_PROMETHEUS")
 set_milvus_definition(ENABLE_CPU_PROFILING, "ENABLE_CPU_PROFILING")
 set_milvus_definition(MILVUS_WITH_FIU, "FIU_ENABLE")
 
+config_summary()
 
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
-    if (MILVUS_GPU_VERSION)
-        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
-    endif ()
-else ()
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
+elseif (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
-    if (MILVUS_GPU_VERSION)
-        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
-    endif ()
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
+else ()
+    message(FATAL_ERROR "Unknown CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
 endif ()
 
-config_summary()
+# **************************** Source files ****************************
 add_subdirectory(src)
 
 if (BUILD_UNIT_TEST STREQUAL "ON")
@@ -99,21 +96,20 @@ endif ()
 
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 
+# **************************** Install ****************************
+
 if ("${MILVUS_DB_PATH}" STREQUAL "")
     set(MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}")
 endif ()
 
 if (MILVUS_GPU_VERSION)
     set(GPU_ENABLE "true")
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template
-        ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml
-        @ONLY)
 else ()
     set(GPU_ENABLE "false")
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template
-        ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml
-        @ONLY)
 endif ()
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template
+    ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml
+    @ONLY)
 
 install(DIRECTORY scripts/
         DESTINATION scripts
@@ -131,6 +127,8 @@ install(FILES
         DESTINATION
         conf)
 
+
+# **************************** Coding style check tools ****************************
 find_package(Python COMPONENTS Interpreter Development)
 find_package(ClangTools)
 set(BUILD_SUPPORT_DIR "${CMAKE_SOURCE_DIR}/build-support")
