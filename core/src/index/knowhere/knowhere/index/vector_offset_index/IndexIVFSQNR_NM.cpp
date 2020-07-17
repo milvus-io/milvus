@@ -116,7 +116,7 @@ IVFSQNR_NM::Load(const BinarySet& binary_set) {
 
 void
 IVFSQNR_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GET_TENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
@@ -134,7 +134,7 @@ IVFSQNR_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GET_TENSOR_WO_IDS(dataset_ptr)
+    GET_TENSOR_DATA_ID(dataset_ptr)
     index_->add_with_ids_without_codes(rows, (float*)p_data, p_ids);
 
     ArrangeCodes(dataset_ptr, config);
@@ -147,7 +147,7 @@ IVFSQNR_NM::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GET_TENSOR_ROWS_DATA(dataset_ptr)
+    GET_TENSOR_DATA_ID(dataset_ptr)
     index_->add_without_codes(rows, (float*)p_data);
 
     ArrangeCodes(dataset_ptr, config);
@@ -175,7 +175,7 @@ IVFSQNR_NM::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 
 void
 IVFSQNR_NM::ArrangeCodes(const DatasetPtr& dataset_ptr, const Config& config) {
-    GET_TENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
     // Construct arranged sq8 data from original data
     const float* original_data = (const float*)p_data;

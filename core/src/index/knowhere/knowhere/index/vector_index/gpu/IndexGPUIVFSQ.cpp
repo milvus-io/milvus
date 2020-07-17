@@ -28,7 +28,7 @@ namespace knowhere {
 
 void
 GPUIVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GET_TENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
     gpu_id_ = config[knowhere::meta::DEVICEID];
 
     // std::stringstream index_type;

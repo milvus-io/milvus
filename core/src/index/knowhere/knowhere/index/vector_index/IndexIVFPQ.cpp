@@ -33,7 +33,7 @@ namespace knowhere {
 
 void
 IVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GET_TENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
