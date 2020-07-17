@@ -76,6 +76,8 @@ InstanceLockCheck::Check(const std::string& path) {
 void
 InstanceLockCheck::Release() {
     auto fd = open(InstanceLockCheck::GetInstance()->lk_path.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0640);
+    if (fd < 0)
+        return;
     close(fd);
 }
 
