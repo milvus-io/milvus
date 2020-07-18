@@ -147,7 +147,7 @@ IVFSQNR_NM::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GET_TENSOR_DATA_ID(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
     index_->add_without_codes(rows, (float*)p_data);
 
     ArrangeCodes(dataset_ptr, config);

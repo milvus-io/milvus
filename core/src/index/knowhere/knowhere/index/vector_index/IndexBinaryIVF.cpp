@@ -48,7 +48,7 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GET_TENSOR_DATA_ID(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
     try {
         int64_t k = config[meta::TOPK].get<int64_t>();

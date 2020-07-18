@@ -91,7 +91,7 @@ IVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GET_TENSOR_DATA_DIM(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
     index_->add(rows, (float*)p_data);
 }
 
@@ -101,7 +101,7 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GET_TENSOR_DATA_ID(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
     try {
         fiu_do_on("IVF.Search.throw_std_exception", throw std::exception());

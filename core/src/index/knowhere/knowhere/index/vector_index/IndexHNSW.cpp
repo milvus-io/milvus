@@ -136,7 +136,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
-    GET_TENSOR_DATA_ID(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
     size_t k = config[meta::TOPK].get<int64_t>();
     size_t id_size = sizeof(int64_t) * k;

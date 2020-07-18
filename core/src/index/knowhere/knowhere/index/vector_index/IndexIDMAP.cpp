@@ -96,7 +96,7 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    GET_TENSOR_DATA_ID(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
     int64_t k = config[meta::TOPK].get<int64_t>();
     auto elems = rows * k;
