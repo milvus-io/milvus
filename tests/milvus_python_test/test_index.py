@@ -29,11 +29,8 @@ class TestIndexBase:
     )
     def get_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVFSQ8H:
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     @pytest.fixture(
@@ -42,11 +39,8 @@ class TestIndexBase:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVFSQ8H:
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     """
@@ -671,13 +665,8 @@ class TestIndexIP:
     )
     def get_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVFSQ8H:
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("ivfpq not support in GPU mode")
-        if request.param["index_type"] == IndexType.RNSG:
-            pytest.skip("rnsg not support in ip")
         return request.param
 
     @pytest.fixture(
@@ -686,13 +675,8 @@ class TestIndexIP:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVFSQ8H:
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("ivfpq not support in GPU mode")
-        if request.param["index_type"] == IndexType.RNSG:
-            pytest.skip("rnsg not support in ip")
         return request.param
     """
     ******************************************************************
@@ -1230,11 +1214,8 @@ class TestIndexJAC:
     )
     def get_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVFSQ8H:
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     @pytest.fixture(
@@ -1243,11 +1224,8 @@ class TestIndexJAC:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVFSQ8H:
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     @pytest.fixture(
@@ -1431,9 +1409,9 @@ class TestIndexBinary:
     )
     def get_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVFSQ8H:
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
-        if request.param["index_type"] == IndexType.IVF_PQ or request.param["index_type"] == IndexType.HNSW:
+        if request.param["index_type"] in ["IVF_PQ", "HNSW"]:
             pytest.skip("Skip PQ Temporary")
         return request.param
 
@@ -1443,9 +1421,9 @@ class TestIndexBinary:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVFSQ8H:
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
-        if request.param["index_type"] == IndexType.IVF_PQ or request.param["index_type"] == IndexType.HNSW:
+        if request.param["index_type"] in ["IVF_PQ", "HNSW"]:
             pytest.skip("Skip PQ Temporary")
         return request.param
 
@@ -1455,7 +1433,7 @@ class TestIndexBinary:
     )
     def get_hamming_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
+        if request.param["index_type"] in binary_support():
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -1466,7 +1444,7 @@ class TestIndexBinary:
     )
     def get_substructure_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if request.param["index_type"] == IndexType.FLAT:
+        if request.param["index_type"] == "FLAT":
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -1477,7 +1455,7 @@ class TestIndexBinary:
     )
     def get_superstructure_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if request.param["index_type"] == IndexType.FLAT:
+        if request.param["index_type"] == "FLAT":
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -1782,7 +1760,7 @@ class TestCreateIndexParamsInvalid(object):
     """
     @pytest.fixture(
         scope="function",
-        params=[IndexType.FLAT,IndexType.IVFLAT,IndexType.IVF_SQ8,IndexType.IVFSQ8H]
+        params=ivf()
     )
     def get_index_type(self, request):
         yield request.param
@@ -1823,11 +1801,8 @@ class TestIndexAsync:
     )
     def get_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVFSQ8H:
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] == IndexType.IVF_PQ:
-                pytest.skip("ivfpq not support in GPU mode")
         return request.param
 
     @pytest.fixture(
@@ -1836,13 +1811,8 @@ class TestIndexAsync:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == IndexType.IVFSQ8H:
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in CPU mode")
-        if str(connect._cmd("mode")[1]) == "GPU":
-            # if request.param["index_type"] == IndexType.IVF_PQ:
-            if request.param["index_type"] not in [IndexType.IVF_FLAT]:
-                # pytest.skip("ivfpq not support in GPU mode")
-                pytest.skip("debug ivf_flat in GPU mode")
         return request.param
 
     def check_status(self, status):
