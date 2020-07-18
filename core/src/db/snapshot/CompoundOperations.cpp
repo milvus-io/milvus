@@ -26,7 +26,8 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-AddSegmentFileOperation::AddSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+AddSegmentFileOperation::AddSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
 }
 
 Status
@@ -111,12 +112,12 @@ AddSegmentFileOperation::CommitRowCountDelta(SIZE_TYPE delta, bool sub) {
 
 Status
 AddSegmentFileOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
-    STATUS_CHECK(
-        CheckStale(std::bind(&AddSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id)));
+    STATUS_CHECK(CheckStale(
+        std::bind(&AddSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id)));
 
     auto segment = GetStartedSS()->GetResource<Segment>(context.segment_id);
-    if (!segment || (context_.new_segment_files.size() > 0 && (
-                     context_.new_segment_files[0]->GetSegmentId() != context.segment_id))) {
+    if (!segment || (context_.new_segment_files.size() > 0 &&
+                     (context_.new_segment_files[0]->GetSegmentId() != context.segment_id))) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Invalid segment " << context.segment_id << " in context";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
