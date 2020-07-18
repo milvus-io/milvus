@@ -161,10 +161,11 @@ class TestDeleteBase:
         '''        
         ids = connect.insert(collection, entity)
         connect.flush([collection])
-        delete_ids = [ids[0], ids[-1]]
-        with pytest.raises(Exception) as e:
-            status = connect.delete_entity_by_id(collection, delete_ids)
-            logging.getLogger().info(status)
+        delete_ids = [ids[0], 1]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == 0
 
     # TODO
     def test_flush_after_delete(self, connect, collection):
