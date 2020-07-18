@@ -42,7 +42,7 @@ class TestInsertBase:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] == "IVFSQ8H":
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
@@ -614,7 +614,7 @@ class TestInsertMultiCollections:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] == "IVFSQ8H":
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in cpu mode")
 
     def test_insert_vector_multi_collections(self, connect):
