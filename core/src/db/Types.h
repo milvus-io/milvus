@@ -92,6 +92,7 @@ enum FieldElementType {
     FET_BLOOM_FILTER = 2,
     FET_DELETED_DOCS = 3,
     FET_INDEX = 4,
+    FET_COMPRESS_SQ8 = 5,
 };
 
 }  // namespace engine
