@@ -857,7 +857,7 @@ TEST_F(SnapshotTest, OperationTest) {
         OperationContext context;
         context.lsn = ++lsn;
         context.new_field_elements.push_back(new_fe);
-        auto op = std::make_shared<FieldElementModificationOperation>(context, ss);
+        auto op = std::make_shared<AddFieldElementOperation>(context, ss);
         status = op->Push();
         ASSERT_TRUE(status.ok());
 
@@ -879,7 +879,7 @@ TEST_F(SnapshotTest, OperationTest) {
         OperationContext context;
         context.lsn = ++lsn;
         context.new_field_elements.push_back(new_fe);
-        auto op = std::make_shared<FieldElementModificationOperation>(context, ss);
+        auto op = std::make_shared<AddFieldElementOperation>(context, ss);
         status = op->Push();
         ASSERT_FALSE(status.ok());
 

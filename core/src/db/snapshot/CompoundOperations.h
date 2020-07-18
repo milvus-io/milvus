@@ -75,12 +75,12 @@ class BuildOperation : public CompoundBaseOperation<BuildOperation> {
     CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const;
 };
 
-class FieldElementModificationOperation : public CompoundBaseOperation<FieldElementModificationOperation> {
+class AddFieldElementOperation : public CompoundBaseOperation<AddFieldElementOperation> {
  public:
-    using BaseT = CompoundBaseOperation<FieldElementModificationOperation>;
+    using BaseT = CompoundBaseOperation<AddFieldElementOperation>;
     static constexpr const char* Name = "AFE";
 
-    FieldElementModificationOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+    AddFieldElementOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
     Status
     PreCheck() override;

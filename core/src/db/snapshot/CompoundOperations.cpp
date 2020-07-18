@@ -114,21 +114,21 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
     return Status::OK();
 }
 
-FieldElementModificationOperation::FieldElementModificationOperation(const OperationContext& context,
+AddFieldElementOperation::AddFieldElementOperation(const OperationContext& context,
         ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
 }
 
 Status
-FieldElementModificationOperation::PreCheck() {
-    if (context_.stale_field_elements.size() == 0 && context_.new_field_elements.size() == 0) {
-        return Status(SS_INVALID_CONTEX_ERROR, "No changes to field elements");
+AddFieldElementOperation::PreCheck() {
+    if (context_.stale_field_elements.size() > 0 || context_.new_field_elements.size() == 0) {
+        return Status(SS_INVALID_CONTEX_ERROR, "No new field element or at least one stale field element");
     }
 
     return Status::OK();
 }
 
 Status
-FieldElementModificationOperation::DoExecute(StorePtr store) {
+AddFieldElementOperation::DoExecute(StorePtr store) {
     OperationContext cc_context;
     {
         auto context = context_;
