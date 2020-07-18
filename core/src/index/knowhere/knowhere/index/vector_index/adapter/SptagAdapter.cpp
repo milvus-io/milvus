@@ -32,7 +32,7 @@ ConvertToMetadataSet(const DatasetPtr& dataset_ptr) {
 
 std::shared_ptr<SPTAG::VectorSet>
 ConvertToVectorSet(const DatasetPtr& dataset_ptr) {
-    GETTENSOR(dataset_ptr);
+    GET_TENSOR_DATA_DIM(dataset_ptr)
     size_t num_bytes = rows * dim * sizeof(float);
     SPTAG::ByteArray byte_array((uint8_t*)p_data, num_bytes, false);
 
@@ -42,7 +42,7 @@ ConvertToVectorSet(const DatasetPtr& dataset_ptr) {
 
 std::vector<SPTAG::QueryResult>
 ConvertToQueryResult(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr);
+    GET_TENSOR_DATA_DIM(dataset_ptr);
 
     int64_t k = config[meta::TOPK].get<int64_t>();
     std::vector<SPTAG::QueryResult> query_results(rows, SPTAG::QueryResult(nullptr, k, true));

@@ -102,7 +102,7 @@ IVF_NM::Load(const BinarySet& binary_set) {
 
 void
 IVF_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
@@ -118,7 +118,7 @@ IVF_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR_DATA_ID(dataset_ptr)
     index_->add_with_ids_without_codes(rows, (float*)p_data, p_ids);
 }
 
@@ -129,7 +129,7 @@ IVF_NM::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
     index_->add_without_codes(rows, (float*)p_data);
 }
 
@@ -139,7 +139,7 @@ IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
     try {
         fiu_do_on("IVF_NM.Search.throw_std_exception", throw std::exception());
