@@ -23,7 +23,7 @@ default_index_name = "insert_index"
 default_fields = gen_default_fields() 
 search_param = {"nprobe": 1}
 entity = gen_entities(1, is_normal=True)
-binary_entity = gen_binary_entities(1)
+raw_vector, binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 query, query_vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1)
