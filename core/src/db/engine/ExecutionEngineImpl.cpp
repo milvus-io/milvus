@@ -584,9 +584,17 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
              */
             LOG_ENGINE_DEBUG_ << "CPU to GPU" << device_id << " start";
             auto gpu_cache_mgr = cache::GpuCacheMgr::GetInstance(device_id);
-            // gpu_cache_mgr->Reserve(index_->Size());
-            index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
-            // gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
+
+            bool gpu_cache_enable = false;
+            STATUS_CHECK(server::Config::GetInstance().GetGpuResourceConfigCacheEnable(gpu_cache_enable));
+
+            if (gpu_cache_enable) {
+                gpu_cache_mgr->Reserve(index_->Size());
+                index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
+                gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
+            } else {
+                index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
+            }
             LOG_ENGINE_DEBUG_ << "CPU to GPU" << device_id << " finished";
         } catch (std::exception& e) {
             LOG_ENGINE_ERROR_ << e.what();
