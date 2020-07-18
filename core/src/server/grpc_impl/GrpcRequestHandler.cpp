@@ -376,6 +376,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
         }
     }
 
+    // TODO(yukun): valid_row not used in vector records serialize
     if (!vector_field_name.empty()) {
         auto grpc_field = response->add_fields();
         grpc_field->set_field_name(vector_field_name);
