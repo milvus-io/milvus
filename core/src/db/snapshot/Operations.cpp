@@ -75,7 +75,7 @@ Operations::GetID() const {
 }
 
 Status
-Operations::operator()(Store& store) {
+Operations::operator()(StorePtr store) {
     STATUS_CHECK(PreCheck());
     return ApplyToStore(store);
 }
@@ -94,7 +94,7 @@ Operations::WaitToFinish() {
 }
 
 void
-Operations::Done(Store& store) {
+Operations::Done(StorePtr store) {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     done_ = true;
     if (GetType() == OperationsType::W_Compound) {
@@ -185,7 +185,7 @@ Operations::GetSnapshot(ScopedSnapshotT& ss) const {
 }
 
 const Status&
-Operations::ApplyToStore(Store& store) {
+Operations::ApplyToStore(StorePtr store) {
     if (GetType() == OperationsType::W_Compound) {
         /* std::cout << ToString() << std::endl; */
     }
@@ -212,7 +212,7 @@ Operations::OnSnapshotStale() {
 }
 
 Status
-Operations::OnExecute(Store& store) {
+Operations::OnExecute(StorePtr store) {
     STATUS_CHECK(PreExecute(store));
     STATUS_CHECK(DoExecute(store));
     STATUS_CHECK(PostExecute(store));
@@ -220,7 +220,7 @@ Operations::OnExecute(Store& store) {
 }
 
 Status
-Operations::PreExecute(Store& store) {
+Operations::PreExecute(StorePtr store) {
     if (GetStartedSS() && type_ == OperationsType::W_Compound) {
         STATUS_CHECK(Snapshots::GetInstance().GetSnapshot(context_.prev_ss, GetStartedSS()->GetCollectionId()));
         if (!context_.prev_ss) {
@@ -233,13 +233,13 @@ Operations::PreExecute(Store& store) {
 }
 
 Status
-Operations::DoExecute(Store& store) {
+Operations::DoExecute(StorePtr store) {
     return Status::OK();
 }
 
 Status
-Operations::PostExecute(Store& store) {
-    return store.ApplyOperation(*this);
+Operations::PostExecute(StorePtr store) {
+    return store->ApplyOperation(*this);
 }
 
 template <typename ResourceT>

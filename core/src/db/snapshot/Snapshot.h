@@ -44,7 +44,7 @@ using ScopedResourcesT =
 class Snapshot : public ReferenceProxy {
  public:
     using Ptr = std::shared_ptr<Snapshot>;
-    explicit Snapshot(ID_TYPE id);
+    explicit Snapshot(StorePtr, ID_TYPE);
 
     ID_TYPE
     GetID() const {
