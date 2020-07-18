@@ -290,7 +290,7 @@ class TestCreateCollectionInvalid(object):
         '''
         target: test create collection with no segment_size params
         method: create collection with corrent params
-        expected: create status return ok, use default default_segment_size
+        expected: use default default_segment_size
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
@@ -298,13 +298,13 @@ class TestCreateCollectionInvalid(object):
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
         logging.getLogger().info(res)
-        assert res.segment_size == default_segment_size
+        assert res["segment_size"] == default_segment_size
 
     def test_create_collection_no_metric_type(self, connect):
         '''
         target: test create collection with no metric_type params
         method: create collection with corrent params
-        expected: create status return ok, use default L2
+        expected: use default L2
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
@@ -312,7 +312,7 @@ class TestCreateCollectionInvalid(object):
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
         logging.getLogger().info(res)
-        # assert result.metric_type == MetricType.L2
+        assert result["metric_type"] == "L2"
 
     # TODO: assert exception
     def test_create_collection_limit_fields(self, connect):
