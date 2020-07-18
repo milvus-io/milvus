@@ -97,7 +97,7 @@ class TestGetBase:
         res = connect.get_entity_by_id(collection, get_ids)
         assert_equal_vector(res[0].get("vector"), entities[-1]["values"][0])
         assert_equal_vector(res[-1].get("vector"), entities[-1]["values"][-1])
-        assert not len(res[1].get("vector"))
+        assert res[1] is None
 
     def test_get_entity_limit(self, connect, collection, args):
         '''
@@ -175,7 +175,7 @@ class TestGetBase:
         res = connect.get_entity_by_id(ip_collection, get_ids)
         assert_equal_vector(res[0].get("vector"), entities[-1]["values"][0])
         assert_equal_vector(res[-1].get("vector"), entities[-1]["values"][-1])
-        assert not len(res[1].get("vector"))
+        assert res[1] is None
 
     def test_get_entity_parts_ids_jac(self, connect, jac_collection):
         '''
@@ -189,7 +189,7 @@ class TestGetBase:
         res = connect.get_entity_by_id(jac_collection, get_ids)
         assert_equal_vector(res[0].get("binary_vector"), binary_entities[-1]["values"][0])
         assert_equal_vector(res[-1].get("binary_vector"), binary_entities[-1]["values"][-1])
-        assert not len(res[1].get("binary_vector"))
+        assert res[1] is None
 
     """
     ******************************************************************
@@ -394,7 +394,7 @@ class TestGetBase:
         connect.flush([collection])
         get_ids = [ids[get_pos]]
         res = connect.get_entity_by_id(collection, get_ids)
-        assert not len(res)
+        assert res[0] is None
 
     # TODO
     def test_get_entities_after_delete(self, connect, collection, get_pos):
@@ -411,7 +411,7 @@ class TestGetBase:
         get_ids = delete_ids
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert not len(res[i])
+            assert res[i] is None
 
     def test_get_entities_after_delete_compact(self, connect, collection, get_pos):
         '''
@@ -428,7 +428,7 @@ class TestGetBase:
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert not len(res[i])
+            assert res[i] is None
 
     def test_get_entities_indexed_batch(self, connect, collection, get_simple_index, get_pos):
         '''
@@ -494,7 +494,7 @@ class TestGetBase:
         connect.flush([collection])
         get_ids = [1]
         res = connect.get_entity_by_id(collection, get_ids)
-        assert not len(res[0])
+        assert res[0] is None
 
     def test_get_entity_after_delete_with_partition(self, connect, collection, get_pos):
         '''
@@ -508,7 +508,7 @@ class TestGetBase:
         status = connect.delete_entity_by_id(collection, [ids[get_pos]])
         connect.flush([collection])
         res = connect.get_entity_by_id(collection, [ids[get_pos]])
-        assert not len(res[0])
+        assert res[0] is None
 
     def test_get_entity_by_id_multithreads(self, connect, collection):
         ids = connect.insert(collection, entities)
