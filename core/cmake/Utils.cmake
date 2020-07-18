@@ -25,9 +25,9 @@ MACRO(get_git_branch_name GIT_BRANCH_NAME)
     execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | sed 's/.*(\\(.*\\))/\\1/' | sed 's/.*, //' | sed 's=[a-zA-Z]*\/==g'"
             OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
 
-    # if (NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
-    #     execute_process(COMMAND "git" rev-parse --abbrev-ref HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
-    # endif ()
+    if (NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
+        execute_process(COMMAND "git" rev-parse --abbrev-ref HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+    endif ()
 
     if (NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
         execute_process(COMMAND "git" symbolic-ref -q --short HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
@@ -48,11 +48,10 @@ MACRO(get_last_commit_id LAST_COMMIT_ID)
     execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | awk '{print $2}'"
             OUTPUT_VARIABLE ${LAST_COMMIT_ID})
 
-    message(DEBUG "LAST_COMMIT_ID = ${LAST_COMMIT_ID}")
+    message(DEBUG "LAST_COMMIT_ID = ${${LAST_COMMIT_ID}}")
 
     if (NOT LAST_COMMIT_ID STREQUAL "")
-        string(REGEX REPLACE "\n" "" LAST_COMMIT_ID ${LAST_COMMIT_ID})
-        set(LAST_COMMIT_ID "${LAST_COMMIT_ID}")
+        string(REGEX REPLACE "\n" "" ${LAST_COMMIT_ID} ${${LAST_COMMIT_ID}})
     else ()
         set(LAST_COMMIT_ID "Unknown")
     endif ()
@@ -75,7 +74,7 @@ ENDMACRO(get_milvus_version)
 
 # set definition
 MACRO(set_milvus_definition DEF_PASS_CMAKE MILVUS_DEF)
-    if (${DEF_PASS_CMAKE} STREQUAL "ON")
+    if (${${DEF_PASS_CMAKE}})
         add_compile_definitions(${MILVUS_DEF})
     endif()
 ENDMACRO(set_milvus_definition)
