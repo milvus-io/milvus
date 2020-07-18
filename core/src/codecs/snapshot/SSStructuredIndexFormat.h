@@ -28,9 +28,9 @@
 namespace milvus {
 namespace codec {
 
-class SSAttrsIndexFormat {
+class SSStructuredIndexFormat {
  public:
-    SSAttrsIndexFormat() = default;
+    SSStructuredIndexFormat() = default;
 
     void
     read(const storage::FSHandlerPtr& fs_ptr, segment::AttrsIndexPtr& attr_index);
@@ -39,13 +39,13 @@ class SSAttrsIndexFormat {
     write(const storage::FSHandlerPtr& fs_ptr, const segment::AttrsIndexPtr& attr_index);
 
     // No copy and move
-    SSAttrsIndexFormat(const SSAttrsIndexFormat&) = delete;
-    SSAttrsIndexFormat(SSAttrsIndexFormat&&) = delete;
+    SSStructuredIndexFormat(const SSStructuredIndexFormat&) = delete;
+    SSStructuredIndexFormat(SSStructuredIndexFormat&&) = delete;
 
-    SSAttrsIndexFormat&
-    operator=(const SSAttrsIndexFormat&) = delete;
-    SSAttrsIndexFormat&
-    operator=(SSAttrsIndexFormat&&) = delete;
+    SSStructuredIndexFormat&
+    operator=(const SSStructuredIndexFormat&) = delete;
+    SSStructuredIndexFormat&
+    operator=(SSStructuredIndexFormat&&) = delete;
 
  private:
     void
@@ -59,7 +59,7 @@ class SSAttrsIndexFormat {
     const std::string attr_index_extension_ = ".idx";
 };
 
-using SSAttrsIndexFormatPtr = std::shared_ptr<SSAttrsIndexFormat>;
+using SSStructuredIndexFormatPtr = std::shared_ptr<SSStructuredIndexFormat>;
 
 }  // namespace codec
 }  // namespace milvus

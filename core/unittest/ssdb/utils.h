@@ -305,6 +305,9 @@ class SSDBTest : public BaseTest {
  protected:
     std::shared_ptr<SSDBImpl> db_;
 
+    milvus::engine::DBOptions
+    GetOptions();
+
     void
     SetUp() override;
     void

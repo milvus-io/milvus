@@ -23,7 +23,7 @@ Milvus 的架构如下：
 
 ![arch](https://github.com/milvus-io/docs/blob/v0.9.1/assets/milvus_arch.png)
 
-若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/docs/overview.md)。您可以通过 [版本发布说明](https://www.milvus.io/docs/v0.10.0/release_notes.md) 获取最新版本的功能和更新。
+若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/docs/overview.md)。您可以通过 [版本发布说明](https://www.milvus.io/docs/release_notes.md) 获取最新版本的功能和更新。
 
 Milvus是一个[LF AI基金会](https://lfai.foundation/)的孵化项目。获取更多，请访问[lfai.foundation](https://lfai.foundation/)。
 
@@ -31,11 +31,11 @@ Milvus是一个[LF AI基金会](https://lfai.foundation/)的孵化项目。获�
 
 ### 安装 Milvus
 
-请参阅 [Milvus 安装指南](https://www.milvus.io/docs/v0.10.0/install_milvus.md) 使用 Docker 容器安装 Milvus。若要基于源码编译，请访问 [源码安装](INSTALL.md)。
+请参阅 [Milvus 安装指南](https://www.milvus.io/docs/install_milvus.md) 使用 Docker 容器安装 Milvus。若要基于源码编译，请访问 [源码安装](INSTALL.md)。
 
 ### 尝试示例代码
 
-您可以尝试用 [Python](https://www.milvus.io/docs/v0.10.0/example_code.md)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
+您可以尝试用 [Python](https://www.milvus.io/docs/example_code.md)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
 
 ## 支持的客户端
 

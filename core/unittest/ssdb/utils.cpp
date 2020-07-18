@@ -185,6 +185,15 @@ SnapshotTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+SSDBTest::GetOptions() {
+    auto options = milvus::engine::DBOptions();
+    options.meta_.path_ = "/tmp/milvus_ss";
+    options.meta_.backend_uri_ = "sqlite://:@:/";
+    options.wal_enable_ = false;
+    return options;
+}
+
 void
 SSDBTest::SetUp() {
     BaseTest::SetUp();
@@ -210,9 +219,7 @@ SSDBTest::SetUp() {
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
     milvus::engine::snapshot::Snapshots::GetInstance().Init(store);
 
-    auto options = milvus::engine::DBOptions();
-    options.wal_enable_ = false;
-    db_ = std::make_shared<milvus::engine::SSDBImpl>(options);
+    db_ = std::make_shared<milvus::engine::SSDBImpl>(GetOptions());
 }
 
 void
@@ -222,6 +229,9 @@ SSDBTest::TearDown() {
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
     milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
+
+    auto options = GetOptions();
+    boost::filesystem::remove_all(options.meta_.path_);
 
     BaseTest::TearDown();
 }

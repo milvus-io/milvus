@@ -68,13 +68,13 @@ class BlockingQueue {
     }
 
     size_t
-    Size() {
+    Size() const {
         std::lock_guard<std::mutex> lock(mtx);
         return queue_.size();
     }
 
     bool
-    Empty() {
+    Empty() const {
         std::unique_lock<std::mutex> lock(mtx);
         return queue_.empty();
     }
