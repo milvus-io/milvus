@@ -150,7 +150,7 @@ class TestStatsBase:
         stats = connect.get_collection_stats(collection)
         assert stats["row_count"] == nb - 2
         assert stats["partitions"][0]["segments"][0]["data_size"] > 0
-        assert stats["partitions"][0]["segments"][0]["index_name"] == "IDMAP"
+        assert stats["partitions"][0]["segments"][0]["index_name"] == "FLAT"
 
     def test_get_collection_stats_after_compact_parts(self, connect, collection):
         '''
