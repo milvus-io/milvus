@@ -321,7 +321,7 @@ class TestGetBase:
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
-        fields = ["int8", "int64", "float", "float_vector"]
+        fields = ["int8", "int64", "float", "vector"]
         res = connect.get_entity_by_id(collection, get_ids, fields = fields)
         # assert fields
 
