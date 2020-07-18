@@ -126,6 +126,8 @@ const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "true";
 #else
 const char* CONFIG_GPU_RESOURCE_ENABLE_DEFAULT = "false";
 #endif
+const char* CONFIG_GPU_RESOURCE_CACHE_ENABLE = "cache.enable";
+const char* CONFIG_GPU_RESOURCE_CACHE_ENABLE_DEFAULT = "false";
 const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY = "cache_size";
 const char* CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT = "1073741824";  // 1024 * 1024 * 1024
 const char* CONFIG_GPU_RESOURCE_CACHE_THRESHOLD = "cache_threshold";
@@ -374,6 +376,9 @@ Config::ValidateConfig() {
     std::cout << "GPU resources " << (gpu_resource_enable ? "ENABLED !" : "DISABLED !") << std::endl;
 
     if (gpu_resource_enable) {
+        bool resource_cache_enable;
+        STATUS_CHECK(GetGpuResourceConfigCacheEnable(resource_cache_enable));
+
         int64_t resource_cache_capacity;
         STATUS_CHECK(GetGpuResourceConfigCacheCapacity(resource_cache_capacity));
 
@@ -488,6 +493,7 @@ Config::ResetDefaultConfig() {
     /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
     STATUS_CHECK(SetGpuResourceConfigEnable(CONFIG_GPU_RESOURCE_ENABLE_DEFAULT));
+    STATUS_CHECK(SetGpuResourceConfigCacheEnable(CONFIG_GPU_RESOURCE_CACHE_ENABLE_DEFAULT));
     STATUS_CHECK(SetGpuResourceConfigCacheCapacity(CONFIG_GPU_RESOURCE_CACHE_CAPACITY_DEFAULT));
     STATUS_CHECK(SetGpuResourceConfigCacheThreshold(CONFIG_GPU_RESOURCE_CACHE_THRESHOLD_DEFAULT));
     STATUS_CHECK(SetGpuResourceConfigGpuSearchThreshold(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD_DEFAULT));
@@ -629,6 +635,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
     } else if (parent_key == CONFIG_GPU_RESOURCE) {
         if (child_key == CONFIG_GPU_RESOURCE_ENABLE) {
             status = SetGpuResourceConfigEnable(value);
+        } else if (child_key == CONFIG_GPU_RESOURCE_CACHE_ENABLE) {
+            status = SetGpuResourceConfigCacheEnable(value);
         } else if (child_key == CONFIG_GPU_RESOURCE_CACHE_CAPACITY) {
             status = SetGpuResourceConfigCacheCapacity(value);
         } else if (child_key == CONFIG_GPU_RESOURCE_CACHE_THRESHOLD) {
@@ -1597,6 +1605,16 @@ Config::CheckGpuResourceConfigEnable(const std::string& value) {
 }
 
 Status
+Config::CheckGpuResourceConfigCacheEnable(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+        std::string msg =
+            "Invalid gpu resource config: " + value + ". Possible reason: gpu.cache.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
 Config::CheckGpuResourceConfigCacheCapacity(const std::string& value) {
     fiu_return_on("check_gpu_cache_size_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
@@ -2298,6 +2316,15 @@ Config::GetGpuResourceConfigEnable(bool& value) {
 }
 
 Status
+Config::GetGpuResourceConfigCacheEnable(bool& value) {
+    std::string str =
+        GetConfigStr(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_ENABLE, CONFIG_GPU_RESOURCE_CACHE_ENABLE_DEFAULT);
+    STATUS_CHECK(CheckGpuResourceConfigCacheEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
 Config::GetGpuResourceConfigCacheCapacity(int64_t& value) {
     bool gpu_resource_enable = false;
     STATUS_CHECK(GetGpuResourceConfigEnable(gpu_resource_enable));
@@ -2734,12 +2761,17 @@ Config::SetEngineSearchCombineMaxNq(const std::string& value) {
 
 /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
-
 Status
 Config::SetGpuResourceConfigEnable(const std::string& value) {
     STATUS_CHECK(CheckGpuResourceConfigEnable(value));
     STATUS_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value));
     return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_ENABLE, value);
+}
+
+Status
+Config::SetGpuResourceConfigCacheEnable(const std::string& value) {
+    STATUS_CHECK(CheckGpuResourceConfigCacheEnable(value));
+    return SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_CACHE_ENABLE, value);
 }
 
 Status
