@@ -10,7 +10,7 @@ timeout(time: 180, unit: 'MINUTES') {
             try {
                 dir ('charts/milvus') {
                     if ("${BINARY_VERSION}" == "CPU") {
-                        sh "helm install --wait --timeout 300s --set cluster.enabled=true --set persistence.enabled=true --set image.repository=registry.zilliz.com/milvus/engine --set mishards.image.tag=test --set mishards.image.pullPolicy=Always --set image.tag=${DOCKER_VERSION} --set image.pullPolicy=Always --set service.type=ClusterIP -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml --namespace milvus ${env.SHARDS_HELM_RELEASE_NAME} ."
+                        sh "helm install --wait --timeout 300s --set cluster.enabled=true --set persistence.enabled=true --set image.repository=registry.zilliz.com/milvus/engine --set mishards.image.tag=test --set mishards.image.pullPolicy=Always --set image.tag=${DOCKER_VERSION} --set image.pullPolicy=Always --set service.type=ClusterIP --set image.resources.requests.memory=8Gi --set image.resources.requests.cpu=2.0 --set image.resources.limits.memory=12Gi --set image.resources.limits.cpu=4.0 -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml --namespace milvus ${env.SHARDS_HELM_RELEASE_NAME} ."
                     } else {
                         sh "helm install --wait --timeout 300s --set cluster.enabled=true --set persistence.enabled=true --set image.repository=registry.zilliz.com/milvus/engine --set mishards.image.tag=test --set mishards.image.pullPolicy=Always --set gpu.enabled=true  --set image.tag=${DOCKER_VERSION} --set image.pullPolicy=Always --set service.type=ClusterIP -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml --namespace milvus ${env.SHARDS_HELM_RELEASE_NAME} ."
                     }
