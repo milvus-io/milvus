@@ -321,7 +321,7 @@ class TestGetBase:
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
-        fields = ["int8", "int64", "float", "float_vector"]
+        fields = ["int8", "int64", "float", "vector"]
         res = connect.get_entity_by_id(collection, get_ids, fields = fields)
         # assert fields
 
@@ -362,7 +362,7 @@ class TestGetBase:
         ids = connect.insert(collection, entity)
         connect.flush([collection])
         res = connect.get_entity_by_id(collection, [1]) 
-        assert not res
+        assert res[0] is None
 
     def test_get_entity_collection_not_existed(self, connect, collection):
         '''
