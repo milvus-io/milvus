@@ -611,4 +611,4 @@ class TestCollectionMultiCollections:
         connect.flush(collection_list)
         for i in range(collection_num):
             res = connect.count_entities(collection_list[i])
-            assert res == insert_count
+            assert res == nb
