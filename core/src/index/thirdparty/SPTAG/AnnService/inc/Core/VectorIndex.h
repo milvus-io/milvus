@@ -37,6 +37,7 @@ public:
    
     virtual DimensionType GetFeatureDim() const = 0;
     virtual SizeType GetNumSamples() const = 0;
+    virtual SizeType GetIndexSize() const = 0;
 
     virtual DistCalcMethod GetDistCalcMethod() const = 0;
     virtual IndexAlgoType GetIndexAlgoType() const = 0;
