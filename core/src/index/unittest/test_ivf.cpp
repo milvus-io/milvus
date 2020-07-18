@@ -346,10 +346,10 @@ TEST_P(IVFTest, invalid_gpu_source) {
     auto invalid_conf = ParamGenerator::GetInstance().Gen(index_type_);
     invalid_conf[milvus::knowhere::meta::DEVICEID] = -1;
 
-    if (index_type_ == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
-        // null faiss index
-        milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
-    }
+    // if (index_type_ == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+    //     null faiss index
+    //     milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
+    // }
 
     index_->Train(base_dataset, conf_);
 
@@ -379,7 +379,7 @@ TEST_P(IVFTest, IVFSQHybrid_test) {
     }
     fiu_init(0);
 
-    milvus::knowhere::cloner::CopyGpuToCpu(index_, conf_);
+    ASSERT_ANY_THROW(milvus::knowhere::cloner::CopyGpuToCpu(index_, conf_));
     ASSERT_ANY_THROW(milvus::knowhere::cloner::CopyCpuToGpu(index_, -1, conf_));
 
     fiu_enable("FaissGpuResourceMgr.GetRes.ret_null", 1, nullptr, 0);
