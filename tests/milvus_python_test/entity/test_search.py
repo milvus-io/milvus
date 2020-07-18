@@ -762,11 +762,7 @@ class TestSearchBase:
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
         # create collection
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-        fields = {
-                "fields": default_fields["fields"],
-                "segment_size": segment_size
-        }
-        milvus.create_collection(collection, fields)
+        milvus.create_collection(collection, default_fields)
         entities, ids = init_data(milvus, collection)
         def search(milvus):
             res = connect.search(collection, query)
@@ -797,11 +793,7 @@ class TestSearchBase:
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
         # create collection
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-        fields = {
-                "fields": default_fields["fields"],
-                "segment_size": segment_size
-        }
-        milvus.create_collection(collection, fields)
+        milvus.create_collection(collection, default_fields)
         entities, ids = init_data(milvus, collection)
         def search(milvus):
             res = connect.search(collection, query)
@@ -825,13 +817,9 @@ class TestSearchBase:
         num = 10
         top_k = 10
         nq = 20
-        fields = {
-                "fields": default_fields["fields"],
-                "segment_size": segment_size
-        }
         for i in range(num):
             collection = gen_unique_str(collection_id+str(i))
-            connect.create_collection(collection, fields)
+            connect.create_collection(collection, default_fields)
             entities, ids = init_data(connect, collection)
             assert len(ids) == nb
             query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
