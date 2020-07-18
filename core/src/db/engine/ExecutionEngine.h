@@ -59,6 +59,8 @@ static std::map<std::string, EngineType> s_map_engine_type = {
     {"IVF_PQ", EngineType::FAISS_PQ},
     {"SPTAG_KDT_RNT", EngineType::SPTAG_KDT},
     {"SPTAG_BKT_RNT", EngineType::SPTAG_BKT},
+    {"BIN_FLAT", EngineType::FAISS_BIN_IDMAP},
+    {"BIN_IVF_FLAT", EngineType::FAISS_BIN_IVFFLAT},
     {"HNSW", EngineType::HNSW},
     {"ANNOY", EngineType::ANNOY},
 };

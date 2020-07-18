@@ -114,9 +114,10 @@ CreateIndexRequest::OnExecute() {
                 adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
             } else if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
                 adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
-            } else {
-                return Status(SERVER_INVALID_INDEX_TYPE, "Invalid index type for collection metric type");
             }
+            //            else {
+            //                return Status(SERVER_INVALID_INDEX_TYPE, "Invalid index type for collection metric type");
+            //            }
         }
 
         rc.RecordSection("check validation");
