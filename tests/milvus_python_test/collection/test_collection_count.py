@@ -600,11 +600,7 @@ class TestCollectionMultiCollections:
         for i in range(0, int(collection_num / 2)):
             collection_name = gen_unique_str(collection_id)
             collection_list.append(collection_name)
-            fields = {
-                    "fields": default_fields,
-                    "segment_size": segment_size
-            }
-            connect.create_collection(collection_name, fields)
+            connect.create_collection(collection_name, default_fields)
             res = connect.insert(collection_name, entities)
         for i in range(int(collection_num / 2), collection_num):
             collection_name = gen_unique_str(collection_id)

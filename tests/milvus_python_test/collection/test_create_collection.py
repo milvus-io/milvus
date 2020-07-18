@@ -89,12 +89,9 @@ class TestCreateCollection:
         method: create collection with diff segment_size
         expected: no exception raised
         '''
-        segment_size = get_segment_size
         collection_name = gen_unique_str(collection_id)
-        fields = {
-                "fields": default_fields["fields"],
-                "segment_size": segment_size
-        }
+        fields = copy.deepcopy(default_fields)
+        fields["segment_size"] = get_segment_size
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
 
