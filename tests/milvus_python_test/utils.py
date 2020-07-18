@@ -653,6 +653,8 @@ def gen_index():
 def gen_simple_index():
     index_params = []
     for i in range(len(all_index_types)):
+        if all_index_types[i] in binary_support():
+            continue
         dic = {"index_type": all_index_types[i]}
         dic.update(default_index_params[i])
         index_params.append(dic)
