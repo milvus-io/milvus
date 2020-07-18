@@ -26,12 +26,12 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-BuildOperation::BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+AddSegmentFileOperation::AddSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
 }
 
 Status
-BuildOperation::DoExecute(StorePtr store) {
-    STATUS_CHECK(CheckStale(std::bind(&BuildOperation::CheckSegmentStale, this, std::placeholders::_1,
+AddSegmentFileOperation::DoExecute(StorePtr store) {
+    STATUS_CHECK(CheckStale(std::bind(&AddSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1,
                                       context_.new_segment_files[0]->GetSegmentId())));
 
     auto update_size = [&](SegmentFilePtr& file) {
@@ -51,6 +51,18 @@ BuildOperation::DoExecute(StorePtr store) {
                                 .SetResource(context_.new_segment_commit)
                                 .SetOp(meta::oUpdate)
                                 .CreatePtr();
+    if (delta_ != 0) {
+        auto new_row_cnt = 0;
+        if (sub_ && context_.new_segment_commit->GetRowCount() < delta_) {
+            return Status(SS_ERROR, "Invalid row count delta");
+        } else if (sub_) {
+            new_row_cnt = context_.new_segment_commit->GetRowCount() - delta_;
+        } else {
+            new_row_cnt = context_.new_segment_commit->GetRowCount() + delta_;
+        }
+        context_.new_segment_commit->SetRowCount(new_row_cnt);
+        seg_commit_ctx_p->AddAttr(RowCountField::Name);
+    }
     AddStepWithLsn(*context_.new_segment_commit, context_.lsn, seg_commit_ctx_p);
 
     PartitionCommitOperation pc_op(context_, GetAdjustedSS());
@@ -80,7 +92,7 @@ BuildOperation::DoExecute(StorePtr store) {
 }
 
 Status
-BuildOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const {
+AddSegmentFileOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const {
     auto segment = latest_snapshot->GetResource<Segment>(segment_id);
     if (!segment) {
         std::stringstream emsg;
@@ -91,12 +103,20 @@ BuildOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segm
 }
 
 Status
-BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
+AddSegmentFileOperation::CommitRowCountDelta(SIZE_TYPE delta, bool sub) {
+    delta_ = delta;
+    sub_ = sub;
+    return Status::OK();
+}
+
+Status
+AddSegmentFileOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
     STATUS_CHECK(
-        CheckStale(std::bind(&BuildOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id)));
+        CheckStale(std::bind(&AddSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id)));
 
     auto segment = GetStartedSS()->GetResource<Segment>(context.segment_id);
-    if (!segment) {
+    if (!segment || (context_.new_segment_files.size() > 0 && (
+                     context_.new_segment_files[0]->GetSegmentId() != context.segment_id))) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Invalid segment " << context.segment_id << " in context";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
