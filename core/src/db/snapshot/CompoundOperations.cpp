@@ -114,8 +114,8 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
     return Status::OK();
 }
 
-AddFieldElementOperation::AddFieldElementOperation(const OperationContext& context,
-        ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+AddFieldElementOperation::AddFieldElementOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
 }
 
 Status
@@ -153,7 +153,7 @@ AddFieldElementOperation::DoExecute(StorePtr store) {
                 return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
             }
 
-            STATUS_CHECK(store->CreateResource<FieldElement>(FieldElement(*new_fe),field_element));
+            STATUS_CHECK(store->CreateResource<FieldElement>(FieldElement(*new_fe), field_element));
             auto fe_ctx_p = ResourceContextBuilder<FieldElement>().SetOp(meta::oUpdate).CreatePtr();
             AddStepWithLsn(*field_element, context.lsn, fe_ctx_p);
 
