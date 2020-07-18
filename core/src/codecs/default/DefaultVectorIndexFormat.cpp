@@ -93,6 +93,7 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
     if (index != nullptr) {
         index->Load(load_data_list);
         index->UpdateIndexSize();
+        LOG_ENGINE_DEBUG_ << "index file size " << length << " index size " << index->IndexSize();
     } else {
         LOG_ENGINE_ERROR_ << "Fail to create vector index: " << path;
     }

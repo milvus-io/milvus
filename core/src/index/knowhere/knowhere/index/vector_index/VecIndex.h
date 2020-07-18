@@ -124,6 +124,11 @@ class VecIndex : public Index {
         return index_size_;
     }
 
+    void
+    SetIndexSize(int64_t size) {
+        index_size_ = size;
+    }
+
     virtual void
     UpdateIndexSize() {
     }

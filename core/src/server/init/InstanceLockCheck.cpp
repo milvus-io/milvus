@@ -23,6 +23,12 @@
 namespace milvus {
 namespace server {
 
+InstanceLockCheck*
+InstanceLockCheck::GetInstance() {
+    static InstanceLockCheck lk;
+    return &lk;
+}
+
 Status
 InstanceLockCheck::Check(const std::string& path) {
     std::string lock_path = path + "/lock";
@@ -37,6 +43,7 @@ InstanceLockCheck::Check(const std::string& path) {
         msg += "Could not open file: " + lock_path + ", " + strerror(errno);
         return Status(SERVER_UNEXPECTED_ERROR, msg);
     }
+    InstanceLockCheck::GetInstance()->lk_path = lock_path;
 
     // Acquire a write lock
     struct flock fl;
@@ -64,6 +71,22 @@ InstanceLockCheck::Check(const std::string& path) {
     LOG_SERVER_INFO_ << "InstanceLockCheck passed.";
 
     return Status::OK();
+}
+
+void
+InstanceLockCheck::Release() {
+    auto fd = open(InstanceLockCheck::GetInstance()->lk_path.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0640);
+    if (fd < 0) {
+        std::string msg;
+        if (errno == EROFS) {
+            // Not using locking for read-only lock file
+            msg += "Lock file is read-only.";
+        }
+        msg += "Could not open file for release: " + InstanceLockCheck::GetInstance()->lk_path + ", " + strerror(errno);
+        LOG_SERVER_ERROR_ << msg;
+        return;
+    }
+    close(fd);
 }
 
 }  // namespace server
