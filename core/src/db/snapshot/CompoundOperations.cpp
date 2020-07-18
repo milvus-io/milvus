@@ -114,6 +114,82 @@ BuildOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
     return Status::OK();
 }
 
+FieldElementModificationOperation::FieldElementModificationOperation(const OperationContext& context,
+        ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
+}
+
+Status
+FieldElementModificationOperation::PreCheck() {
+    if (context_.stale_field_elements.size() == 0 && context_.new_field_elements.size() == 0) {
+        return Status(SS_INVALID_CONTEX_ERROR, "No changes to field elements");
+    }
+
+    return Status::OK();
+}
+
+Status
+FieldElementModificationOperation::DoExecute(StorePtr store) {
+    OperationContext cc_context;
+    {
+        auto context = context_;
+        context.new_field_elements.clear();
+        for (auto& new_fe : context_.new_field_elements) {
+            if (new_fe->GetCollectionId() != GetAdjustedSS()->GetCollectionId()) {
+                std::stringstream emsg;
+                emsg << GetRepr() << ". Invalid collection id " << new_fe->GetCollectionId();
+                return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+            }
+            auto field = GetAdjustedSS()->GetResource<Field>(new_fe->GetFieldId());
+            if (!field) {
+                std::stringstream emsg;
+                emsg << GetRepr() << ". Invalid field id " << new_fe->GetFieldId();
+                return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+            }
+            FieldElementPtr field_element;
+            auto status = GetAdjustedSS()->GetFieldElement(field->GetName(), new_fe->GetName(), field_element);
+            if (status.ok()) {
+                std::stringstream emsg;
+                emsg << GetRepr() << ". Duplicate field element name " << new_fe->GetName();
+                return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+            }
+
+            STATUS_CHECK(store->CreateResource<FieldElement>(FieldElement(*new_fe),field_element));
+            auto fe_ctx_p = ResourceContextBuilder<FieldElement>().SetOp(meta::oUpdate).CreatePtr();
+            AddStepWithLsn(*field_element, context.lsn, fe_ctx_p);
+
+            context.new_field_elements.push_back(field_element);
+        }
+
+        FieldCommitOperation fc_op(context, GetAdjustedSS());
+        STATUS_CHECK(fc_op(store));
+        FieldCommitPtr new_field_commit;
+        STATUS_CHECK(fc_op.GetResource(new_field_commit));
+        auto fc_ctx_p = ResourceContextBuilder<FieldCommit>().SetOp(meta::oUpdate).CreatePtr();
+        AddStepWithLsn(*new_field_commit, context.lsn, fc_ctx_p);
+        context.new_field_commits.push_back(new_field_commit);
+        for (auto& kv : GetAdjustedSS()->GetResources<FieldCommit>()) {
+            if (kv.second->GetFieldId() == new_field_commit->GetFieldId()) {
+                context.stale_field_commits.push_back(kv.second.Get());
+            }
+        }
+
+        SchemaCommitOperation sc_op(context, GetAdjustedSS());
+
+        STATUS_CHECK(sc_op(store));
+        STATUS_CHECK(sc_op.GetResource(cc_context.new_schema_commit));
+        auto sc_ctx_p = ResourceContextBuilder<SchemaCommit>().SetOp(meta::oUpdate).CreatePtr();
+        AddStepWithLsn(*cc_context.new_schema_commit, context.lsn, sc_ctx_p);
+    }
+
+    CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
+    STATUS_CHECK(cc_op(store));
+    STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn, cc_ctx_p);
+
+    return Status::OK();
+}
+
 DropAllIndexOperation::DropAllIndexOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
 }

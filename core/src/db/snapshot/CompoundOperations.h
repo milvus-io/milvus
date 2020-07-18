@@ -75,6 +75,19 @@ class BuildOperation : public CompoundBaseOperation<BuildOperation> {
     CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const;
 };
 
+class FieldElementModificationOperation : public CompoundBaseOperation<FieldElementModificationOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<FieldElementModificationOperation>;
+    static constexpr const char* Name = "AFE";
+
+    FieldElementModificationOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    Status
+    PreCheck() override;
+
+    Status DoExecute(StorePtr) override;
+};
+
 class DropIndexOperation : public CompoundBaseOperation<DropIndexOperation> {
  public:
     using BaseT = CompoundBaseOperation<DropIndexOperation>;
