@@ -33,6 +33,7 @@
 #include "server/web_impl/dto/StatusDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
 #include "server/web_impl/handler/WebRequestHandler.h"
+#include "server/web_impl/utils/Util.h"
 #include "src/version.h"
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
@@ -1549,3 +1550,125 @@ TEST_F(WebControllerTest, LOAD) {
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
 
+
+class WebUtilTest : public ::testing::Test {
+public:
+    std::string key;
+    OString value;
+    int64_t intValue;
+    std::string stringValue;
+    bool boolValue;
+    OQueryParams params;
+
+    void
+    SetUp() override {
+        key = "offset";
+    }
+
+    void
+    TearDown() override {
+    };
+};
+
+
+TEST_F(WebUtilTest, ParseQueryInteger) {
+    value = "5";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryInteger(params, key, intValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(5, intValue);
+
+}
+
+TEST_F(WebUtilTest, ParQueryIntegerIllegalQueryParam) {
+    value = "-5";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryInteger(params, key, intValue);
+    ASSERT_EQ(status.code(), milvus::server::web::ILLEGAL_QUERY_PARAM);
+    ASSERT_STREQ(status.message().c_str(),
+                 "Query param \'offset\' is illegal, only non-negative integer supported");
+
+}
+
+TEST_F(WebUtilTest, ParQueryIntegerQueryParamLoss) {
+    value = "5";
+
+    params.put("offset", value);
+    fiu_enable("WebUtils.ParseQueryInteger.null_query_get", 1, nullptr, 0);
+    milvus::Status status = milvus::server::web::ParseQueryInteger(params, key, intValue, false);
+    ASSERT_EQ(status.code(), milvus::server::web::QUERY_PARAM_LOSS);
+    std::string msg = "Query param \"" + key + "\" is required";
+    ASSERT_STREQ(status.message().c_str(), msg.c_str());
+
+}
+
+
+TEST_F(WebUtilTest, ParseQueryBoolTrue) {
+    value = "True";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(boolValue);
+
+}
+
+TEST_F(WebUtilTest, ParQueryBoolFalse) {
+
+    value = "False";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(!boolValue);
+
+}
+
+TEST_F(WebUtilTest, ParQueryBoolIllegalQuery) {
+
+    value = "Hello";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue);
+    ASSERT_EQ(status.code(), milvus::server::web::ILLEGAL_QUERY_PARAM);
+    ASSERT_STREQ(status.message().c_str(), "Query param \'all_required\' must be a bool");
+
+}
+
+TEST_F(WebUtilTest, ParQueryBoolQueryParamLoss) {
+
+    value = "Hello";
+
+    params.put("offset", value);
+    fiu_enable("WebUtils.ParseQueryBool.null_query_get", 1, nullptr, 0);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue, false);
+    ASSERT_EQ(status.code(), milvus::server::web::QUERY_PARAM_LOSS);
+    std::string msg = "Query param \"" + key + "\" is required";
+    ASSERT_STREQ(status.message().c_str(), msg.c_str());
+
+}
+
+TEST_F(WebUtilTest, ParseQueryStr) {
+    value = "Are you ok?";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryStr(params, key, stringValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_STREQ(value->c_str(), stringValue.c_str());
+
+}
+
+TEST_F(WebUtilTest, ParQueryStrQueryParamLoss) {
+
+    value = "Are you ok?";
+
+    params.put("offset", value);
+    fiu_enable("WebUtils.ParseQueryStr.null_query_get", 1, nullptr, 0);
+    milvus::Status status = milvus::server::web::ParseQueryStr(params, key, stringValue, false);
+    ASSERT_EQ(status.code(), milvus::server::web::QUERY_PARAM_LOSS);
+    std::string msg = "Query param \"" + key + "\" is required";
+    ASSERT_STREQ(status.message().c_str(), msg.c_str());
+
+}
