@@ -313,12 +313,13 @@ def add_vector_field(entities, is_normal=False):
 
 
 def update_fields_metric_type(fields, metric_type):
+    tmp_fields = copy.deepcopy(fields)
     if metric_type in ["L2", "IP"]:
-        fields["fields"][-1]["type"] = DataType.VECTOR
+        tmp_fields["fields"][-1]["type"] = DataType.VECTOR
     else:
-        fields["fields"][-1]["type"] = DataType.BINARY_VECTOR
-    fields["fields"][-1]["params"]["metric_type"] = metric_type
-    return fields
+        tmp_fields["fields"][-1]["type"] = DataType.BINARY_VECTOR
+    tmp_fields["fields"][-1]["params"]["metric_type"] = metric_type
+    return tmp_fields
 
 
 def remove_field(entities):
@@ -468,9 +469,10 @@ def gen_invalid_metric_types():
     return metric_types
 
 
+# TODO:
 def gen_invalid_ints():
     top_ks = [
-            1.0,
+            # 1.0,
             None,
             "stringg",
             [1,2,3],
