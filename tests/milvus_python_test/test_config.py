@@ -194,11 +194,11 @@ class TestCacheConfig:
         expected: status ok, set successfully
         '''
         self.reset_configs(connect)
-        status, reply = connect.set_config("cache", "cache_size", '8GB')
+        status, reply = connect.set_config("cache", "cache_size", '2GB')
         assert status.OK()
         status, config_value = connect.get_config("cache", "cache_size")
         assert status.OK()
-        assert config_value == '8GB'
+        assert config_value == '2GB'
 
     @pytest.mark.level(2)
     def test_set_cache_size_valid_multiple_times(self, connect, collection):
@@ -215,11 +215,11 @@ class TestCacheConfig:
             assert status.OK()
             assert config_value == '4GB'
         for i in range(20):
-            status, reply = connect.set_config("cache", "cache_size", '8GB')
+            status, reply = connect.set_config("cache", "cache_size", '2GB')
             assert status.OK()
             status, config_value = connect.get_config("cache", "cache_size")
             assert status.OK()
-            assert config_value == '8GB'
+            assert config_value == '2GB'
 
     @pytest.mark.level(2)
     def test_set_insert_buffer_size_invalid_parent_key(self, connect, collection):
