@@ -326,7 +326,7 @@ XSearchTask::Execute() {
                                   << ", len of distance = " << output_distance.size();
 
                 if (search_job->GetResultIds().empty()) {
-                    LOG_ENGINE_ERROR_ << "Result reduce error: result id array is empty";
+                    LOG_ENGINE_ERROR_ << "Result reduce error: result id array is empty!";
                 }
             }
 
