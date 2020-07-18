@@ -65,8 +65,7 @@ class BuildOperation : public CompoundBaseOperation<BuildOperation> {
 
     BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
@@ -74,6 +73,19 @@ class BuildOperation : public CompoundBaseOperation<BuildOperation> {
  protected:
     Status
     CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const;
+};
+
+class AddFieldElementOperation : public CompoundBaseOperation<AddFieldElementOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<AddFieldElementOperation>;
+    static constexpr const char* Name = "AFE";
+
+    AddFieldElementOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    Status
+    PreCheck() override;
+
+    Status DoExecute(StorePtr) override;
 };
 
 class DropIndexOperation : public CompoundBaseOperation<DropIndexOperation> {
@@ -86,8 +98,7 @@ class DropIndexOperation : public CompoundBaseOperation<DropIndexOperation> {
     Status
     PreCheck() override;
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 };
 
 class DropAllIndexOperation : public CompoundBaseOperation<DropAllIndexOperation> {
@@ -100,8 +111,7 @@ class DropAllIndexOperation : public CompoundBaseOperation<DropAllIndexOperation
     Status
     PreCheck() override;
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 };
 
 class NewSegmentOperation : public CompoundBaseOperation<NewSegmentOperation> {
@@ -111,8 +121,7 @@ class NewSegmentOperation : public CompoundBaseOperation<NewSegmentOperation> {
 
     NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     CommitNewSegment(SegmentPtr& created);
@@ -134,8 +143,7 @@ class MergeOperation : public CompoundBaseOperation<MergeOperation> {
 
     MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     CommitNewSegment(SegmentPtr&);
@@ -153,8 +161,7 @@ class CreateCollectionOperation : public CompoundBaseOperation<CreateCollectionO
 
     explicit CreateCollectionOperation(const CreateCollectionContext& context);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     GetSnapshot(ScopedSnapshotT& ss) const override;
@@ -184,8 +191,7 @@ class CreatePartitionOperation : public CompoundBaseOperation<CreatePartitionOpe
     Status
     CommitNewPartition(const PartitionContext& context, PartitionPtr& partition);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -197,8 +203,7 @@ class DropPartitionOperation : public CompoundBaseOperation<DropPartitionOperati
     static constexpr const char* Name = "DP";
     DropPartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     const LSN_TYPE&
     GetContextLsn() const override {
@@ -218,8 +223,7 @@ class GetSnapshotIDsOperation : public Operations {
 
     explicit GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed = true);
 
-    Status
-    DoExecute(Store& store) override;
+    Status DoExecute(StorePtr) override;
 
     const IDS_TYPE&
     GetIDs() const;
@@ -236,8 +240,7 @@ class GetCollectionIDsOperation : public Operations {
 
     explicit GetCollectionIDsOperation(bool reversed = true);
 
-    Status
-    DoExecute(Store& store) override;
+    Status DoExecute(StorePtr) override;
 
     const IDS_TYPE&
     GetIDs() const;
@@ -256,8 +259,7 @@ class DropCollectionOperation : public CompoundBaseOperation<DropCollectionOpera
         : BaseT(context, prev_ss) {
     }
 
-    Status
-    DoExecute(Store& store) override;
+    Status DoExecute(StorePtr) override;
 
  private:
     ID_TYPE collection_id_;

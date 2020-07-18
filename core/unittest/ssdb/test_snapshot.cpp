@@ -844,6 +844,50 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_FALSE(status.ok());
     }
 
+    std::string new_fe_name = "fe_index";
+    {
+        status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+        ASSERT_TRUE(status.ok());
+
+        auto field = ss->GetField(sf_context.field_name);
+        ASSERT_TRUE(field);
+        auto new_fe = std::make_shared<FieldElement>(ss->GetCollectionId(),
+                field->GetID(), new_fe_name, milvus::engine::FieldElementType::FET_INDEX);
+
+        OperationContext context;
+        context.lsn = ++lsn;
+        context.new_field_elements.push_back(new_fe);
+        auto op = std::make_shared<AddFieldElementOperation>(context, ss);
+        status = op->Push();
+        ASSERT_TRUE(status.ok());
+
+        status = op->GetSnapshot(ss);
+        ASSERT_TRUE(status.ok());
+
+        std::cout << ss->ToString() << std::endl;
+    }
+
+    {
+        auto snapshot_id = ss->GetID();
+        auto field = ss->GetField(sf_context.field_name);
+        ASSERT_TRUE(field);
+        FieldElementPtr new_fe;
+        status = ss->GetFieldElement(sf_context.field_name, new_fe_name, new_fe);
+        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(new_fe);
+
+        OperationContext context;
+        context.lsn = ++lsn;
+        context.new_field_elements.push_back(new_fe);
+        auto op = std::make_shared<AddFieldElementOperation>(context, ss);
+        status = op->Push();
+        ASSERT_FALSE(status.ok());
+
+        status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(snapshot_id, ss->GetID());
+    }
+
     // 1. Build start
     // 2. Commit new seg file of build operation
     // 3. Drop collection
@@ -867,6 +911,7 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_FALSE(build_op->GetStatus().ok());
         std::cout << build_op->ToString() << std::endl;
     }
+
     Snapshots::GetInstance().Reset();
 }
 
