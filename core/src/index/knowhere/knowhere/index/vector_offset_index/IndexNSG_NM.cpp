@@ -79,7 +79,7 @@ NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
     try {
         auto topK = config[meta::TOPK].get<int64_t>();
@@ -143,7 +143,7 @@ NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
     auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
 
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
     impl::NsgIndex::Metric_Type metric_type_nsg;
     if (config[Metric::TYPE].get<std::string>() == "IP") {
         metric_type_nsg = impl::NsgIndex::Metric_Type::Metric_Type_IP;
