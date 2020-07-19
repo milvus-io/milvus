@@ -58,21 +58,27 @@ class CompoundBaseOperation : public Operations {
     }
 };
 
-class BuildOperation : public CompoundBaseOperation<BuildOperation> {
+class AddSegmentFileOperation : public CompoundBaseOperation<AddSegmentFileOperation> {
  public:
-    using BaseT = CompoundBaseOperation<BuildOperation>;
+    using BaseT = CompoundBaseOperation<AddSegmentFileOperation>;
     static constexpr const char* Name = "B";
 
-    BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+    AddSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
     Status DoExecute(StorePtr) override;
 
     Status
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
 
+    Status
+    CommitRowCountDelta(SIZE_TYPE delta, bool sub = true);
+
  protected:
     Status
     CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const;
+
+    SIZE_TYPE delta_ = 0;
+    bool sub_;
 };
 
 class AddFieldElementOperation : public CompoundBaseOperation<AddFieldElementOperation> {
