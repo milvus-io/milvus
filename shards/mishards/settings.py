@@ -12,7 +12,7 @@ else:
     env.read_env()
 
 
-SERVER_VERSIONS = ['0.9.0', '0.9.1', '0.10.0']
+SERVER_VERSIONS = ['0.9.0', '0.9.1', '0.10.0', '0.10.1']
 DEBUG = env.bool('DEBUG', False)
 MAX_RETRY = env.int('MAX_RETRY', 3)
 
