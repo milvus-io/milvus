@@ -294,7 +294,7 @@ class TestGPUConfig:
         method: call get_config without parent_key: gpu
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Engine_config", "engine config"]
         for config in invalid_configs:
@@ -308,7 +308,7 @@ class TestGPUConfig:
         method: call get_config without child_key: gpu_search_threshold
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_search_threshold", "gpusearchthreshold"]
         for config in invalid_configs:
@@ -322,7 +322,7 @@ class TestGPUConfig:
         method: call get_config correctly
         expected: status ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         config_value = connect.get_config("gpu", "gpu_search_threshold")
         assert config_value
@@ -351,7 +351,7 @@ class TestGPUConfig:
         method: call set_config without parent_key: gpu
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Engine_config", "engine config"]
         for config in invalid_configs:
@@ -365,7 +365,7 @@ class TestGPUConfig:
         method: call set_config correctly
         expected: status ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         relpy = connect.set_config("gpu", "gpu_search_threshold", 2000)
         config_value = connect.get_config("gpu", "gpu_search_threshold")
@@ -381,7 +381,7 @@ class TestGPUConfig:
         for i in [-1, "1000\n", "1000\t", "1000.0", 1000.35]:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("gpu", "use_blas_threshold", i)
-            if str(connect._cmd("mode")[1]) == "GPU":
+            if str(connect._cmd("mode")) == "GPU":
                 with pytest.raises(Exception) as e:
                     relpy = connect.set_config("gpu", "gpu_search_threshold", i)
 
@@ -410,7 +410,7 @@ class TestGPUConfig:
         method: call get_config without parent_key: gpu
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
             "gpu_resource"]
@@ -425,7 +425,7 @@ class TestGPUConfig:
         method: call get_config without child_key: enable
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Enable", "enable ", "disable", "true"]
         for config in invalid_configs:
@@ -439,7 +439,7 @@ class TestGPUConfig:
         method: call get_config correctly
         expected: status ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         config_value = connect.get_config("gpu", "enable")
         assert config_value == "true" or config_value == "false"
@@ -451,7 +451,7 @@ class TestGPUConfig:
         method: call get_config without parent_key: gpu
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
             "gpu_resource"]
@@ -466,7 +466,7 @@ class TestGPUConfig:
         method: call get_config without child_key: cache_size
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Cache_capacity", "cachecapacity"]
         for config in invalid_configs:
@@ -480,7 +480,7 @@ class TestGPUConfig:
         method: call get_config correctly
         expected: status ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         config_value = connect.get_config("gpu", "cache_size")
 
@@ -491,7 +491,7 @@ class TestGPUConfig:
         method: call get_config without parent_key: gpu
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
             "gpu_resource"]
@@ -506,7 +506,7 @@ class TestGPUConfig:
         method: call get_config without child_key: search_devices
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Search_resources"]
         for config in invalid_configs:
@@ -520,7 +520,7 @@ class TestGPUConfig:
         method: call get_config correctly
         expected: status ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         config_value = connect.get_config("gpu", "search_devices")
         logging.getLogger().info(config_value)
@@ -532,7 +532,7 @@ class TestGPUConfig:
         method: call get_config without parent_key: gpu
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
             "gpu_resource"]
@@ -547,7 +547,7 @@ class TestGPUConfig:
         method: call get_config without child_key: build_index_devices
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Build_index_resources"]
         for config in invalid_configs:
@@ -561,7 +561,7 @@ class TestGPUConfig:
         method: call get_config correctly
         expected: status ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         config_value = connect.get_config("gpu", "build_index_devices")
         logging.getLogger().info(config_value)
@@ -579,7 +579,7 @@ class TestGPUConfig:
         method: call set_config without parent_key: gpu
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
             "gpu_resource"]
@@ -594,7 +594,7 @@ class TestGPUConfig:
         method: call set_config with invalid child_key
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
             "gpu_resource"]
@@ -609,7 +609,7 @@ class TestGPUConfig:
         method: call set_config with invalid child values
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         for i in [-1, -2, 100]:
             with pytest.raises(Exception) as e:
@@ -622,7 +622,7 @@ class TestGPUConfig:
         method: call set_config correctly
         expected: status ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         valid_configs = ["off", "False", "0", "nO", "on", "True", 1, "yES"]
         for config in valid_configs:
@@ -637,7 +637,7 @@ class TestGPUConfig:
         method: call set_config without parent_key: gpu
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
             "gpu_resource"]
@@ -652,7 +652,7 @@ class TestGPUConfig:
         method: call set_config correctly
         expected: status ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         relpy = connect.set_config("gpu", "cache_size", 2)
 
@@ -663,7 +663,7 @@ class TestGPUConfig:
         method: call set_config with invalid child values
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         self.reset_configs(connect)
         for i in [-1, "1\n", "1\t"]:
@@ -678,7 +678,7 @@ class TestGPUConfig:
         method: call set_config without parent_key: gpu
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
             "gpu_resource"]
@@ -693,7 +693,7 @@ class TestGPUConfig:
         method: call set_config correctly
         expected: status ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         relpy = connect.set_config("gpu", "search_devices", "gpu0")
         config_value = connect.get_config("gpu", "search_devices")
@@ -706,7 +706,7 @@ class TestGPUConfig:
         method: call set_config with invalid child values
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         for i in [-1, "10", "gpu-1", "gpu0, gpu1", "gpu22,gpu44","gpu10000","gpu 0","-gpu0"]:
             with pytest.raises(Exception) as e:
@@ -719,7 +719,7 @@ class TestGPUConfig:
         method: call set_config without parent_key: gpu
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
             "gpu_resource"]
@@ -734,7 +734,7 @@ class TestGPUConfig:
         method: call set_config correctly
         expected: status ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         relpy = connect.set_config("gpu", "build_index_devices", "gpu0")
         config_value = connect.get_config("gpu", "build_index_devices")
@@ -747,7 +747,7 @@ class TestGPUConfig:
         method: call set_config with invalid child values
         expected: status not ok
         '''
-        if str(connect._cmd("mode")[1]) == "CPU":
+        if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         for i in [-1, "10", "gpu-1", "gpu0, gpu1", "gpu22,gpu44","gpu10000","gpu 0","-gpu0"]:
             with pytest.raises(Exception) as e:
