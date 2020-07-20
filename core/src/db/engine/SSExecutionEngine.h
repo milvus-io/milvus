@@ -28,7 +28,7 @@ class SSExecutionEngine {
  public:
 };
 
-using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;
+using SSExecutionEnginePtr = std::shared_ptr<SSExecutionEngine>;
 
 }  // namespace engine
 }  // namespace milvus
