@@ -1697,7 +1697,6 @@ TEST_F(SnapshotTest, CompoundTest2) {
         if (it == stale_partitions.end()) {
             continue;
         }
-        /* std::cout << "stale Segment " << seg_p.first << std::endl; */
         expect_segments.erase(seg_p.first);
     }
 
