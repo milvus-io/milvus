@@ -196,7 +196,7 @@ class RpcHandlerTest : public testing::Test {
         grpc_index_param_2->set_value("index_2");
         auto grpc_index_type = field_2->add_index_params();
         grpc_index_type->set_key("index_type");
-        grpc_index_type->set_value("IVFFLAT");
+        grpc_index_type->set_value("IVF_FLAT");
         auto field_param = field_2->add_extra_params();
         field_param->set_key("params");
         nlohmann::json vector_param;
@@ -467,7 +467,7 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
 
     ::milvus::grpc::KeyValuePair* kv = request.add_extra_params();
     kv->set_key("params");
-    nlohmann::json json_params = {{"index_type", "IVFFLAT"}, {"nlist", 16384}};
+    nlohmann::json json_params = {{"index_type", "IVF_FLAT"}, {"nlist", 16384}};
     kv->set_value(json_params.dump());
     grpc_status = handler->CreateIndex(&context, &request, &response);
     ASSERT_EQ(grpc_status.error_code(), ::grpc::Status::OK.error_code());
