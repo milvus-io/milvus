@@ -28,6 +28,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Feature
 
 ## Improvement
+-   \#2932 Upgrade mishards for milvus 0.10.1
 
 ## Task
 

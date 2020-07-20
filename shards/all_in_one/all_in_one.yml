@@ -3,7 +3,7 @@ services:
     milvus_wr:
         runtime: nvidia
         restart: always
-        image: milvusdb/milvus:0.10.0-gpu-d061620-5f3c00
+        image: milvusdb/milvus:0.10.1-gpu-d072020-bd02b1
         ports:
             - "0.0.0.0:19540:19530"
         volumes:
@@ -13,7 +13,7 @@ services:
     milvus_ro:
         runtime: nvidia
         restart: always
-        image: milvusdb/milvus:0.10.0-gpu-d061620-5f3c00
+        image: milvusdb/milvus:0.10.1-gpu-d072020-bd02b1
         ports:
             - "0.0.0.0:19541:19530"
         volumes:
