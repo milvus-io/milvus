@@ -678,13 +678,11 @@ SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection
     VectorsData vectors;
     scheduler::SearchJobPtr job =
         std::make_shared<scheduler::SearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
-    for (auto& sv: segment_visitors) {
-        // job->AddSegment(segment);
-    }
+    job->AddSegmentVisitors(segment_visitors);
 
     // step 2: put search job to scheduler and wait result
     scheduler::JobMgrInst::GetInstance()->Put(job);
-    job->WaitResult();
+    job->SSWaitResult();
 
     if (!job->GetStatus().ok()) {
         return job->GetStatus();

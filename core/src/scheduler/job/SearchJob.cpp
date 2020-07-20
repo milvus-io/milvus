@@ -47,9 +47,24 @@ SearchJob::AddIndexFile(const SegmentSchemaPtr& index_file) {
 }
 
 void
+SearchJob::AddSegmentVisitors(const std::vector<engine::SegmentVisitorPtr>& visitors) {
+    segment_visitors_.insert(segment_visitors_.end(), visitors.begin(), visitors.end());
+}
+
+void
 SearchJob::WaitResult() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return index_files_.empty(); });
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld: query_time %f, map_uids_time %f, reduce_time %f", "search", 0,
+                                id(), this->time_stat().query_time, this->time_stat().map_uids_time,
+                                this->time_stat().reduce_time);
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld all done", "search", 0, id());
+}
+
+void
+SearchJob::SSWaitResult() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    cv_.wait(lock, [this] { return segment_visitors_.empty(); });
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld: query_time %f, map_uids_time %f, reduce_time %f", "search", 0,
                                 id(), this->time_stat().query_time, this->time_stat().map_uids_time,
                                 this->time_stat().reduce_time);

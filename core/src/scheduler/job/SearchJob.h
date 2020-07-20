@@ -25,7 +25,7 @@
 #include "Job.h"
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
-
+#include "db/SnapshotVisitor.h"
 #include "query/GeneralQuery.h"
 
 #include "server/context/Context.h"
@@ -60,7 +60,13 @@ class SearchJob : public Job {
     AddIndexFile(const SegmentSchemaPtr& index_file);
 
     void
+    AddSegmentVisitors(const std::vector<engine::SegmentVisitorPtr>& visitors);
+
+    void
     WaitResult();
+
+    void
+    SSWaitResult();
 
     void
     SearchDone(size_t index_id);
@@ -150,6 +156,8 @@ class SearchJob : public Job {
     engine::VectorsData& vectors_;
 
     Id2IndexMap index_files_;
+    std::vector<engine::SegmentVisitorPtr> segment_visitors_;
+
     // TODO: column-base better ?
     ResultIds result_ids_;
     ResultDistances result_distances_;
