@@ -665,7 +665,10 @@ class TestCompactJAC:
         assert status.OK()
         query_vecs = [raw_vectors[0]]
         distance = jaccard(query_vecs[0], raw_vectors[0])
-        res = connect.search(jac_collection, top_k, query_records=query_vecs)
+        query = copy.deepcopy(default_single_query)
+        query["bool"]["must"][0]["vector"][field_name]["query"] = [entities[-1]["values"][0],
+                                                                   entities[-1]["values"][-1]]
+        res = connect.search(collection, query)
         logging.getLogger().debug(res)
         assert abs(res[0].distance[0]-distance) <= epsilon
 
