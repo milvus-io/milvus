@@ -97,6 +97,7 @@ class Store : public std::enable_shared_from_this<Store> {
         if (status.ok()) {
             op.SetStepResult(result_id);
         }
+
         return status;
     }
 

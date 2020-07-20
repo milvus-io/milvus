@@ -11,7 +11,6 @@
 
 #include "db/meta/backend/MockMetaEngine.h"
 
-#include <chrono>
 #include <utility>
 
 #include "db/meta/MetaFields.h"

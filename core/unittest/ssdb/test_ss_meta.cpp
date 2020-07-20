@@ -75,12 +75,12 @@ TEST_F(SSMetaTest, SessionTest) {
     auto field_element = std::make_shared<FieldElement>(collection->GetID(), field->GetID(),
         "meta_test_f1_fe1", FEType::FET_RAW);
     auto fe_ctx = ResourceContextBuilder<FieldElement>().SetResource(field_element).CreatePtr();
-    status = meta_.Apply<FieldElement>(fe_ctx, result_id);
+    status = meta_->Apply<FieldElement>(fe_ctx, result_id);
     ASSERT_TRUE(status.ok()) << status.ToString();
     ASSERT_GT(result_id, 0);
     field_element->SetID(result_id);
 
-    auto session = MetaAdapter::GetInstance().CreateSession();
+    auto session = meta_->CreateSession();
     ASSERT_TRUE(collection->Activate());
     auto c2_ctx = ResourceContextBuilder<Collection>().SetResource(collection)
         .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
