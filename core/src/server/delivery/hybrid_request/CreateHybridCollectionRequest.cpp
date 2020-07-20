@@ -90,23 +90,21 @@ CreateHybridCollectionRequest::OnExecute() {
             }
             schema.index_param_ = index_params.dump();
 
-            auto field_param = field_params_.at(field_name);
-            schema.field_params_ = field_param;
-            fields_schema.fields_schema_.emplace_back(schema);
-
-            if (field_type.second == engine::meta::hybrid::DataType::FLOAT_VECTOR ||
-                field_type.second == engine::meta::hybrid::DataType::BINARY_VECTOR) {
-                vector_param = milvus::json::parse(field_param);
-                if (index_params.contains("index_type")) {
-                    vector_param["index_type"] = index_params["index_type"];
-                }
-                if (vector_param.contains("dimension")) {
-                    dimension = vector_param["dimension"].get<uint16_t>();
-                } else {
-                    return Status{milvus::SERVER_INVALID_VECTOR_DIMENSION,
-                                  "Dimension should be defined in vector field extra_params"};
+            if (!field_params_.at(field_name).empty()) {
+                auto field_param = field_params_.at(field_name);
+                schema.field_params_ = field_param;
+                if (field_type.second == engine::meta::hybrid::DataType::FLOAT_VECTOR ||
+                    field_type.second == engine::meta::hybrid::DataType::BINARY_VECTOR) {
+                    vector_param = milvus::json::parse(field_param);
+                    if (vector_param.contains("dimension")) {
+                        dimension = vector_param["dimension"].get<uint16_t>();
+                    } else {
+                        return Status{milvus::SERVER_INVALID_VECTOR_DIMENSION,
+                                      "Dimension should be defined in vector field extra_params"};
+                    }
                 }
             }
+            fields_schema.fields_schema_.emplace_back(schema);
         }
 
         collection_info.collection_id_ = collection_name_;
@@ -123,11 +121,6 @@ CreateHybridCollectionRequest::OnExecute() {
         if (vector_param.contains("metric_type")) {
             int32_t metric_type = (int32_t)milvus::engine::s_map_metric_type.at(vector_param["metric_type"]);
             collection_info.metric_type_ = metric_type;
-        }
-
-        if (vector_param.contains("index_type")) {
-            int32_t engine_type = (int32_t)milvus::engine::s_map_engine_type.at(vector_param["index_type"]);
-            collection_info.engine_type_ = engine_type;
         }
 
         // step 3: create collection

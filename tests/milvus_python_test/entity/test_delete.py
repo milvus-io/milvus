@@ -19,7 +19,7 @@ nb = 6000
 field_name = "float_vector"
 default_index_name = "insert_index"
 entity = gen_entities(1)
-binary_entity = gen_binary_entities(1)
+raw_vector, binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 default_single_query = {
@@ -336,7 +336,7 @@ class TestDeleteBase:
         res_count = connect.count_entities(collection)
         assert res_count == nb - len(delete_ids)
         res_get = connect.get_entity_by_id(collection, delete_ids)
-        assert not res_get
+        assert res_get[0] is None
 
     # TODO
     def test_index_insert_single_delete_get(self, connect, collection, get_simple_index):
@@ -464,14 +464,14 @@ class TestDeleteInvalid(object):
         with pytest.raises(Exception) as e:
             status = connect.delete_entity_by_id(collection_name, [1])
 
-    def test_insert_same_ids_after_delete_jac(self, connect, jac_collection):
-        '''
-        method: add entities and delete
-        expected: status DELETED
-        '''
-        insert_ids = [i for i in range(nb)]
-        ids = connect.insert(jac_collection, binary_entities, insert_ids)
-        connect.flush([jac_collection])
-        delete_ids = [ids[0], ids[-1]]
-        with pytest.raises(Exception) as e:
-            status = connect.delete_entity_by_id(jac_collection, delete_ids)
+    # def test_insert_same_ids_after_delete_jac(self, connect, jac_collection):
+    #     '''
+    #     method: add entities and delete
+    #     expected: status DELETED
+    #     '''
+    #     insert_ids = [i for i in range(nb)]
+    #     ids = connect.insert(jac_collection, binary_entities, insert_ids)
+    #     connect.flush([jac_collection])
+    #     delete_ids = [ids[0], ids[-1]]
+    #     with pytest.raises(Exception) as e:
+    #         status = connect.delete_entity_by_id(jac_collection, delete_ids)

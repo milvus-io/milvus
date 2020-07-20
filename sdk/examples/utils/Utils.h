@@ -54,6 +54,9 @@ class Utils {
     PrintIndexParam(const milvus::IndexParam& index_param);
 
     static void
+    PrintMapping(const milvus::Mapping& mapping);
+
+    static void
     BuildEntities(int64_t from, int64_t to, milvus::FieldValue& field_value, std::vector<int64_t>& entity_ids,
                   int64_t dimension);
 

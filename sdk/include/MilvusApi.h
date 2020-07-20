@@ -138,6 +138,7 @@ using PartitionTagList = std::vector<std::string>;
 struct Mapping {
     std::string collection_name;
     std::vector<FieldPtr> fields;
+    std::string extra_params;
 };
 
 /**

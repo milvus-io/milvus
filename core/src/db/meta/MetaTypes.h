@@ -156,8 +156,8 @@ struct FieldSchema {
     std::string field_name_;
     int32_t field_type_ = (int)INT8;
     std::string index_name_;
-    std::string index_param_;
-    std::string field_params_;
+    std::string index_param_ = "{}";
+    std::string field_params_ = "{}";
 };
 
 struct FieldsSchema {
