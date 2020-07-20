@@ -23,7 +23,6 @@
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
-#include "segment/VectorIndex.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -31,22 +30,44 @@
 namespace milvus {
 namespace codec {
 
-knowhere::VecIndexPtr
-SSVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path,
-                                   const std::string& extern_key, const knowhere::BinaryPtr& extern_data) {
+void
+SSVectorIndexFormat::read_raw(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                              knowhere::BinaryPtr& data) {
+    if (!fs_ptr->reader_ptr_->open(location.c_str())) {
+        std::string err_msg = "Failed to open file: " + location + ", error: " + std::strerror(errno);
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
+    }
+
+    size_t num_bytes;
+    fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
+
+    data = std::make_shared<knowhere::Binary>();
+    data->size = num_bytes;
+    data->data = std::shared_ptr<uint8_t[]>(new uint8_t[num_bytes]);
+
+    // Beginning of file is num_bytes
+    fs_ptr->reader_ptr_->seekg(sizeof(size_t));
+    fs_ptr->reader_ptr_->read(data->data.get(), num_bytes);
+    fs_ptr->reader_ptr_->close();
+}
+
+void
+SSVectorIndexFormat::read_index(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                                knowhere::BinarySet& data) {
     milvus::TimeRecorder recorder("read_index");
-    knowhere::BinarySet load_data_list;
 
     recorder.RecordSection("Start");
-    if (!fs_ptr->reader_ptr_->open(path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector index: " << path;
-        return nullptr;
+    if (!fs_ptr->reader_ptr_->open(location)) {
+        std::string err_msg = "Failed to open file: " + location + ", error: " + std::strerror(errno);
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
     int64_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
-        LOG_ENGINE_ERROR_ << "Invalid vector index length: " << path;
-        return nullptr;
+        LOG_ENGINE_ERROR_ << "Invalid vector index length: " << location;
+        return;
     }
 
     int64_t rp = 0;
@@ -57,7 +78,7 @@ SSVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, const st
     rp += sizeof(current_type);
     fs_ptr->reader_ptr_->seekg(rp);
 
-    LOG_ENGINE_DEBUG_ << "Start to read_index(" << path << ") length: " << length << " bytes";
+    LOG_ENGINE_DEBUG_ << "Start to read_index(" << location << ") length: " << length << " bytes";
     while (rp < length) {
         size_t meta_length;
         fs_ptr->reader_ptr_->read(&meta_length, sizeof(meta_length));
@@ -80,77 +101,67 @@ SSVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, const st
         fs_ptr->reader_ptr_->seekg(rp);
 
         std::shared_ptr<uint8_t[]> binptr(bin);
-        load_data_list.Append(std::string(meta, meta_length), binptr, bin_length);
+        data.Append(std::string(meta, meta_length), binptr, bin_length);
         delete[] meta;
     }
     fs_ptr->reader_ptr_->close();
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "read_index(" << path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "read_index(" << location << ") rate " << rate << "MB/s";
+}
 
+void
+SSVectorIndexFormat::read_compress(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                                   knowhere::BinaryPtr& data) {
+    auto& ss_codec = codec::SSCodec::instance();
+    ss_codec.GetVectorCompressFormat()->read(fs_ptr, location, data);
+}
+
+void
+SSVectorIndexFormat::convert_raw(const std::vector<uint8_t>& raw, knowhere::BinaryPtr& data) {
+    data = std::make_shared<knowhere::Binary>();
+    data->size = raw.size();
+    data->data = std::shared_ptr<uint8_t[]>(new uint8_t[data->size]);
+}
+
+void
+SSVectorIndexFormat::construct_index(const std::string& index_name, knowhere::BinarySet& index_data,
+                                     knowhere::BinaryPtr& raw_data, knowhere::BinaryPtr& compress_data,
+                                     knowhere::VecIndexPtr& index) {
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
-    auto index =
-        vec_index_factory.CreateVecIndex(knowhere::OldIndexTypeToStr(current_type), knowhere::IndexMode::MODE_CPU);
+    index = vec_index_factory.CreateVecIndex(index_name, knowhere::IndexMode::MODE_CPU);
     if (index != nullptr) {
-        if (extern_data != nullptr) {
-            LOG_ENGINE_DEBUG_ << "load index with " << extern_key << " " << extern_data->size;
-            load_data_list.Append(extern_key, extern_data);
-            length += extern_data->size;
+        int64_t length = 0;
+        for (auto& pair : index_data.binary_map_) {
+            length += pair.second->size;
         }
 
-        index->Load(load_data_list);
+        if (raw_data != nullptr) {
+            LOG_ENGINE_DEBUG_ << "load index with " << RAW_DATA << " " << raw_data->size;
+            index_data.Append(RAW_DATA, raw_data);
+            length += raw_data->size;
+        }
+
+        if (compress_data != nullptr) {
+            LOG_ENGINE_DEBUG_ << "load index with " << SQ8_DATA << " " << compress_data->size;
+            index_data.Append(SQ8_DATA, compress_data);
+            length += compress_data->size;
+        }
+
+        index->Load(index_data);
         index->SetIndexSize(length);
     } else {
-        LOG_ENGINE_ERROR_ << "Fail to create vector index: " << path;
-    }
-
-    return index;
-}
-
-void
-SSVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, ExternalData externalData,
-                          segment::VectorIndexPtr& vector_index) {
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-    if (!boost::filesystem::is_directory(dir_path)) {
-        std::string err_msg = "Directory: " + dir_path + "does not exist";
+        std::string err_msg = "Fail to create vector index";
         LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
+        throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
-
-    knowhere::VecIndexPtr index = nullptr;
-    switch (externalData) {
-        case ExternalData_None: {
-            index = read_internal(fs_ptr, location);
-            break;
-        }
-        case ExternalData_RawData: {
-            auto& ss_codec = codec::SSCodec::instance();
-            knowhere::BinaryPtr raw_data = nullptr;
-            ss_codec.GetVectorsFormat()->read_vectors(fs_ptr, raw_data);
-
-            index = read_internal(fs_ptr, location, RAW_DATA, raw_data);
-            break;
-        }
-        case ExternalData_SQ8: {
-            auto& ss_codec = codec::SSCodec::instance();
-            knowhere::BinaryPtr sq8_data = nullptr;
-            ss_codec.GetVectorCompressFormat()->read(fs_ptr, location, sq8_data);
-
-            index = read_internal(fs_ptr, location, SQ8_DATA, sq8_data);
-            break;
-        }
-    }
-
-    vector_index->SetVectorIndex(index);
 }
 
 void
-SSVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                           const segment::VectorIndexPtr& vector_index) {
+SSVectorIndexFormat::write_index(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                                 const knowhere::VecIndexPtr& index) {
     milvus::TimeRecorder recorder("write_index");
-
-    knowhere::VecIndexPtr index = vector_index->GetVectorIndex();
 
     auto binaryset = index->Serialize(knowhere::Config());
     int32_t index_type = knowhere::StrToOldIndexType(index->index_type());
@@ -179,6 +190,20 @@ SSVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::strin
     double span = recorder.RecordSection("End");
     double rate = fs_ptr->writer_ptr_->length() * 1000000.0 / span / 1024 / 1024;
     LOG_ENGINE_DEBUG_ << "write_index(" << location << ") rate " << rate << "MB/s";
+}
+
+void
+SSVectorIndexFormat::write_compress(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                                    const knowhere::VecIndexPtr& index) {
+    milvus::TimeRecorder recorder("write_index");
+
+    auto binaryset = index->Serialize(knowhere::Config());
+
+    auto sq8_data = binaryset.Erase(SQ8_DATA);
+    if (sq8_data != nullptr) {
+        auto& ss_codec = codec::SSCodec::instance();
+        ss_codec.GetVectorCompressFormat()->write(fs_ptr, location, sq8_data);
+    }
 }
 
 }  // namespace codec

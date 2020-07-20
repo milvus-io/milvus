@@ -150,9 +150,14 @@ BaseTest::TearDown() {
 void
 SnapshotTest::SetUp() {
     BaseTest::SetUp();
-    milvus::engine::snapshot::Store::GetInstance().Mock();
+    /* auto uri = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
+    auto uri = "mock://:@:/";
+    auto store = Store::Build(uri);
+    milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
+    milvus::engine::snapshot::EventExecutor::Init(store);
     milvus::engine::snapshot::EventExecutor::GetInstance().Start();
+    store->Mock();
     milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
     milvus::engine::snapshot::CollectionsHolder::GetInstance().Reset();
     milvus::engine::snapshot::SchemaCommitsHolder::GetInstance().Reset();
@@ -167,7 +172,7 @@ SnapshotTest::SetUp() {
 
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
 
-    milvus::engine::snapshot::Snapshots::GetInstance().Init();
+    milvus::engine::snapshot::Snapshots::GetInstance().Init(store);
 }
 
 void
@@ -180,10 +185,24 @@ SnapshotTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+SSDBTest::GetOptions() {
+    auto options = milvus::engine::DBOptions();
+    options.meta_.path_ = "/tmp/milvus_ss";
+    options.meta_.backend_uri_ = "sqlite://:@:/";
+    options.wal_enable_ = false;
+    return options;
+}
+
 void
 SSDBTest::SetUp() {
     BaseTest::SetUp();
+    /* auto uri = "mysql://root:123456@127.0.0.1:3306/milvus"; */
+    auto uri = "mock://:@:/";
+    auto store = Store::Build(uri);
+    milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
+    milvus::engine::snapshot::EventExecutor::Init(store);
     milvus::engine::snapshot::EventExecutor::GetInstance().Start();
     milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
     milvus::engine::snapshot::CollectionsHolder::GetInstance().Reset();
@@ -196,13 +215,11 @@ SSDBTest::SetUp() {
     milvus::engine::snapshot::SegmentsHolder::GetInstance().Reset();
     milvus::engine::snapshot::SegmentCommitsHolder::GetInstance().Reset();
     milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
-    milvus::engine::snapshot::Store::GetInstance().DoReset();
+    store->DoReset();
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
-    milvus::engine::snapshot::Snapshots::GetInstance().Init();
+    milvus::engine::snapshot::Snapshots::GetInstance().Init(store);
 
-    auto options = milvus::engine::DBOptions();
-    options.wal_enable_ = false;
-    db_ = std::make_shared<milvus::engine::SSDBImpl>(options);
+    db_ = std::make_shared<milvus::engine::SSDBImpl>(GetOptions());
 }
 
 void
@@ -213,6 +230,9 @@ SSDBTest::TearDown() {
     milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
     milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
 
+    auto options = GetOptions();
+    boost::filesystem::remove_all(options.meta_.path_);
+
     BaseTest::TearDown();
 }
 
@@ -220,7 +240,12 @@ SSDBTest::TearDown() {
 void
 SSSegmentTest::SetUp() {
     BaseTest::SetUp();
+    auto uri = "mock://:@:/";
+    auto store = Store::Build(uri);
+    milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
+
+    milvus::engine::snapshot::EventExecutor::Init(store);
     milvus::engine::snapshot::EventExecutor::GetInstance().Start();
     milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
     milvus::engine::snapshot::CollectionsHolder::GetInstance().Reset();
@@ -234,9 +259,9 @@ SSSegmentTest::SetUp() {
     milvus::engine::snapshot::SegmentCommitsHolder::GetInstance().Reset();
     milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
 
-    milvus::engine::snapshot::Store::GetInstance().DoReset();
+    store->DoReset();
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
-    milvus::engine::snapshot::Snapshots::GetInstance().Init();
+    milvus::engine::snapshot::Snapshots::GetInstance().Init(store);
 
     auto options = milvus::engine::DBOptions();
     options.wal_enable_ = false;
@@ -257,7 +282,9 @@ SSSegmentTest::TearDown() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 SSMetaTest::SetUp() {
-    meta_.TruncateAll();
+    auto engine = std::make_shared<milvus::engine::meta::MockMetaEngine>();
+    meta_ = std::make_shared<milvus::engine::meta::MetaAdapter>(engine);
+    meta_->TruncateAll();
 }
 
 void

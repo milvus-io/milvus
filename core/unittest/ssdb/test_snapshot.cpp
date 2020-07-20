@@ -479,7 +479,7 @@ TEST_F(SnapshotTest, IndexTest) {
     OperationContext context;
     context.lsn = next_lsn();
     context.prev_partition = ss->GetResource<Partition>(sf_context.partition_id);
-    auto build_op = std::make_shared<BuildOperation>(context, ss);
+    auto build_op = std::make_shared<AddSegmentFileOperation>(context, ss);
     SegmentFilePtr seg_file;
     status = build_op->CommitNewSegmentFile(sf_context, seg_file);
     ASSERT_TRUE(status.ok());
@@ -673,7 +673,7 @@ TEST_F(SnapshotTest, OperationTest) {
     {
         OperationContext context;
         context.lsn = ++lsn;
-        auto build_op = std::make_shared<BuildOperation>(context, ss);
+        auto build_op = std::make_shared<AddSegmentFileOperation>(context, ss);
         SegmentFilePtr seg_file;
         status = build_op->CommitNewSegmentFile(sf_context, seg_file);
         std::cout << status.ToString() << std::endl;
@@ -687,12 +687,17 @@ TEST_F(SnapshotTest, OperationTest) {
         seg_file->SetSize(new_size);
         total_size += new_size;
 
+        auto delta = prev_segment_commit->GetRowCount() / 2;
+        build_op->CommitRowCountDelta(delta);
+        total_row_cnt -= delta;
+
         build_op->Push();
         status = build_op->GetSnapshot(ss);
         ASSERT_TRUE(status.ok());
         ASSERT_GT(ss->GetID(), ss_id);
         ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
         ASSERT_EQ(ss->GetCollectionCommit()->GetSize(), total_size);
+        std::cout << ss->ToString() << std::endl;
 
         auto segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
         auto segment_commit_mappings = segment_commit->GetMappings();
@@ -836,12 +841,74 @@ TEST_F(SnapshotTest, OperationTest) {
     {
         OperationContext context;
         context.lsn = ++lsn;
-        auto build_op = std::make_shared<BuildOperation>(context, new_ss);
+        auto build_op = std::make_shared<AddSegmentFileOperation>(context, new_ss);
         SegmentFilePtr seg_file;
         auto new_sf_context = sf_context;
         new_sf_context.segment_id = new_seg_id;
         status = build_op->CommitNewSegmentFile(new_sf_context, seg_file);
         ASSERT_FALSE(status.ok());
+    }
+
+    {
+        OperationContext context;
+        context.lsn = ++lsn;
+        auto op = std::make_shared<AddSegmentFileOperation>(context, ss);
+        SegmentFilePtr seg_file;
+        auto new_sf_context = sf_context;
+        new_sf_context.segment_id = merge_seg->GetID();
+        status = op->CommitNewSegmentFile(new_sf_context, seg_file);
+        ASSERT_TRUE(status.ok());
+        auto prev_sc = ss->GetSegmentCommitBySegmentId(merge_seg->GetID());
+        ASSERT_TRUE(prev_sc);
+        auto delta = prev_sc->GetRowCount() + 1;
+        op->CommitRowCountDelta(delta);
+        status = op->Push();
+        std::cout << status.ToString() << std::endl;
+        ASSERT_FALSE(status.ok());
+    }
+
+    std::string new_fe_name = "fe_index";
+    {
+        status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+        ASSERT_TRUE(status.ok());
+
+        auto field = ss->GetField(sf_context.field_name);
+        ASSERT_TRUE(field);
+        auto new_fe = std::make_shared<FieldElement>(ss->GetCollectionId(),
+                field->GetID(), new_fe_name, milvus::engine::FieldElementType::FET_INDEX);
+
+        OperationContext context;
+        context.lsn = ++lsn;
+        context.new_field_elements.push_back(new_fe);
+        auto op = std::make_shared<AddFieldElementOperation>(context, ss);
+        status = op->Push();
+        ASSERT_TRUE(status.ok());
+
+        status = op->GetSnapshot(ss);
+        ASSERT_TRUE(status.ok());
+
+        std::cout << ss->ToString() << std::endl;
+    }
+
+    {
+        auto snapshot_id = ss->GetID();
+        auto field = ss->GetField(sf_context.field_name);
+        ASSERT_TRUE(field);
+        FieldElementPtr new_fe;
+        status = ss->GetFieldElement(sf_context.field_name, new_fe_name, new_fe);
+        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(new_fe);
+
+        OperationContext context;
+        context.lsn = ++lsn;
+        context.new_field_elements.push_back(new_fe);
+        auto op = std::make_shared<AddFieldElementOperation>(context, ss);
+        status = op->Push();
+        ASSERT_FALSE(status.ok());
+
+        status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(snapshot_id, ss->GetID());
     }
 
     // 1. Build start
@@ -851,7 +918,7 @@ TEST_F(SnapshotTest, OperationTest) {
     {
         OperationContext context;
         context.lsn = ++lsn;
-        auto build_op = std::make_shared<BuildOperation>(context, ss);
+        auto build_op = std::make_shared<AddSegmentFileOperation>(context, ss);
         SegmentFilePtr seg_file;
         auto new_sf_context = sf_context;
         new_sf_context.segment_id = merge_seg->GetID();
@@ -867,6 +934,7 @@ TEST_F(SnapshotTest, OperationTest) {
         ASSERT_FALSE(build_op->GetStatus().ok());
         std::cout << build_op->ToString() << std::endl;
     }
+
     Snapshots::GetInstance().Reset();
 }
 
@@ -920,7 +988,7 @@ TEST_F(SnapshotTest, CompoundTest1) {
 
         OperationContext context;
         context.lsn = next_lsn();
-        auto build_op = std::make_shared<BuildOperation>(context, latest_ss);
+        auto build_op = std::make_shared<AddSegmentFileOperation>(context, latest_ss);
         SegmentFilePtr seg_file;
         build_sf_context.segment_id = seg_id;
         status = build_op->CommitNewSegmentFile(build_sf_context, seg_file);
@@ -1264,7 +1332,7 @@ TEST_F(SnapshotTest, CompoundTest2) {
 
         OperationContext context;
         context.lsn = next_lsn();
-        auto build_op = std::make_shared<BuildOperation>(context, latest_ss);
+        auto build_op = std::make_shared<AddSegmentFileOperation>(context, latest_ss);
         SegmentFilePtr seg_file;
         build_sf_context.segment_id = seg_id;
         status = build_op->CommitNewSegmentFile(build_sf_context, seg_file);

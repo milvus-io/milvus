@@ -59,7 +59,8 @@ SSSegmentWriter::Initialize() {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
         engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
-        if (ftype == engine::FIELD_TYPE::VECTOR_FLOAT || ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
+        if (ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR_FLOAT ||
+            ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
             json params = field->GetParams();
             if (params.find(knowhere::meta::DIM) == params.end()) {
                 std::string msg = "Vector field params must contain: dimension";
@@ -89,39 +90,20 @@ SSSegmentWriter::AddChunk(const engine::DataChunkPtr& chunk_ptr) {
 }
 
 Status
-SSSegmentWriter::AddChunk(const engine::DataChunkPtr& chunk_ptr, uint64_t from, uint64_t to) {
+SSSegmentWriter::AddChunk(const engine::DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
     return segment_ptr_->AddChunk(chunk_ptr, from, to);
 }
 
 Status
 SSSegmentWriter::Serialize() {
-    auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
-    auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+    // write fields raw data
+    STATUS_CHECK(WriteFields());
 
-    /* write fields raw data */
-    for (auto& iter : field_visitors_map) {
-        const engine::snapshot::FieldPtr& field = iter.second->GetField();
-        std::string name = field->GetName();
-        engine::FIXED_FIELD_DATA raw_data;
-        segment_ptr_->GetFixedFieldData(name, raw_data);
+    // write empty UID's deleted docs
+    STATUS_CHECK(WriteDeletedDocs());
 
-        auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-        STATUS_CHECK(WriteField(file_path, raw_data));
-    }
-
-    /* write empty UID's deleted docs */
-    auto uid_del_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
-    std::string uid_del_path =
-        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_del_visitor->GetFile());
-    STATUS_CHECK(WriteDeletedDocs(uid_del_path));
-
-    /* don't write UID's bloom filter */
-    // auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
-    // std::string uid_blf_path =
-    //     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
-    // STATUS_CHECK(WriteBloomFilter(uid_blf_path, segment_ptr_->GetBloomFilter()));
+    // write UID's bloom filter
+    STATUS_CHECK(WriteBloomFilter());
 
     return Status::OK();
 }
@@ -142,10 +124,26 @@ SSSegmentWriter::WriteField(const std::string& file_path, const engine::FIXED_FI
 }
 
 Status
-SSSegmentWriter::WriteBloomFilter(const std::string& file_path) {
-    try {
-        auto& ss_codec = codec::SSCodec::instance();
+SSSegmentWriter::WriteFields() {
+    auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+    for (auto& iter : field_visitors_map) {
+        const engine::snapshot::FieldPtr& field = iter.second->GetField();
+        std::string name = field->GetName();
+        engine::FIXED_FIELD_DATA raw_data;
+        segment_ptr_->GetFixedFieldData(name, raw_data);
 
+        auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+        STATUS_CHECK(WriteField(file_path, raw_data));
+    }
+
+    return Status::OK();
+}
+
+Status
+SSSegmentWriter::WriteBloomFilter() {
+    try {
         TimeRecorder recorder("SSSegmentWriter::WriteBloomFilter");
 
         engine::FIXED_FIELD_DATA uid_data;
@@ -154,19 +152,26 @@ SSSegmentWriter::WriteBloomFilter(const std::string& file_path) {
             return status;
         }
 
-        segment::IdBloomFilterPtr bloom_filter_ptr;
-        ss_codec.GetIdBloomFilterFormat()->create(fs_ptr_, bloom_filter_ptr);
+        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
+        std::string uid_blf_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
 
-        recorder.RecordSection("Initializing bloom filter");
+        auto& ss_codec = codec::SSCodec::instance();
+        segment::IdBloomFilterPtr bloom_filter_ptr;
+        ss_codec.GetIdBloomFilterFormat()->create(fs_ptr_, uid_blf_path, bloom_filter_ptr);
 
         int64_t* uids = (int64_t*)(uid_data.data());
         int64_t row_count = segment_ptr_->GetRowCount();
-        for (uint64_t i = 0; i < row_count; i++) {
+        for (int64_t i = 0; i < row_count; i++) {
             bloom_filter_ptr->Add(uids[i]);
         }
         segment_ptr_->SetBloomFilter(bloom_filter_ptr);
 
-        recorder.RecordSection("Adding " + std::to_string(row_count) + " ids to bloom filter");
+        recorder.RecordSection("Initialize bloom filter");
+
+        return WriteBloomFilter(uid_blf_path, segment_ptr_->GetBloomFilter());
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -174,15 +179,21 @@ SSSegmentWriter::WriteBloomFilter(const std::string& file_path) {
         engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
-
-    return WriteBloomFilter(file_path, segment_ptr_->GetBloomFilter());
 }
 
 Status
 SSSegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilterPtr& id_bloom_filter_ptr) {
+    if (id_bloom_filter_ptr == nullptr) {
+        return Status(DB_ERROR, "WriteBloomFilter: null pointer");
+    }
+
     try {
+        TimeRecorder recorder("SSSegmentWriter::WriteBloomFilter");
+
         auto& ss_codec = codec::SSCodec::instance();
         ss_codec.GetIdBloomFilterFormat()->write(fs_ptr_, file_path, id_bloom_filter_ptr);
+
+        recorder.RecordSection("Write bloom filter file");
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write bloom filter: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -194,16 +205,25 @@ SSSegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFil
 }
 
 Status
-SSSegmentWriter::WriteDeletedDocs(const std::string& file_path) {
-    DeletedDocsPtr deleted_docs_ptr = std::make_shared<DeletedDocs>();
-    STATUS_CHECK(WriteDeletedDocs(file_path, deleted_docs_ptr));
-    segment_ptr_->SetDeletedDocs(deleted_docs_ptr);
-    return Status::OK();
+SSSegmentWriter::WriteDeletedDocs() {
+    auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+    auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+    auto del_doc_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
+    std::string file_path =
+        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, del_doc_visitor->GetFile());
+
+    return WriteDeletedDocs(file_path, segment_ptr_->GetDeletedDocs());
 }
 
 Status
 SSSegmentWriter::WriteDeletedDocs(const std::string& file_path, const DeletedDocsPtr& deleted_docs) {
+    if (deleted_docs == nullptr) {
+        return Status::OK();
+    }
+
     try {
+        TimeRecorderAuto recorder("SSSegmentWriter::WriteDeletedDocs");
+
         auto& ss_codec = codec::SSCodec::instance();
         ss_codec.GetDeletedDocsFormat()->write(fs_ptr_, file_path, deleted_docs);
     } catch (std::exception& e) {
@@ -217,70 +237,68 @@ SSSegmentWriter::WriteDeletedDocs(const std::string& file_path, const DeletedDoc
 }
 
 Status
-SSSegmentWriter::GetSegment(engine::SegmentPtr& segment_ptr) {
-    segment_ptr = segment_ptr_;
-    return Status::OK();
-}
+SSSegmentWriter::Merge(const SSSegmentReaderPtr& segment_reader) {
+    if (segment_reader == nullptr) {
+        return Status(DB_ERROR, "Segment reader is null");
+    }
 
-Status
-SSSegmentWriter::Merge(const SSSegmentReaderPtr& segment_to_merge) {
-    //    if (dir_to_merge == fs_ptr_->operation_ptr_->GetDirectory()) {
-    //        return Status(DB_ERROR, "Cannot Merge Self");
-    //    }
-    //
-    //    LOG_ENGINE_DEBUG_ << "Merging from " << dir_to_merge << " to " << fs_ptr_->operation_ptr_->GetDirectory();
-    //
-    //    TimeRecorder recorder("SSSegmentWriter::Merge");
-    //
-    //    SSSegmentReader segment_reader_to_merge(dir_to_merge);
-    //    bool in_cache;
-    //    auto status = segment_reader_to_merge.LoadCache(in_cache);
-    //    if (!in_cache) {
-    //        status = segment_reader_to_merge.Load();
-    //        if (!status.ok()) {
-    //            std::string msg = "Failed to load segment from " + dir_to_merge;
-    //            LOG_ENGINE_ERROR_ << msg;
-    //            return Status(DB_ERROR, msg);
-    //        }
-    //    }
-    //    SegmentPtr segment_to_merge;
-    //    segment_reader_to_merge.GetSegment(segment_to_merge);
-    //    // auto& uids = segment_to_merge->vectors_ptr_->GetUids();
-    //
-    //    recorder.RecordSection("Loading segment");
-    //
-    //    if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
-    //        auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
-    //
-    //        // Erase from raw data
-    //        segment_to_merge->vectors_ptr_->Erase(offsets_to_delete);
-    //    }
-    //
-    //    recorder.RecordSection("erase");
-    //
-    //    AddVectors(name, segment_to_merge->vectors_ptr_->GetData(), segment_to_merge->vectors_ptr_->GetUids());
-    //
-    //    auto rows = segment_to_merge->vectors_ptr_->GetCount();
-    //    recorder.RecordSection("Adding " + std::to_string(rows) + " vectors and uids");
-    //
-    //    std::unordered_map<std::string, uint64_t> attr_nbytes;
-    //    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
-    //    auto attr_it = segment_to_merge->attrs_ptr_->attrs.begin();
-    //    for (; attr_it != segment_to_merge->attrs_ptr_->attrs.end(); attr_it++) {
-    //        attr_nbytes.insert(std::make_pair(attr_it->first, attr_it->second->GetNbytes()));
-    //        attr_data.insert(std::make_pair(attr_it->first, attr_it->second->GetData()));
-    //
-    //        if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
-    //            auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
-    //
-    //            // Erase from field data
-    //            attr_it->second->Erase(offsets_to_delete);
-    //        }
-    //    }
-    //    AddAttrs(name, attr_nbytes, attr_data, segment_to_merge->vectors_ptr_->GetUids());
-    //
-    //  LOG_ENGINE_DEBUG_ << "Merging completed from " << dir_to_merge << " to " <<
-    //  fs_ptr_->operation_ptr_->GetDirectory();
+    // check conflict
+    int64_t src_id, target_id;
+    auto status = GetSegmentID(target_id);
+    if (!status.ok()) {
+        return status;
+    }
+    status = segment_reader->GetSegmentID(src_id);
+    if (!status.ok()) {
+        return status;
+    }
+    if (src_id == target_id) {
+        return Status(DB_ERROR, "Cannot Merge Self");
+    }
+
+    LOG_ENGINE_DEBUG_ << "Merging from " << segment_reader->GetSegmentPath() << " to " << GetSegmentPath();
+
+    TimeRecorder recorder("SSSegmentWriter::Merge");
+
+    // merge deleted docs (Note: this step must before merge raw data)
+    segment::DeletedDocsPtr src_deleted_docs;
+    status = segment_reader->LoadDeletedDocs(src_deleted_docs);
+    if (!status.ok()) {
+        return status;
+    }
+
+    engine::SegmentPtr src_segment;
+    status = segment_reader->GetSegment(src_segment);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (src_deleted_docs) {
+        const std::vector<offset_t>& delete_ids = src_deleted_docs->GetDeletedDocs();
+        for (auto offset : delete_ids) {
+            src_segment->DeleteEntity(offset);
+        }
+    }
+
+    // merge filed raw data
+    engine::DataChunkPtr chunk = std::make_shared<engine::DataChunk>();
+    auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+    for (auto& iter : field_visitors_map) {
+        const engine::snapshot::FieldPtr& field = iter.second->GetField();
+        std::string name = field->GetName();
+        engine::FIXED_FIELD_DATA raw_data;
+        segment_reader->LoadField(name, raw_data);
+        chunk->fixed_fields_[name] = raw_data;
+    }
+
+    auto& uid_data = chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
+    chunk->count_ = uid_data.size() / sizeof(int64_t);
+    status = AddChunk(chunk);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // Note: no need to merge bloom filter, the bloom filter will be created during serialize
 
     return Status::OK();
 }
@@ -301,15 +319,38 @@ SSSegmentWriter::SetVectorIndex(const std::string& field_name, const milvus::kno
 }
 
 Status
-SSSegmentWriter::WriteVectorIndex(const std::string& field_name, const std::string& file_path) {
+SSSegmentWriter::WriteVectorIndex(const std::string& field_name) {
     try {
         knowhere::VecIndexPtr index;
-        segment_ptr_->GetVectorIndex(field_name, index);
-        segment::VectorIndexPtr index_ptr = std::make_shared<segment::VectorIndex>(index);
+        auto status = segment_ptr_->GetVectorIndex(field_name, index);
+        if (!status.ok() || index == nullptr) {
+            return Status(DB_ERROR, "Index doesn't exist: " + status.message());
+        }
+
+        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+        auto field = segment_visitor_->GetFieldVisitor(field_name);
+        if (field == nullptr) {
+            return Status(DB_ERROR, "Invalid filed name: " + field_name);
+        }
+
+        auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (element_visitor == nullptr) {
+            return Status(DB_ERROR, "Invalid filed name: " + field_name);
+        }
 
         auto& ss_codec = codec::SSCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
-        ss_codec.GetVectorIndexFormat()->write(fs_ptr_, file_path, index_ptr);
+
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+        ss_codec.GetVectorIndexFormat()->write_index(fs_ptr_, file_path, index);
+
+        element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+        if (element_visitor != nullptr) {
+            file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+            ss_codec.GetVectorIndexFormat()->write_compress(fs_ptr_, file_path, index);
+        }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -317,7 +358,34 @@ SSSegmentWriter::WriteVectorIndex(const std::string& field_name, const std::stri
         engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
+
     return Status::OK();
+}
+
+Status
+SSSegmentWriter::GetSegment(engine::SegmentPtr& segment_ptr) {
+    segment_ptr = segment_ptr_;
+    return Status::OK();
+}
+
+Status
+SSSegmentWriter::GetSegmentID(int64_t& id) {
+    if (segment_visitor_) {
+        auto segment = segment_visitor_->GetSegment();
+        if (segment) {
+            id = segment->GetID();
+            return Status::OK();
+        }
+    }
+
+    return Status(DB_ERROR, "SSSegmentWriter::GetSegmentID: null pointer");
+}
+
+std::string
+SSSegmentWriter::GetSegmentPath() {
+    std::string seg_path =
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
+    return seg_path;
 }
 
 }  // namespace segment
