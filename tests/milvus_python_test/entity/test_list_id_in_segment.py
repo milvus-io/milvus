@@ -11,6 +11,7 @@ from utils import *
 dim = 128
 segment_size = 100
 nb = 6000
+tag = "1970-01-01"
 field_name = "float_vector"
 default_index_name = "list_index"
 collection_id = "list_id_in_segment"
@@ -22,7 +23,7 @@ default_fields = gen_default_fields()
 
 
 def get_segment_name(connect, collection, nb=1, vec_type='float', index_params=None):
-    if vec_type == "float":
+    if vec_type != "float":
         vectors, entities = gen_binary_entities(nb)
     else:
         entities = gen_entities(nb)
@@ -41,7 +42,6 @@ class TestGetVectorIdsBase:
       The following cases are used to test `list_id_in_segment` function
     ******************************************************************
     """
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_collection_name_None(self, connect, collection):
         '''
         target: get vector ids where collection name is None
@@ -53,7 +53,6 @@ class TestGetVectorIdsBase:
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection_name, name)
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_collection_name_not_existed(self, connect, collection):
         '''
         target: get vector ids where collection name does not exist
@@ -72,7 +71,6 @@ class TestGetVectorIdsBase:
     def get_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_collection_name_invalid(self, connect, collection, get_collection_name):
         '''
         target: get vector ids where collection name is invalid
@@ -84,7 +82,6 @@ class TestGetVectorIdsBase:
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection_name, name)
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_name_None(self, connect, collection):
         '''
         target: get vector ids where segment name is None
@@ -96,7 +93,6 @@ class TestGetVectorIdsBase:
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection, segment)
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_name_not_existed(self, connect, collection):
         '''
         target: get vector ids where segment name does not exist
@@ -108,7 +104,6 @@ class TestGetVectorIdsBase:
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection, segment)
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_without_index_A(self, connect, collection):
         '''
         target: get vector ids when there is no index
@@ -122,7 +117,6 @@ class TestGetVectorIdsBase:
         for i in range(nb):
             assert vector_ids[i] == ids[i]
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_without_index_B(self, connect, collection):
         '''
         target: get vector ids when there is no index but with partition
@@ -152,7 +146,6 @@ class TestGetVectorIdsBase:
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_with_index_A(self, connect, collection, get_simple_index):
         '''
         target: get vector ids when there is index
@@ -163,7 +156,6 @@ class TestGetVectorIdsBase:
         vector_ids = connect.list_id_in_segment(collection, name)
         # TODO: 
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_with_index_B(self, connect, collection, get_simple_index):
         '''
         target: get vector ids when there is index and with partition
@@ -179,7 +171,6 @@ class TestGetVectorIdsBase:
         # vector_ids should match ids
         # TODO
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_after_delete_vectors(self, connect, collection):
         '''
         target: get vector ids after vectors are deleted
@@ -203,7 +194,6 @@ class TestGetVectorIdsIP:
       The following cases are used to test `list_id_in_segment` function
     ******************************************************************
     """
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_without_index_A(self, connect, ip_collection):
         '''
         target: get vector ids when there is no index
@@ -221,7 +211,6 @@ class TestGetVectorIdsIP:
         for i in range(nb):
             assert vector_ids[i] == ids[i]
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_without_index_B(self, connect, ip_collection):
         '''
         target: get vector ids when there is no index but with partition
@@ -250,7 +239,6 @@ class TestGetVectorIdsIP:
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_with_index_A(self, connect, ip_collection, get_simple_index):
         '''
         target: get vector ids when there is index
@@ -261,7 +249,6 @@ class TestGetVectorIdsIP:
         vector_ids = connect.list_id_in_segment(ip_collection, name)
         # TODO: 
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_with_index_B(self, connect, ip_collection, get_simple_index):
         '''
         target: get vector ids when there is index and with partition
@@ -277,7 +264,6 @@ class TestGetVectorIdsIP:
         # vector_ids should match ids
         # TODO
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_after_delete_vectors(self, connect, ip_collection):
         '''
         target: get vector ids after vectors are deleted
@@ -301,7 +287,6 @@ class TestGetVectorIdsJAC:
       The following cases are used to test `list_id_in_segment` function
     ******************************************************************
     """
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_without_index_A(self, connect, jac_collection):
         '''
         target: get vector ids when there is no index
@@ -319,7 +304,6 @@ class TestGetVectorIdsJAC:
         for i in range(nb):
             assert vector_ids[i] == ids[i]
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_without_index_B(self, connect, jac_collection):
         '''
         target: get vector ids when there is no index but with partition
@@ -349,7 +333,6 @@ class TestGetVectorIdsJAC:
         else:
             pytest.skip("not support")
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_with_index_A(self, connect, jac_collection, get_jaccard_index):
         '''
         target: get vector ids when there is index
@@ -360,7 +343,6 @@ class TestGetVectorIdsJAC:
         vector_ids = connect.list_id_in_segment(ip_collection, name)
         # TODO: 
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_with_index_B(self, connect, jac_collection, get_jaccard_index):
         '''
         target: get vector ids when there is index and with partition
@@ -376,7 +358,6 @@ class TestGetVectorIdsJAC:
         # vector_ids should match ids
         # TODO
 
-    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_after_delete_vectors(self, connect, jac_collection):
         '''
         target: get vector ids after vectors are deleted
