@@ -666,11 +666,10 @@ class TestCompactJAC:
         query_vecs = [raw_vectors[0]]
         distance = jaccard(query_vecs[0], raw_vectors[0])
         query = copy.deepcopy(default_single_query)
-        query["bool"]["must"][0]["vector"][field_name]["query"] = [entities[-1]["values"][0],
-                                                                   entities[-1]["values"][-1]]
-        res = connect.search(collection, query)
-        logging.getLogger().debug(res)
-        assert abs(res[0].distance[0]-distance) <= epsilon
+        query["bool"]["must"][0]["vector"][field_name]["query"] = [binary_entities[-1]["values"][0],
+                                                                   binary_entities[-1]["values"][-1]]
+        res = connect.search(jac_collection, query)
+        assert abs(res[0]._distances[0]-distance) <= epsilon
 
 
 class TestCompactIP:
