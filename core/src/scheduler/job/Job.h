@@ -35,6 +35,8 @@ enum class JobType {
     BUILD = 2,
 
     SS_SEARCH = 10,
+    SS_DELETE = 11,
+    SS_BUILD = 12,
 };
 
 using JobId = std::uint64_t;

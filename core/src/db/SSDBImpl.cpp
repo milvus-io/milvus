@@ -26,6 +26,7 @@
 #include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/job/SSSearchJob.h"
 #include "segment/SSSegmentReader.h"
 #include "segment/SSSegmentWriter.h"
 #include "utils/Exception.h"
@@ -676,13 +677,13 @@ SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection
     LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
 
     VectorsData vectors;
-    scheduler::SearchJobPtr job =
-        std::make_shared<scheduler::SearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
+    scheduler::SSSearchJobPtr job =
+        std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
     job->AddSegmentVisitors(segment_visitors);
 
     // step 2: put search job to scheduler and wait result
     scheduler::JobMgrInst::GetInstance()->Put(job);
-    job->SSWaitResult();
+    job->WaitResult();
 
     if (!job->GetStatus().ok()) {
         return job->GetStatus();

@@ -13,6 +13,10 @@
 #include "SchedInst.h"
 #include "tasklabel/BroadcastLabel.h"
 #include "tasklabel/SpecResLabel.h"
+#include "task/BuildIndexTask.h"
+#include "task/DeleteTask.h"
+#include "task/SearchTask.h"
+#include "task/SSSearchTask.h"
 
 namespace milvus {
 namespace scheduler {
@@ -28,6 +32,9 @@ TaskCreator::Create(const JobPtr& job) {
         }
         case JobType::BUILD: {
             return Create(std::static_pointer_cast<BuildIndexJob>(job));
+        }
+        case JobType::SS_SEARCH: {
+            return Create(std::static_pointer_cast<SSSearchJob>(job));
         }
         default: {
             // TODO(wxyu): error
@@ -70,5 +77,16 @@ TaskCreator::Create(const BuildIndexJobPtr& job) {
     return tasks;
 }
 
+std::vector<TaskPtr>
+TaskCreator::Create(const SSSearchJobPtr& job) {
+    std::vector<TaskPtr> tasks;
+    for (auto& sv: job->segment_visitors()) {
+        auto task = std::make_shared<XSSSearchTask>(job->GetContext(), sv, nullptr);
+        task->job_ = job;
+        tasks.emplace_back(task);
+    }
+
+    return tasks;
+}
 }  // namespace scheduler
 }  // namespace milvus

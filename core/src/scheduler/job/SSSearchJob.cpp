@@ -9,23 +9,23 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "scheduler/job/SearchJob.h"
+#include "scheduler/job/SSSearchJob.h"
 
 #include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
 
-SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, const milvus::json& extra_params,
+SSSearchJob::SSSearchJob(const server::ContextPtr& context, int64_t topk, const milvus::json& extra_params,
                      engine::VectorsData& vectors)
-    : Job(JobType::SEARCH), context_(context), topk_(topk), extra_params_(extra_params), vectors_(vectors) {
+    : Job(JobType::SS_SEARCH), context_(context), topk_(topk), extra_params_(extra_params), vectors_(vectors) {
 }
 
-SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, milvus::query::GeneralQueryPtr general_query,
+SSSearchJob::SSSearchJob(const server::ContextPtr& context, milvus::query::GeneralQueryPtr general_query,
                      query::QueryPtr query_ptr,
                      std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                      engine::VectorsData& vectors)
-    : Job(JobType::SEARCH),
+    : Job(JobType::SS_SEARCH),
       context_(context),
       general_query_(general_query),
       query_ptr_(query_ptr),
@@ -34,7 +34,7 @@ SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, milvus::qu
 }
 
 bool
-SearchJob::AddIndexFile(const SegmentSchemaPtr& index_file) {
+SSSearchJob::AddIndexFile(const SegmentSchemaPtr& index_file) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (index_file == nullptr || index_files_.find(index_file->id_) != index_files_.end()) {
         return false;
@@ -47,17 +47,22 @@ SearchJob::AddIndexFile(const SegmentSchemaPtr& index_file) {
 }
 
 void
-SearchJob::WaitResult() {
+SSSearchJob::AddSegmentVisitors(const std::vector<engine::SegmentVisitorPtr>& visitors) {
+    segment_visitors_.insert(segment_visitors_.end(), visitors.begin(), visitors.end());
+}
+
+void
+SSSearchJob::WaitResult() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return index_files_.empty(); });
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld: query_time %f, map_uids_time %f, reduce_time %f", "search", 0,
-                                id(), this->time_stat().query_time, this->time_stat().map_uids_time,
-                                this->time_stat().reduce_time);
+    cv_.wait(lock, [this] { return segment_visitors_.empty(); });
+//    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld: query_time %f, map_uids_time %f, reduce_time %f", "search", 0,
+//                                id(), this->time_stat().query_time, this->time_stat().map_uids_time,
+//                                this->time_stat().reduce_time);
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld all done", "search", 0, id());
 }
 
 void
-SearchJob::SearchDone(size_t index_id) {
+SSSearchJob::SearchDone(size_t index_id) {
     std::unique_lock<std::mutex> lock(mutex_);
     index_files_.erase(index_id);
     if (index_files_.empty()) {
@@ -68,22 +73,22 @@ SearchJob::SearchDone(size_t index_id) {
 }
 
 ResultIds&
-SearchJob::GetResultIds() {
+SSSearchJob::GetResultIds() {
     return result_ids_;
 }
 
 ResultDistances&
-SearchJob::GetResultDistances() {
+SSSearchJob::GetResultDistances() {
     return result_distances_;
 }
 
 Status&
-SearchJob::GetStatus() {
+SSSearchJob::GetStatus() {
     return status_;
 }
 
 json
-SearchJob::Dump() const {
+SSSearchJob::Dump() const {
     json ret{
         {"topk", topk_},
         {"nq", vectors_.vector_count_},
@@ -95,7 +100,7 @@ SearchJob::Dump() const {
 }
 
 const std::shared_ptr<server::Context>&
-SearchJob::GetContext() const {
+SSSearchJob::GetContext() const {
     return context_;
 }
 
