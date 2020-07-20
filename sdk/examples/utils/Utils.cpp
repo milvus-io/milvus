@@ -113,8 +113,8 @@ Utils::IndexTypeName(const milvus::IndexType& index_type) {
             return "SPTAGBKT";
         case milvus::IndexType::HNSW:
             return "HNSW";
-        case milvus::IndexType::HNSW_SQ8NR:
-            return "HNSW_SQ8NR";
+        case milvus::IndexType::HNSW_SQ8NM:
+            return "HNSW_SQ8NM";
         case milvus::IndexType::ANNOY:
             return "ANNOY";
         case milvus::IndexType::IVFSQ8NR:
@@ -238,7 +238,7 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
 
     {
         BLOCK_SPLITER
-        JSON json_params = {{"nprobe", nprobe}};
+        JSON json_params = {{"nprobe", nprobe}, {"ef", 64}, {"search_length", 100}, {"search_k", -1}};
         milvus_sdk::TimeRecorder rc("Search");
         milvus::Status stat = conn->Search(collection_name, partition_tags, temp_entity_array, top_k,
                                            json_params.dump(), topk_query_result);
