@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/web_impl/utils/Util.h"
+#include <fiu-local.h>
 
 #include "utils/ValidationUtil.h"
 
@@ -20,6 +21,7 @@ namespace web {
 Status
 ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int64_t& value, bool nullable) {
     auto query = query_params.get(key.c_str());
+    fiu_do_on("WebUtils.ParseQueryInteger.null_query_get", query = "");
     if (nullptr != query.get() && query->getSize() > 0) {
         std::string value_str = query->std_str();
         if (!ValidationUtil::ValidateStringIsNumber(value_str).ok()) {
@@ -38,6 +40,7 @@ ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int6
 Status
 ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::string& value, bool nullable) {
     auto query = query_params.get(key.c_str());
+    fiu_do_on("WebUtils.ParseQueryStr.null_query_get", query = "");
     if (nullptr != query.get() && query->getSize() > 0) {
         value = query->std_str();
     } else if (!nullable) {
@@ -50,6 +53,7 @@ ParseQueryStr(const OQueryParams& query_params, const std::string& key, std::str
 Status
 ParseQueryBool(const OQueryParams& query_params, const std::string& key, bool& value, bool nullable) {
     auto query = query_params.get(key.c_str());
+    fiu_do_on("WebUtils.ParseQueryBool.null_query_get", query = "");
     if (nullptr != query.get() && query->getSize() > 0) {
         std::string value_str = query->std_str();
         if (!ValidationUtil::ValidateStringIsBool(value_str).ok()) {

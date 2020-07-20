@@ -284,6 +284,10 @@ XSearchTask::Execute() {
                     search_job->vector_count() = nq;
                     XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
                                                       search_job->GetResultIds(), search_job->GetResultDistances());
+
+                    if (search_job->GetResultIds().empty()) {
+                        LOG_ENGINE_ERROR_ << "Result reduce error: result id array is empty";
+                    }
                 }
                 search_job->SearchDone(index_id_);
                 index_engine_ = nullptr;
@@ -320,6 +324,10 @@ XSearchTask::Execute() {
                 LOG_ENGINE_DEBUG_ << "Merged result: "
                                   << "nq = " << nq << ", topk = " << topk << ", len of ids = " << output_ids.size()
                                   << ", len of distance = " << output_distance.size();
+
+                if (search_job->GetResultIds().empty()) {
+                    LOG_ENGINE_ERROR_ << "Result reduce error: result id array is empty!";
+                }
             }
 
             // span = rc.RecordSection(hdr + ", reduce topk");
