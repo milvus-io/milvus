@@ -49,6 +49,11 @@ ConstructParentFolder(const std::string& db_path, const meta::SegmentSchema& tab
 
 }  // namespace
 
+std::string
+ConstructCollectionRootPath(const std::string& root_path) {
+    return root_path + TABLES_FOLDER;
+}
+
 int64_t
 GetMicroSecTimeStamp() {
     auto now = std::chrono::system_clock::now();
