@@ -113,34 +113,29 @@ class Operations : public std::enable_shared_from_this<Operations> {
         return type_;
     }
 
-    virtual Status
-    OnExecute(Store&);
-    virtual Status
-    PreExecute(Store&);
-    virtual Status
-    DoExecute(Store&);
-    virtual Status
-    PostExecute(Store&);
+    virtual Status OnExecute(StorePtr);
+    virtual Status PreExecute(StorePtr);
+    virtual Status DoExecute(StorePtr);
+    virtual Status PostExecute(StorePtr);
 
     virtual Status
     GetSnapshot(ScopedSnapshotT& ss) const;
 
     virtual Status
-    operator()(Store& store);
+    operator()(StorePtr store);
     virtual Status
     Push(bool sync = true);
 
     virtual Status
     PreCheck();
 
-    virtual const Status&
-    ApplyToStore(Store& store);
+    virtual const Status& ApplyToStore(StorePtr);
 
     const Status&
     WaitToFinish();
 
     void
-    Done(Store& store);
+    Done(StorePtr store);
 
     void
     SetStatus(const Status& status);
@@ -288,12 +283,12 @@ class LoadOperation : public Operations {
     }
 
     const Status&
-    ApplyToStore(Store& store) override {
+    ApplyToStore(StorePtr store) override {
         if (done_) {
             Done(store);
             return status_;
         }
-        auto status = store.GetResource<ResourceT>(context_.id, resource_);
+        auto status = store->GetResource<ResourceT>(context_.id, resource_);
         SetStatus(status);
         Done(store);
         return status_;
@@ -346,8 +341,8 @@ class SoftDeleteOperation : public Operations {
     }
 
     Status
-    DoExecute(Store& store) override {
-        auto status = store.GetResource<ResourceT>(id_, resource_);
+    DoExecute(StorePtr store) override {
+        auto status = store->GetResource<ResourceT>(id_, resource_);
         if (!status.ok()) {
             return status;
         }
@@ -376,33 +371,10 @@ class HardDeleteOperation : public Operations {
     }
 
     const Status&
-    ApplyToStore(Store& store) override {
+    ApplyToStore(StorePtr store) override {
         if (done_)
             return status_;
-        auto status = store.RemoveResource<ResourceT>(id_);
-        SetStatus(status);
-        Done(store);
-        return status_;
-    }
-
- protected:
-    ID_TYPE id_;
-};
-
-template <>
-class HardDeleteOperation<Collection> : public Operations {
- public:
-    explicit HardDeleteOperation(ID_TYPE id)
-        : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::W_Leaf), id_(id) {
-    }
-
-    const Status&
-    ApplyToStore(Store& store) override {
-        if (done_) {
-            Done(store);
-            return status_;
-        }
-        auto status = store.RemoveCollection(id_);
+        auto status = store->RemoveResource<ResourceT>(id_);
         SetStatus(status);
         Done(store);
         return status_;

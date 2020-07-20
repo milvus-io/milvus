@@ -32,6 +32,7 @@
      ivfFlatConfig_(config),
      reserveMemoryVecs_(0),
      index_(nullptr) {
+
    copyFrom(index);
  }
  
@@ -47,7 +48,7 @@
  
    // faiss::Index params
    this->is_trained = false;
- 
+
    // We haven't trained ourselves, so don't construct the IVFFlat
    // index yet
  }

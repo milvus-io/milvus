@@ -110,19 +110,7 @@ GetEntityByIdSegmentHandler::GetEntityByIdSegmentHandler(const std::shared_ptr<m
                                                          engine::snapshot::ScopedSnapshotT ss,
                                                          const std::string& dir_root, const IDNumbers& ids,
                                                          const std::vector<std::string>& field_names)
-    : BaseT(ss),
-      context_(context),
-      dir_root_(dir_root),
-      ids_(ids),
-      field_names_(field_names),
-      vector_data_(),
-      attr_type_(),
-      attr_data_() {
-    for (auto& field_name : field_names_) {
-        auto field_ptr = ss_->GetField(field_name);
-        auto field_type = field_ptr->GetFtype();
-        attr_type_.push_back((meta::hybrid::DataType)field_type);
-    }
+    : BaseT(ss), context_(context), dir_root_(dir_root), ids_(ids), field_names_(field_names) {
 }
 
 Status
@@ -138,107 +126,43 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     auto uid_field_visitor = segment_visitor->GetFieldVisitor(DEFAULT_UID_NAME);
 
     /* load UID's bloom filter file */
-    auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_BLOOM_FILTER);
-    std::string uid_blf_path = snapshot::GetResPath<snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
-
     segment::IdBloomFilterPtr id_bloom_filter_ptr;
-    STATUS_CHECK(segment_reader.LoadBloomFilter(uid_blf_path, id_bloom_filter_ptr));
+    STATUS_CHECK(segment_reader.LoadBloomFilter(id_bloom_filter_ptr));
 
     /* load UID's raw data */
-    auto uid_raw_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_RAW);
-    std::string uid_raw_path = snapshot::GetResPath<snapshot::SegmentFile>(dir_root_, uid_raw_visitor->GetFile());
-    std::vector<segment::doc_id_t> uids;
-    STATUS_CHECK(segment_reader.LoadUids(uid_raw_path, uids));
+    std::vector<int64_t> uids;
+    STATUS_CHECK(segment_reader.LoadUids(uids));
 
     /* load UID's deleted docs */
-    auto uid_del_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_DELETED_DOCS);
-    std::string uid_del_path = snapshot::GetResPath<snapshot::SegmentFile>(dir_root_, uid_del_visitor->GetFile());
     segment::DeletedDocsPtr deleted_docs_ptr;
-    STATUS_CHECK(segment_reader.LoadDeletedDocs(uid_del_path, deleted_docs_ptr));
+    STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
 
     auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
 
+    std::vector<int64_t> offsets;
     for (auto id : ids_) {
-        AttrsData& attr_ref = attr_data_[id];
-        VectorsData& vector_ref = vector_data_[id];
-
-        /* fast check using bloom filter */
+        // fast check using bloom filter
         if (!id_bloom_filter_ptr->Check(id)) {
             continue;
         }
 
-        /* check if id really exists in uids */
+        // check if id really exists in uids
         auto found = std::find(uids.begin(), uids.end(), id);
         if (found == uids.end()) {
             continue;
         }
 
-        /* check if this id is deleted */
+        // check if this id is deleted
         auto offset = std::distance(uids.begin(), found);
         auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
         if (deleted != deleted_docs.end()) {
             continue;
         }
 
-        //        std::unordered_map<std::string, std::vector<uint8_t>> raw_attrs;
-        //        for (size_t i = 0; i < field_names_.size(); i++) {
-        //            auto& field_name = field_names_[i];
-        //            auto field_ptr = ss_->GetField(field_name);
-        //
-        //            auto field_type = attr_type_[i];
-        //
-        //            if (field_type == meta::hybrid::DataType::VECTOR_BINARY) {
-        //                auto field_params = field_ptr->GetParams();
-        //                auto dim = field_params[knowhere::meta::DIM].get<int64_t>();
-        //                size_t vector_size = dim / 8;
-        //                std::vector<uint8_t> raw_vector;
-        //                STATUS_CHECK(segment_reader.LoadVectors(offset * vector_size, vector_size, raw_vector));
-        //
-        //                vector_ref.vector_count_ = 1;
-        //                vector_ref.binary_data_.swap(raw_vector);
-        //            } else if (field_type == meta::hybrid::DataType::VECTOR_FLOAT) {
-        //                auto field_params = field_ptr->GetParams();
-        //                auto dim = field_params[knowhere::meta::DIM].get<int64_t>();
-        //                size_t vector_size = dim * sizeof(float);
-        //                std::vector<uint8_t> raw_vector;
-        //                STATUS_CHECK(segment_reader.LoadVectors(offset * vector_size, vector_size, raw_vector));
-        //
-        //                vector_ref.vector_count_ = 1;
-        //                std::vector<float> float_vector;
-        //                float_vector.resize(dim);
-        //                memcpy(float_vector.data(), raw_vector.data(), vector_size);
-        //                vector_ref.float_data_.swap(float_vector);
-        //            } else {
-        //                size_t num_bytes;
-        //                switch (field_type) {
-        //                    case meta::hybrid::DataType::INT8:
-        //                        num_bytes = 1;
-        //                        break;
-        //                    case meta::hybrid::DataType::INT16:
-        //                        num_bytes = 2;
-        //                        break;
-        //                    case meta::hybrid::DataType::INT32:
-        //                    case meta::hybrid::DataType::FLOAT:
-        //                        num_bytes = 4;
-        //                        break;
-        //                    case meta::hybrid::DataType::INT64:
-        //                    case meta::hybrid::DataType::DOUBLE:
-        //                        num_bytes = 8;
-        //                        break;
-        //                    default: {
-        //                        std::string msg = "Field type of " + field_name + " not supported";
-        //                        return Status(DB_ERROR, msg);
-        //                    }
-        //                }
-        //                std::vector<uint8_t> raw_attr;
-        //                STATUS_CHECK(segment_reader.LoadAttrs(field_name, offset * num_bytes, num_bytes, raw_attr));
-        //                raw_attrs.insert(std::make_pair(field_name, raw_attr));
-        //            }
-        //        }
-        //
-        //        attr_ref.attr_count_ = 1;
-        //        attr_ref.attr_data_ = raw_attrs;
+        offsets.push_back(offset);
     }
+
+    STATUS_CHECK(segment_reader.LoadFieldsEntities(field_names_, offsets, data_chunk_));
 
     return Status::OK();
 }

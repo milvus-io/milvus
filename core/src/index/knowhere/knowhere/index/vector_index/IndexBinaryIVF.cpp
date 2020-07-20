@@ -48,7 +48,7 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
     try {
         int64_t k = config[meta::TOPK].get<int64_t>();
@@ -147,7 +147,7 @@ BinaryIVF::Dim() {
 
 void
 BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR(dataset_ptr)
 
     int64_t nlist = config[IndexParams::nlist];
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());

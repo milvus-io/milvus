@@ -24,22 +24,9 @@
 
 namespace milvus::engine::meta {
 
-// using namespace snapshot;
-
 class MetaAdapter {
  public:
-    static MetaAdapter&
-    GetInstance() {
-        static MetaAdapter db;
-        return db;
-    }
-
- public:
-    MetaAdapter() {
-        engine_ = std::make_shared<MockMetaEngine>();
-        //        DBMetaOptions options;
-        //        options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
-        //        engine_ = std::make_shared<MySqlEngine>(options);
+    explicit MetaAdapter(MetaEnginePtr engine) : engine_(engine) {
     }
 
     SessionPtr
@@ -89,6 +76,8 @@ class MetaAdapter {
     template <typename ResourceT>
     Status
     Apply(snapshot::ResourceContextPtr<ResourceT> resp, int64_t& result_id) {
+        result_id = 0;
+
         auto session = CreateSession();
         session->Apply<ResourceT>(resp);
 
@@ -115,5 +104,7 @@ class MetaAdapter {
  private:
     MetaEnginePtr engine_;
 };
+
+using MetaAdapterPtr = std::shared_ptr<MetaAdapter>;
 
 }  // namespace milvus::engine::meta

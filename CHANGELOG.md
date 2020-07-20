@@ -5,6 +5,7 @@ Please mark all changes in change log and use the issue from GitHub
 # Milvus 0.11.0 (TBD)
 
 ## Bug
+    \#2852 Fix Prometheus rebuild problem.
 -   \#2487 Remove timeout when creating collection in dev test
 -   \#2532 Fix Milvus docker image report illegal instruction
 -   \#2551 Fix test_hybrid_db and test_rpc error
@@ -22,6 +23,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2739 Fix mishards start failed
 -   \#2752 Milvus formats vectors data to double-precision and return to http client
 -   \#2767 Fix a bug of getting wrong nprobe limitation in knowhere on GPU version
+-   \#2768 After building the index,the number of vectors increases
 -   \#2776 Fix too many data copies during creating IVF index
 -   \#2813 To implemente RNSG IP
 
@@ -33,7 +35,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2689 Construct Knowhere Index Without Data
 -   \#2798 hnsw-sq8 support
 -   \#2802 Add new index: IVFSQ8NR
--   \#2834 add C++ sdk support 4 hnsw_sq8nr
+-   \#2834 Add C++ sdk support 4 hnsw_sq8nr
 
 ## Improvement
 -   \#2543 Remove secondary_path related code
@@ -41,6 +43,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2561 Clean util dependencies with other modules
 -   \#2612 Move all APIs in utils into namespace milvus 
 -   \#2675 Print out system memory size when report invalid cpu cache size 
+-   \#2828 Let Faiss not compile half float by default
 -   \#2841 Replace IndexType/EngineType/MetricType
 -   \#2858 Unify index name in db
 -   \#2884 Using BlockingQueue in JobMgr

@@ -15,6 +15,7 @@
 #include "db/meta/FilesHolder.h"
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/Snapshot.h"
+#include "segment/Segment.h"
 #include "segment/Types.h"
 #include "server/context/Context.h"
 #include "utils/Log.h"
@@ -76,9 +77,7 @@ struct GetEntityByIdSegmentHandler : public snapshot::IterateHandler<snapshot::S
     const std::string dir_root_;
     const engine::IDNumbers ids_;
     const std::vector<std::string> field_names_;
-    std::vector<engine::VectorsData> vector_data_;
-    std::vector<meta::hybrid::DataType> attr_type_;
-    std::vector<engine::AttrsData> attr_data_;
+    engine::DataChunkPtr data_chunk_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
