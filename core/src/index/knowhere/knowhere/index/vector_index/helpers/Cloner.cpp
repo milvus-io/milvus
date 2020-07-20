@@ -31,6 +31,7 @@ CopyIndexData(const VecIndexPtr& dst_index, const VecIndexPtr& src_index) {
     dst_index->SetUids(uids);
 
     dst_index->SetBlacklist(src_index->GetBlacklist());
+    dst_index->SetIndexSize(src_index->IndexSize());
 }
 
 VecIndexPtr
@@ -38,7 +39,6 @@ CopyGpuToCpu(const VecIndexPtr& index, const Config& config) {
     if (auto device_index = std::dynamic_pointer_cast<GPUIndex>(index)) {
         VecIndexPtr result = device_index->CopyGpuToCpu(config);
         CopyIndexData(result, index);
-        result->UpdateIndexSize();
         return result;
     } else {
         KNOWHERE_THROW_MSG("index type is not gpuindex");

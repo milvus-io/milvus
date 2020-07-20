@@ -36,7 +36,8 @@ class LessItemCacheMgr : public milvus::cache::CacheMgr<milvus::cache::DataObjPt
 class MockVecIndex : public milvus::knowhere::VecIndex {
  public:
     MockVecIndex(int64_t dim, int64_t total) : dim_(dim), ntotal_(total) {
-        index_size_ = Dim() * Count() * sizeof(float);
+        int64_t data_size = Dim() * Count() * sizeof(float);
+        SetIndexSize(data_size);
     }
 
     virtual void
