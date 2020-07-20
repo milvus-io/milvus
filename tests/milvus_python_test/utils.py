@@ -203,6 +203,8 @@ def gen_single_vector_fields():
         for data_type in [DataType.VECTOR, DataType.BINARY_VECTOR]:
             if metric_type in ["L2", "IP"] and data_type == DataType.BINARY_VECTOR:
                 continue
+            if metric_type not in ["L2", "IP"] and data_type == DataType.VECTOR:
+                continue
             field = {"field": data_type.name, "type": data_type, "params": {"metric_type": metric_type, "dimension": dimension}}
             fields.append(field)
     return fields
@@ -354,7 +356,7 @@ def update_field_value(entities, old_type, new_value):
     return entities
 
 
-def add_vector_field(nb, dimension):
+def add_vector_field(nb, dimension=dimension):
     field_name = gen_unique_str()
     field = {
         "field": field_name,

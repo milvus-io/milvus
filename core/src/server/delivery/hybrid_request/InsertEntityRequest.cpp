@@ -159,6 +159,12 @@ InsertEntityRequest::OnExecute() {
 #endif
         // step 4: some metric type doesn't support float vectors
 
+        status = ValidateVectorData(vector_datas_it->second, collection_schema);
+        if (!status.ok()) {
+            LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid vector data: %s", "insert", 0, status.message().c_str());
+            return status;
+        }
+
         // TODO(yukun): check dimension and metric_type
 
         // step 5: insert entities
