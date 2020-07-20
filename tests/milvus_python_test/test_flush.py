@@ -20,8 +20,9 @@ tag = "partition_tag"
 field_name = "float_vector"
 default_index_name = "insert_index"
 entity = gen_entities(1)
-binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
+raw_vector, binary_entity = gen_binary_entities(1)
+raw_vectors, binary_entities = gen_binary_entities(nb)
 default_fields = gen_default_fields()
 default_single_query = {
     "bool": {
