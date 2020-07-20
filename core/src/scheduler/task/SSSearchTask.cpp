@@ -25,6 +25,7 @@
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/task/SSSearchTask.h"
+#include "scheduler/job/SSSearchJob.h"
 #include "segment/SegmentReader.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -155,8 +156,9 @@ XSSSearchTask::Load(LoadType type, uint8_t device_id) {
 
 void
 XSSSearchTask::Execute() {
-    milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(index_id_));
-    TimeRecorder rc(LogOut("[%s][%ld] DoSearch file id:%ld", "search", 0, index_id_));
+    auto seg_id = visitor_->GetSegment()->GetID();
+    milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(seg_id));
+    TimeRecorder rc(LogOut("[%s][%ld] DoSearch file id:%ld", "search", 0, seg_id));
 
     server::CollectDurationMetrics metrics(index_type_);
 
@@ -165,10 +167,10 @@ XSSSearchTask::Execute() {
     double span;
 
     if (auto job = job_.lock()) {
-        auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
+        auto search_job = std::static_pointer_cast<scheduler::SSSearchJob>(job);
 
         if (index_engine_ == nullptr) {
-            search_job->SearchDone(index_id_);
+            search_job->SearchDone(seg_id);
             return;
         }
 
@@ -235,7 +237,7 @@ XSSSearchTask::Execute() {
 //        }
 
         /* step 4: notify to send result to client */
-        search_job->SearchDone(index_id_);
+        search_job->SearchDone(seg_id);
     }
 
     rc.ElapseFromBegin("totally cost");

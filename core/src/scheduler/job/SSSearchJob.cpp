@@ -33,28 +33,15 @@ SSSearchJob::SSSearchJob(const server::ContextPtr& context, milvus::query::Gener
       vectors_(vectors) {
 }
 
-bool
-SSSearchJob::AddIndexFile(const SegmentSchemaPtr& index_file) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (index_file == nullptr || index_files_.find(index_file->id_) != index_files_.end()) {
-        return false;
-    }
-
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld add index file: %ld", "search", 0, id(), index_file->id_);
-
-    index_files_[index_file->id_] = index_file;
-    return true;
-}
-
 void
-SSSearchJob::AddSegmentVisitors(const std::vector<engine::SegmentVisitorPtr>& visitors) {
-    segment_visitors_.insert(segment_visitors_.end(), visitors.begin(), visitors.end());
+SSSearchJob::AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor) {
+    segment_visitor_map_[visitor->GetSegment()->GetID()] = visitor;
 }
 
 void
 SSSearchJob::WaitResult() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return segment_visitors_.empty(); });
+    cv_.wait(lock, [this] { return segment_visitor_map_.empty(); });
 //    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld: query_time %f, map_uids_time %f, reduce_time %f", "search", 0,
 //                                id(), this->time_stat().query_time, this->time_stat().map_uids_time,
 //                                this->time_stat().reduce_time);
@@ -62,14 +49,14 @@ SSSearchJob::WaitResult() {
 }
 
 void
-SSSearchJob::SearchDone(size_t index_id) {
+SSSearchJob::SearchDone(engine::snapshot::ID_TYPE seg_id) {
     std::unique_lock<std::mutex> lock(mutex_);
-    index_files_.erase(index_id);
-    if (index_files_.empty()) {
+    segment_visitor_map_.erase(seg_id);
+    if (segment_visitor_map_.empty()) {
         cv_.notify_all();
     }
 
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld finish index file: %ld", "search", 0, id(), index_id);
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld finish segment: %ld", "search", 0, id(), seg_id);
 }
 
 ResultIds&

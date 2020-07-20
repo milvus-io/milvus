@@ -449,7 +449,7 @@ TEST_F(SSDBTest, QueryTest) {
     std::vector<std::string> field_names;
     std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type;
     milvus::engine::QueryResult result;
-    // db_->Query(ctx1, c1, partition_patterns, general_query, query_ptr, field_names, attr_type, result);
+    db_->Query(ctx1, c1, partition_patterns, general_query, query_ptr, field_names, attr_type, result);
 }
 
 TEST_F(SSDBTest, InsertTest) {

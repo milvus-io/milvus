@@ -679,7 +679,9 @@ SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection
     VectorsData vectors;
     scheduler::SSSearchJobPtr job =
         std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
-    job->AddSegmentVisitors(segment_visitors);
+    for (auto& sv : segment_visitors) {
+        job->AddSegmentVisitor(sv);
+    }
 
     // step 2: put search job to scheduler and wait result
     scheduler::JobMgrInst::GetInstance()->Put(job);
@@ -714,7 +716,7 @@ SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection
 
     rc.ElapseFromBegin("Engine query totally cost");
 
-    tracer.Context()->GetTraceContext()->GetSpan()->Finish();
+    // tracer.Context()->GetTraceContext()->GetSpan()->Finish();
 
     return Status::OK();
 }

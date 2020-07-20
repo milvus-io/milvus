@@ -51,7 +51,7 @@ class XSSSearchTask : public Task {
 
     engine::SegmentVisitorPtr visitor_;
 
-    size_t index_id_ = 0;
+//    size_t index_id_ = 0;
     int index_type_ = 0;
     ExecutionEnginePtr index_engine_ = nullptr;
 

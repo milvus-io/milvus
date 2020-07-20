@@ -80,8 +80,8 @@ TaskCreator::Create(const BuildIndexJobPtr& job) {
 std::vector<TaskPtr>
 TaskCreator::Create(const SSSearchJobPtr& job) {
     std::vector<TaskPtr> tasks;
-    for (auto& sv: job->segment_visitors()) {
-        auto task = std::make_shared<XSSSearchTask>(job->GetContext(), sv, nullptr);
+    for (auto& sv: job->segment_visitor_map()) {
+        auto task = std::make_shared<XSSSearchTask>(job->GetContext(), sv.second, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);
     }

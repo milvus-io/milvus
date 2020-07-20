@@ -36,6 +36,7 @@ namespace scheduler {
 using engine::meta::SegmentSchemaPtr;
 
 using Id2IndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
+using SegmentVisitorMap = std::unordered_map<engine::snapshot::ID_TYPE, engine::SegmentVisitorPtr>;
 
 using ResultIds = engine::ResultIds;
 using ResultDistances = engine::ResultDistances;
@@ -56,17 +57,14 @@ class SSSearchJob : public Job {
               engine::VectorsData& vectorsData);
 
  public:
-    bool
-    AddIndexFile(const SegmentSchemaPtr& index_file);
-
     void
-    AddSegmentVisitors(const std::vector<engine::SegmentVisitorPtr>& visitors);
+    AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor);
 
     void
     WaitResult();
 
     void
-    SearchDone(size_t index_id);
+    SearchDone(engine::snapshot::ID_TYPE seg_id);
 
     ResultIds&
     GetResultIds();
@@ -109,14 +107,9 @@ class SSSearchJob : public Job {
         return vectors_;
     }
 
-    Id2IndexMap&
-    index_files() {
-        return index_files_;
-    }
-
-    std::vector<engine::SegmentVisitorPtr>&
-    segment_visitors() {
-        return segment_visitors_;
+    const SegmentVisitorMap&
+    segment_visitor_map() {
+        return segment_visitor_map_;
     }
 
     std::mutex&
@@ -157,8 +150,7 @@ class SSSearchJob : public Job {
     // TODO: smart pointer
     engine::VectorsData& vectors_;
 
-    Id2IndexMap index_files_;
-    std::vector<engine::SegmentVisitorPtr> segment_visitors_;
+    SegmentVisitorMap segment_visitor_map_;
 
     // TODO: column-base better ?
     ResultIds result_ids_;
