@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "db/Types.h"
 #include "db/meta/MetaTypes.h"
 #include "query/GeneralQuery.h"
 #include "utils/Status.h"
@@ -26,6 +27,17 @@ namespace engine {
 
 class SSExecutionEngine {
  public:
+    virtual Status
+    Load(const query::QueryPtr& query_ptr) = 0;
+
+    virtual Status
+    CopyToGpu(uint64_t device_id) = 0;
+
+    virtual Status
+    Search(const query::QueryPtr& query_ptr, QueryResult& result) = 0;
+
+    virtual Status
+    BuildIndex(const std::string& field_name, const CollectionIndex& index) = 0;
 };
 
 using SSExecutionEnginePtr = std::shared_ptr<SSExecutionEngine>;

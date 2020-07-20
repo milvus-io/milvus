@@ -624,19 +624,15 @@ SSDBImpl::DropIndex(const std::string& collection_id) {
 }
 
 Status
-SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection_name,
-                const std::vector<std::string>& partition_patterns, query::GeneralQueryPtr general_query,
-                query::QueryPtr query_ptr, std::vector<std::string>& field_names,
-                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                engine::QueryResult& result) {
+SSDBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResult& result) {
     CHECK_INITIALIZED;
 
     auto query_ctx = context->Child("Query");
 
-    TimeRecorder rc("HybridQuery");
+    TimeRecorder rc("SSDBImpl::Query");
 
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+    //    snapshot::ScopedSnapshotT ss;
+    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     //    auto handler = std::make_shared<HybridQueryHelperSegmentHandler>(nullptr, ss, partition_patterns);
     //    handler->Iterate();

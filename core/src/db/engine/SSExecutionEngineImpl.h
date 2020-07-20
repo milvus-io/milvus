@@ -17,12 +17,31 @@
 #include <vector>
 
 #include "SSExecutionEngine.h"
+#include "db/SnapshotVisitor.h"
+#include "segment/SSSegmentReader.h"
 
 namespace milvus {
 namespace engine {
 
 class SSExecutionEngineImpl : public SSExecutionEngine {
  public:
+    SSExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor);
+
+    Status
+    Load(const query::QueryPtr& query_ptr) override;
+
+    Status
+    CopyToGpu(uint64_t device_id) override;
+
+    Status
+    Search(const query::QueryPtr& query_ptr, QueryResult& result) override;
+
+    Status
+    BuildIndex(const std::string& field_name, const CollectionIndex& index) override;
+
+ private:
+    SegmentVisitorPtr segment_visitor_;
+    segment::SSSegmentReaderPtr segment_reader_;
 };
 
 }  // namespace engine

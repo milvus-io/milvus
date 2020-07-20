@@ -66,13 +66,7 @@ class SSSegmentReader {
     LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     Status
-    LoadBloomFilter();
-
-    Status
     LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr);
-
-    Status
-    LoadDeletedDocs();
 
     Status
     ReadDeletedDocsSize(size_t& size);

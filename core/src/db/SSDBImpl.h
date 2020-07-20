@@ -118,10 +118,7 @@ class SSDBImpl {
     DropIndex(const std::string& collection_id);
 
     Status
-    Query(const server::ContextPtr& context, const std::string& collection_name,
-          const std::vector<std::string>& partition_patterns, query::GeneralQueryPtr general_query,
-          query::QueryPtr query_ptr, std::vector<std::string>& field_names,
-          std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, engine::QueryResult& result);
+    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResult& result);
 
  private:
     void
