@@ -107,13 +107,13 @@ InsertEntityRequest::OnExecute() {
 
         for (const auto& schema : fields_schema.fields_schema_) {
             if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::FLOAT_VECTOR &&
-                vector_datas_.at(schema.field_name_).float_data_.empty()) {
+                vector_datas_it->second.float_data_.empty()) {
                 return Status{
                     SERVER_INVALID_ROWRECORD_ARRAY,
                     "The vector field is defined as float vector. Make sure you have entered float vector records"};
             }
             if (schema.field_type_ == (int32_t)engine::meta::hybrid::DataType::BINARY_VECTOR &&
-                vector_datas_.at(schema.field_name_).binary_data_.empty()) {
+                vector_datas_it->second.binary_data_.empty()) {
                 return Status{
                     SERVER_INVALID_ROWRECORD_ARRAY,
                     "The vector field is defined as binary vector. Make sure you have entered binary vector records"};

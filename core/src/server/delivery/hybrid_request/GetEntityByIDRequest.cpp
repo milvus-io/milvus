@@ -94,6 +94,19 @@ GetEntityByIDRequest::OnExecute() {
             for (const auto& schema : fields_schema.fields_schema_) {
                 field_names_.emplace_back(schema.field_name_);
             }
+        } else {
+            for (const auto& name : field_names_) {
+                bool find_field_name = false;
+                for (const auto& schema : fields_schema.fields_schema_) {
+                    if (name == schema.field_name_) {
+                        find_field_name = true;
+                        break;
+                    }
+                }
+                if (not find_field_name) {
+                    return Status{SERVER_INVALID_FIELD_NAME, "Field name: " + name + " is wrong"};
+                }
+            }
         }
 
         // step 2: get vector data, now only support get one id

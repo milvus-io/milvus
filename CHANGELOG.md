@@ -32,6 +32,8 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2818 Wrong result returned by `get_entity_by_id`
 -   \#2823 Server crashed during inserting, and can not restart
 -   \#2845 Server crashed after calling `delete_entity_by_id`
+-   \#2869 Create index failed with binary vectors
+-   \#2893 Insert binary data failed
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC

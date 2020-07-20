@@ -84,9 +84,12 @@ CreateIndexRequest::OnExecute() {
             }
         }
 
-        int32_t index_type;
+        int32_t index_type = 0;
         if (json_params_.contains("index_type")) {
             auto index_type_str = json_params_["index_type"].get<std::string>();
+            if (engine::s_map_engine_type.find(index_type_str) == engine::s_map_engine_type.end()) {
+                return Status(SERVER_INVALID_ARGUMENT, "Set wrong index type");
+            }
             index_type = (int32_t)engine::s_map_engine_type.at(index_type_str);
         }
 
@@ -111,9 +114,10 @@ CreateIndexRequest::OnExecute() {
                 adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
             } else if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
                 adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
-            } else {
-                return Status(SERVER_INVALID_INDEX_TYPE, "Invalid index type for collection metric type");
             }
+            //            else {
+            //                return Status(SERVER_INVALID_INDEX_TYPE, "Invalid index type for collection metric type");
+            //            }
         }
 
         rc.RecordSection("check validation");
