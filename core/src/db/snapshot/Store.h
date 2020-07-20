@@ -11,11 +11,14 @@
 
 #pragma once
 
+#include "db/Utils.h"
 #include "db/meta/MetaAdapter.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Utils.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
 #include "utils/Status.h"
 
 #include <stdlib.h>
@@ -42,24 +45,46 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-class Store {
+class Store : public std::enable_shared_from_this<Store> {
  public:
-    using MockIDST =
-        std::tuple<ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE>;
-    using MockResourcesT = std::tuple<CollectionCommit::MapT, Collection::MapT, SchemaCommit::MapT, FieldCommit::MapT,
-                                      Field::MapT, FieldElement::MapT, PartitionCommit::MapT, Partition::MapT,
-                                      SegmentCommit::MapT, Segment::MapT, SegmentFile::MapT>;
+    using Ptr = typename std::shared_ptr<Store>;
 
-    static Store&
-    GetInstance() {
-        static Store store;
-        return store;
+    explicit Store(meta::MetaAdapterPtr adapter) : adapter_(adapter) {
+    }
+
+    static Store::Ptr
+    Build(const std::string& uri) {
+        utils::MetaUriInfo uri_info;
+        LOG_ENGINE_DEBUG_ << "MetaUri: " << uri << std::endl;
+        auto status = utils::ParseMetaUri(uri, uri_info);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << "Wrong URI format: URI = " << uri;
+            throw InvalidArgumentException("Wrong URI format ");
+        }
+
+        if (strcasecmp(uri_info.dialect_.c_str(), "mysql") == 0) {
+            LOG_ENGINE_INFO_ << "Using MySQL";
+            DBMetaOptions options;
+            /* options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
+            options.backend_uri_ = uri;
+            auto engine = std::make_shared<meta::MySqlEngine>(options);
+            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
+            return std::make_shared<Store>(adapter);
+        } else if (strcasecmp(uri_info.dialect_.c_str(), "mock") == 0) {
+            LOG_ENGINE_INFO_ << "Using Mock. Should only be used in test environment";
+            auto engine = std::make_shared<meta::MockMetaEngine>();
+            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
+            return std::make_shared<Store>(adapter);
+        } else {
+            LOG_ENGINE_ERROR_ << "Invalid dialect in URI: dialect = " << uri_info.dialect_;
+            throw InvalidArgumentException("URI dialect is not mysql / sqlite / mock");
+        }
     }
 
     template <typename OpT>
     Status
     ApplyOperation(OpT& op) {
-        auto session = meta::MetaAdapter::GetInstance().CreateSession();
+        auto session = adapter_->CreateSession();
         std::apply(
             [&](auto&... step_context_set) {
                 std::size_t n{0};
@@ -91,13 +116,13 @@ class Store {
     template <typename OpT>
     void
     Apply(OpT& op) {
-        op.ApplyToStore(*this);
+        op.ApplyToStore(this->shared_from_this());
     }
 
     template <typename ResourceT>
     Status
     GetResource(ID_TYPE id, typename ResourceT::Ptr& return_v) {
-        auto status = meta::MetaAdapter::GetInstance().Select<ResourceT>(id, return_v);
+        auto status = adapter_->Select<ResourceT>(id, return_v);
 
         if (!status.ok()) {
             return status;
@@ -116,7 +141,7 @@ class Store {
     GetCollection(const std::string& name, CollectionPtr& return_v) {
         // TODO: Get active collection
         std::vector<CollectionPtr> resources;
-        auto status = meta::MetaAdapter::GetInstance().SelectBy<Collection>(NameField::Name, name, resources);
+        auto status = adapter_->SelectBy<Collection>(NameField::Name, name, resources);
         if (!status.ok()) {
             return status;
         }
@@ -131,20 +156,6 @@ class Store {
         return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
     }
 
-    Status
-    GetCollections(const std::string& name, std::vector<CollectionPtr>& returns_v) {
-        return meta::MetaAdapter::GetInstance().SelectBy<Collection, std::string>(NameField::Name, name, returns_v);
-    }
-
-    Status
-    RemoveCollection(ID_TYPE id) {
-        auto rc_ctx_p =
-            ResourceContextBuilder<Collection>().SetTable(Collection::Name).SetOp(meta::oDelete).SetID(id).CreatePtr();
-
-        int64_t result_id;
-        return meta::MetaAdapter::GetInstance().Apply<Collection>(rc_ctx_p, result_id);
-    }
-
     template <typename ResourceT>
     Status
     RemoveResource(ID_TYPE id) {
@@ -152,14 +163,14 @@ class Store {
             ResourceContextBuilder<ResourceT>().SetTable(ResourceT::Name).SetOp(meta::oDelete).SetID(id).CreatePtr();
 
         int64_t result_id;
-        return meta::MetaAdapter::GetInstance().Apply<ResourceT>(rc_ctx_p, result_id);
+        return adapter_->Apply<ResourceT>(rc_ctx_p, result_id);
     }
 
     IDS_TYPE
     AllActiveCollectionIds(bool reversed = true) const {
         IDS_TYPE ids;
         IDS_TYPE selected_ids;
-        meta::MetaAdapter::GetInstance().SelectResourceIDs<Collection, std::string>(selected_ids, "", "");
+        adapter_->SelectResourceIDs<Collection, std::string>(selected_ids, "", "");
 
         if (!reversed) {
             ids = selected_ids;
@@ -175,8 +186,7 @@ class Store {
     IDS_TYPE
     AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
         IDS_TYPE ids, selected_ids;
-        meta::MetaAdapter::GetInstance().SelectResourceIDs<CollectionCommit, int64_t>(
-            selected_ids, meta::F_COLLECTON_ID, collection_id);
+        adapter_->SelectResourceIDs<CollectionCommit, int64_t>(selected_ids, meta::F_COLLECTON_ID, collection_id);
 
         if (!reversed) {
             ids = selected_ids;
@@ -189,41 +199,14 @@ class Store {
         return ids;
     }
 
-    Status
-    CreateCollection(Collection&& collection, CollectionPtr& return_v) {
-        auto status = CreateResource<Collection>(std::move(collection), return_v);
-        if (!status.ok()) {
-            return status;
-        }
-
-        return Status::OK();
-    }
-
-    template <typename ResourceT>
-    Status
-    UpdateResource(ResourceT&& resource, typename ResourceT::Ptr& return_v) {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-        auto& resources = std::get<typename ResourceT::MapT>(resources_);
-        auto res = std::make_shared<ResourceT>(resource);
-        auto& id = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(ids_);
-        res->ResetCnt();
-        resources[res->GetID()] = res;
-        lock.unlock();
-        GetResource<ResourceT>(res->GetID(), return_v);
-        /* std::cout << ">>> [Update] " << ResourceT::Name << " " << id; */
-        /* std::cout << " " << std::boolalpha << res->IsActive() << std::endl; */
-        return Status::OK();
-    }
-
     template <typename ResourceT>
     Status
     CreateResource(ResourceT&& resource, typename ResourceT::Ptr& return_v) {
-        //        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto res_p = std::make_shared<ResourceT>(resource);
         auto res_ctx_p = ResourceContextBuilder<ResourceT>().SetOp(meta::oAdd).SetResource(res_p).CreatePtr();
 
         int64_t result_id;
-        auto status = meta::MetaAdapter::GetInstance().Apply<ResourceT>(res_ctx_p, result_id);
+        auto status = adapter_->Apply<ResourceT>(res_ctx_p, result_id);
         if (!status.ok()) {
             return status;
         }
@@ -232,16 +215,12 @@ class Store {
         return_v->SetID(result_id);
         return_v->ResetCnt();
 
-        //        lock.unlock();
-        //        auto status = GetResource<ResourceT>(res->GetID(), return_v);
-        /* std::cout << ">>> [Create] " << ResourceT::Name << " " << id; */
-        /* std::cout << " " << std::boolalpha << res->IsActive() << std::endl; */
         return Status::OK();
     }
 
     void
     DoReset() {
-        auto status = meta::MetaAdapter::GetInstance().TruncateAll();
+        auto status = adapter_->TruncateAll();
         if (!status.ok()) {
             std::cout << "TruncateAll failed: " << status.ToString() << std::endl;
         }
@@ -254,9 +233,6 @@ class Store {
     }
 
  private:
-    Store() {
-    }
-
     void
     DoMock() {
         Status status;
@@ -275,7 +251,7 @@ class Store {
             auto tc = Collection(name.str());
             tc.Activate();
             CollectionPtr c;
-            CreateCollection(std::move(tc), c);
+            CreateResource<Collection>(std::move(tc), c);
             all_records.push_back(c);
 
             MappingT schema_c_m;
@@ -373,7 +349,7 @@ class Store {
                                  .AddAttr(meta::F_STATE)
                                  .CreatePtr();
 
-                meta::MetaAdapter::GetInstance().Apply<Collection>(t_c_p, result_id);
+                adapter_->Apply<Collection>(t_c_p, result_id);
             } else if (record.type() == typeid(std::shared_ptr<CollectionCommit>)) {
                 const auto& r = std::any_cast<std::shared_ptr<CollectionCommit>>(record);
                 r->Activate();
@@ -382,17 +358,15 @@ class Store {
                                   .SetResource(r)
                                   .AddAttr(meta::F_STATE)
                                   .CreatePtr();
-                meta::MetaAdapter::GetInstance().Apply<CollectionCommit>(t_cc_p, result_id);
+                adapter_->Apply<CollectionCommit>(t_cc_p, result_id);
             }
         }
     }
 
-    MockResourcesT resources_;
-    MockIDST ids_;
-    std::map<std::string, ID_TYPE> name_ids_;
-    std::unordered_map<std::type_index, std::function<ID_TYPE(std::any const&)>> any_flush_vistors_;
-    mutable std::shared_timed_mutex mutex_;
+    meta::MetaAdapterPtr adapter_;
 };
+
+using StorePtr = Store::Ptr;
 
 }  // namespace snapshot
 }  // namespace engine

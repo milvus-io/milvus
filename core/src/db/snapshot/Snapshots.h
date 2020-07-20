@@ -39,14 +39,14 @@ class Snapshots {
     Status
     GetHolder(const std::string& name, SnapshotHolderPtr& holder) const;
     Status
-    LoadHolder(Store& store, const ID_TYPE& collection_id, SnapshotHolderPtr& holder);
+    LoadHolder(StorePtr store, const ID_TYPE& collection_id, SnapshotHolderPtr& holder);
 
     Status
     GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id = 0, bool scoped = true) const;
     Status
     GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id = 0, bool scoped = true) const;
     Status
-    LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped = true);
+    LoadSnapshot(StorePtr store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped = true);
 
     Status
     GetCollectionIds(IDS_TYPE& ids) const;
@@ -64,20 +64,17 @@ class Snapshots {
     Status
     Reset();
 
-    void
-    Init();
+    Status Init(StorePtr);
 
  private:
     void
     SnapshotGCCallback(Snapshot::Ptr ss_ptr);
-    Snapshots() {
-        Init();
-    }
+    Snapshots() = default;
     Status
     DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn);
 
     Status
-    LoadNoLock(Store& store, ID_TYPE collection_id, SnapshotHolderPtr& holder);
+    LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& holder);
     Status
     GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) const;
 

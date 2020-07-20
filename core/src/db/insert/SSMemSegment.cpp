@@ -116,7 +116,7 @@ SSMemSegment::CreateSegment() {
 }
 
 Status
-SSMemSegment::GetSingleEntitySize(size_t& single_size) {
+SSMemSegment::GetSingleEntitySize(int64_t& single_size) {
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
     if (!status.ok()) {
@@ -153,6 +153,7 @@ SSMemSegment::GetSingleEntitySize(size_t& single_size) {
             case meta::hybrid::DataType::INT64:
                 single_size += sizeof(uint64_t);
                 break;
+            case meta::hybrid::DataType::VECTOR:
             case meta::hybrid::DataType::VECTOR_FLOAT:
             case meta::hybrid::DataType::VECTOR_BINARY: {
                 json params = field->GetParams();
@@ -179,7 +180,7 @@ SSMemSegment::GetSingleEntitySize(size_t& single_size) {
 
 Status
 SSMemSegment::Add(const SSVectorSourcePtr& source) {
-    size_t single_entity_mem_size = 0;
+    int64_t single_entity_mem_size = 0;
     auto status = GetSingleEntitySize(single_entity_mem_size);
     if (!status.ok()) {
         return status;
@@ -187,8 +188,8 @@ SSMemSegment::Add(const SSVectorSourcePtr& source) {
 
     size_t mem_left = GetMemLeft();
     if (mem_left >= single_entity_mem_size) {
-        size_t num_entities_to_add = std::ceil(mem_left / single_entity_mem_size);
-        size_t num_entities_added;
+        int64_t num_entities_to_add = std::ceil(mem_left / single_entity_mem_size);
+        int64_t num_entities_added;
 
         auto status = source->Add(segment_writer_ptr_, num_entities_to_add, num_entities_added);
 
@@ -254,19 +255,19 @@ SSMemSegment::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
     return Status::OK();
 }
 
-size_t
+int64_t
 SSMemSegment::GetCurrentMem() {
     return current_mem_;
 }
 
-size_t
+int64_t
 SSMemSegment::GetMemLeft() {
     return (MAX_TABLE_FILE_MEM - current_mem_);
 }
 
 bool
 SSMemSegment::IsFull() {
-    size_t single_entity_mem_size = 0;
+    int64_t single_entity_mem_size = 0;
     auto status = GetSingleEntitySize(single_entity_mem_size);
     if (!status.ok()) {
         return true;
@@ -280,29 +281,15 @@ SSMemSegment::Serialize(uint64_t wal_lsn) {
     int64_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
-    snapshot::SegmentFileContext sf_context;
-    sf_context.field_name = "vector";
-    sf_context.field_element_name = "raw";
-    sf_context.collection_id = segment_->GetCollectionId();
-    sf_context.partition_id = segment_->GetPartitionId();
-    sf_context.segment_id = segment_->GetID();
-    snapshot::SegmentFilePtr seg_file;
-    auto status = operation_->CommitNewSegmentFile(sf_context, seg_file);
-
-    status = segment_writer_ptr_->Serialize();
+    auto status = segment_writer_ptr_->Serialize();
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to serialize segment: " << segment_->GetID();
         return status;
     }
 
-    seg_file->SetSize(segment_writer_ptr_->Size());
-    seg_file->SetRowCount(segment_writer_ptr_->RowCount());
-
+    status = operation_->CommitRowCount(segment_writer_ptr_->RowCount());
     status = operation_->Push();
-
-    LOG_ENGINE_DEBUG_ << "New file " << seg_file->GetID() << " of size " << seg_file->GetSize()
-                      << " bytes, lsn = " << wal_lsn;
-
+    LOG_ENGINE_DEBUG_ << "New segment " << segment_->GetID() << " serialized, lsn = " << wal_lsn;
     return status;
 }
 

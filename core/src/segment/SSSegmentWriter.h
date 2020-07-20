@@ -40,7 +40,7 @@ class SSSegmentWriter {
     AddChunk(const engine::DataChunkPtr& chunk_ptr);
 
     Status
-    AddChunk(const engine::DataChunkPtr& chunk_ptr, uint64_t from, uint64_t to);
+    AddChunk(const engine::DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
 
     Status
     WriteBloomFilter(const std::string& file_path, const IdBloomFilterPtr& bloom_filter_ptr);
@@ -52,10 +52,7 @@ class SSSegmentWriter {
     Serialize();
 
     Status
-    GetSegment(engine::SegmentPtr& segment_ptr);
-
-    Status
-    Merge(const SSSegmentReaderPtr& segment_to_merge);
+    Merge(const SSSegmentReaderPtr& segment_reader);
 
     size_t
     Size();
@@ -67,7 +64,16 @@ class SSSegmentWriter {
     SetVectorIndex(const std::string& field_name, const knowhere::VecIndexPtr& index);
 
     Status
-    WriteVectorIndex(const std::string& field_name, const std::string& file_path);
+    WriteVectorIndex(const std::string& field_name);
+
+    Status
+    GetSegment(engine::SegmentPtr& segment_ptr);
+
+    Status
+    GetSegmentID(int64_t& id);
+
+    std::string
+    GetSegmentPath();
 
  private:
     Status
@@ -77,10 +83,13 @@ class SSSegmentWriter {
     WriteField(const std::string& file_path, const engine::FIXED_FIELD_DATA& raw);
 
     Status
-    WriteBloomFilter(const std::string& file_path);
+    WriteFields();
 
     Status
-    WriteDeletedDocs(const std::string& file_path);
+    WriteBloomFilter();
+
+    Status
+    WriteDeletedDocs();
 
  private:
     engine::SegmentVisitorPtr segment_visitor_;

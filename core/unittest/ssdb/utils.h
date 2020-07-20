@@ -20,6 +20,7 @@
 #include <string>
 
 #include "db/SSDBImpl.h"
+#include "db/meta/MetaAdapter.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/EventExecutor.h"
@@ -36,14 +37,16 @@ using IDS_TYPE = milvus::engine::snapshot::IDS_TYPE;
 using LSN_TYPE = milvus::engine::snapshot::LSN_TYPE;
 using SIZE_TYPE = milvus::engine::snapshot::SIZE_TYPE;
 using MappingT = milvus::engine::snapshot::MappingT;
+using State = milvus::engine::snapshot::State;
 using LoadOperationContext = milvus::engine::snapshot::LoadOperationContext;
 using CreateCollectionContext = milvus::engine::snapshot::CreateCollectionContext;
 using SegmentFileContext = milvus::engine::snapshot::SegmentFileContext;
 using OperationContext = milvus::engine::snapshot::OperationContext;
 using PartitionContext = milvus::engine::snapshot::PartitionContext;
 using DropIndexOperation = milvus::engine::snapshot::DropIndexOperation;
+using AddFieldElementOperation = milvus::engine::snapshot::AddFieldElementOperation;
 using DropAllIndexOperation = milvus::engine::snapshot::DropAllIndexOperation;
-using BuildOperation = milvus::engine::snapshot::BuildOperation;
+using AddSegmentFileOperation = milvus::engine::snapshot::AddSegmentFileOperation;
 using MergeOperation = milvus::engine::snapshot::MergeOperation;
 using CreateCollectionOperation = milvus::engine::snapshot::CreateCollectionOperation;
 using NewSegmentOperation = milvus::engine::snapshot::NewSegmentOperation;
@@ -63,6 +66,7 @@ using SegmentFile = milvus::engine::snapshot::SegmentFile;
 using SegmentFilePtr = milvus::engine::snapshot::SegmentFilePtr;
 using Field = milvus::engine::snapshot::Field;
 using FieldElement = milvus::engine::snapshot::FieldElement;
+using FieldElementPtr = milvus::engine::snapshot::FieldElementPtr;
 using Snapshots = milvus::engine::snapshot::Snapshots;
 using ScopedSnapshotT = milvus::engine::snapshot::ScopedSnapshotT;
 using ReferenceProxy = milvus::engine::snapshot::ReferenceProxy;
@@ -76,6 +80,9 @@ using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
 using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
 using SSDBImpl = milvus::engine::SSDBImpl;
 using Status = milvus::Status;
+using Store = milvus::engine::snapshot::Store;
+
+using MetaAdapterPtr = milvus::engine::meta::MetaAdapterPtr;
 
 inline int
 RandomInt(int start, int end) {
@@ -268,6 +275,7 @@ CreateSegment(ScopedSnapshotT ss, ID_TYPE partition_id, LSN_TYPE lsn, const Segm
     nsf_context.partition_id = new_seg->GetPartitionId();
     STATUS_CHECK(op->CommitNewSegmentFile(nsf_context, seg_file));
     op->CommitRowCount(row_cnt);
+    seg_file->SetSize(row_cnt * 10);
     STATUS_CHECK(op->Push());
 
     return op->GetSnapshot(ss);
@@ -299,6 +307,9 @@ class SSDBTest : public BaseTest {
  protected:
     std::shared_ptr<SSDBImpl> db_;
 
+    milvus::engine::DBOptions
+    GetOptions();
+
     void
     SetUp() override;
     void
@@ -310,6 +321,18 @@ class SSSegmentTest : public BaseTest {
  protected:
     std::shared_ptr<SSDBImpl> db_;
 
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+class SSMetaTest : public BaseTest {
+ protected:
+    MetaAdapterPtr meta_;
+
+ protected:
     void
     SetUp() override;
     void

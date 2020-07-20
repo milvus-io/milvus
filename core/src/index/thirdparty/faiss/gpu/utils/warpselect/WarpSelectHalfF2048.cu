@@ -12,6 +12,7 @@ namespace faiss { namespace gpu {
 
 #ifdef FAISS_USE_FLOAT16
 #if GPU_MAX_SELECTION_K >= 2048
+#ifdef FAISS_USE_FLOAT16
 WARP_SELECT_IMPL(half, false, 2048, 8);
 #endif
 #endif

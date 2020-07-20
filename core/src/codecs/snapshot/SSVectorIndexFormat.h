@@ -19,9 +19,9 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "codecs/VectorIndexFormat.h"
-#include "segment/VectorIndex.h"
 #include "storage/FSHandler.h"
 
 namespace milvus {
@@ -32,12 +32,27 @@ class SSVectorIndexFormat {
     SSVectorIndexFormat() = default;
 
     void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, ExternalData externalData,
-         segment::VectorIndexPtr& vector_index);
+    read_raw(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr& data);
 
     void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-          const segment::VectorIndexPtr& vector_index);
+    read_index(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinarySet& data);
+
+    void
+    read_compress(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr& data);
+
+    void
+    convert_raw(const std::vector<uint8_t>& raw, knowhere::BinaryPtr& data);
+
+    void
+    construct_index(const std::string& index_name, knowhere::BinarySet& index_data, knowhere::BinaryPtr& raw_data,
+                    knowhere::BinaryPtr& compress_data, knowhere::VecIndexPtr& index);
+
+    void
+    write_index(const storage::FSHandlerPtr& fs_ptr, const std::string& location, const knowhere::VecIndexPtr& index);
+
+    void
+    write_compress(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                   const knowhere::VecIndexPtr& index);
 
     // No copy and move
     SSVectorIndexFormat(const SSVectorIndexFormat&) = delete;
@@ -47,11 +62,6 @@ class SSVectorIndexFormat {
     operator=(const SSVectorIndexFormat&) = delete;
     SSVectorIndexFormat&
     operator=(SSVectorIndexFormat&&) = delete;
-
- private:
-    knowhere::VecIndexPtr
-    read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path, const std::string& extern_key = "",
-                  const knowhere::BinaryPtr& extern_data = nullptr);
 };
 
 using SSVectorIndexFormatPtr = std::shared_ptr<SSVectorIndexFormat>;

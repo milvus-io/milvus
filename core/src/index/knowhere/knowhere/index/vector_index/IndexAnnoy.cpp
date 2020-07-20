@@ -86,7 +86,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         return;
     }
 
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR(dataset_ptr)
 
     metric_type_ = config[Metric::TYPE];
     if (metric_type_ == Metric::L2) {
@@ -110,7 +110,7 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
     auto k = config[meta::TOPK].get<int64_t>();
     auto search_k = config[IndexParams::search_k].get<int64_t>();
     auto all_num = rows * k;

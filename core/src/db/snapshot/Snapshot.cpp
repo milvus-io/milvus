@@ -29,7 +29,7 @@ Snapshot::UnRefAll() {
     std::apply([this](auto&... resource) { ((DoUnRef(resource)), ...); }, resources_);
 }
 
-Snapshot::Snapshot(ID_TYPE ss_id) {
+Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
     auto& collection_commits_holder = CollectionCommitsHolder::GetInstance();
     auto& collections_holder = CollectionsHolder::GetInstance();
     auto& schema_commits_holder = SchemaCommitsHolder::GetInstance();
@@ -42,22 +42,22 @@ Snapshot::Snapshot(ID_TYPE ss_id) {
     auto& segments_holder = SegmentsHolder::GetInstance();
     auto& segment_files_holder = SegmentFilesHolder::GetInstance();
 
-    auto collection_commit = collection_commits_holder.GetResource(ss_id, false);
+    auto collection_commit = collection_commits_holder.GetResource(store, ss_id, false);
     AddResource<CollectionCommit>(collection_commit);
 
     max_lsn_ = collection_commit->GetLsn();
-    auto schema_commit = schema_commits_holder.GetResource(collection_commit->GetSchemaId(), false);
+    auto schema_commit = schema_commits_holder.GetResource(store, collection_commit->GetSchemaId(), false);
     AddResource<SchemaCommit>(schema_commit);
 
     current_schema_id_ = schema_commit->GetID();
-    auto collection = collections_holder.GetResource(collection_commit->GetCollectionId(), false);
+    auto collection = collections_holder.GetResource(store, collection_commit->GetCollectionId(), false);
     AddResource<Collection>(collection);
 
     auto& collection_commit_mappings = collection_commit->GetMappings();
     for (auto p_c_id : collection_commit_mappings) {
-        auto partition_commit = partition_commits_holder.GetResource(p_c_id, false);
+        auto partition_commit = partition_commits_holder.GetResource(store, p_c_id, false);
         auto partition_id = partition_commit->GetPartitionId();
-        auto partition = partitions_holder.GetResource(partition_id, false);
+        auto partition = partitions_holder.GetResource(store, partition_id, false);
         auto partition_name = partition->GetName();
         AddResource<PartitionCommit>(partition_commit);
 
@@ -72,11 +72,11 @@ Snapshot::Snapshot(ID_TYPE ss_id) {
         /* std::cout << ")" << std::endl; */
         auto& partition_commit_mappings = partition_commit->GetMappings();
         for (auto s_c_id : partition_commit_mappings) {
-            auto segment_commit = segment_commits_holder.GetResource(s_c_id, false);
+            auto segment_commit = segment_commits_holder.GetResource(store, s_c_id, false);
             auto segment_id = segment_commit->GetSegmentId();
-            auto segment = segments_holder.GetResource(segment_id, false);
+            auto segment = segments_holder.GetResource(store, segment_id, false);
             auto segment_schema_id = segment_commit->GetSchemaId();
-            auto segment_schema = schema_commits_holder.GetResource(segment_schema_id, false);
+            auto segment_schema = schema_commits_holder.GetResource(store, segment_schema_id, false);
             auto segment_partition_id = segment->GetPartitionId();
             AddResource<SchemaCommit>(segment_schema);
             AddResource<SegmentCommit>(segment_commit);
@@ -88,10 +88,10 @@ Snapshot::Snapshot(ID_TYPE ss_id) {
             seg_segc_map_[segment_id] = segment_commit->GetID();
             auto& segment_commit_mappings = segment_commit->GetMappings();
             for (auto s_f_id : segment_commit_mappings) {
-                auto segment_file = segment_files_holder.GetResource(s_f_id, false);
+                auto segment_file = segment_files_holder.GetResource(store, s_f_id, false);
                 auto segment_file_id = segment_file->GetID();
                 auto field_element_id = segment_file->GetFieldElementId();
-                auto field_element = field_elements_holder.GetResource(field_element_id, false);
+                auto field_element = field_elements_holder.GetResource(store, field_element_id, false);
                 AddResource<FieldElement>(field_element);
                 AddResource<SegmentFile>(segment_file);
                 element_segfiles_map_[field_element_id][segment_id] = segment_file_id;
@@ -108,18 +108,18 @@ Snapshot::Snapshot(ID_TYPE ss_id) {
         }
         auto& schema_commit = kv.second;
         for (auto field_commit_id : schema_commit_mappings) {
-            auto field_commit = field_commits_holder.GetResource(field_commit_id, false);
+            auto field_commit = field_commits_holder.GetResource(store, field_commit_id, false);
             AddResource<FieldCommit>(field_commit);
 
             auto field_id = field_commit->GetFieldId();
-            auto field = fields_holder.GetResource(field_id, false);
+            auto field = fields_holder.GetResource(store, field_id, false);
             auto field_name = field->GetName();
             AddResource<Field>(field);
 
             field_names_map_[field_name] = field_id;
             auto& field_commit_mappings = field_commit->GetMappings();
             for (auto field_element_id : field_commit_mappings) {
-                auto field_element = field_elements_holder.GetResource(field_element_id, false);
+                auto field_element = field_elements_holder.GetResource(store, field_element_id, false);
                 AddResource<FieldElement>(field_element);
                 auto field_element_name = field_element->GetName();
                 field_element_names_map_[field_name][field_element_name] = field_element_id;
@@ -217,6 +217,7 @@ Snapshot::ToString() const {
     ss << "****************************** Snapshot " << GetID() << " ******************************";
     ss << "\nCollection: id=" << GetCollectionId() << ",name=\"" << GetName() << "\"";
     ss << ", CollectionCommit: id=" << GetCollectionCommit()->GetID();
+    ss << ",size=" << GetCollectionCommit()->GetSize();
     ss << ",rows=" << GetCollectionCommit()->GetRowCount() << ",mappings=";
     auto& cc_m = GetCollectionCommit()->GetMappings();
     ss << to_matrix_string(cc_m, row_element_size, 2);
@@ -243,6 +244,7 @@ Snapshot::ToString() const {
         auto p = GetResource<Partition>(p_c->GetPartitionId());
         ss << "\nPartition: id=" << p->GetID() << ",name=\"" << p->GetName() << "\"";
         ss << ", PartitionCommit: id=" << p_c->GetID();
+        ss << ",size=" << p_c->GetSize();
         ss << ",rows=" << p_c->GetRowCount() << ",mappings=";
         auto& pc_m = p_c->GetMappings();
         ss << to_matrix_string(pc_m, row_element_size, 2);
@@ -251,12 +253,14 @@ Snapshot::ToString() const {
             auto se = GetResource<Segment>(sc->GetSegmentId());
             ss << "\n  Segment: id=" << se->GetID();
             ss << ", SegmentCommit: id=" << sc->GetID();
+            ss << ",size=" << sc->GetSize();
             ss << ",rows=" << sc->GetRowCount() << ",mappings=";
             auto& sc_m = sc->GetMappings();
             ss << to_matrix_string(sc_m, row_element_size, 2);
             for (auto& sf_id : sc_m) {
                 auto sf = GetResource<SegmentFile>(sf_id);
                 ss << "\n\tSegmentFile: id=" << sf_id << ",field_element_id=" << sf->GetFieldElementId();
+                ss << ",size=" << sf->GetSize();
             }
         }
     }
