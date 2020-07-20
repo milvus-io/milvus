@@ -17,7 +17,7 @@ namespace engine {
 namespace snapshot {
 
 Status
-CollectionCommitOperation::DoExecute(Store& store) {
+CollectionCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
     auto row_cnt = 0;
     auto size = 0;
@@ -74,7 +74,7 @@ PartitionOperation::PreCheck() {
 }
 
 Status
-PartitionOperation::DoExecute(Store& store) {
+PartitionOperation::DoExecute(StorePtr store) {
     auto status = CheckStale();
     if (!status.ok())
         return status;
@@ -103,7 +103,7 @@ PartitionCommitOperation::GetPrevResource() const {
 }
 
 Status
-PartitionCommitOperation::DoExecute(Store& store) {
+PartitionCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
     auto row_cnt = 0;
     auto size = 0;
@@ -184,7 +184,7 @@ SegmentOperation::PreCheck() {
 }
 
 Status
-SegmentOperation::DoExecute(Store& store) {
+SegmentOperation::DoExecute(StorePtr store) {
     if (!context_.prev_partition) {
         std::stringstream emsg;
         emsg << GetRepr() << ". prev_partition should be specified in context";
@@ -212,7 +212,7 @@ SegmentCommitOperation::GetPrevResource() const {
 }
 
 Status
-SegmentCommitOperation::DoExecute(Store& store) {
+SegmentCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
     auto size = 0;
     if (prev_resource) {
@@ -277,7 +277,7 @@ FieldCommitOperation::GetPrevResource() const {
 }
 
 Status
-FieldCommitOperation::DoExecute(Store& store) {
+FieldCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
 
     if (prev_resource) {
@@ -309,7 +309,7 @@ SchemaCommitOperation::GetPrevResource() const {
 }
 
 Status
-SchemaCommitOperation::DoExecute(Store& store) {
+SchemaCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
     if (!prev_resource) {
         return Status(SS_INVALID_CONTEX_ERROR, "Cannot get schema commit");
@@ -335,7 +335,7 @@ SegmentFileOperation::SegmentFileOperation(const SegmentFileContext& sc, ScopedS
 }
 
 Status
-SegmentFileOperation::DoExecute(Store& store) {
+SegmentFileOperation::DoExecute(StorePtr store) {
     FieldElementPtr fe;
     STATUS_CHECK(GetStartedSS()->GetFieldElement(context_.field_name, context_.field_element_name, fe));
     resource_ =

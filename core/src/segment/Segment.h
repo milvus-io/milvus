@@ -33,7 +33,7 @@ namespace engine {
 
 using FIELD_TYPE = engine::meta::hybrid::DataType;
 using FIELD_TYPE_MAP = std::unordered_map<std::string, engine::meta::hybrid::DataType>;
-using FIELD_WIDTH_MAP = std::unordered_map<std::string, uint64_t>;
+using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;
 using FIXED_FIELD_DATA = std::vector<uint8_t>;
 using FIXEDX_FIELD_MAP = std::unordered_map<std::string, FIXED_FIELD_DATA>;
 using VARIABLE_FIELD_DATA = std::vector<std::string>;
@@ -41,7 +41,7 @@ using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VARIABLE_FIELD_DATA>;
 using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;
 
 struct DataChunk {
-    uint64_t count_ = 0;
+    int64_t count_ = 0;
     FIXEDX_FIELD_MAP fixed_fields_;
     VARIABLE_FIELD_MAP variable_fields_;
 };
@@ -51,22 +51,22 @@ using DataChunkPtr = std::shared_ptr<DataChunk>;
 class Segment {
  public:
     Status
-    AddField(const std::string& field_name, FIELD_TYPE field_type, uint64_t field_width = 0);
+    AddField(const std::string& field_name, FIELD_TYPE field_type, int64_t field_width = 0);
 
     Status
     AddChunk(const DataChunkPtr& chunk_ptr);
 
     Status
-    AddChunk(const DataChunkPtr& chunk_ptr, uint64_t from, uint64_t to);
+    AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
 
     Status
-    DeleteEntity(int32_t offset);
+    DeleteEntity(int64_t offset);
 
     Status
     GetFieldType(const std::string& field_name, FIELD_TYPE& type);
 
     Status
-    GetFixedFieldWidth(const std::string& field_name, uint64_t width);
+    GetFixedFieldWidth(const std::string& field_name, int64_t& width);
 
     Status
     GetFixedFieldData(const std::string& field_name, FIXED_FIELD_DATA& data);
@@ -126,7 +126,7 @@ class Segment {
     VARIABLE_FIELD_MAP variable_fields_;
     VECTOR_INDEX_MAP vector_indice_;
 
-    uint64_t row_count_ = 0;
+    int64_t row_count_ = 0;
 
     segment::DeletedDocsPtr deleted_docs_ptr_ = nullptr;
     segment::IdBloomFilterPtr id_bloom_filter_ptr_ = nullptr;

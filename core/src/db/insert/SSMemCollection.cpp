@@ -46,6 +46,8 @@ SSMemCollection::Add(const milvus::engine::SSVectorSourcePtr& source) {
             status = new_mem_segment->Add(source);
             if (status.ok()) {
                 mem_segment_list_.emplace_back(new_mem_segment);
+            } else {
+                return status;
             }
         } else {
             status = current_mem_segment->Add(source);

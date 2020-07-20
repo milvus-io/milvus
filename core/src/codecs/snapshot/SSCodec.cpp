@@ -19,12 +19,10 @@
 
 #include <memory>
 
-#include "SSAttrsFormat.h"
-#include "SSAttrsIndexFormat.h"
 #include "SSDeletedDocsFormat.h"
 #include "SSIdBloomFilterFormat.h"
+#include "SSStructuredIndexFormat.h"
 #include "SSVectorIndexFormat.h"
-#include "SSVectorsFormat.h"
 
 namespace milvus {
 namespace codec {
@@ -37,10 +35,8 @@ SSCodec::instance() {
 
 SSCodec::SSCodec() {
     block_format_ptr_ = std::make_shared<SSBlockFormat>();
-    vectors_format_ptr_ = std::make_shared<SSVectorsFormat>();
-    attrs_format_ptr_ = std::make_shared<SSAttrsFormat>();
+    structured_index_format_ptr_ = std::make_shared<SSStructuredIndexFormat>();
     vector_index_format_ptr_ = std::make_shared<SSVectorIndexFormat>();
-    attrs_index_format_ptr_ = std::make_shared<SSAttrsIndexFormat>();
     deleted_docs_format_ptr_ = std::make_shared<SSDeletedDocsFormat>();
     id_bloom_filter_format_ptr_ = std::make_shared<SSIdBloomFilterFormat>();
     vector_compress_format_ptr_ = std::make_shared<SSVectorCompressFormat>();
@@ -51,24 +47,14 @@ SSCodec::GetBlockFormat() {
     return block_format_ptr_;
 }
 
-SSVectorsFormatPtr
-SSCodec::GetVectorsFormat() {
-    return vectors_format_ptr_;
-}
-
-SSAttrsFormatPtr
-SSCodec::GetAttrsFormat() {
-    return attrs_format_ptr_;
-}
-
 SSVectorIndexFormatPtr
 SSCodec::GetVectorIndexFormat() {
     return vector_index_format_ptr_;
 }
 
-SSAttrsIndexFormatPtr
-SSCodec::GetAttrsIndexFormat() {
-    return attrs_index_format_ptr_;
+SSStructuredIndexFormatPtr
+SSCodec::GetStructuredIndexFormat() {
+    return structured_index_format_ptr_;
 }
 
 SSDeletedDocsFormatPtr

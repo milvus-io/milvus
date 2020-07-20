@@ -33,7 +33,8 @@ class SSVectorSource {
     explicit SSVectorSource(const DataChunkPtr& chunk);
 
     Status
-    Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const size_t& num_attrs_to_add, size_t& num_attrs_added);
+    Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const int64_t& num_attrs_to_add,
+        int64_t& num_attrs_added);
 
     bool
     AllAdded();
@@ -41,7 +42,7 @@ class SSVectorSource {
  private:
     DataChunkPtr chunk_;
 
-    size_t current_num_added_ = 0;
+    int64_t current_num_added_ = 0;
 };  // SSVectorSource
 
 using SSVectorSourcePtr = std::shared_ptr<SSVectorSource>;

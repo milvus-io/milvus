@@ -314,7 +314,6 @@ MySqlEngine::Initialize() {
             LOG_ENGINE_ERROR_ << msg;
             throw Exception(DB_META_TRANSACTION_FAILED, msg);
         }
-        sleep(1);
     };
 
     create_schema(COLLECTION_SCHEMA);

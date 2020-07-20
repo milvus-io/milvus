@@ -70,6 +70,8 @@ SSMergeManagerImpl::MergeFiles(const std::string& collection_name) {
         for (it = part2seg.begin(); it != part2seg.end();) {
             if (it->second.size() <= 1) {
                 part2seg.erase(it++);
+            } else {
+                it++;
             }
         }
 
