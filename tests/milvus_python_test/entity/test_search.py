@@ -572,22 +572,12 @@ class TestSearchBase:
         '''
         # from scipy.spatial import distance
         nprobe = 512
-        int_vectors, vectors, ids = self.init_binary_data(connect, jac_collection, nb=2)
-        index_type = "FLAT"
-        index_param = {
-            "nlist": 16384
-        }
-        connect.create_index(jac_collection, index_type, index_param)
-        logging.getLogger().info(connect.get_collection_info(jac_collection))
-        logging.getLogger().info(connect.get_index_info(jac_collection))
-        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, jac_collection, nb=1, insert=False)
+        int_vectors, entities, ids = init_binary_data(connect, jac_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, jac_collection, nb=1, insert=False)
         distance_0 = jaccard(query_int_vectors[0], int_vectors[0])
         distance_1 = jaccard(query_int_vectors[0], int_vectors[1])
-        search_param = get_search_param(index_type)
-        status, result = connect.search(jac_collection, top_k, query_vecs, params=search_param)
-        logging.getLogger().info(status)
-        logging.getLogger().info(result)
-        assert abs(result[0][0].distance - min(distance_0, distance_1)) <= epsilon
+        res = connect.search(jac_collection, query_entities)
+        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     def test_search_distance_hamming_flat_index(self, connect, ham_collection):
         '''
@@ -597,19 +587,11 @@ class TestSearchBase:
         '''
         # from scipy.spatial import distance
         nprobe = 512
-        int_vectors, vectors, ids = self.init_binary_data(connect, ham_collection, nb=2)
-        index_type = "FLAT"
-        index_param = {
-            "nlist": 16384
-        }
-        connect.create_index(ham_collection, index_type, index_param)
-        logging.getLogger().info(connect.get_collection_info(ham_collection))
-        logging.getLogger().info(connect.get_index_info(ham_collection))
-        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, ham_collection, nb=1, insert=False)
+        int_vectors, entities, ids = init_binary_data(connect, ham_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, ham_collection, nb=1, insert=False)
         distance_0 = hamming(query_int_vectors[0], int_vectors[0])
         distance_1 = hamming(query_int_vectors[0], int_vectors[1])
-        search_param = get_search_param(index_type)
-        status, result = connect.search(ham_collection, top_k, query_vecs, params=search_param)
+        res = connect.search(ham_collection, query_entities, params=)
         logging.getLogger().info(status)
         logging.getLogger().info(result)
         assert abs(result[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
