@@ -656,7 +656,7 @@ TEST_F(SnapshotTest, OperationTest) {
         auto collection_commit = CollectionCommitsHolder::GetInstance().GetResource(ss_id, false);
         /* snapshot::SegmentCommitsHolder::GetInstance().GetResource(prev_segment_commit->GetID()); */
         ASSERT_TRUE(collection_commit);
-        ASSERT_TRUE(collection_commit->ToString().empty());
+        std::cout << collection_commit->ToString() << std::endl;
     }
 
     OperationContext merge_ctx;
