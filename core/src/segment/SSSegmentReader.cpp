@@ -205,7 +205,7 @@ SSSegmentReader::LoadUids(std::vector<int64_t>& uids) {
 }
 
 Status
-SSSegmentReader::LoadVectorIndex(const std::string& field_name, segment::VectorIndexPtr& vector_index_ptr) {
+SSSegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
@@ -236,11 +236,29 @@ SSSegmentReader::LoadVectorIndex(const std::string& field_name, segment::VectorI
             ss_codec.GetVectorIndexFormat()->read_compress(fs_ptr_, file_path, compress_data);
         }
 
-        knowhere::VecIndexPtr index;
         std::string index_name = index_visitor->GetElement()->GetName();
-        ss_codec.GetVectorIndexFormat()->construct_index(index_name, index_data, raw_data, compress_data, index);
+        ss_codec.GetVectorIndexFormat()->construct_index(index_name, index_data, raw_data, compress_data, index_ptr);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to load vector index: " + std::string(e.what());
+        LOG_ENGINE_ERROR_ << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
 
-        vector_index_ptr = std::make_shared<segment::VectorIndex>(index);
+    return Status::OK();
+}
+
+Status
+SSSegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr) {
+    try {
+        auto& ss_codec = codec::SSCodec::instance();
+        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+
+        auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (index_visitor) {
+            std::string file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, index_visitor->GetFile());
+            ss_codec.GetStructuredIndexFormat()->read(fs_ptr_, file_path, index_ptr);
+        }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -262,15 +280,17 @@ SSSegmentReader::LoadVectorIndice() {
             continue;
         }
 
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
         if (field->GetFtype() == engine::FIELD_TYPE::VECTOR || field->GetFtype() == engine::FIELD_TYPE::VECTOR_FLOAT ||
             field->GetFtype() == engine::FIELD_TYPE::VECTOR_BINARY) {
-            std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-
-            segment::VectorIndexPtr vector_index_ptr;
-            STATUS_CHECK(LoadVectorIndex(name, vector_index_ptr));
-
-            segment_ptr_->SetVectorIndex(name, vector_index_ptr->GetVectorIndex());
+            knowhere::VecIndexPtr index_ptr;
+            STATUS_CHECK(LoadVectorIndex(name, index_ptr));
+            segment_ptr_->SetVectorIndex(name, index_ptr);
+        } else {
+            knowhere::IndexPtr index_ptr;
+            STATUS_CHECK(LoadStructuredIndex(name, index_ptr));
+            segment_ptr_->SetStructuredIndex(name, index_ptr);
         }
     }
 

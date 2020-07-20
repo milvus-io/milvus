@@ -54,7 +54,10 @@ class SSSegmentReader {
     LoadUids(std::vector<int64_t>& uids);
 
     Status
-    LoadVectorIndex(const std::string& field_name, segment::VectorIndexPtr& vector_index_ptr);
+    LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr);
+
+    Status
+    LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr);
 
     Status
     LoadVectorIndice();

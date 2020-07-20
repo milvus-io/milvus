@@ -69,7 +69,8 @@ class SSDBImpl {
     GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count);
 
     Status
-    PreloadCollection(const server::ContextPtr& context, const std::string& collection_name, bool force = false);
+    LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
+                   const std::vector<std::string>& field_names, bool force = false);
 
     Status
     CreatePartition(const std::string& collection_name, const std::string& partition_name);
@@ -127,13 +128,13 @@ class SSDBImpl {
     InternalFlush(const std::string& collection_name = "");
 
     void
-    BackgroundFlushThread();
+    TimingFlushThread();
 
     void
     StartMetricTask();
 
     void
-    BackgroundMetricThread();
+    TimingMetricThread();
 
     void
     StartBuildIndexTask();
@@ -142,13 +143,13 @@ class SSDBImpl {
     BackgroundBuildIndexTask();
 
     void
-    BackgroundIndexThread();
+    TimingIndexThread();
 
     void
     WaitBuildIndexFinish();
 
     void
-    BackgroundWalThread();
+    TimingWalThread();
 
     Status
     ExecWalRecord(const wal::MXLogRecord& record);
