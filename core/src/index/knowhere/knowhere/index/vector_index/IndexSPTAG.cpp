@@ -214,6 +214,14 @@ CPUSPTAGRNG::Dim() {
     return index_ptr_->GetFeatureDim();
 }
 
+void
+CPUSPTAGRNG::UpdateIndexSize() {
+    if (!index_ptr_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = index_ptr_->GetIndexSize();
+}
+
 // void
 // CPUSPTAGRNG::Add(const DatasetPtr& origin, const Config& add_config) {
 //     SetParameters(add_config);
