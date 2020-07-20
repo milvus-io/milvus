@@ -71,6 +71,8 @@ IndexHNSW_NM::Load(const BinarySet& index_binary) {
         normalize = (index_->metric_type_ == 1);  // 1 == InnerProduct
 
         data_ = index_binary.GetByName(RAW_DATA)->data;
+        std::cout << "IndexHNSW_NM load index size = " << reader.total << std::endl;
+        std::cout << "raw data size = " << index_binary.GetByName(RAW_DATA)->size << std::endl;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -185,6 +187,15 @@ IndexHNSW_NM::Dim() {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     return (*(size_t*)index_->dist_func_param_);
+}
+
+void
+IndexHNSW_NM::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = index_->cal_size();
+    std::cout << "IndexHNSW_NM UpdateIndexSize = " << index_size_ << ", total size = " << Size() << std::endl;
 }
 
 }  // namespace knowhere

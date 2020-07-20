@@ -22,10 +22,10 @@
 namespace milvus {
 namespace knowhere {
 
-class IndexHNSW_SQ8NR : public VecIndex {
+class IndexHNSW_SQ8NM : public VecIndex {
  public:
-    IndexHNSW_SQ8NR() {
-        index_type_ = IndexEnum::INDEX_HNSW_SQ8NR;
+    IndexHNSW_SQ8NM() {
+        index_type_ = IndexEnum::INDEX_HNSW_SQ8NM;
     }
 
     BinarySet
@@ -53,6 +53,9 @@ class IndexHNSW_SQ8NR : public VecIndex {
 
     int64_t
     Dim() override;
+
+    void
+    UpdateIndexSize() override;
 
  private:
     bool normalize = false;
