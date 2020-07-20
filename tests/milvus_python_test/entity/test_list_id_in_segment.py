@@ -32,7 +32,7 @@ def get_segment_name(connect, collection, nb=1, vec_type='float', index_params=N
     if index_params:
         connect.create_index(collection, field_name, default_index_name, index_params)
     stats = connect.get_collection_stats(collection)
-    return stats["partitions"][0]["segments"][0]["name"]
+    return ids, stats["partitions"][0]["segments"][0]["name"]
 
 
 class TestGetVectorIdsBase:
@@ -49,7 +49,7 @@ class TestGetVectorIdsBase:
         expected: exception raised
         '''
         collection_name = None
-        name = get_segment_name(connect, collection)
+        ids, name = get_segment_name(connect, collection)
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection_name, name)
 
@@ -60,7 +60,7 @@ class TestGetVectorIdsBase:
         expected: status not ok
         '''
         collection_name = gen_unique_str(collection_id)
-        name = get_segment_name(connect, collection)
+        ids, name = get_segment_name(connect, collection)
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection_name, name)
     
@@ -78,7 +78,7 @@ class TestGetVectorIdsBase:
         expected: status not ok
         '''
         collection_name = get_collection_name
-        name = get_segment_name(connect, collection)
+        ids, name = get_segment_name(connect, collection)
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection_name, name)
 
@@ -88,7 +88,7 @@ class TestGetVectorIdsBase:
         method: call list_id_in_segment with the name: None
         expected: exception raised
         '''
-        valid_name = get_segment_name(connect, collection)
+        ids, valid_name = get_segment_name(connect, collection)
         segment = None
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection, segment)
@@ -99,7 +99,7 @@ class TestGetVectorIdsBase:
         method: call list_id_in_segment with a random segment name
         expected: status not ok
         '''
-        valid_name = get_segment_name(connect, collection)
+        ids, valid_name = get_segment_name(connect, collection)
         segment = gen_unique_str(collection_id)
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection, segment)
@@ -110,12 +110,12 @@ class TestGetVectorIdsBase:
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        name = get_segment_name(connect, collection, nb=1)
+        nb = 1
+        ids, name = get_segment_name(connect, collection, nb=nb)
         vector_ids = connect.list_id_in_segment(collection, name)
         # vector_ids should match ids
         assert len(vector_ids) == nb
-        for i in range(nb):
-            assert vector_ids[i] == ids[i]
+        assert vector_ids[0] == ids[0]
 
     def test_list_id_in_segment_without_index_B(self, connect, collection):
         '''
@@ -130,7 +130,7 @@ class TestGetVectorIdsBase:
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats["partitions"][1]["tag"] == tag
-        vector_ids = connect.list_id_in_segment(collection, info["partitions"][1]["segments"][0]["name"])
+        vector_ids = connect.list_id_in_segment(collection, stats["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == nb
         for i in range(nb):
@@ -152,7 +152,7 @@ class TestGetVectorIdsBase:
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        name = get_segment_name(connect, collection, nb=nb, index_params=get_simple_index)
+        ids, name = get_segment_name(connect, collection, nb=nb, index_params=get_simple_index)
         vector_ids = connect.list_id_in_segment(collection, name)
         # TODO: 
 
@@ -167,7 +167,7 @@ class TestGetVectorIdsBase:
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats["partitions"][1]["tag"] == tag
-        vector_ids = connect.list_id_in_segment(collection, info["partitions"][1]["segments"][0]["name"])
+        vector_ids = connect.list_id_in_segment(collection, stats["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
         # TODO
 
@@ -178,7 +178,7 @@ class TestGetVectorIdsBase:
         expected: status ok, vector_ids decreased after vectors deleted
         '''
         nb = 2
-        name = get_segment_name(connect, collection)
+        ids, name = get_segment_name(connect, collection, nb=nb)
         delete_ids = [ids[0]]
         status = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
@@ -217,13 +217,14 @@ class TestGetVectorIdsIP:
         method: create partition, add vectors to it and call list_id_in_segment, check if the segment contains vectors
         expected: status ok
         '''
+        connect.create_partition(ip_collection, tag)
         nb = 10
         entities = gen_entities(nb)
         ids = connect.insert(ip_collection, entities, partition_tag=tag)
         connect.flush([ip_collection])
         stats = connect.get_collection_stats(ip_collection)
         assert stats["partitions"][1]["tag"] == tag
-        vector_ids = connect.list_id_in_segment(ip_collection, info["partitions"][1]["segments"][0]["name"])
+        vector_ids = connect.list_id_in_segment(ip_collection, stats["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
         assert len(vector_ids) == nb
         for i in range(nb):
@@ -245,7 +246,7 @@ class TestGetVectorIdsIP:
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        name = get_segment_name(connect, ip_collection, nb=nb, index_params=get_simple_index)
+        ids, name = get_segment_name(connect, ip_collection, nb=nb, index_params=get_simple_index)
         vector_ids = connect.list_id_in_segment(ip_collection, name)
         # TODO: 
 
@@ -260,7 +261,7 @@ class TestGetVectorIdsIP:
         connect.flush([ip_collection])
         stats = connect.get_collection_stats(ip_collection)
         assert stats["partitions"][1]["tag"] == tag
-        vector_ids = connect.list_id_in_segment(ip_collection, info["partitions"][1]["segments"][0]["name"])
+        vector_ids = connect.list_id_in_segment(ip_collection, stats["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
         # TODO
 
@@ -271,7 +272,7 @@ class TestGetVectorIdsIP:
         expected: status ok, vector_ids decreased after vectors deleted
         '''
         nb = 2
-        name = get_segment_name(connect, ip_collection)
+        ids, name = get_segment_name(connect, ip_collection, nb=nb)
         delete_ids = [ids[0]]
         status = connect.delete_entity_by_id(ip_collection, delete_ids)
         connect.flush([ip_collection])
@@ -328,7 +329,7 @@ class TestGetVectorIdsJAC:
     )
     def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if request.param["index_type"] in get_binary_support():
+        if request.param["index_type"] in binary_support():
             return request.param
         else:
             pytest.skip("not support")
@@ -339,8 +340,8 @@ class TestGetVectorIdsJAC:
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        name = get_segment_name(connect, ip_collection, nb=nb, index_params=get_jaccard_index, vec_type='binary')
-        vector_ids = connect.list_id_in_segment(ip_collection, name)
+        ids, name = get_segment_name(connect, jac_collection, nb=nb, index_params=get_jaccard_index, vec_type='binary')
+        vector_ids = connect.list_id_in_segment(jac_collection, name)
         # TODO: 
 
     def test_list_id_in_segment_with_index_B(self, connect, jac_collection, get_jaccard_index):
@@ -349,23 +350,23 @@ class TestGetVectorIdsJAC:
         method: create partition, add vectors to it and call list_id_in_segment, check if the segment contains vectors
         expected: status ok
         '''
-        connect.create_partition(ip_collection, tag)
-        ids = connect.insert(ip_collection, entities, partition_tag=tag)
-        connect.flush([ip_collection])
-        stats = connect.get_collection_stats(ip_collection)
+        connect.create_partition(jac_collection, tag)
+        ids = connect.insert(jac_collection, entities, partition_tag=tag)
+        connect.flush([jac_collection])
+        stats = connect.get_collection_stats(jac_collection)
         assert stats["partitions"][1]["tag"] == tag
-        vector_ids = connect.list_id_in_segment(ip_collection, info["partitions"][1]["segments"][0]["name"])
+        vector_ids = connect.list_id_in_segment(jac_collection, stats["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
         # TODO
 
-    def test_list_id_in_segment_after_delete_vectors(self, connect, jac_collection):
+    def test_list_id_in_segment_after_delete_vectors(self, connect, jac_collection, get_jaccard_index):
         '''
         target: get vector ids after vectors are deleted
         method: add vectors and delete a few, call list_id_in_segment
         expected: status ok, vector_ids decreased after vectors deleted
         '''
         nb = 2
-        name = get_segment_name(connect, jac_collection, nb=nb, vec_type='binary', index_params=get_jaccard_index)
+        ids, name = get_segment_name(connect, jac_collection, nb=nb, vec_type='binary', index_params=get_jaccard_index)
         delete_ids = [ids[0]]
         status = connect.delete_entity_by_id(jac_collection, delete_ids)
         connect.flush([jac_collection])
