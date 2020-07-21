@@ -286,6 +286,10 @@ class BaseTest : public ::testing::Test {
  protected:
     void
     InitLog();
+    void
+    SnapshotStart(bool mock_store);
+    void
+    SnapshotStop();
 
     void
     SetUp() override;

@@ -81,19 +81,6 @@ struct GetEntityByIdSegmentHandler : public snapshot::IterateHandler<snapshot::S
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-struct HybridQueryHelperSegmentHandler : public snapshot::IterateHandler<snapshot::Segment> {
-    using ResourceT = snapshot::Segment;
-    using BaseT = snapshot::IterateHandler<ResourceT>;
-    HybridQueryHelperSegmentHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
-                                    const std::vector<std::string>& partition_patterns);
-
-    Status
-    Handle(const typename ResourceT::Ptr&) override;
-
-    const server::ContextPtr context_;
-    const std::vector<std::string> partition_patterns_;
-    std::vector<snapshot::SegmentPtr> segments_;
-};
 
 }  // namespace engine
 }  // namespace milvus

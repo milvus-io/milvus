@@ -18,7 +18,6 @@
 #include "db/snapshot/Snapshot.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/SSSegmentReader.h"
-#include "utils/StringHelpFunctions.h"
 
 #include <unordered_map>
 #include <utility>
@@ -169,28 +168,6 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-HybridQueryHelperSegmentHandler::HybridQueryHelperSegmentHandler(const server::ContextPtr& context,
-                                                                 engine::snapshot::ScopedSnapshotT ss,
-                                                                 const std::vector<std::string>& partition_patterns)
-    : BaseT(ss), context_(context), partition_patterns_(partition_patterns), segments_() {
-}
 
-Status
-HybridQueryHelperSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
-    if (partition_patterns_.empty()) {
-        segments_.push_back(segment);
-    } else {
-        auto p_id = segment->GetPartitionId();
-        auto p_ptr = ss_->GetResource<snapshot::Partition>(p_id);
-        auto& p_name = p_ptr->GetName();
-        for (auto& pattern : partition_patterns_) {
-            if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
-                segments_.push_back(segment);
-                break;
-            }
-        }
-    }
-    return Status::OK();
-}
 }  // namespace engine
 }  // namespace milvus

@@ -21,21 +21,26 @@
 #include <unordered_map>
 #include <vector>
 
+#include "db/SnapshotVisitor.h"
+#include "db/snapshot/ResourceTypes.h"
 #include "scheduler/interface/interfaces.h"
-
 #include "server/context/Context.h"
 
 namespace milvus {
 namespace scheduler {
 
 enum class JobType {
-    INVALID,
-    SEARCH,
-    DELETE,
-    BUILD,
+    INVALID = -1,
+    SEARCH = 0,
+    DELETE = 1,
+    BUILD = 2,
+
+    SS_SEARCH = 10,
+    SS_BUILD = 11,
 };
 
 using JobId = std::uint64_t;
+using SegmentVisitorMap = std::unordered_map<engine::snapshot::ID_TYPE, engine::SegmentVisitorPtr>;
 
 class Job : public interface::dumpable {
  public:

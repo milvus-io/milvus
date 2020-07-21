@@ -30,11 +30,11 @@
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
 #include "db/snapshot/ResourceHolders.h"
-
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
-
+#include "scheduler/ResourceFactory.h"
+#include "scheduler/SchedInst.h"
 #include "utils/CommonUtil.h"
 
 
@@ -138,26 +138,16 @@ BaseTest::InitLog() {
 }
 
 void
-BaseTest::SetUp() {
-    InitLog();
-}
-
-void
-BaseTest::TearDown() {
-}
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void
-SnapshotTest::SetUp() {
-    BaseTest::SetUp();
+BaseTest::SnapshotStart(bool mock_store) {
     /* auto uri = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
     auto uri = "mock://:@:/";
     auto store = Store::Build(uri);
+
     milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
     milvus::engine::snapshot::EventExecutor::Init(store);
     milvus::engine::snapshot::EventExecutor::GetInstance().Start();
-    store->Mock();
+
     milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
     milvus::engine::snapshot::CollectionsHolder::GetInstance().Reset();
     milvus::engine::snapshot::SchemaCommitsHolder::GetInstance().Reset();
@@ -170,17 +160,43 @@ SnapshotTest::SetUp() {
     milvus::engine::snapshot::SegmentCommitsHolder::GetInstance().Reset();
     milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
 
-    milvus::engine::snapshot::Snapshots::GetInstance().Reset();
+    if (mock_store) {
+        store->Mock();
+    } else {
+        store->DoReset();
+    }
 
+    milvus::engine::snapshot::Snapshots::GetInstance().Reset();
     milvus::engine::snapshot::Snapshots::GetInstance().Init(store);
 }
 
 void
-SnapshotTest::TearDown() {
+BaseTest::SnapshotStop() {
     // TODO: Temp to delay some time. OperationExecutor should wait all resources be destructed before stop
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
     milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
+}
+
+void
+BaseTest::SetUp() {
+    InitLog();
+}
+
+void
+BaseTest::TearDown() {
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void
+SnapshotTest::SetUp() {
+    BaseTest::SetUp();
+    BaseTest::SnapshotStart(true);
+}
+
+void
+SnapshotTest::TearDown() {
+    BaseTest::SnapshotStop();
     BaseTest::TearDown();
 }
 
@@ -197,39 +213,37 @@ SSDBTest::GetOptions() {
 void
 SSDBTest::SetUp() {
     BaseTest::SetUp();
-    /* auto uri = "mysql://root:123456@127.0.0.1:3306/milvus"; */
-    auto uri = "mock://:@:/";
-    auto store = Store::Build(uri);
-    milvus::engine::snapshot::OperationExecutor::Init(store);
-    milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
-    milvus::engine::snapshot::EventExecutor::Init(store);
-    milvus::engine::snapshot::EventExecutor::GetInstance().Start();
-    milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::CollectionsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::SchemaCommitsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::FieldCommitsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::FieldsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::FieldElementsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::PartitionsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::PartitionCommitsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::SegmentsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::SegmentCommitsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
-    store->DoReset();
-    milvus::engine::snapshot::Snapshots::GetInstance().Reset();
-    milvus::engine::snapshot::Snapshots::GetInstance().Init(store);
-
+    BaseTest::SnapshotStart(false);
     db_ = std::make_shared<milvus::engine::SSDBImpl>(GetOptions());
+
+    auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
+    res_mgr->Clear();
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, false));
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
+
+    auto default_conn = milvus::scheduler::Connection("IO", 500.0);
+    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
+    res_mgr->Connect("disk", "cpu", default_conn);
+#ifdef MILVUS_GPU_VERSION
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("0", "GPU", 0));
+    res_mgr->Connect("cpu", "0", PCIE);
+#endif
+    res_mgr->Start();
+    milvus::scheduler::SchedInst::GetInstance()->Start();
+    milvus::scheduler::JobMgrInst::GetInstance()->Start();
+    milvus::scheduler::CPUBuilderInst::GetInstance()->Start();
 }
 
 void
 SSDBTest::TearDown() {
-    db_ = nullptr;
-    // TODO: Temp to delay some time. OperationExecutor should wait all resources be destructed before stop
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
-    milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
+    milvus::scheduler::JobMgrInst::GetInstance()->Stop();
+    milvus::scheduler::SchedInst::GetInstance()->Stop();
+    milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Clear();
 
+    BaseTest::SnapshotStop();
+    db_ = nullptr;
     auto options = GetOptions();
     boost::filesystem::remove_all(options.meta_.path_);
 
@@ -240,28 +254,7 @@ SSDBTest::TearDown() {
 void
 SSSegmentTest::SetUp() {
     BaseTest::SetUp();
-    auto uri = "mock://:@:/";
-    auto store = Store::Build(uri);
-    milvus::engine::snapshot::OperationExecutor::Init(store);
-    milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
-
-    milvus::engine::snapshot::EventExecutor::Init(store);
-    milvus::engine::snapshot::EventExecutor::GetInstance().Start();
-    milvus::engine::snapshot::CollectionCommitsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::CollectionsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::SchemaCommitsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::FieldCommitsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::FieldsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::FieldElementsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::PartitionsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::PartitionCommitsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::SegmentsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::SegmentCommitsHolder::GetInstance().Reset();
-    milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
-
-    store->DoReset();
-    milvus::engine::snapshot::Snapshots::GetInstance().Reset();
-    milvus::engine::snapshot::Snapshots::GetInstance().Init(store);
+    BaseTest::SnapshotStart(false);
 
     auto options = milvus::engine::DBOptions();
     options.wal_enable_ = false;
@@ -270,12 +263,8 @@ SSSegmentTest::SetUp() {
 
 void
 SSSegmentTest::TearDown() {
+    BaseTest::SnapshotStop();
     db_ = nullptr;
-    // TODO: Temp to delay some time. OperationExecutor should wait all resources be destructed before stop
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
-    milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
-
     BaseTest::TearDown();
 }
 
