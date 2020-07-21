@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.10.2 (TBD)
 
 ## Bug
+-   \#2890 Fix the wrong index size
 
 ## Feature
 
@@ -34,7 +35,6 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2774 Server down during loading data
 -   \#2776 Fix too many data copies during creating IVF index
 -   \#2813 To implemente RNSG IP
--   \#2890 Fix the wrong index size
 
 ## Feature
 
