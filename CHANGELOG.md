@@ -29,6 +29,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2890 Fix wrong index size
 
 ## Feature
+    \#2940 Add option to build.sh for cuda arch
 -   \#2319 Redo metadata to support MVCC
 -   \#2509 Count up query statistics for debug ease
 -   \#2572 Support structured data index
