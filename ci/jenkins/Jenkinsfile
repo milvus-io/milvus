@@ -87,7 +87,7 @@ pipeline {
                                             try{
                                                 if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
                                                     load "${env.WORKSPACE}/ci/jenkins/step/nightlyBuild.groovy"
-                                                else {
+                                                } else {
                                                     load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
                                                 }
                                             } catch (Exception e) {
