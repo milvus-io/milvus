@@ -928,46 +928,50 @@ Status
 ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
                                   std::unordered_map<std::string, DataType>& attr_type, std::vector<float>& distances,
                                   std::vector<int64_t>& search_ids, bool hybrid) {
-    faiss::ConcurrentBitsetPtr bitset;
-    std::string vector_placeholder;
-    auto status = ExecBinaryQuery(search_job->general_query(), bitset, attr_type, vector_placeholder);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // Do search
-    faiss::ConcurrentBitsetPtr list;
-    list = index_->GetBlacklist();
-    // Do AND
-    for (uint64_t i = 0; i < attr_index_->entity_count(); ++i) {
-        if (list->test(i) && !bitset->test(i)) {
-            list->clear(i);
+    try {
+        faiss::ConcurrentBitsetPtr bitset;
+        std::string vector_placeholder;
+        auto status = ExecBinaryQuery(search_job->general_query(), bitset, attr_type, vector_placeholder);
+        if (!status.ok()) {
+            return status;
         }
-    }
-    index_->SetBlacklist(list);
 
-    auto vector_query = search_job->query_ptr()->vectors.at(vector_placeholder);
-    int64_t topk = vector_query->topk;
-    int64_t nq = 0;
-    if (!vector_query->query_vector.float_data.empty()) {
-        nq = vector_query->query_vector.float_data.size() / dim_;
-    } else if (!vector_query->query_vector.binary_data.empty()) {
-        nq = vector_query->query_vector.binary_data.size() * 8 / dim_;
-    }
+        // Do search
+        faiss::ConcurrentBitsetPtr list;
+        list = index_->GetBlacklist();
+        // Do AND
+        for (uint64_t i = 0; i < attr_index_->entity_count(); ++i) {
+            if (list->test(i) && !bitset->test(i)) {
+                list->clear(i);
+            }
+        }
+        index_->SetBlacklist(list);
 
-    engine::VectorsData vectors;
-    vectors.vector_count_ = nq;
-    vectors.float_data_ = vector_query->query_vector.float_data;
-    vectors.binary_data_ = vector_query->query_vector.binary_data;
+        auto vector_query = search_job->query_ptr()->vectors.at(vector_placeholder);
+        int64_t topk = vector_query->topk;
+        int64_t nq = 0;
+        if (!vector_query->query_vector.float_data.empty()) {
+            nq = vector_query->query_vector.float_data.size() / dim_;
+        } else if (!vector_query->query_vector.binary_data.empty()) {
+            nq = vector_query->query_vector.binary_data.size() * 8 / dim_;
+        }
 
-    search_job->SetVectors(vectors);
-    search_job->vector_count() = nq;
-    search_job->topk() = topk;
-    search_job->vector_params() = vector_query->extra_params;
+        engine::VectorsData vectors;
+        vectors.vector_count_ = nq;
+        vectors.float_data_ = vector_query->query_vector.float_data;
+        vectors.binary_data_ = vector_query->query_vector.binary_data;
 
-    status = Search(search_ids, distances, search_job, hybrid);
-    if (!status.ok()) {
-        return status;
+        search_job->SetVectors(vectors);
+        search_job->vector_count() = nq;
+        search_job->topk() = topk;
+        search_job->vector_params() = vector_query->extra_params;
+
+        status = Search(search_ids, distances, search_job, hybrid);
+        if (!status.ok()) {
+            return status;
+        }
+    } catch (std::exception& exception) {
+        return Status{DB_ERROR, "Illegal search params"};
     }
 
     return Status::OK();

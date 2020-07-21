@@ -1579,7 +1579,9 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
                     return status;
                 }
                 vector_query->topk = topk;
-                vector_query->extra_params = vector_param_it.value()["params"];
+                if (!vector_param_it.value()["params"].empty()) {
+                    vector_query->extra_params = vector_param_it.value()["params"];
+                }
             }
 
             engine::VectorsData vector_data;
