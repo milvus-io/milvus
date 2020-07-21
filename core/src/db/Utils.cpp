@@ -29,6 +29,7 @@
 //#include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 
 #include <map>
 
@@ -48,6 +49,15 @@ ConstructParentFolder(const std::string& db_path, const meta::SegmentSchema& tab
 }
 
 }  // namespace
+
+std::string
+ConstructCollectionRootPath(const std::string& root_path) {
+    if (StringHelpFunctions::EndWithSlash(root_path)) {
+        return root_path + "db" + TABLES_FOLDER;
+    }
+
+    return root_path + "/db" + TABLES_FOLDER;
+}
 
 int64_t
 GetMicroSecTimeStamp() {
@@ -260,7 +270,7 @@ GetIndexName(int32_t index_type) {
 #endif
         {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, "IDMAP"},
         {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "IVFFLAT"},
-        {(int32_t)engine::EngineType::HNSW_SQ8NR, "HNSW_SQ8NR"},
+        {(int32_t)engine::EngineType::HNSW_SQ8NM, "HNSW_SQ8NM"},
         {(int32_t)engine::EngineType::HNSW, "HNSW"},
         {(int32_t)engine::EngineType::NSG_MIX, "NSG"},
         {(int32_t)engine::EngineType::ANNOY, "ANNOY"}};

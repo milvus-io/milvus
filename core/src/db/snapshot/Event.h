@@ -35,7 +35,7 @@ class ResourceGCEvent : public MetaEvent {
  public:
     using Ptr = std::shared_ptr<ResourceGCEvent>;
 
-    explicit ResourceGCEvent(class ResourceT::Ptr res) : res_(res) {
+    explicit ResourceGCEvent(const std::string& root_path, class ResourceT::Ptr res) : dir_root_(root_path), res_(res) {
     }
 
     ~ResourceGCEvent() = default;
@@ -51,10 +51,16 @@ class ResourceGCEvent : public MetaEvent {
         /* if (!boost::filesystem::exists(res_path)) { */
         /*     return Status::OK(); */
         /* } */
-        if (boost::filesystem::is_directory(res_path)) {
-            boost::filesystem::remove_all(res_path);
+        if (res_path.empty()) {
+            /* std::cout << "[GC] No remove action for " << res_->ToString() << std::endl; */
+        } else if (boost::filesystem::is_directory(res_path)) {
+            auto ok = boost::filesystem::remove_all(res_path);
+            /* std::cout << "[GC] Remove dir " << res_->ToString() << " " << res_path << " " << ok << std::endl; */
+        } else if (boost::filesystem::is_regular_file(res_path)) {
+            auto ok = boost::filesystem::remove(res_path);
+            /* std::cout << "[GC] Remove file " << res_->ToString() << " " << res_path << " " << ok << std::endl; */
         } else {
-            boost::filesystem::remove(res_path);
+            std::cout << "[GC] Remove stale " << res_path << " for " << res_->ToString() << std::endl;
         }
 
         /* remove resource from meta */

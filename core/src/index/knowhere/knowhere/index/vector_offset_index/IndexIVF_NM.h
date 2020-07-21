@@ -64,6 +64,9 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     int64_t
     Dim() override;
 
+    void
+    UpdateIndexSize() override;
+
 #if 0
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config) override;

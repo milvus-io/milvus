@@ -159,5 +159,13 @@ IndexAnnoy::Dim() {
     return index_->get_dim();
 }
 
+void
+IndexAnnoy::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = index_->cal_size();
+}
+
 }  // namespace knowhere
 }  // namespace milvus
