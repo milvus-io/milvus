@@ -98,21 +98,6 @@ if (MILVUS_SUPPORT_SPTAG)
 endif ()
 
 
-if (FAISS_WITH_MKL)
-    set(depend_libs ${depend_libs}
-            "-Wl,--start-group \
-            ${MKL_LIB_PATH}/libmkl_intel_ilp64.a \
-            ${MKL_LIB_PATH}/libmkl_gnu_thread.a \
-            ${MKL_LIB_PATH}/libmkl_core.a \
-            -Wl,--end-group -lgomp -lpthread -lm -ldl"
-            )
-else ()
-    set(depend_libs ${depend_libs}
-            ${OpenBLAS_LIBRARIES}
-            ${LAPACK_LIBRARIES}
-            )
-endif ()
-
 if (MILVUS_GPU_VERSION)
     include_directories(${CUDA_INCLUDE_DIRS})
     link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")

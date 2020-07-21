@@ -11,12 +11,10 @@ PROFILING="OFF"
 RUN_CPPLINT="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 GPU_VERSION="OFF" #defaults to CPU version
-WITH_MKL="OFF"
 FAISS_ROOT="" #FAISS root path
 FAISS_SOURCE="BUNDLED"
 WITH_PROMETHEUS="ON"
 FIU_ENABLE="OFF"
-# BUILD_OPENBLAS="ON" # not used any more
 
 while getopts "p:d:t:f:ulrcghzmei" arg; do
   case $arg in
@@ -55,9 +53,6 @@ while getopts "p:d:t:f:ulrcghzmei" arg; do
   g)
     GPU_VERSION="ON"
     ;;
-  m)
-    WITH_MKL="ON"
-    ;;
   e)
     WITH_PROMETHEUS="OFF"
     ;;
@@ -80,13 +75,12 @@ parameter:
 -c: code coverage(default: OFF)
 -z: profiling(default: OFF)
 -g: build GPU version(default: OFF)
--m: build with MKL(default: OFF)
 -e: build without prometheus(default: OFF)
 -i: build FIU_ENABLE(default: OFF)
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f \${FAISS_ROOT} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f \${FAISS_ROOT} [-u] [-l] [-r] [-c] [-z] [-g] [-e] [-h]
                 "
     exit 0
     ;;
@@ -119,7 +113,6 @@ CMAKE_CMD="cmake \
 -DMILVUS_DB_PATH=${DB_PATH} \
 -DENABLE_CPU_PROFILING=${PROFILING} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
--DFAISS_WITH_MKL=${WITH_MKL} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_WITH_FIU=${FIU_ENABLE} \
 ../"

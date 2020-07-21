@@ -19,19 +19,17 @@ include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 set(FOUND_OPENBLAS "unknown")
+
 add_subdirectory(index)
-if (FAISS_WITH_MKL)
-    add_compile_definitions("WITH_MKL")
-endif ()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 foreach (dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach ()
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/config/handler config_handler_files)
+add_subdirectory(cache)
+add_subdirectory(config)
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
@@ -148,7 +146,6 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
 
 set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
-        ${cache_files}
         ${db_main_files}
         ${db_engine_files}
         ${db_insert_files}
@@ -309,12 +306,14 @@ set(server_libs
         milvus_engine
         metrics
         tracing
+        config
+        cache
         oatpp
         )
 
 add_executable(milvus_server
-        ${config_files}
-        ${config_handler_files}
+        # ${config_files}
+        # ${config_handler_files}
         ${metrics_files}
         ${query_files}
         ${search_files}
