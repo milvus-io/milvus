@@ -30,11 +30,14 @@ class SSVectorCompressFormat {
  public:
     SSVectorCompressFormat() = default;
 
-    void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr& compress);
+    std::string
+    FilePostfix();
 
     void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location, const knowhere::BinaryPtr& compress);
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinaryPtr& compress);
+
+    void
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const knowhere::BinaryPtr& compress);
 
     // No copy and move
     SSVectorCompressFormat(const SSVectorCompressFormat&) = delete;
@@ -44,9 +47,6 @@ class SSVectorCompressFormat {
     operator=(const SSVectorCompressFormat&) = delete;
     SSVectorCompressFormat&
     operator=(SSVectorCompressFormat&&) = delete;
-
- private:
-    const std::string sq8_vector_extension_ = ".sq8";
 };
 
 using SSVectorCompressFormatPtr = std::shared_ptr<SSVectorCompressFormat>;
