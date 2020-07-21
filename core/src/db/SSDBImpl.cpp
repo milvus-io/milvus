@@ -12,9 +12,11 @@
 #include "db/SSDBImpl.h"
 #include "cache/CpuCacheMgr.h"
 #include "db/IDGenerator.h"
+#include "db/SnapshotVisitor.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "db/merge/SSMergeTask.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
@@ -24,6 +26,7 @@
 #include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/job/SSSearchJob.h"
 #include "segment/SSSegmentReader.h"
 #include "segment/SSSegmentWriter.h"
 #include "utils/Exception.h"
@@ -627,24 +630,54 @@ Status
 SSDBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResult& result) {
     CHECK_INITIALIZED;
 
-    auto query_ctx = context->Child("Query");
+    milvus::server::ContextChild tracer(context, "Query");
 
     TimeRecorder rc("SSDBImpl::Query");
 
     //    snapshot::ScopedSnapshotT ss;
     //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    //    auto handler = std::make_shared<HybridQueryHelperSegmentHandler>(nullptr, ss, partition_patterns);
-    //    handler->Iterate();
-    //    STATUS_CHECK(handler->GetStatus());
     //
-    //    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", handler->segments_.size());
+    //    /* collect all valid segment */
+    //    std::vector<SegmentVisitor::Ptr> segment_visitors;
+    //    auto exec = [&] (const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
+    //        auto p_id = segment->GetPartitionId();
+    //        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
+    //        auto& p_name = p_ptr->GetName();
+    //
+    //        /* check partition match pattern */
+    //        bool match = false;
+    //        if (partition_patterns.empty()) {
+    //            match = true;
+    //        } else {
+    //            for (auto &pattern : partition_patterns) {
+    //                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
+    //                    match = true;
+    //                    break;
+    //                }
+    //            }
+    //        }
+    //
+    //        if (match) {
+    //            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
+    //            if (!visitor) {
+    //                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
+    //            }
+    //            segment_visitors.push_back(visitor);
+    //        }
+    //        return Status::OK();
+    //    };
+    //
+    //    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
+    //    segment_iter->Iterate();
+    //    STATUS_CHECK(segment_iter->GetStatus());
+    //
+    //    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
     //
     //    VectorsData vectors;
-    //    scheduler::SearchJobPtr job =
-    //        std::make_shared<scheduler::SearchJob>(query_ctx, general_query, query_ptr, attr_type, vectors);
-    //    for (auto& segment : handler->segments_) {
-    //        // job->AddSegment(segment);
+    //    scheduler::SSSearchJobPtr job =
+    //        std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
+    //    for (auto& sv : segment_visitors) {
+    //        job->AddSegmentVisitor(sv);
     //    }
     //
     //    // step 2: put search job to scheduler and wait result
@@ -659,30 +692,28 @@ SSDBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_
     //    result.row_num_ = job->vector_count();
     //    result.result_ids_ = job->GetResultIds();
     //    result.result_distances_ = job->GetResultDistances();
-    //
-    //    // step 4: get entities by result ids
-    //    STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));
-    //
-    //    // step 5: filter entities by field names
-    //    //    std::vector<engine::AttrsData> filter_attrs;
-    //    //    for (auto attr : result.attrs_) {
-    //    //        AttrsData attrs_data;
-    //    //        attrs_data.attr_type_ = attr.attr_type_;
-    //    //        attrs_data.attr_count_ = attr.attr_count_;
-    //    //        attrs_data.id_array_ = attr.id_array_;
-    //    //        for (auto& name : field_names) {
-    //    //            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
-    //    //                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
-    //    //            }
-    //    //        }
-    //    //        filter_attrs.emplace_back(attrs_data);
-    //    //    }
-    //    //
-    //    //    result.attrs_ = filter_attrs;
+
+    // step 4: get entities by result ids
+    // STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));
+
+    // step 5: filter entities by field names
+    //    std::vector<engine::AttrsData> filter_attrs;
+    //    for (auto attr : result.attrs_) {
+    //        AttrsData attrs_data;
+    //        attrs_data.attr_type_ = attr.attr_type_;
+    //        attrs_data.attr_count_ = attr.attr_count_;
+    //        attrs_data.id_array_ = attr.id_array_;
+    //        for (auto& name : field_names) {
+    //            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
+    //                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
+    //            }
+    //        }
+    //        filter_attrs.emplace_back(attrs_data);
+    //    }
 
     rc.ElapseFromBegin("Engine query totally cost");
 
-    query_ctx->GetTraceContext()->GetSpan()->Finish();
+    // tracer.Context()->GetTraceContext()->GetSpan()->Finish();
 
     return Status::OK();
 }
