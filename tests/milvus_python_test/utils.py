@@ -575,7 +575,7 @@ def gen_invaild_search_params():
 
 def gen_invalid_index():
     index_params = []
-    for index_type in gen_invalid_index_types():
+    for index_type in gen_invalid_strs():
         index_param = {"index_type": index_type, "params": {"nlist": 1024}}
         index_params.append(index_param)
     for nlist in gen_invalid_params():
@@ -625,7 +625,7 @@ def gen_index():
 
     index_params = []
     for index_type in all_index_types:
-        if index_type == "FLAT":
+        if index_type in ["FLAT", "BIN_FLAT", "BIN_IVF_FLAT"]:
             index_params.append({"index_type": index_type, "index_param": {"nlist": 1024}})
         elif index_type in ["IVF_FLAT", "IVF_SQ8", "IVF_SQ8_HYBRID"]:
             ivf_params = [{"index_type": index_type, "index_param": {"nlist": nlist}} \
@@ -665,8 +665,18 @@ def gen_simple_index():
     return index_params
 
 
+def gen_binary_index():
+    index_params = []
+    for i in range(len(all_index_types)):
+        if all_index_types[i] in binary_support():
+            dic = {"index_type": all_index_types[i]}
+            dic.update(default_index_params[i])
+            index_params.append(dic)
+    return index_params
+
+
 def get_search_param(index_type):
-    if index_type in ivf():
+    if index_type in ivf() or index_type in binary_support():
         return {"nprobe": 32}
     elif index_type == "HNSW":
         return {"ef": 64}
