@@ -192,7 +192,7 @@ IndexHNSW_NM::UpdateIndexSize() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    index_size_ = index_->cal_size();
+    index_size_ = index_->cal_size() + Dim() * Count() * sizeof(float);
 }
 
 }  // namespace knowhere

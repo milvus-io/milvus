@@ -178,7 +178,7 @@ NSG_NM::UpdateIndexSize() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    index_size_ = index_->GetSize();
+    index_size_ = index_->GetSize() + Dim() * Count() * sizeof(float);
 }
 
 }  // namespace knowhere
