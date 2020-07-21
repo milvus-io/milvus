@@ -35,7 +35,7 @@ class ResourceGCEvent : public MetaEvent {
  public:
     using Ptr = std::shared_ptr<ResourceGCEvent>;
 
-    explicit ResourceGCEvent(class ResourceT::Ptr res) : res_(res) {
+    explicit ResourceGCEvent(const std::string& root_path, class ResourceT::Ptr res) : dir_root_(root_path), res_(res) {
     }
 
     ~ResourceGCEvent() = default;

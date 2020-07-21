@@ -69,6 +69,9 @@ class StringHelpFunctions {
     // "false", "off", "no", "0", "" ==> false
     static Status
     ConvertToBoolean(const std::string& str, bool& value);
+
+    static bool
+    EndWithSlash(const std::string& path);
 };
 
 }  // namespace milvus

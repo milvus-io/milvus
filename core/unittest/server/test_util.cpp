@@ -788,6 +788,11 @@ TEST(ValidationUtilTest, VALIDATE_PATH_TEST) {
     ASSERT_FALSE(milvus::server::ValidateStoragePath("/tmp//milvus").ok());
 }
 
+TEST(UtilTest, ENDWITHSLASH_TEST) {
+    ASSERT_TRUE(milvus::StringHelpFunctions::EndWithSlash("/tmp/milvus/"));
+    ASSERT_FALSE(milvus::StringHelpFunctions::EndWithSlash("/tmp/milvus"));
+}
+
 TEST(UtilTest, ROLLOUTHANDLER_TEST) {
     std::string dir1 = "/tmp/milvus_test";
     std::string dir2 = "/tmp/milvus_test/log_test";
