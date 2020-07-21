@@ -139,18 +139,16 @@ MetaSession::Select(const std::string& field, const U& value, const std::vector<
             iter = raw.find(F_STATE);
             if (iter != raw.end()) {
                 auto status_int = std::stol(iter->second);
+                sf_p->ResetStatus();
                 switch (static_cast<snapshot::State>(status_int)) {
                     case snapshot::PENDING: {
-                        sf_p->ResetStatus();
                         break;
                     }
                     case snapshot::ACTIVE: {
-                        sf_p->ResetStatus();
                         sf_p->Activate();
                         break;
                     }
                     case snapshot::DEACTIVE: {
-                        sf_p->ResetStatus();
                         sf_p->Deactivate();
                         break;
                     }

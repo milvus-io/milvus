@@ -164,6 +164,12 @@ class Store : public std::enable_shared_from_this<Store> {
 
     template <typename ResourceT>
     Status
+    GetInActiveResources(std::vector<typename ResourceT::Ptr>& return_vs) {
+        return Status::OK();
+    }
+
+    template <typename ResourceT>
+    Status
     RemoveResource(ID_TYPE id) {
         auto rc_ctx_p =
             ResourceContextBuilder<ResourceT>().SetTable(ResourceT::Name).SetOp(meta::oDelete).SetID(id).CreatePtr();
