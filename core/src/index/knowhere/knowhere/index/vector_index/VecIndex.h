@@ -129,6 +129,10 @@ class VecIndex : public Index {
         index_size_ = size;
     }
 
+    virtual void
+    UpdateIndexSize() {
+    }
+
     int64_t
     Size() override {
         return BlacklistSize() + UidsSize() + IndexSize();

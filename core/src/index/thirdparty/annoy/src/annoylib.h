@@ -850,6 +850,7 @@ class AnnoyIndexInterface {
   virtual void get_item(S item, T* v) const = 0;
   virtual void set_seed(int q) = 0;
   virtual bool on_disk_build(const char* filename, char** error=nullptr) = 0;
+  virtual int64_t cal_size() = 0;
 };
 
 template<typename S, typename T, typename Distance, typename Random>
@@ -1396,6 +1397,14 @@ protected:
       result->push_back(nns_dist[i].second);
     }
   }
+
+  int64_t cal_size() {
+     int64_t ret = 0;
+     ret += sizeof(*this);
+     ret += _roots.size() * sizeof(S);
+     ret += std::max(_n_nodes, _nodes_size) * _s;
+     return ret;
+   }
 };
 
 #endif
