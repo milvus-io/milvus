@@ -12,6 +12,7 @@ SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
 MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
 CORE_BUILD_DIR="${MILVUS_CORE_DIR}/cmake_build"
+CUDA_ARCH="DEFAULT"
 
 HELP="
 Usage:
@@ -26,6 +27,7 @@ Usage:
     -l                        Run cpplint & check clang-format
     -n                        No make and make install step
     -g                        Building for the architecture of the GPU in the system
+    -s [CUDA_ARCH]            Building for the cuda architecture
     --with_mkl                Build with MKL (default: OFF)
     --with_fiu                Build with FIU (default: OFF)
     -c or --coverage          Build Code Coverage
@@ -72,6 +74,10 @@ while true ; do
                 -p|--privileges) PRIVILEGES="ON" ; shift ;;
                 -v|--verbose) VERBOSE="1" ; shift ;;
                 -h|--help) echo -e "${HELP}" ; exit 0 ;;
+                -s)
+                        case "$2" in
+                                "") CUDA_ARCH="DEFAULT"; shift 2 ;;
+                                *) CUDA_ARCH=$2 ; shift 2 ;;
                 --) shift ; break ;;
                 *) echo "Internal error!" ; exit 1 ;;
         esac
@@ -125,6 +131,7 @@ CMAKE_CMD="cmake \
 -DFAISS_SOURCE=AUTO \
 -DOpenBLAS_SOURCE=AUTO \
 -DMILVUS_WITH_FIU=${FIU_ENABLE} \
+-DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
 ${MILVUS_CORE_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}

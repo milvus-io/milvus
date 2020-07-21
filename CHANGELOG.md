@@ -5,7 +5,6 @@ Please mark all changes in change log and use the issue from GitHub
 # Milvus 0.11.0 (TBD)
 
 ## Bug
-    \#2852 Fix Prometheus rebuild problem.
 -   \#2487 Remove timeout when creating collection in dev test
 -   \#2532 Fix Milvus docker image report illegal instruction
 -   \#2551 Fix test_hybrid_db and test_rpc error
@@ -27,6 +26,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2776 Fix too many data copies during creating IVF index
 -   \#2813 To implemente RNSG IP
 -   \#2890 Fix wrong index size
+-   \#2852 Fix Prometheus rebuild problem.
 
 ## Feature
     \#2940 Add option to build.sh for cuda arch
