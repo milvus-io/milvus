@@ -71,19 +71,19 @@ SSStructuredIndexFormat::create_structured_index(const milvus::engine::meta::hyb
 }
 
 void
-SSStructuredIndexFormat::read_internal(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& path,
-                                       knowhere::IndexPtr& index, engine::meta::hybrid::DataType& attr_type) {
+SSStructuredIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                              knowhere::IndexPtr& index) {
     milvus::TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
     recorder.RecordSection("Start");
-    if (!fs_ptr->reader_ptr_->open(path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open attribute index: " << path;
+    if (!fs_ptr->reader_ptr_->open(location)) {
+        LOG_ENGINE_ERROR_ << "Fail to open structured index: " << location;
         return;
     }
     int64_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
-        LOG_ENGINE_ERROR_ << "Invalid attr index length: " << path;
+        LOG_ENGINE_ERROR_ << "Invalid structured index length: " << location;
         return;
     }
 
@@ -95,9 +95,9 @@ SSStructuredIndexFormat::read_internal(const milvus::storage::FSHandlerPtr& fs_p
     rp += sizeof(data_type);
     fs_ptr->reader_ptr_->seekg(rp);
 
-    attr_type = (engine::meta::hybrid::DataType)data_type;
+    auto attr_type = (engine::meta::hybrid::DataType)data_type;
 
-    LOG_ENGINE_DEBUG_ << "Start to read_index(" << path << ") length: " << length << " bytes";
+    LOG_ENGINE_DEBUG_ << "Start to read_index(" << location << ") length: " << length << " bytes";
     while (rp < length) {
         size_t meta_length;
         fs_ptr->reader_ptr_->read(&meta_length, sizeof(meta_length));
@@ -127,7 +127,7 @@ SSStructuredIndexFormat::read_internal(const milvus::storage::FSHandlerPtr& fs_p
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "read_index(" << path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "SSStructuredIndexFormat::read(" << location << ") rate " << rate << "MB/s";
 
     index = create_structured_index((engine::meta::hybrid::DataType)data_type);
 
@@ -137,76 +137,38 @@ SSStructuredIndexFormat::read_internal(const milvus::storage::FSHandlerPtr& fs_p
 }
 
 void
-SSStructuredIndexFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr,
-                              milvus::segment::AttrsIndexPtr& attrs_index) {
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
-    if (!boost::filesystem::is_directory(dir_path)) {
-        std::string err_msg = "Directory: " + dir_path + "does not exist";
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
-    }
-
-    boost::filesystem::path target_path(dir_path);
-    typedef boost::filesystem::directory_iterator d_it;
-
-    d_it it_end;
-    d_it it(target_path);
-    for (; it != it_end; ++it) {
-        const auto& path = it->path();
-        if (path.extension().string() == attr_index_extension_) {
-            auto file_name = path.filename().string();
-            auto field_name = file_name.substr(0, file_name.size() - 4);
-            knowhere::IndexPtr index = nullptr;
-            engine::meta::hybrid::DataType data_type;
-            read_internal(fs_ptr, path.string(), index, data_type);
-            auto attr_index = std::make_shared<milvus::segment::AttrIndex>(index, data_type, field_name);
-            attrs_index->attr_indexes.insert(std::make_pair(field_name, attr_index));
-        }
-    }
-}
-
-void
-SSStructuredIndexFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr,
-                               const milvus::segment::AttrsIndexPtr& attrs_index) {
+SSStructuredIndexFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& location,
+                               engine::meta::hybrid::DataType data_type, const knowhere::IndexPtr& index) {
     milvus::TimeRecorder recorder("write_index");
     recorder.RecordSection("Start");
 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
 
-    auto attr_it = attrs_index->attr_indexes.begin();
-    for (; attr_it != attrs_index->attr_indexes.end(); attr_it++) {
-        auto field_name = attr_it->first;
-        const std::string file_path = dir_path + "/" + field_name + attr_index_extension_;
+    auto binaryset = index->Serialize(knowhere::Config());
 
-        knowhere::IndexPtr index = attr_it->second->GetAttrIndex();
-        int32_t data_type = (int32_t)attr_it->second->GetDataType();
+    if (!fs_ptr->writer_ptr_->open(location)) {
+        LOG_ENGINE_ERROR_ << "Fail to open structured index: " << location;
+        return;
+    }
+    fs_ptr->writer_ptr_->write(&data_type, sizeof(data_type));
 
-        auto binaryset = index->Serialize(knowhere::Config());
+    for (auto& iter : binaryset.binary_map_) {
+        auto meta = iter.first.c_str();
+        size_t meta_length = iter.first.length();
+        fs_ptr->writer_ptr_->write(&meta_length, sizeof(meta_length));
+        fs_ptr->writer_ptr_->write((void*)meta, meta_length);
 
-        if (!fs_ptr->writer_ptr_->open(file_path)) {
-            LOG_ENGINE_ERROR_ << "Fail to open attribute index: " << file_path;
-            return;
-        }
-        fs_ptr->writer_ptr_->write(&data_type, sizeof(data_type));
-
-        for (auto& iter : binaryset.binary_map_) {
-            auto meta = iter.first.c_str();
-            size_t meta_length = iter.first.length();
-            fs_ptr->writer_ptr_->write(&meta_length, sizeof(meta_length));
-            fs_ptr->writer_ptr_->write((void*)meta, meta_length);
-
-            auto binary = iter.second;
-            int64_t binary_length = binary->size;
-            fs_ptr->writer_ptr_->write(&binary_length, sizeof(binary_length));
-            fs_ptr->writer_ptr_->write((void*)binary->data.get(), binary_length);
-        }
+        auto binary = iter.second;
+        int64_t binary_length = binary->size;
+        fs_ptr->writer_ptr_->write(&binary_length, sizeof(binary_length));
+        fs_ptr->writer_ptr_->write((void*)binary->data.get(), binary_length);
     }
 
     fs_ptr->writer_ptr_->close();
 
     double span = recorder.RecordSection("End");
     double rate = fs_ptr->writer_ptr_->length() * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "write_index(" << dir_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "SSStructuredIndexFormat::write(" << dir_path << ") rate " << rate << "MB/s";
 }
 
 }  // namespace codec

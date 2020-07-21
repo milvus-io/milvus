@@ -363,6 +363,51 @@ SSSegmentWriter::WriteVectorIndex(const std::string& field_name) {
 }
 
 Status
+SSSegmentWriter::SetStructuredIndex(const std::string& field_name, const knowhere::IndexPtr& index) {
+    return segment_ptr_->SetStructuredIndex(field_name, index);
+}
+
+Status
+SSSegmentWriter::WriteStructuredIndex(const std::string& field_name) {
+    try {
+        knowhere::IndexPtr index;
+        auto status = segment_ptr_->GetStructuredIndex(field_name, index);
+        if (!status.ok() || index == nullptr) {
+            return Status(DB_ERROR, "Structured index doesn't exist: " + status.message());
+        }
+
+        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+        auto field = segment_visitor_->GetFieldVisitor(field_name);
+        if (field == nullptr) {
+            return Status(DB_ERROR, "Invalid filed name: " + field_name);
+        }
+
+        auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (element_visitor == nullptr) {
+            return Status(DB_ERROR, "Invalid filed name: " + field_name);
+        }
+
+        auto& ss_codec = codec::SSCodec::instance();
+        fs_ptr_->operation_ptr_->CreateDirectory();
+
+        engine::FIELD_TYPE field_type;
+        segment_ptr_->GetFieldType(field_name, field_type);
+
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+        ss_codec.GetStructuredIndexFormat()->write(fs_ptr_, file_path, field_type, index);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to write vector index: " + std::string(e.what());
+        LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
+        return Status(SERVER_WRITE_ERROR, err_msg);
+    }
+
+    return Status::OK();
+}
+
+Status
 SSSegmentWriter::GetSegment(engine::SegmentPtr& segment_ptr) {
     segment_ptr = segment_ptr_;
     return Status::OK();
