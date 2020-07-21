@@ -16,6 +16,7 @@
 
 #include "db/snapshot/Resources.h"
 #include "utils/Status.h"
+#include "utils/StringHelpFunctions.h"
 
 namespace milvus::engine::snapshot {
 
@@ -34,7 +35,10 @@ template <>
 inline std::string
 GetResPath<Collection>(const std::string& root, const Collection::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << root << "/";
+    ss << root;
+    if (!StringHelpFunctions::EndWithSlash(root)) {
+        ss << "/";
+    }
     ss << COLLECTION_PREFIX << res_ptr->GetID();
 
     return ss.str();
@@ -44,7 +48,10 @@ template <>
 inline std::string
 GetResPath<Partition>(const std::string& root, const Partition::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << root << "/";
+    ss << root;
+    if (!StringHelpFunctions::EndWithSlash(root)) {
+        ss << "/";
+    }
     ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
     ss << PARTITION_PREFIX << res_ptr->GetID();
 
@@ -55,7 +62,10 @@ template <>
 inline std::string
 GetResPath<Segment>(const std::string& root, const Segment::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << root << "/";
+    ss << root;
+    if (!StringHelpFunctions::EndWithSlash(root)) {
+        ss << "/";
+    }
     ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
     ss << PARTITION_PREFIX << res_ptr->GetPartitionId() << "/";
     ss << SEGMENT_PREFIX << res_ptr->GetID();
@@ -67,7 +77,10 @@ template <>
 inline std::string
 GetResPath<SegmentFile>(const std::string& root, const SegmentFile::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << root << "/";
+    ss << root;
+    if (!StringHelpFunctions::EndWithSlash(root)) {
+        ss << "/";
+    }
     ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
     ss << PARTITION_PREFIX << res_ptr->GetPartitionId() << "/";
     ss << SEGMENT_PREFIX << res_ptr->GetSegmentId() << "/";

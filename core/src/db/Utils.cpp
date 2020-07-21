@@ -29,6 +29,7 @@
 //#include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 
 #include <map>
 
@@ -48,6 +49,15 @@ ConstructParentFolder(const std::string& db_path, const meta::SegmentSchema& tab
 }
 
 }  // namespace
+
+std::string
+ConstructCollectionRootPath(const std::string& root_path) {
+    if (StringHelpFunctions::EndWithSlash(root_path)) {
+        return root_path + "db" + TABLES_FOLDER;
+    }
+
+    return root_path + "/db" + TABLES_FOLDER;
+}
 
 int64_t
 GetMicroSecTimeStamp() {
