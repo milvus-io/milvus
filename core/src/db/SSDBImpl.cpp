@@ -12,6 +12,7 @@
 #include "db/SSDBImpl.h"
 #include "cache/CpuCacheMgr.h"
 #include "db/IDGenerator.h"
+#include "db/SnapshotUtils.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "db/merge/SSMergeTask.h"
 #include "db/snapshot/CompoundOperations.h"
@@ -625,7 +626,7 @@ SSDBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std
     WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
 
     // step 4: create field element for index
-    status = utils::SetIndex(collection_name, field_name, new_index);
+    status = SetSnapshotIndex(collection_name, field_name, new_index);
     if (!status.ok()) {
         return status;
     }
@@ -655,7 +656,7 @@ Status
 SSDBImpl::DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) {
     CHECK_INITIALIZED;
 
-    return utils::GetIndex(collection_name, field_name, index);
+    return GetSnapshotIndex(collection_name, field_name, index);
 }
 
 Status
@@ -664,7 +665,7 @@ SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field
 
     LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
 
-    STATUS_CHECK(utils::DeleteIndex(collection_name, field_name));
+    STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
 
     std::set<std::string> merge_collection_names = {collection_name};
     StartMergeTask(merge_collection_names, true);
@@ -686,7 +687,7 @@ SSDBImpl::DropIndex(const std::string& collection_name) {
 
     snapshot::OperationContext context;
     for (auto& field_name : field_names) {
-        STATUS_CHECK(utils::DeleteIndex(collection_name, field_name));
+        STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
     }
 
     std::set<std::string> merge_collection_names = {collection_name};
