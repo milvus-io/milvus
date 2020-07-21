@@ -27,7 +27,7 @@ SSSearchJob::AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor) {
 }
 
 void
-SSSearchJob::WaitResult() {
+SSSearchJob::WaitFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return segment_visitor_map_.empty(); });
     // LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld: query_time %f, map_uids_time %f, reduce_time %f",

@@ -47,7 +47,7 @@ class SSSearchJob : public Job {
     AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor);
 
     void
-    WaitResult();
+    WaitFinish();
 
     void
     SearchDone(const engine::snapshot::ID_TYPE seg_id);

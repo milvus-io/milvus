@@ -45,7 +45,7 @@ XSSBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
 
     if (auto job = job_.lock()) {
         auto build_index_job = std::static_pointer_cast<scheduler::SSBuildIndexJob>(job);
-        auto options = build_index_job->options();
+        // auto options = build_index_job->options();
         try {
             if (type == LoadType::DISK2CPU) {
                 stat = engine_->Load(nullptr);
