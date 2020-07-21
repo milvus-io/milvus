@@ -16,7 +16,6 @@
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuCloner.h>
 #endif
-#include <faiss/IndexScalarQuantizer.h>
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexScalarQuantizer.h>
 #include <faiss/clone_index.h>
