@@ -100,7 +100,7 @@ GetIndexDataType(EngineType type) {
         case EngineType::NSG_MIX:
             return codec::ExternalData::ExternalData_RawData;
 
-        case EngineType::HNSW_SQ8NR:
+        case EngineType::HNSW_SQ8NM:
         case EngineType::FAISS_IVFSQ8NR:
             return codec::ExternalData::ExternalData_SQ8;
 
@@ -244,8 +244,8 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW, mode);
             break;
         }
-        case EngineType::HNSW_SQ8NR: {
-            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW_SQ8NR, mode);
+        case EngineType::HNSW_SQ8NM: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW_SQ8NM, mode);
             break;
         }
         case EngineType::ANNOY: {
@@ -396,7 +396,7 @@ ExecutionEngineImpl::Serialize() {
 
     // here we reset index size by file size,
     // since some index type(such as SQ8) data size become smaller after serialized
-    index_->SetIndexSize(CommonUtil::GetFileSize(location_));
+    index_->UpdateIndexSize();
     LOG_ENGINE_DEBUG_ << "Finish serialize index file: " << location_ << " size: " << index_->Size();
 
     if (index_->Size() == 0) {

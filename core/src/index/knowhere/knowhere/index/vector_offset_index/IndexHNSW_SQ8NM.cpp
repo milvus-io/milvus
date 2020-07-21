@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "knowhere/index/vector_offset_index/IndexHNSW_SQ8NR.h"
+#include "knowhere/index/vector_offset_index/IndexHNSW_SQ8NM.h"
 
 #include <algorithm>
 #include <cassert>
@@ -29,7 +29,7 @@ namespace milvus {
 namespace knowhere {
 
 BinarySet
-IndexHNSW_SQ8NR::Serialize(const Config& config) {
+IndexHNSW_SQ8NM::Serialize(const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -49,7 +49,7 @@ IndexHNSW_SQ8NR::Serialize(const Config& config) {
 }
 
 void
-IndexHNSW_SQ8NR::Load(const BinarySet& index_binary) {
+IndexHNSW_SQ8NM::Load(const BinarySet& index_binary) {
     try {
         auto binary = index_binary.GetByName("HNSW_SQ8");
 
@@ -71,7 +71,7 @@ IndexHNSW_SQ8NR::Load(const BinarySet& index_binary) {
 }
 
 void
-IndexHNSW_SQ8NR::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexHNSW_SQ8NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
         GET_TENSOR_DATA_DIM(dataset_ptr)
 
@@ -93,7 +93,7 @@ IndexHNSW_SQ8NR::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-IndexHNSW_SQ8NR::Add(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexHNSW_SQ8NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     // It will not call Query() just after Add()
     // So, not to set 'data_' is allowed.
 
@@ -116,7 +116,7 @@ IndexHNSW_SQ8NR::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IndexHNSW_SQ8NR::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexHNSW_SQ8NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -168,7 +168,7 @@ IndexHNSW_SQ8NR::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 int64_t
-IndexHNSW_SQ8NR::Count() {
+IndexHNSW_SQ8NM::Count() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -176,11 +176,19 @@ IndexHNSW_SQ8NR::Count() {
 }
 
 int64_t
-IndexHNSW_SQ8NR::Dim() {
+IndexHNSW_SQ8NM::Dim() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     return (*(size_t*)index_->dist_func_param_);
+}
+
+void
+IndexHNSW_SQ8NM::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = index_->cal_size() + Dim() * (2 * sizeof(float) + Count());
 }
 
 }  // namespace knowhere

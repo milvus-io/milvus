@@ -73,6 +73,9 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     int64_t
     Dim() override;
 
+    void
+    UpdateIndexSize() override;
+
 #if 0
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset_ptr, const Config& config);
