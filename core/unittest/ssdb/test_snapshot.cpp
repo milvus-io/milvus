@@ -582,6 +582,7 @@ TEST_F(SnapshotTest, IndexTest) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(fe, d_a_i_ctx.stale_field_elements[0]);
 
+    std::cout << ss->ToString() << std::endl;
     auto drop_all_index_op = std::make_shared<DropAllIndexOperation>(d_a_i_ctx, ss);
     status = drop_all_index_op->Push();
     std::cout << status.ToString() << std::endl;
@@ -589,22 +590,6 @@ TEST_F(SnapshotTest, IndexTest) {
 
     status = drop_all_index_op->GetSnapshot(ss);
     ASSERT_TRUE(status.ok());
-
-    /* { */
-    /*     auto& fields = ss->GetResources<Field>(); */
-    /*     for (auto field_kv : fields) { */
-    /*         auto field = field_kv.second; */
-    /*         std::cout << "field " << field->GetID() << " " << field->GetName() << std::endl; */
-    /*         auto& field_elements = ss->GetResources<FieldElement>(); */
-    /*         for (auto element_kv : field_elements) { */
-    /*             auto element = element_kv.second; */
-    /*             if (element->GetFieldId() != field->GetID()) { */
-    /*                 continue; */
-    /*             } */
-    /*             std::cout << "\tfield_element " << element->GetID() << " " << element->GetName() << std::endl; */
-    /*         } */
-    /*     } */
-    /* } */
 
     sf_collector = std::make_shared<SegmentFileCollector>(ss, filter2);
     sf_collector->Iterate();
@@ -615,6 +600,59 @@ TEST_F(SnapshotTest, IndexTest) {
         for (auto& kv : field_elements) {
             ASSERT_NE(kv.second->GetID(), field_element_id);
         }
+    }
+
+    {
+        auto& fields = ss->GetResources<Field>();
+        OperationContext dai_ctx;
+        for (auto& field : fields) {
+            auto elements = ss->GetFieldElementsByField(field.second->GetName());
+            ASSERT_TRUE(elements.size() >= 1);
+            dai_ctx.stale_field_elements.push_back(elements[0]);
+        }
+        ASSERT_TRUE(dai_ctx.stale_field_elements.size() > 1);
+        auto op = std::make_shared<DropAllIndexOperation>(dai_ctx, ss);
+        status = op->Push();
+        ASSERT_FALSE(status.ok());
+    }
+
+    {
+        auto& fields = ss->GetResources<Field>();
+        ASSERT_TRUE(fields.size() > 0);
+        OperationContext dai_ctx;
+        std::string field_name;
+        std::set<ID_TYPE> stale_element_ids;
+        for (auto& field : fields) {
+            field_name = field.second->GetName();
+            auto elements = ss->GetFieldElementsByField(field_name);
+            ASSERT_TRUE(elements.size() >= 2);
+            for (auto& element : elements) {
+                stale_element_ids.insert(element->GetID());
+            }
+            dai_ctx.stale_field_elements = std::move(elements);
+            break;
+        }
+
+        std::set<ID_TYPE> stale_segment_ids;
+        auto& segment_files = ss->GetResources<SegmentFile>();
+        for (auto& kv : segment_files) {
+            auto& id = kv.first;
+            auto& segment_file = kv.second;
+            auto it = stale_element_ids.find(segment_file->GetFieldElementId());
+            if (it != stale_element_ids.end()) {
+                stale_segment_ids.insert(id);
+            }
+        }
+
+        auto prev_segment_file_cnt = segment_files.size();
+
+        ASSERT_TRUE(dai_ctx.stale_field_elements.size() > 1);
+        auto op = std::make_shared<DropAllIndexOperation>(dai_ctx, ss);
+        status = op->Push();
+        ASSERT_TRUE(status.ok());
+        status = op->GetSnapshot(ss);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(ss->GetResources<SegmentFile>().size() + stale_segment_ids.size(), prev_segment_file_cnt);
     }
 }
 

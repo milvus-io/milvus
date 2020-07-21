@@ -284,6 +284,9 @@ DropAllIndexOperation::DoExecute(StorePtr store) {
                 context.stale_segment_files.push_back(segment_file);
             }
         }
+        if (context.stale_segment_files.size() == 0) {
+            return Status::OK();
+        }
         SegmentCommitOperation sc_op(context, GetAdjustedSS());
         STATUS_CHECK(sc_op(store));
         STATUS_CHECK(sc_op.GetResource(context.new_segment_commit));
