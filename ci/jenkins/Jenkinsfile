@@ -85,6 +85,7 @@ pipeline {
                                     container("milvus-${BINARY_VERSION}-build-env") {
                                         script {
                                             try{
+                                                boolean isNightlyTest = isTimeTriggeredBuild()
                                                 if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
                                                     load "${env.WORKSPACE}/ci/jenkins/step/nightlyBuild.groovy"
                                                 } else {
