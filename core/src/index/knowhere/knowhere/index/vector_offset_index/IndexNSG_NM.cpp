@@ -68,7 +68,6 @@ NSG_NM::Load(const BinarySet& index_binary) {
         index_.reset(index);
 
         data_ = index_binary.GetByName(RAW_DATA)->data;
-        std::cout << "IndexNSG_NM load size = " << reader.total << std::endl;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -180,7 +179,6 @@ NSG_NM::UpdateIndexSize() {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     index_size_ = index_->GetSize();
-    std::cout << "IndexNSG_NM UpdateIndexSize = " << index_size_ << ", total size = " << Size() << std::endl;
 }
 
 }  // namespace knowhere

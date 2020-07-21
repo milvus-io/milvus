@@ -65,8 +65,6 @@ IndexHNSW_SQ8NM::Load(const BinarySet& index_binary) {
 
         data_ = index_binary.GetByName(SQ8_DATA)->data;
         index_->SetSq8((float*)(data_.get() + Dim() * Count()));
-        std::cout << "IndexHNSW_SQ8NM load index size = " << reader.total << std::endl;
-        std::cout << "IndexHNSW_SQ8NM load sq8 data size = " << index_binary.GetByName(SQ8_DATA)->size << std::endl;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -191,7 +189,6 @@ IndexHNSW_SQ8NM::UpdateIndexSize() {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     index_size_ = index_->cal_size() + Dim() * (2 * sizeof(float) + Count());
-    std::cout << "IndexHNSW_SQ8NM UpdateIndexSize = " << index_size_ << ", total size = " << Size() << std::endl;
 }
 
 }  // namespace knowhere
