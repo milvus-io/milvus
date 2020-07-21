@@ -77,6 +77,9 @@ class IVFSQHybrid : public GPUIVFSQ {
     void
     UnsetQuantizer();
 
+    void
+    UpdateIndexSize() override;
+
  protected:
     BinarySet
     SerializeImpl(const IndexType&) override;

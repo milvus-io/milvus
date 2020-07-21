@@ -10,6 +10,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <faiss/IndexSQHybrid.h>
 #include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/index_factory.h>
@@ -259,6 +260,20 @@ IVFSQHybrid::QueryImpl(int64_t n, const float* data, int64_t k, float* distances
     } else if (gpu_mode_ == 0) {
         IVF::QueryImpl(n, data, k, distances, labels, config);
     }
+}
+
+void
+IVFSQHybrid::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    auto ivfsqh_index = dynamic_cast<faiss::IndexIVFSQHybrid*>(index_.get());
+    auto nb = ivfsqh_index->invlists->compute_ntotal();
+    auto code_size = ivfsqh_index->code_size;
+    auto nlist = ivfsqh_index->nlist;
+    auto d = ivfsqh_index->d;
+    // ivf codes, ivf ids, sq trained vectors and quantizer
+    index_size_ = nb * code_size + nb * sizeof(int64_t) + 2 * d * sizeof(float) + nlist * d * sizeof(float);
 }
 
 FaissIVFQuantizer::~FaissIVFQuantizer() {
