@@ -78,6 +78,7 @@ while true ; do
                         case "$2" in
                                 "") CUDA_ARCH="DEFAULT"; shift 2 ;;
                                 *) CUDA_ARCH=$2 ; shift 2 ;;
+                        esac ;;
                 --) shift ; break ;;
                 *) echo "Internal error!" ; exit 1 ;;
         esac
