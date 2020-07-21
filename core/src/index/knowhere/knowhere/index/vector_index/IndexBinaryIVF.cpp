@@ -153,14 +153,10 @@ BinaryIVF::UpdateIndexSize() {
     auto bin_ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
     auto nb = bin_ivf_index->invlists->compute_ntotal();
     auto nlist = bin_ivf_index->nlist;
-    auto d = bin_ivf_index->d;
+    auto code_size = bin_ivf_index->code_size;
 
-    int64_t dim_byte = ceil(d / 8);
-    if ((d % 8) > 0) {
-        dim_byte++;
-    }
     // binary ivf codes, ids and quantizer
-    index_size_ = nb * dim_byte + nb * sizeof(int64_t) + nlist * d * sizeof(float);
+    index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
 }
 
 void

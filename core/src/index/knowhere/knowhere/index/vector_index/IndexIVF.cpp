@@ -247,9 +247,9 @@ IVF::UpdateIndexSize() {
     auto ivf_index = dynamic_cast<faiss::IndexIVFFlat*>(index_.get());
     auto nb = ivf_index->invlists->compute_ntotal();
     auto nlist = ivf_index->nlist;
-    auto d = ivf_index->d;
+    auto code_size = ivf_index->code_size;
     // ivf codes, ivf ids and quantizer
-    index_size_ = nb * d * sizeof(float) + nb * sizeof(int64_t) + nlist * d * sizeof(float);
+    index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
 }
 
 VecIndexPtr
