@@ -20,7 +20,8 @@ namespace scheduler {
 
 class SSTestTask : public XSSSearchTask {
  public:
-    explicit SSTestTask(const server::ContextPtr& context, const engine::SegmentVisitorPtr& visitor, TaskLabelPtr label);
+    explicit SSTestTask(const server::ContextPtr& context, const engine::SegmentVisitorPtr& visitor,
+                        TaskLabelPtr label);
 
  public:
     void

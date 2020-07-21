@@ -23,9 +23,9 @@
 #include <vector>
 
 #include "Job.h"
+#include "db/SnapshotVisitor.h"
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
-#include "db/SnapshotVisitor.h"
 #include "query/GeneralQuery.h"
 
 #include "server/context/Context.h"
@@ -40,7 +40,7 @@ using Id2IndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
 using ResultIds = engine::ResultIds;
 using ResultDistances = engine::ResultDistances;
 
-//struct SearchTimeStat {
+// struct SearchTimeStat {
 //    double query_time = 0.0;
 //    double map_uids_time = 0.0;
 //    double reduce_time = 0.0;
@@ -49,11 +49,11 @@ using ResultDistances = engine::ResultDistances;
 class SSSearchJob : public Job {
  public:
     SSSearchJob(const server::ContextPtr& context, int64_t topk, const milvus::json& extra_params,
-              engine::VectorsData& vectors);
+                engine::VectorsData& vectors);
 
     SSSearchJob(const server::ContextPtr& context, query::GeneralQueryPtr general_query, query::QueryPtr query_ptr,
-              std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-              engine::VectorsData& vectorsData);
+                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                engine::VectorsData& vectorsData);
 
  public:
     void
@@ -136,10 +136,10 @@ class SSSearchJob : public Job {
         return vector_count_;
     }
 
-//    SearchTimeStat&
-//    time_stat() {
-//        return time_stat_;
-//    }
+    //    SearchTimeStat&
+    //    time_stat() {
+    //        return time_stat_;
+    //    }
 
  private:
     const server::ContextPtr context_;
@@ -164,7 +164,7 @@ class SSSearchJob : public Job {
     std::mutex mutex_;
     std::condition_variable cv_;
 
-//    SearchTimeStat time_stat_;
+    //    SearchTimeStat time_stat_;
 };
 
 using SSSearchJobPtr = std::shared_ptr<SSSearchJob>;

@@ -24,8 +24,8 @@
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
-#include "scheduler/task/SSSearchTask.h"
 #include "scheduler/job/SSSearchJob.h"
+#include "scheduler/task/SSSearchTask.h"
 #include "segment/SegmentReader.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -34,8 +34,8 @@
 namespace milvus {
 namespace scheduler {
 
-//void
-//CollectFileMetrics(int file_type, size_t file_size) {
+// void
+// CollectFileMetrics(int file_type, size_t file_size) {
 //    server::MetricsBase& inst = server::Metrics::GetInstance();
 //    switch (file_type) {
 //        case SegmentSchema::RAW:
@@ -54,38 +54,39 @@ namespace scheduler {
 //    }
 //}
 
-XSSSearchTask::XSSSearchTask(const server::ContextPtr& context, const engine::SegmentVisitorPtr& visitor, TaskLabelPtr label)
+XSSSearchTask::XSSSearchTask(const server::ContextPtr& context, const engine::SegmentVisitorPtr& visitor,
+                             TaskLabelPtr label)
     : Task(TaskType::SearchTask, std::move(label)), context_(context), visitor_(visitor) {
-//    if (file_) {
-//        // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
-//        // similarity -- infinity value means two vectors equal, descending reduce, IP
-//        if (file_->metric_type_ == static_cast<int>(MetricType::IP) &&
-//            file_->engine_type_ != static_cast<int>(EngineType::FAISS_PQ)) {
-//            ascending_reduce = false;
-//        }
-//
-//        EngineType engine_type;
-//        if (file->file_type_ == SegmentSchema::FILE_TYPE::RAW ||
-//            file->file_type_ == SegmentSchema::FILE_TYPE::TO_INDEX ||
-//            file->file_type_ == SegmentSchema::FILE_TYPE::BACKUP) {
-//            engine_type = engine::utils::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
-//                                                                                : EngineType::FAISS_IDMAP;
-//        } else {
-//            engine_type = (EngineType)file->engine_type_;
-//        }
-//
-//        milvus::json json_params;
-//        if (!file_->index_params_.empty()) {
-//            json_params = milvus::json::parse(file_->index_params_);
-//        }
-//        index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
-//                                             (MetricType)file_->metric_type_, json_params);
-//    }
+    //    if (file_) {
+    //        // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
+    //        // similarity -- infinity value means two vectors equal, descending reduce, IP
+    //        if (file_->metric_type_ == static_cast<int>(MetricType::IP) &&
+    //            file_->engine_type_ != static_cast<int>(EngineType::FAISS_PQ)) {
+    //            ascending_reduce = false;
+    //        }
+    //
+    //        EngineType engine_type;
+    //        if (file->file_type_ == SegmentSchema::FILE_TYPE::RAW ||
+    //            file->file_type_ == SegmentSchema::FILE_TYPE::TO_INDEX ||
+    //            file->file_type_ == SegmentSchema::FILE_TYPE::BACKUP) {
+    //            engine_type = engine::utils::IsBinaryMetricType(file->metric_type_) ? EngineType::FAISS_BIN_IDMAP
+    //                                                                                : EngineType::FAISS_IDMAP;
+    //        } else {
+    //            engine_type = (EngineType)file->engine_type_;
+    //        }
+    //
+    //        milvus::json json_params;
+    //        if (!file_->index_params_.empty()) {
+    //            json_params = milvus::json::parse(file_->index_params_);
+    //        }
+    //        index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
+    //                                             (MetricType)file_->metric_type_, json_params);
+    //    }
 }
 
 void
 XSSSearchTask::Load(LoadType type, uint8_t device_id) {
-//    milvus::server::ContextFollower tracer(context_, "XSearchTask::Load " + std::to_string(file_->id_));
+    //    milvus::server::ContextFollower tracer(context_, "XSearchTask::Load " + std::to_string(file_->id_));
 
     TimeRecorder rc(LogOut("[%s][%ld]", "search", 0));
     Status stat = Status::OK();
@@ -95,18 +96,18 @@ XSSSearchTask::Load(LoadType type, uint8_t device_id) {
     try {
         fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
         if (type == LoadType::DISK2CPU) {
-//            stat = index_engine_->Load();
-//            stat = index_engine_->LoadAttr();
+            //            stat = index_engine_->Load();
+            //            stat = index_engine_->LoadAttr();
             type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
-//            bool hybrid = false;
-//            if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H) {
-//                hybrid = true;
-//            }
-//            stat = index_engine_->CopyToGpu(device_id, hybrid);
+            //            bool hybrid = false;
+            //            if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H) {
+            //                hybrid = true;
+            //            }
+            //            stat = index_engine_->CopyToGpu(device_id, hybrid);
             type_str = "CPU2GPU" + std::to_string(device_id);
         } else if (type == LoadType::GPU2CPU) {
-//            stat = index_engine_->CopyToCpu();
+            //            stat = index_engine_->CopyToCpu();
             type_str = "GPU2CPU";
         } else {
             error_msg = "Wrong load type";
@@ -139,18 +140,18 @@ XSSSearchTask::Load(LoadType type, uint8_t device_id) {
         return;
     }
 
-//    size_t file_size = index_engine_->Size();
+    //    size_t file_size = index_engine_->Size();
 
-//    std::string info = "Search task load file id:" + std::to_string(file_->id_) + " " + type_str +
-//                       " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
-//                       " bytes from location: " + file_->location_ + " totally cost";
-//    rc.ElapseFromBegin(info);
-//
-//    CollectFileMetrics(file_->file_type_, file_size);
-//
-//    // step 2: return search task for later execution
-//    index_id_ = file_->id_;
-//    index_type_ = file_->file_type_;
+    //    std::string info = "Search task load file id:" + std::to_string(file_->id_) + " " + type_str +
+    //                       " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
+    //                       " bytes from location: " + file_->location_ + " totally cost";
+    //    rc.ElapseFromBegin(info);
+    //
+    //    CollectFileMetrics(file_->file_type_, file_size);
+    //
+    //    // step 2: return search task for later execution
+    //    index_id_ = file_->id_;
+    //    index_type_ = file_->file_type_;
     //    search_contexts_.swap(search_contexts_);
 }
 
@@ -182,59 +183,62 @@ XSSSearchTask::Execute() {
 
         fiu_do_on("XSearchTask.Execute.throw_std_exception", throw std::exception());
 
-//        try {
-//            /* step 2: search */
-//            bool hybrid = false;
-//            if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H &&
-//                ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
-//                hybrid = true;
-//            }
-//            Status s;
-//            if (general_query != nullptr) {
-//                std::unordered_map<std::string, DataType> types;
-//                auto attr_type = search_job->attr_type();
-//                auto type_it = attr_type.begin();
-//                for (; type_it != attr_type.end(); type_it++) {
-//                    types.insert(std::make_pair(type_it->first, (DataType)(type_it->second)));
-//                }
-//
-//                auto query_ptr = search_job->query_ptr();
-//
-//                s = index_engine_->HybridSearch(search_job, types, output_distance, output_ids, hybrid);
-//                auto vector_query = query_ptr->vectors.begin()->second;
-//                topk = vector_query->topk;
-//                nq = vector_query->query_vector.float_data.size() / file_->dimension_;
-//                search_job->vector_count() = nq;
-//            } else {
-//                s = index_engine_->Search(output_ids, output_distance, search_job, hybrid);
-//            }
-//
-//            fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
-//            if (!s.ok()) {
-//                search_job->GetStatus() = s;
-//                search_job->SearchDone(index_id_);
-//                return;
-//            }
-//
-//            span = rc.RecordSection("search done");
-//
-//            /* step 3: pick up topk result */
-//            auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
-//            if (spec_k == 0) {
-//                LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty file. file location = %s", "search", 0,
-//                                              file_->location_.c_str());
-//            } else {
-//                std::unique_lock<std::mutex> lock(search_job->mutex());
-//                XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, ascending_reduce,
-//                                                  search_job->GetResultIds(), search_job->GetResultDistances());
-//            }
-//
-//            span = rc.RecordSection("reduce topk done");
-//            search_job->time_stat().reduce_time += span / 1000;
-//        } catch (std::exception& ex) {
-//            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
-//            search_job->GetStatus() = Status(SERVER_UNEXPECTED_ERROR, ex.what());
-//        }
+        //        try {
+        //            /* step 2: search */
+        //            bool hybrid = false;
+        //            if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H &&
+        //                ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
+        //                hybrid = true;
+        //            }
+        //            Status s;
+        //            if (general_query != nullptr) {
+        //                std::unordered_map<std::string, DataType> types;
+        //                auto attr_type = search_job->attr_type();
+        //                auto type_it = attr_type.begin();
+        //                for (; type_it != attr_type.end(); type_it++) {
+        //                    types.insert(std::make_pair(type_it->first, (DataType)(type_it->second)));
+        //                }
+        //
+        //                auto query_ptr = search_job->query_ptr();
+        //
+        //                s = index_engine_->HybridSearch(search_job, types, output_distance, output_ids, hybrid);
+        //                auto vector_query = query_ptr->vectors.begin()->second;
+        //                topk = vector_query->topk;
+        //                nq = vector_query->query_vector.float_data.size() / file_->dimension_;
+        //                search_job->vector_count() = nq;
+        //            } else {
+        //                s = index_engine_->Search(output_ids, output_distance, search_job, hybrid);
+        //            }
+        //
+        //            fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
+        //            if (!s.ok()) {
+        //                search_job->GetStatus() = s;
+        //                search_job->SearchDone(index_id_);
+        //                return;
+        //            }
+        //
+        //            span = rc.RecordSection("search done");
+        //
+        //            /* step 3: pick up topk result */
+        //            auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
+        //            if (spec_k == 0) {
+        //                LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty file. file location = %s",
+        //                "search", 0,
+        //                                              file_->location_.c_str());
+        //            } else {
+        //                std::unique_lock<std::mutex> lock(search_job->mutex());
+        //                XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk,
+        //                ascending_reduce,
+        //                                                  search_job->GetResultIds(),
+        //                                                  search_job->GetResultDistances());
+        //            }
+        //
+        //            span = rc.RecordSection("reduce topk done");
+        //            search_job->time_stat().reduce_time += span / 1000;
+        //        } catch (std::exception& ex) {
+        //            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0,
+        //            ex.what()); search_job->GetStatus() = Status(SERVER_UNEXPECTED_ERROR, ex.what());
+        //        }
 
         /* step 4: notify to send result to client */
         search_job->SearchDone(seg_id);
@@ -247,9 +251,10 @@ XSSSearchTask::Execute() {
 }
 
 void
-XSSSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const scheduler::ResultDistances& src_distances,
-                                  size_t src_k, size_t nq, size_t topk, bool ascending, scheduler::ResultIds& tar_ids,
-                                  scheduler::ResultDistances& tar_distances) {
+XSSSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids,
+                                    const scheduler::ResultDistances& src_distances, size_t src_k, size_t nq,
+                                    size_t topk, bool ascending, scheduler::ResultIds& tar_ids,
+                                    scheduler::ResultDistances& tar_distances) {
     if (src_ids.empty()) {
         LOG_ENGINE_DEBUG_ << LogOut("[%s][%d] Search result is empty.", "search", 0);
         return;
@@ -313,13 +318,13 @@ XSSSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const s
     tar_distances.swap(buf_distances);
 }
 
-//const std::string&
-//XSSSearchTask::GetLocation() const {
+// const std::string&
+// XSSSearchTask::GetLocation() const {
 //    return file_->location_;
 //}
 
-//size_t
-//XSSSearchTask::GetIndexId() const {
+// size_t
+// XSSSearchTask::GetIndexId() const {
 //    return file_->id_;
 //}
 

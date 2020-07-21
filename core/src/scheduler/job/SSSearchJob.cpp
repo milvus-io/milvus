@@ -17,14 +17,14 @@ namespace milvus {
 namespace scheduler {
 
 SSSearchJob::SSSearchJob(const server::ContextPtr& context, int64_t topk, const milvus::json& extra_params,
-                     engine::VectorsData& vectors)
+                         engine::VectorsData& vectors)
     : Job(JobType::SS_SEARCH), context_(context), topk_(topk), extra_params_(extra_params), vectors_(vectors) {
 }
 
 SSSearchJob::SSSearchJob(const server::ContextPtr& context, milvus::query::GeneralQueryPtr general_query,
-                     query::QueryPtr query_ptr,
-                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                     engine::VectorsData& vectors)
+                         query::QueryPtr query_ptr,
+                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                         engine::VectorsData& vectors)
     : Job(JobType::SS_SEARCH),
       context_(context),
       general_query_(general_query),
@@ -44,9 +44,10 @@ void
 SSSearchJob::WaitResult() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return segment_visitor_map_.empty(); });
-//    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld: query_time %f, map_uids_time %f, reduce_time %f", "search", 0,
-//                                id(), this->time_stat().query_time, this->time_stat().map_uids_time,
-//                                this->time_stat().reduce_time);
+    //    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld: query_time %f, map_uids_time %f, reduce_time %f",
+    //    "search", 0,
+    //                                id(), this->time_stat().query_time, this->time_stat().map_uids_time,
+    //                                this->time_stat().reduce_time);
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld all done", "search", 0, id());
 }
 

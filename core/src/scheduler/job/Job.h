@@ -21,8 +21,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "db/snapshot/ResourceTypes.h"
 #include "db/SnapshotVisitor.h"
+#include "db/snapshot/ResourceTypes.h"
 #include "scheduler/interface/interfaces.h"
 #include "server/context/Context.h"
 

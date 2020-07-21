@@ -11,8 +11,8 @@
 
 #include <utility>
 
-#include "scheduler/task/SSTestTask.h"
 #include "cache/GpuCacheMgr.h"
+#include "scheduler/task/SSTestTask.h"
 
 namespace milvus {
 namespace scheduler {

@@ -23,8 +23,8 @@
 
 #include "job/BuildIndexJob.h"
 #include "job/DeleteJob.h"
-#include "job/SearchJob.h"
 #include "job/SSSearchJob.h"
+#include "job/SearchJob.h"
 #include "task/Task.h"
 
 namespace milvus {

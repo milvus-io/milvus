@@ -30,10 +30,10 @@
 namespace milvus {
 namespace scheduler {
 
-//using engine::meta::SegmentSchemaPtr;
+// using engine::meta::SegmentSchemaPtr;
 
-//using Id2ToIndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
-//using Id2ToTableFileMap = std::unordered_map<size_t, SegmentSchema>;
+// using Id2ToIndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
+// using Id2ToTableFileMap = std::unordered_map<size_t, SegmentSchema>;
 
 class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
  public:
@@ -42,8 +42,8 @@ class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
     ~SSBuildIndexJob() = default;
 
  public:
-//    bool
-//    AddToIndexFiles(const SegmentSchemaPtr& to_index_file);
+    //    bool
+    //    AddToIndexFiles(const SegmentSchemaPtr& to_index_file);
 
     void
     AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor);
@@ -63,15 +63,15 @@ class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
         return status_;
     }
 
-//    Id2ToIndexMap&
-//    to_index_files() {
-//        return to_index_files_;
-//    }
+    //    Id2ToIndexMap&
+    //    to_index_files() {
+    //        return to_index_files_;
+    //    }
 
-//    engine::meta::MetaPtr
-//    meta() const {
-//        return meta_ptr_;
-//    }
+    //    engine::meta::MetaPtr
+    //    meta() const {
+    //        return meta_ptr_;
+    //    }
 
     const SegmentVisitorMap&
     segment_visitor_map() {
@@ -88,8 +88,8 @@ class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
     OnCacheInsertDataChanged(bool value) override;
 
  private:
-//    Id2ToIndexMap to_index_files_;
-//    engine::meta::MetaPtr meta_ptr_;
+    //    Id2ToIndexMap to_index_files_;
+    //    engine::meta::MetaPtr meta_ptr_;
     engine::DBOptions options_;
     SegmentVisitorMap segment_visitor_map_;
 

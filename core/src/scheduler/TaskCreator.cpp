@@ -11,12 +11,12 @@
 
 #include "scheduler/TaskCreator.h"
 #include "SchedInst.h"
-#include "tasklabel/BroadcastLabel.h"
-#include "tasklabel/SpecResLabel.h"
 #include "task/BuildIndexTask.h"
 #include "task/DeleteTask.h"
-#include "task/SearchTask.h"
 #include "task/SSSearchTask.h"
+#include "task/SearchTask.h"
+#include "tasklabel/BroadcastLabel.h"
+#include "tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
@@ -80,7 +80,7 @@ TaskCreator::Create(const BuildIndexJobPtr& job) {
 std::vector<TaskPtr>
 TaskCreator::Create(const SSSearchJobPtr& job) {
     std::vector<TaskPtr> tasks;
-    for (auto& sv: job->segment_visitor_map()) {
+    for (auto& sv : job->segment_visitor_map()) {
         auto task = std::make_shared<XSSSearchTask>(job->GetContext(), sv.second, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);

@@ -18,8 +18,7 @@
 namespace milvus {
 namespace scheduler {
 
-SSBuildIndexJob::SSBuildIndexJob(engine::DBOptions options)
-    : Job(JobType::SS_BUILD), options_(std::move(options)) {
+SSBuildIndexJob::SSBuildIndexJob(engine::DBOptions options) : Job(JobType::SS_BUILD), options_(std::move(options)) {
     SetIdentity("SSBuildIndexJob");
     AddCacheInsertDataListener();
 }

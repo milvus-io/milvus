@@ -12,8 +12,8 @@
 #pragma once
 
 #include "db/SnapshotVisitor.h"
-#include "scheduler/task/Task.h"
 #include "scheduler/Definition.h"
+#include "scheduler/task/Task.h"
 
 namespace milvus {
 namespace scheduler {
@@ -30,9 +30,9 @@ class XSSBuildIndexTask : public Task {
 
  public:
     engine::SegmentVisitorPtr visitor_;
-//    SegmentSchemaPtr file_;
-//    SegmentSchema table_file_;
-//    size_t to_index_id_ = 0;
+    //    SegmentSchemaPtr file_;
+    //    SegmentSchema table_file_;
+    //    size_t to_index_id_ = 0;
     int to_index_type_ = 0;
     ExecutionEnginePtr to_index_engine_ = nullptr;
 };

@@ -16,9 +16,9 @@
 #include <vector>
 
 #include "db/SnapshotVisitor.h"
-#include "scheduler/task/Task.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/SSSearchJob.h"
+#include "scheduler/task/Task.h"
 
 namespace milvus {
 namespace scheduler {
@@ -41,18 +41,18 @@ class XSSSearchTask : public Task {
                          size_t src_k, size_t nq, size_t topk, bool ascending, scheduler::ResultIds& tar_ids,
                          scheduler::ResultDistances& tar_distances);
 
-//    const std::string&
-//    GetLocation() const;
+    //    const std::string&
+    //    GetLocation() const;
 
-//    size_t
-//    GetIndexId() const;
+    //    size_t
+    //    GetIndexId() const;
 
  public:
     const server::ContextPtr context_;
 
     engine::SegmentVisitorPtr visitor_;
 
-//    size_t index_id_ = 0;
+    //    size_t index_id_ = 0;
     int index_type_ = 0;
     ExecutionEnginePtr index_engine_ = nullptr;
 
