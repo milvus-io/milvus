@@ -40,6 +40,10 @@ class SSExecutionEngineImpl : public SSExecutionEngine {
     BuildIndex(const std::string& field_name, const CollectionIndex& index) override;
 
  private:
+    knowhere::VecIndexPtr
+    CreatetVecIndex(EngineType type);
+
+ private:
     SegmentVisitorPtr segment_visitor_;
     segment::SSSegmentReaderPtr segment_reader_;
 };

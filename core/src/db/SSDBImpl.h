@@ -102,20 +102,20 @@ class SSDBImpl {
                   const std::vector<std::string>& field_names, DataChunkPtr& data_chunk);
 
     Status
-    GetEntityIDs(const std::string& collection_id, int64_t segment_id, IDNumbers& entity_ids);
+    GetEntityIDs(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids);
 
     Status
-    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
                 const std::string& field_name, const CollectionIndex& index);
 
     Status
-    DescribeIndex(const std::string& collection_id, const std::string& field_name, CollectionIndex& index);
+    DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index);
 
     Status
-    DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& element_name);
+    DropIndex(const std::string& collection_name, const std::string& field_name);
 
     Status
-    DropIndex(const std::string& collection_id);
+    DropIndex(const std::string& collection_name);
 
     Status
     Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResult& result);
