@@ -510,7 +510,7 @@ TEST_F(SnapshotTest, IndexTest) {
 
     OperationContext drop_ctx;
     drop_ctx.lsn = next_lsn();
-    drop_ctx.stale_segment_file = seg_file;
+    drop_ctx.stale_segment_files.push_back(seg_file);
     auto drop_op = std::make_shared<DropIndexOperation>(drop_ctx, ss);
     status = drop_op->Push();
     ASSERT_TRUE(status.ok());

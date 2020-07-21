@@ -270,7 +270,7 @@ DropAllIndexOperation::DoExecute(StorePtr store) {
         }
 
         auto context = context_;
-        context.stale_segment_file = kv.second.Get();
+        context.stale_segment_files.push_back(kv.second.Get());
         SegmentCommitOperation sc_op(context, GetAdjustedSS());
         STATUS_CHECK(sc_op(store));
         STATUS_CHECK(sc_op.GetResource(context.new_segment_commit));
@@ -306,7 +306,7 @@ DropIndexOperation::DropIndexOperation(const OperationContext& context, ScopedSn
 
 Status
 DropIndexOperation::PreCheck() {
-    if (context_.stale_segment_file == nullptr) {
+    if (context_.stale_segment_files.size() == 0) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Stale segment is requried";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
