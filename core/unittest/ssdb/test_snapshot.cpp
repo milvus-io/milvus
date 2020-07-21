@@ -607,10 +607,10 @@ TEST_F(SnapshotTest, IndexTest) {
         OperationContext dai_ctx;
         for (auto& field : fields) {
             auto elements = ss->GetFieldElementsByField(field.second->GetName());
-            ASSERT_TRUE(elements.size() >= 1);
+            ASSERT_GE(elements.size(), 1);
             dai_ctx.stale_field_elements.push_back(elements[0]);
         }
-        ASSERT_TRUE(dai_ctx.stale_field_elements.size() > 1);
+        ASSERT_GT(dai_ctx.stale_field_elements.size(), 1);
         auto op = std::make_shared<DropAllIndexOperation>(dai_ctx, ss);
         status = op->Push();
         ASSERT_FALSE(status.ok());
@@ -618,14 +618,14 @@ TEST_F(SnapshotTest, IndexTest) {
 
     {
         auto& fields = ss->GetResources<Field>();
-        ASSERT_TRUE(fields.size() > 0);
+        ASSERT_GT(fields.size(), 0);
         OperationContext dai_ctx;
         std::string field_name;
         std::set<ID_TYPE> stale_element_ids;
         for (auto& field : fields) {
             field_name = field.second->GetName();
             auto elements = ss->GetFieldElementsByField(field_name);
-            ASSERT_TRUE(elements.size() >= 2);
+            ASSERT_GE(elements.size(), 2);
             for (auto& element : elements) {
                 stale_element_ids.insert(element->GetID());
             }
@@ -646,7 +646,7 @@ TEST_F(SnapshotTest, IndexTest) {
 
         auto prev_segment_file_cnt = segment_files.size();
 
-        ASSERT_TRUE(dai_ctx.stale_field_elements.size() > 1);
+        ASSERT_GT(dai_ctx.stale_field_elements.size(), 1);
         auto op = std::make_shared<DropAllIndexOperation>(dai_ctx, ss);
         status = op->Push();
         ASSERT_TRUE(status.ok());

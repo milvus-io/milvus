@@ -13,14 +13,15 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <vector>
 
 #include "db/meta/MetaAdapter.h"
+#include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Snapshots.h"
-#include "db/snapshot/IterateHandler.h"
 #include "utils/Status.h"
 
 namespace milvus {
