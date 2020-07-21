@@ -2,7 +2,17 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.10.1 (TBD)
+# Milvus 0.10.2 (TBD)
+
+## Bug
+
+## Feature
+
+## Improvement
+
+## Task
+
+# Milvus 0.10.1 (2020-07-20)
 
 ## Bug
 -   \#2487 Enlarge timeout value for creating collection
