@@ -79,6 +79,7 @@ namespace SPTAG
             ~Index() {}
 
             inline SizeType GetNumSamples() const { return m_pSamples.R(); }
+            inline SizeType GetIndexSize() const { return sizeof(*this); }
             inline DimensionType GetFeatureDim() const { return m_pSamples.C(); }
         
             inline int GetCurrMaxCheck() const { return m_iMaxCheck; }

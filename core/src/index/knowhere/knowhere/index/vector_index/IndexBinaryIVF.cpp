@@ -146,6 +146,20 @@ BinaryIVF::Dim() {
 }
 
 void
+BinaryIVF::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    auto bin_ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
+    auto nb = bin_ivf_index->invlists->compute_ntotal();
+    auto nlist = bin_ivf_index->nlist;
+    auto code_size = bin_ivf_index->code_size;
+
+    // binary ivf codes, ids and quantizer
+    index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
+}
+
+void
 BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR(dataset_ptr)
 

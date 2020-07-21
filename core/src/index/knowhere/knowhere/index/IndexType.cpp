@@ -38,7 +38,7 @@ static std::unordered_map<int32_t, std::string> old_index_type_str_map = {
 #endif
     {(int32_t)OldIndexType::HNSW, IndexEnum::INDEX_HNSW},
     {(int32_t)OldIndexType::ANNOY, IndexEnum::INDEX_ANNOY},
-    {(int32_t)OldIndexType::HNSW_SQ8NR, IndexEnum::INDEX_HNSW_SQ8NR},
+    {(int32_t)OldIndexType::HNSW_SQ8NM, IndexEnum::INDEX_HNSW_SQ8NM},
     {(int32_t)OldIndexType::FAISS_IVFSQ8NR, IndexEnum::INDEX_FAISS_IVFSQ8NR},
     {(int32_t)OldIndexType::FAISS_BIN_IDMAP, IndexEnum::INDEX_FAISS_BIN_IDMAP},
     {(int32_t)OldIndexType::FAISS_BIN_IVFLAT_CPU, IndexEnum::INDEX_FAISS_BIN_IVFFLAT},
@@ -59,7 +59,7 @@ static std::unordered_map<std::string, int32_t> str_old_index_type_map = {
     {IndexEnum::INDEX_HNSW, (int32_t)OldIndexType::HNSW},
     {IndexEnum::INDEX_ANNOY, (int32_t)OldIndexType::ANNOY},
     {IndexEnum::INDEX_FAISS_IVFSQ8NR, (int32_t)OldIndexType::FAISS_IVFSQ8NR},
-    {IndexEnum::INDEX_HNSW_SQ8NR, (int32_t)OldIndexType::HNSW_SQ8NR},
+    {IndexEnum::INDEX_HNSW_SQ8NM, (int32_t)OldIndexType::HNSW_SQ8NM},
     {IndexEnum::INDEX_FAISS_BIN_IDMAP, (int32_t)OldIndexType::FAISS_BIN_IDMAP},
     {IndexEnum::INDEX_FAISS_BIN_IVFFLAT, (int32_t)OldIndexType::FAISS_BIN_IVFLAT_CPU},
 };
@@ -82,7 +82,7 @@ const char* INDEX_SPTAG_BKT_RNT = "SPTAG_BKT_RNT";
 #endif
 const char* INDEX_HNSW = "HNSW";
 const char* INDEX_ANNOY = "ANNOY";
-const char* INDEX_HNSW_SQ8NR = "HNSW_SQ8NR";
+const char* INDEX_HNSW_SQ8NM = "HNSW_SQ8NM";
 }  // namespace IndexEnum
 
 std::string

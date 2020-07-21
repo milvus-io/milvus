@@ -71,7 +71,7 @@ set(vector_offset_index_srcs
         knowhere/index/vector_offset_index/IndexIVFSQNR_NM.cpp
         knowhere/index/vector_offset_index/IndexHNSW_NM.cpp
         knowhere/index/vector_offset_index/IndexNSG_NM.cpp
-        knowhere/index/vector_offset_index/IndexHNSW_SQ8NR.cpp
+        knowhere/index/vector_offset_index/IndexHNSW_SQ8NM.cpp
         )
 
 if (MILVUS_SUPPORT_SPTAG)

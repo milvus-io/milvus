@@ -248,7 +248,7 @@ ValidateIndexParams(const milvus::json& index_params, const engine::meta::Collec
             }
             break;
         }
-        case (int32_t)engine::EngineType::HNSW_SQ8NR:
+        case (int32_t)engine::EngineType::HNSW_SQ8NM:
         case (int32_t)engine::EngineType::HNSW: {
             auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
             if (!status.ok()) {
@@ -298,7 +298,7 @@ ValidateSearchParams(const milvus::json& search_params, const engine::meta::Coll
             }
             break;
         }
-        case (int32_t)engine::EngineType::HNSW_SQ8NR:
+        case (int32_t)engine::EngineType::HNSW_SQ8NM:
         case (int32_t)engine::EngineType::HNSW: {
             auto status = CheckParameterRange(search_params, knowhere::IndexParams::ef, topk, 4096);
             if (!status.ok()) {

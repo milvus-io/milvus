@@ -330,11 +330,11 @@ TEST_P(IVFTest, invalid_gpu_source) {
     auto invalid_conf = ParamGenerator::GetInstance().Gen(index_type_);
     invalid_conf[milvus::knowhere::meta::DEVICEID] = -1;
 
-    if (index_type_ == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
-        // null faiss index
-        index_->SetIndexSize(0);
-        milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
-    }
+    // if (index_type_ == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+    //     null faiss index
+    //     index_->SetIndexSize(0);
+    //     milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
+    // }
 
     index_->Train(base_dataset, conf_);
 

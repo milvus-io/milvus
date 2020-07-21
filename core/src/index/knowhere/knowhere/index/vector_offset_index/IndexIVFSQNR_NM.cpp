@@ -205,5 +205,18 @@ IVFSQNR_NM::ArrangeCodes(const DatasetPtr& dataset_ptr, const Config& config) {
     data_ = std::shared_ptr<uint8_t[]>(arranged_data);
 }
 
+void
+IVFSQNR_NM::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    auto ivfsq_index = dynamic_cast<faiss::IndexIVFScalarQuantizer*>(index_.get());
+    auto nb = ivfsq_index->invlists->compute_ntotal();
+    auto nlist = ivfsq_index->nlist;
+    auto d = ivfsq_index->d;
+    // ivf ids, sq trained vectors and quantizer
+    index_size_ = nb * sizeof(int64_t) + 2 * d * sizeof(float) + nlist * d * sizeof(float);
+}
+
 }  // namespace knowhere
 }  // namespace milvus

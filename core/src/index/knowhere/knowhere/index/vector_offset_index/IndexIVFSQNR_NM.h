@@ -54,6 +54,9 @@ class IVFSQNR_NM : public IVF_NM {
 
     void
     ArrangeCodes(const DatasetPtr&, const Config&);
+
+    void
+    UpdateIndexSize() override;
 };
 
 using IVFSQNRNMPtr = std::shared_ptr<IVFSQNR_NM>;

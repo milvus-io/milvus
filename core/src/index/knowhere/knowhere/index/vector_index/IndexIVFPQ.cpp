@@ -73,5 +73,28 @@ IVFPQ::GenParams(const Config& config) {
     return params;
 }
 
+void
+IVFPQ::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    auto ivfpq_index = dynamic_cast<faiss::IndexIVFPQ*>(index_.get());
+    auto nb = ivfpq_index->invlists->compute_ntotal();
+    auto code_size = ivfpq_index->code_size;
+    auto pq = ivfpq_index->pq;
+    auto nlist = ivfpq_index->nlist;
+    auto d = ivfpq_index->d;
+
+    // ivf codes, ivf ids and quantizer
+    auto capacity = nb * code_size + nb * sizeof(int64_t) + nlist * d * sizeof(float);
+    auto centroid_table = pq.M * pq.ksub * pq.dsub * sizeof(float);
+    auto precomputed_table = nlist * pq.M * pq.ksub * sizeof(float);
+    if (precomputed_table > ivfpq_index->precomputed_table_max_bytes) {
+        // will not precompute table
+        precomputed_table = 0;
+    }
+    index_size_ = capacity + centroid_table + precomputed_table;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

@@ -34,6 +34,9 @@ class IVFSQ : public IVF {
 
     VecIndexPtr
     CopyCpuToGpu(const int64_t, const Config&) override;
+
+    void
+    UpdateIndexSize() override;
 };
 
 using IVFSQPtr = std::shared_ptr<IVFSQ>;

@@ -1208,6 +1208,20 @@ namespace hnswlib_nm {
             return result;
         }
 
+        int64_t cal_size() {
+            int64_t ret = 0;
+            ret += sizeof(*this);
+            ret += sizeof(*space);
+            ret += visited_list_pool_->GetSize();
+            ret += link_list_locks_.size() * sizeof(std::mutex);
+            ret += element_levels_.size() * sizeof(int);
+            ret += max_elements_ * size_data_per_element_;
+            ret += max_elements_ * sizeof(void*);
+            for (auto i = 0; i < max_elements_; ++ i) {
+                ret += linkLists_[i] ? size_links_per_element_ * element_levels_[i] : 0;
+            }
+            return ret;
+        }
     };
 
 }

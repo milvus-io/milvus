@@ -40,7 +40,7 @@ enum class IndexType {
     HNSW = 11,
     ANNOY = 12,
     IVFSQ8NR = 13,
-    HNSW_SQ8NR = 14,
+    HNSW_SQ8NM = 14,
 };
 
 enum class MetricType {

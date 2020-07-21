@@ -62,6 +62,9 @@ class IndexAnnoy : public VecIndex {
     int64_t
     Dim() override;
 
+    void
+    UpdateIndexSize() override;
+
  private:
     MetricType metric_type_;
     std::shared_ptr<AnnoyIndexInterface<int64_t, float>> index_ = nullptr;

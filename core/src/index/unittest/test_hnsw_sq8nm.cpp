@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-#include <knowhere/index/vector_offset_index/IndexHNSW_SQ8NR.h>
+#include <knowhere/index/vector_offset_index/IndexHNSW_SQ8NM.h>
 #include <src/index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h>
 #include <iostream>
 #include <random>
@@ -29,7 +29,7 @@ class HNSWSQ8NRTest : public DataGen, public TestWithParam<std::string> {
         std::cout << "IndexType from GetParam() is: " << IndexType << std::endl;
         Generate(64, 10000, 10);  // dim = 64, nb = 10000, nq = 10
                                   //        Generate(2, 10, 2);  // dim = 64, nb = 10000, nq = 10
-        index_ = std::make_shared<milvus::knowhere::IndexHNSW_SQ8NR>();
+        index_ = std::make_shared<milvus::knowhere::IndexHNSW_SQ8NM>();
         conf = milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, 64},        {milvus::knowhere::meta::TOPK, 10},
             {milvus::knowhere::IndexParams::M, 16},   {milvus::knowhere::IndexParams::efConstruction, 200},
@@ -46,7 +46,7 @@ class HNSWSQ8NRTest : public DataGen, public TestWithParam<std::string> {
 
  protected:
     milvus::knowhere::Config conf;
-    std::shared_ptr<milvus::knowhere::IndexHNSW_SQ8NR> index_ = nullptr;
+    std::shared_ptr<milvus::knowhere::IndexHNSW_SQ8NM> index_ = nullptr;
     std::string IndexType;
 };
 
@@ -162,8 +162,8 @@ TEST_P(HNSWSQ8NRTest, HNSW_serialize) {
         auto bin_index = binaryset.GetByName("HNSW_SQ8");
         auto bin_sq8 = binaryset.GetByName(SQ8_DATA);
 
-        std::string filename = "/tmp/HNSW_SQ8NR_test_serialize_index.bin";
-        std::string filename2 = "/tmp/HNSW_SQ8NR_test_serialize_sq8.bin";
+        std::string filename = "/tmp/HNSW_SQ8NM_test_serialize_index.bin";
+        std::string filename2 = "/tmp/HNSW_SQ8NM_test_serialize_sq8.bin";
         auto load_index_data = new uint8_t[bin_index->size];
         serialize(filename, bin_index, load_index_data);
         auto load_sq8_data = new uint8_t[bin_sq8->size];
