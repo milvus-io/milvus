@@ -12,7 +12,6 @@ SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
 MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
 CORE_BUILD_DIR="${MILVUS_CORE_DIR}/cmake_build"
-CUDA_ARCH="DEFAULT"
 
 HELP="
 Usage:
@@ -23,11 +22,11 @@ Usage:
                               Install directory used by install.
     -t [BUILD_TYPE] or --build_type=[BUILD_TYPE]
                               Build type (default: Release)
+    -s [CUDA_ARCH]            Building for the cuda architecture
     -j[N] or --jobs=[N]       Allow N jobs at once; infinite jobs with no arg.
     -l                        Run cpplint & check clang-format
     -n                        No make and make install step
     -g                        Building for the architecture of the GPU in the system
-    -s [CUDA_ARCH]            Building for the cuda architecture
     --with_mkl                Build with MKL (default: OFF)
     --with_fiu                Build with FIU (default: OFF)
     -c or --coverage          Build Code Coverage
@@ -40,7 +39,7 @@ Usage:
 Use \"$0  --help\" for more information about a given command.
 "
 
-ARGS=`getopt -o "i:t:j::lngcupvh" -l "install_prefix::,build_type::,jobs::,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
+ARGS=`getopt -o "i:t:s:j::lngcupvh" -l "install_prefix::,build_type::,jobs::,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
 
 eval set -- "${ARGS}"
 
@@ -93,6 +92,7 @@ BUILD_UNITTEST=${BUILD_UNITTEST:="OFF"}
 BUILD_COVERAGE=${BUILD_COVERAGE:="OFF"}
 COMPILE_BUILD=${COMPILE_BUILD:="ON"}
 GPU_VERSION=${GPU_VERSION:="OFF"}
+CUDA_ARCH=${CUDA_ARCH:="DEFAULT"}
 RUN_CPPLINT=${RUN_CPPLINT:="OFF"}
 WITH_MKL=${WITH_MKL:="OFF"}
 FIU_ENABLE=${FIU_ENABLE:="OFF"}
