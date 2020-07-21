@@ -54,7 +54,10 @@ class SSSegmentReader {
     LoadUids(std::vector<int64_t>& uids);
 
     Status
-    LoadVectorIndex(const std::string& field_name, segment::VectorIndexPtr& vector_index_ptr);
+    LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr);
+
+    Status
+    LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr);
 
     Status
     LoadVectorIndice();
@@ -63,13 +66,7 @@ class SSSegmentReader {
     LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     Status
-    LoadBloomFilter();
-
-    Status
     LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr);
-
-    Status
-    LoadDeletedDocs();
 
     Status
     ReadDeletedDocsSize(size_t& size);

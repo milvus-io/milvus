@@ -69,7 +69,8 @@ class SSDBImpl {
     GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count);
 
     Status
-    PreloadCollection(const server::ContextPtr& context, const std::string& collection_name, bool force = false);
+    LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
+                   const std::vector<std::string>& field_names, bool force = false);
 
     Status
     CreatePartition(const std::string& collection_name, const std::string& partition_name);
@@ -117,23 +118,20 @@ class SSDBImpl {
     DropIndex(const std::string& collection_id);
 
     Status
-    Query(const server::ContextPtr& context, const std::string& collection_name,
-          const std::vector<std::string>& partition_patterns, query::GeneralQueryPtr general_query,
-          query::QueryPtr query_ptr, std::vector<std::string>& field_names,
-          std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, engine::QueryResult& result);
+    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResult& result);
 
  private:
     void
     InternalFlush(const std::string& collection_name = "");
 
     void
-    BackgroundFlushThread();
+    TimingFlushThread();
 
     void
     StartMetricTask();
 
     void
-    BackgroundMetricThread();
+    TimingMetricThread();
 
     void
     StartBuildIndexTask();
@@ -142,13 +140,13 @@ class SSDBImpl {
     BackgroundBuildIndexTask();
 
     void
-    BackgroundIndexThread();
+    TimingIndexThread();
 
     void
     WaitBuildIndexFinish();
 
     void
-    BackgroundWalThread();
+    TimingWalThread();
 
     Status
     ExecWalRecord(const wal::MXLogRecord& record);
