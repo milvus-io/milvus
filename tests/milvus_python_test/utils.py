@@ -18,7 +18,7 @@ big_flush_interval = 1000
 dimension = 128
 segment_size = 10
 
-
+# TODO:
 all_index_types = [
     "FLAT",
     "IVF_FLAT",
@@ -26,7 +26,7 @@ all_index_types = [
     "IVF_SQ8_HYBRID",
     "IVF_PQ",
     "HNSW",
-    "NSG",
+    # "NSG",
     "ANNOY",
     "BIN_FLAT",
     "BIN_IVF_FLAT"
@@ -40,7 +40,7 @@ default_index_params = [
     {"nlist": 1024},
     {"nlist": 1024, "m": 16},
     {"M": 48, "efConstruction": 500},
-    {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
+    # {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
     {"n_trees": 4},
     {"nlist": 1024},
     {"nlist": 1024}

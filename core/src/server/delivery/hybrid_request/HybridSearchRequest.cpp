@@ -116,6 +116,12 @@ HybridSearchRequest::OnExecute() {
         }
         fiu_do_on("HybridSearchRequest.OnExecute.empty_result_ids", result_.result_ids_.clear());
         if (result_.result_ids_.empty()) {
+            auto vector_query = query_ptr_->vectors.begin()->second;
+            if (!vector_query->query_vector.binary_data.empty()) {
+                result_.row_num_ = vector_query->query_vector.binary_data.size() * 8 / collection_schema.dimension_;
+            } else if (!vector_query->query_vector.float_data.empty()) {
+                result_.row_num_ = vector_query->query_vector.float_data.size() / collection_schema.dimension_;
+            }
             return Status::OK();  // empty table
         }
 
