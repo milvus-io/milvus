@@ -1705,7 +1705,7 @@ class TestIndexCollectionInvalid(object):
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_collection_names()
+        params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
