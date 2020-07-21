@@ -35,7 +35,9 @@ SSSearchJob::SSSearchJob(const server::ContextPtr& context, milvus::query::Gener
 
 void
 SSSearchJob::AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor) {
-    segment_visitor_map_[visitor->GetSegment()->GetID()] = visitor;
+    if (visitor != nullptr) {
+        segment_visitor_map_[visitor->GetSegment()->GetID()] = visitor;
+    }
 }
 
 void

@@ -26,7 +26,9 @@ SSBuildIndexJob::SSBuildIndexJob(engine::DBOptions options)
 
 void
 SSBuildIndexJob::AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor) {
-    segment_visitor_map_[visitor->GetSegment()->GetID()] = visitor;
+    if (visitor != nullptr) {
+        segment_visitor_map_[visitor->GetSegment()->GetID()] = visitor;
+    }
 }
 
 void
