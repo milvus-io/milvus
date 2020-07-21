@@ -89,6 +89,16 @@ ExitOnWriteError(Status& status);
 
 void
 EraseFromCache(const std::string& item_key);
+
+Status
+SetIndex(const std::string& collection_name, const std::string& field_name, engine::CollectionIndex& index_info);
+
+Status
+GetIndex(const std::string& collection_name, const std::string& field_name, engine::CollectionIndex& index_info);
+
+Status
+DeleteIndex(const std::string& collection_name, const std::string& field_name);
+
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

@@ -134,10 +134,10 @@ class SSDBImpl {
     TimingMetricThread();
 
     void
-    StartBuildIndexTask();
+    StartBuildIndexTask(const std::vector<std::string>& collection_names);
 
     void
-    BackgroundBuildIndexTask();
+    BackgroundBuildIndexTask(std::vector<std::string> collection_names);
 
     void
     TimingIndexThread();
@@ -152,7 +152,7 @@ class SSDBImpl {
     ExecWalRecord(const wal::MXLogRecord& record);
 
     void
-    StartMergeTask(const std::set<std::string>& merge_collection_names, bool force_merge_all = false);
+    StartMergeTask(const std::set<std::string>& collection_names, bool force_merge_all = false);
 
     void
     BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all);

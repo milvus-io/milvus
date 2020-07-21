@@ -12,6 +12,7 @@
 #include "db/SnapshotHandlers.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
+#include "db/meta/MetaConsts.h"
 #include "db/meta/MetaTypes.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Resources.h"
@@ -75,35 +76,35 @@ LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, meta::FilesHolder& holder)
-    : BaseT(ss), holder_(holder) {
+SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids)
+    : BaseT(ss), segment_ids_(segment_ids) {
 }
 
 Status
 SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
-    // SS TODO
-    meta::SegmentSchema schema;
-    /* schema.id_ = segment_commit->GetSegmentId(); */
-    /* schema.file_type_ = resRow["file_type"]; */
-    /* schema.file_size_ = resRow["file_size"]; */
-    /* schema.row_count_ = resRow["row_count"]; */
-    /* schema.date_ = resRow["date"]; */
-    /* schema.engine_type_ = resRow["engine_type"]; */
-    /* schema.created_on_ = resRow["created_on"]; */
-    /* schema.updated_time_ = resRow["updated_time"]; */
+    segment_ids_.push_back(segment_commit->GetSegmentId());
+}
 
-    /* schema.dimension_ = collection_schema.dimension_; */
-    /* schema.index_file_size_ = collection_schema.index_file_size_; */
-    /* schema.index_params_ = collection_schema.index_params_; */
-    /* schema.metric_type_ = collection_schema.metric_type_; */
+///////////////////////////////////////////////////////////////////////////////
+SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss, const std::string& field_name,
+                                                   snapshot::IDS_TYPE& segment_ids)
+    : BaseT(ss), field_name_(field_name), segment_ids_(segment_ids) {
+}
 
-    /* auto status = utils::GetCollectionFilePath(options_, schema); */
-    /* if (!status.ok()) { */
-    /*     ret = status; */
-    /*     continue; */
-    /* } */
+Status
+SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
+    if (segment_commit->GetRowCount() < meta::BUILD_INDEX_THRESHOLD) {
+        return Status::OK();
+    }
 
-    holder_.MarkFile(schema);
+    auto segment_visitor = engine::SegmentVisitor::Build(ss_, segment_commit->GetSegmentId());
+    auto field_visitor = segment_visitor->GetFieldVisitor(field_name_);
+    auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+    if (element_visitor == nullptr || element_visitor->GetFile() == nullptr) {
+        segment_ids_.push_back(segment_commit->GetSegmentId());
+    }
+
+    return Status::OK();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
