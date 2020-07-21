@@ -83,7 +83,7 @@ class Store : public std::enable_shared_from_this<Store> {
     }
 
     std::string
-    GetResPath() const {
+    GetRootPath() const {
         return root_path_ + "/tables";
     }
 

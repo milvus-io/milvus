@@ -47,7 +47,7 @@ class ResourceGCEvent : public MetaEvent {
         STATUS_CHECK((*sd_op)(store));
 
         /* TODO: physically clean resource */
-        auto res_prefix = store->GetResPath();
+        auto res_prefix = store->GetRootPath();
         std::string res_path = GetResPath<ResourceT>(res_prefix, res_);
         /* if (!boost::filesystem::exists(res_path)) { */
         /*     return Status::OK(); */
