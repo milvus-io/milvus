@@ -13,6 +13,7 @@
 
 #include "db/SnapshotVisitor.h"
 #include "scheduler/Definition.h"
+#include "scheduler/job/SSBuildIndexJob.h"
 #include "scheduler/task/Task.h"
 
 namespace milvus {
