@@ -114,9 +114,9 @@ class Store : public std::enable_shared_from_this<Store> {
     }
 
     template <typename OpT>
-    void
+    Status
     Apply(OpT& op) {
-        op.ApplyToStore(this->shared_from_this());
+        return op.ApplyToStore(this->shared_from_this());
     }
 
     template <typename ResourceT>

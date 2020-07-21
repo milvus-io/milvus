@@ -435,7 +435,7 @@ class RowCountField {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class Collection : public BaseResource,
+class Collection : public BaseResource<Collection>,
                    public NameField,
                    public ParamsField,
                    public IdField,
@@ -458,7 +458,7 @@ class Collection : public BaseResource,
 
 using CollectionPtr = Collection::Ptr;
 
-class CollectionCommit : public BaseResource,
+class CollectionCommit : public BaseResource<CollectionCommit>,
                          public CollectionIdField,
                          public SchemaIdField,
                          public MappingsField,
@@ -485,7 +485,7 @@ using CollectionCommitPtr = CollectionCommit::Ptr;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class Partition : public BaseResource,
+class Partition : public BaseResource<Partition>,
                   public NameField,
                   public CollectionIdField,
                   public IdField,
@@ -507,7 +507,7 @@ class Partition : public BaseResource,
 
 using PartitionPtr = Partition::Ptr;
 
-class PartitionCommit : public BaseResource,
+class PartitionCommit : public BaseResource<PartitionCommit>,
                         public CollectionIdField,
                         public PartitionIdField,
                         public MappingsField,
@@ -538,7 +538,7 @@ using PartitionCommitPtr = PartitionCommit::Ptr;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class Segment : public BaseResource,
+class Segment : public BaseResource<Segment>,
                 public CollectionIdField,
                 public PartitionIdField,
                 public NumField,
@@ -565,7 +565,7 @@ class Segment : public BaseResource,
 
 using SegmentPtr = Segment::Ptr;
 
-class SegmentCommit : public BaseResource,
+class SegmentCommit : public BaseResource<SegmentCommit>,
                       public SchemaIdField,
                       public PartitionIdField,
                       public SegmentIdField,
@@ -597,7 +597,7 @@ using SegmentCommitPtr = SegmentCommit::Ptr;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class SegmentFile : public BaseResource,
+class SegmentFile : public BaseResource<SegmentFile>,
                     public CollectionIdField,
                     public PartitionIdField,
                     public SegmentIdField,
@@ -626,7 +626,7 @@ using SegmentFilePtr = SegmentFile::Ptr;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class SchemaCommit : public BaseResource,
+class SchemaCommit : public BaseResource<SchemaCommit>,
                      public CollectionIdField,
                      public MappingsField,
                      public IdField,
@@ -651,7 +651,7 @@ using SchemaCommitPtr = SchemaCommit::Ptr;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class Field : public BaseResource,
+class Field : public BaseResource<Field>,
               public NameField,
               public NumField,
               public FtypeField,
@@ -676,7 +676,7 @@ class Field : public BaseResource,
 
 using FieldPtr = Field::Ptr;
 
-class FieldCommit : public BaseResource,
+class FieldCommit : public BaseResource<FieldCommit>,
                     public CollectionIdField,
                     public FieldIdField,
                     public MappingsField,
@@ -702,7 +702,7 @@ using FieldCommitPtr = FieldCommit::Ptr;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class FieldElement : public BaseResource,
+class FieldElement : public BaseResource<FieldElement>,
                      public CollectionIdField,
                      public FieldIdField,
                      public NameField,

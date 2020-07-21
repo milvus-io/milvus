@@ -12,20 +12,23 @@
 #pragma once
 
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include "ReferenceProxy.h"
 
 namespace milvus::engine::snapshot {
 
+template <typename DerivedT>
 class BaseResource : public ReferenceProxy {
  public:
     virtual std::string
     ToString() const {
-        return std::string();
+        std::stringstream ss;
+        const DerivedT& derived = static_cast<const DerivedT&>(*this);
+        ss << DerivedT::Name << ": id=" << derived.GetID() << " state=" << derived.GetState();
+        return ss.str();
     }
 };
-
-using BaseResourcePtr = std::shared_ptr<BaseResource>;
 
 }  // namespace milvus::engine::snapshot

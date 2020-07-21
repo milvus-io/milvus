@@ -11,6 +11,8 @@
 
 #include "db/snapshot/Snapshots.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/EventExecutor.h"
+#include "db/snapshot/InActiveResourcesGCEvent.h"
 
 namespace milvus {
 namespace engine {
@@ -148,6 +150,9 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
 
 Status
 Snapshots::Init(StorePtr store) {
+    auto event = std::make_shared<InActiveResourcesGCEvent>();
+    EventExecutor::GetInstance().Submit(event);
+    STATUS_CHECK(event->WaitToFinish());
     auto op = std::make_shared<GetCollectionIDsOperation>();
     STATUS_CHECK((*op)(store));
     auto& collection_ids = op->GetIDs();
