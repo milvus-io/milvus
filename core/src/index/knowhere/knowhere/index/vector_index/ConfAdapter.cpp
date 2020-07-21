@@ -299,6 +299,9 @@ ANNOYConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 ANNOYConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    static int64_t MIN_SEARCH_K = 1;
+    static int64_t MAX_SEARCH_K = 999999;
+    CheckIntByRange(knowhere::IndexParams::search_k, MIN_SEARCH_K, MAX_SEARCH_K);
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 

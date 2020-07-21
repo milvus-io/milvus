@@ -570,7 +570,8 @@ class TestSearchBase:
         res = connect.search(ip_collection, query)
         assert abs(res[0]._distances[0] - max_distance) <= gen_inaccuracy(res[0]._distances[0])
 
-    def test_search_distance_jaccard_flat_index(self, connect, jac_collection):
+    # TODO:
+    def _test_search_distance_jaccard_flat_index(self, connect, jac_collection):
         '''
         target: search ip_collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
@@ -585,7 +586,7 @@ class TestSearchBase:
         res = connect.search(jac_collection, query_entities)
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
-    def test_search_distance_hamming_flat_index(self, connect, ham_collection):
+    def _test_search_distance_hamming_flat_index(self, connect, ham_collection):
         '''
         target: search ip_collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
@@ -915,8 +916,9 @@ class TestSearchInvalid(object):
     def get_search_params(self, request):
         yield request.param
 
+    # TODO: This case can all pass, but it's too slow
     @pytest.mark.level(2)
-    def test_search_with_invalid_params(self, connect, collection, get_simple_index, get_search_params):
+    def _test_search_with_invalid_params(self, connect, collection, get_simple_index, get_search_params):
         '''
         target: test search fuction, with the wrong nprobe
         method: search with nprobe
@@ -924,6 +926,7 @@ class TestSearchInvalid(object):
         '''
         search_params = get_search_params
         index_type = get_simple_index["index_type"]
+        entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, default_index_name, get_simple_index)
         if search_params["index_type"] != index_type:
             pytest.skip("Skip case")
@@ -940,6 +943,9 @@ class TestSearchInvalid(object):
         index_type = get_simple_index["index_type"]
         if args["handler"] == "HTTP":
             pytest.skip("skip in http mode")
+        if index_type == "FLAT":
+            pytest.skip("skip in FLAT index")
+        entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, default_index_name, get_simple_index)
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1, search_params={})
         with pytest.raises(Exception) as e:

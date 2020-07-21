@@ -88,18 +88,42 @@ HybridSearchRequest::OnExecute() {
             }
         }
 
+        // step 3: check partition tags
+        status = ValidatePartitionTags(partition_list_);
+        fiu_do_on("HybridSearchRequest.OnExecute.invalid_partition_tags",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        if (!status.ok()) {
+            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
+            return status;
+        }
+
+        // step 3: check field names
+        if (json_params_.contains("fields")) {
+            if (json_params_["fields"].is_array()) {
+                for (auto& name : json_params_["fields"]) {
+                    status = ValidateFieldName(name.get<std::string>());
+                    if (!status.ok()) {
+                        return status;
+                    }
+                    bool find_field_name = false;
+                    for (const auto& schema : fields_schema.fields_schema_) {
+                        if (name.get<std::string>() == schema.field_name_) {
+                            find_field_name = true;
+                            break;
+                        }
+                    }
+                    if (not find_field_name) {
+                        return Status{SERVER_INVALID_FIELD_NAME, "Field: " + name.get<std::string>() + " not exist"};
+                    }
+                    field_names_.emplace_back(name.get<std::string>());
+                }
+            }
+        }
+
         std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
         for (auto& field_schema : fields_schema.fields_schema_) {
             attr_type.insert(
                 std::make_pair(field_schema.field_name_, (engine::meta::hybrid::DataType)field_schema.field_type_));
-        }
-
-        if (json_params_.contains("fields")) {
-            if (json_params_["fields"].is_array()) {
-                for (auto& name : json_params_["fields"]) {
-                    field_names_.emplace_back(name.get<std::string>());
-                }
-            }
         }
 
         result_.row_num_ = 0;
