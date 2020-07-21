@@ -24,22 +24,9 @@
 
 namespace milvus::engine::meta {
 
-// using namespace snapshot;
-
 class MetaAdapter {
  public:
-    static MetaAdapter&
-    GetInstance() {
-        static MetaAdapter db;
-        return db;
-    }
-
- public:
-    MetaAdapter() {
-        engine_ = std::make_shared<MockMetaEngine>();
-        //                DBMetaOptions options;
-        //                options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
-        //                engine_ = std::make_shared<MySqlEngine>(options);
+    explicit MetaAdapter(MetaEnginePtr engine) : engine_(engine) {
     }
 
     SessionPtr
@@ -53,7 +40,7 @@ class MetaAdapter {
         // TODO move select logic to here
         auto session = CreateSession();
         std::vector<typename T::Ptr> resources;
-        auto status = session->Select<T, snapshot::ID_TYPE>(snapshot::IdField::Name, id, resources);
+        auto status = session->Select<T, snapshot::ID_TYPE>(snapshot::IdField::Name, id, {}, resources);
         if (status.ok() && !resources.empty()) {
             // TODO: may need to check num of resources
             resource = resources.at(0);
@@ -66,7 +53,7 @@ class MetaAdapter {
     Status
     SelectBy(const std::string& field, const U& value, std::vector<typename ResourceT::Ptr>& resources) {
         auto session = CreateSession();
-        return session->Select<ResourceT, U>(field, value, resources);
+        return session->Select<ResourceT, U>(field, value, {}, resources);
     }
 
     template <typename ResourceT, typename U>
@@ -74,7 +61,8 @@ class MetaAdapter {
     SelectResourceIDs(std::vector<int64_t>& ids, const std::string& filter_field, const U& filter_value) {
         std::vector<typename ResourceT::Ptr> resources;
         auto session = CreateSession();
-        auto status = session->Select<ResourceT, U>(filter_field, filter_value, resources);
+        std::vector<std::string> target_attrs = {F_ID};
+        auto status = session->Select<ResourceT, U>(filter_field, filter_value, target_attrs, resources);
         if (!status.ok()) {
             return status;
         }
@@ -117,5 +105,7 @@ class MetaAdapter {
  private:
     MetaEnginePtr engine_;
 };
+
+using MetaAdapterPtr = std::shared_ptr<MetaAdapter>;
 
 }  // namespace milvus::engine::meta

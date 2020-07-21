@@ -314,7 +314,6 @@ MySqlEngine::Initialize() {
             LOG_ENGINE_ERROR_ << msg;
             throw Exception(DB_META_TRANSACTION_FAILED, msg);
         }
-        sleep(1);
     };
 
     create_schema(COLLECTION_SCHEMA);
@@ -348,6 +347,7 @@ MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
         mysqlpp::Query query = connectionPtr->query(sql);
         auto res = query.store();
         if (!res) {
+            // TODO: change error behavior
             throw Exception(1, "Query res is false");
         }
 
@@ -355,7 +355,7 @@ MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
         for (auto& row : res) {
             AttrsMap attrs_map;
             for (auto& name : *names) {
-                attrs_map.insert(std::pair<std::string, std::string>(name, row[name.c_str()]));
+                attrs_map.insert(std::make_pair(name, row[name.c_str()]));
             }
             attrs.push_back(attrs_map);
         }

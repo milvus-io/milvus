@@ -193,5 +193,22 @@ Segment::SetVectorIndex(const std::string& field_name, const knowhere::VecIndexP
     return Status::OK();
 }
 
+Status
+Segment::GetStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index) {
+    auto iter = structured_indice_.find(field_name);
+    if (iter == structured_indice_.end()) {
+        return Status(DB_ERROR, "invalid field name: " + field_name);
+    }
+
+    index = iter->second;
+    return Status::OK();
+}
+
+Status
+Segment::SetStructuredIndex(const std::string& field_name, const knowhere::IndexPtr& index) {
+    structured_indice_[field_name] = index;
+    return Status::OK();
+}
+
 }  // namespace engine
 }  // namespace milvus

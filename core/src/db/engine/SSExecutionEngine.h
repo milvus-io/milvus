@@ -11,24 +11,36 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
-#include <sstream>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
-#include "ReferenceProxy.h"
+#include "db/Types.h"
+#include "db/meta/MetaTypes.h"
+#include "query/GeneralQuery.h"
+#include "utils/Status.h"
 
-namespace milvus::engine::snapshot {
+namespace milvus {
+namespace engine {
 
-template <typename DerivedT>
-class BaseResource : public ReferenceProxy {
+class SSExecutionEngine {
  public:
-    virtual std::string
-    ToString() const {
-        std::stringstream ss;
-        const DerivedT& derived = static_cast<const DerivedT&>(*this);
-        ss << DerivedT::Name << ": id=" << derived.GetID() << " state=" << derived.GetState();
-        return ss.str();
-    }
+    virtual Status
+    Load(const query::QueryPtr& query_ptr) = 0;
+
+    virtual Status
+    CopyToGpu(uint64_t device_id) = 0;
+
+    virtual Status
+    Search(const query::QueryPtr& query_ptr, QueryResult& result) = 0;
+
+    virtual Status
+    BuildIndex(const std::string& field_name, const CollectionIndex& index) = 0;
 };
 
-}  // namespace milvus::engine::snapshot
+using SSExecutionEnginePtr = std::shared_ptr<SSExecutionEngine>;
+
+}  // namespace engine
+}  // namespace milvus

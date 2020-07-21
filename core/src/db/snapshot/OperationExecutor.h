@@ -25,17 +25,27 @@ using OperationQueue = BlockingQueue<OperationsPtr>;
 
 class OperationExecutor {
  public:
-    OperationExecutor() = default;
-    OperationExecutor(const OperationExecutor&) = delete;
-
     ~OperationExecutor() {
         Stop();
     }
 
+    static void
+    Init(StorePtr store) {
+        auto& instance = GetInstanceImpl();
+        if (instance.initialized_) {
+            return;
+        }
+        instance.store_ = store;
+        instance.initialized_ = true;
+    }
+
     static OperationExecutor&
     GetInstance() {
-        static OperationExecutor executor;
-        return executor;
+        auto& instance = GetInstanceImpl();
+        if (!instance.initialized_) {
+            throw std::runtime_error("OperationExecutor should be init");
+        }
+        return instance;
     }
 
     Status
@@ -43,8 +53,6 @@ class OperationExecutor {
         if (!operation) {
             return Status(SS_INVALID_ARGUMENT_ERROR, "Invalid Operation");
         }
-        /* Store::GetInstance().Apply(*operation); */
-        /* return true; */
         Enqueue(operation);
         if (sync) {
             return operation->WaitToFinish();
@@ -70,6 +78,15 @@ class OperationExecutor {
     }
 
  private:
+    OperationExecutor() = default;
+    OperationExecutor(const OperationExecutor&) = delete;
+
+    static OperationExecutor&
+    GetInstanceImpl() {
+        static OperationExecutor executor;
+        return executor;
+    }
+
     void
     ThreadMain() {
         while (true) {
@@ -77,20 +94,20 @@ class OperationExecutor {
             if (!operation) {
                 break;
             }
-            /* std::cout << std::this_thread::get_id() << " Dequeue Operation " << operation->GetID() << std::endl; */
-            Store::GetInstance().Apply(*operation);
+            store_->Apply(*operation);
         }
     }
 
     void
     Enqueue(const OperationsPtr& operation) {
-        /* std::cout << std::this_thread::get_id() << " Enqueue Operation " << operation->GetID() << std::endl; */
         queue_.Put(operation);
     }
 
  private:
     ThreadPtr thread_ptr_ = nullptr;
     OperationQueue queue_;
+    std::atomic_bool initialized_ = false;
+    StorePtr store_;
 };
 
 }  // namespace milvus::engine::snapshot
