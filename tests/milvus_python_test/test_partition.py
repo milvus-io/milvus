@@ -197,7 +197,7 @@ class TestShowBase:
         expected: status ok, partitions correct
         '''
         res = connect.list_partitions(collection)
-        assert not len(res)
+        assert len(res) == 1
 
     def test_show_multi_partitions(self, connect, collection):
         '''
