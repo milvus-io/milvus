@@ -31,8 +31,7 @@ TEST(SSJobTest, TestJob) {
     TestJob test_job;
     test_job.Dump();
 
-    engine::VectorsData vectors;
-    auto search_ptr = std::make_shared<SSSearchJob>(nullptr, 1, 1, vectors);
+    auto search_ptr = std::make_shared<SSSearchJob>(nullptr, nullptr);
     search_ptr->Dump();
     search_ptr->AddSegmentVisitor(nullptr);
 }
