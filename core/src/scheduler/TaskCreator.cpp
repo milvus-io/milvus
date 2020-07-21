@@ -10,9 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/TaskCreator.h"
-#include "SchedInst.h"
-#include "tasklabel/BroadcastLabel.h"
-#include "tasklabel/SpecResLabel.h"
+#include "scheduler/SchedInst.h"
+#include "scheduler/task/BuildIndexTask.h"
+#include "scheduler/task/DeleteTask.h"
+#include "scheduler/task/SSBuildIndexTask.h"
+#include "scheduler/task/SSSearchTask.h"
+#include "scheduler/task/SearchTask.h"
+#include "scheduler/tasklabel/BroadcastLabel.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
@@ -28,6 +33,12 @@ TaskCreator::Create(const JobPtr& job) {
         }
         case JobType::BUILD: {
             return Create(std::static_pointer_cast<BuildIndexJob>(job));
+        }
+        case JobType::SS_SEARCH: {
+            return Create(std::static_pointer_cast<SSSearchJob>(job));
+        }
+        case JobType::SS_BUILD: {
+            return Create(std::static_pointer_cast<SSBuildIndexJob>(job));
         }
         default: {
             // TODO(wxyu): error
@@ -64,6 +75,28 @@ TaskCreator::Create(const BuildIndexJobPtr& job) {
     std::vector<TaskPtr> tasks;
     for (auto& to_index_file : job->to_index_files()) {
         auto task = std::make_shared<XBuildIndexTask>(to_index_file.second, nullptr);
+        task->job_ = job;
+        tasks.emplace_back(task);
+    }
+    return tasks;
+}
+
+std::vector<TaskPtr>
+TaskCreator::Create(const SSSearchJobPtr& job) {
+    std::vector<TaskPtr> tasks;
+    for (auto& sv : job->segment_visitor_map()) {
+        auto task = std::make_shared<XSSSearchTask>(job->GetContext(), sv.second, nullptr);
+        task->job_ = job;
+        tasks.emplace_back(task);
+    }
+    return tasks;
+}
+
+std::vector<TaskPtr>
+TaskCreator::Create(const SSBuildIndexJobPtr& job) {
+    std::vector<TaskPtr> tasks;
+    for (auto& sv : job->segment_visitor_map()) {
+        auto task = std::make_shared<XSSBuildIndexTask>(sv.second, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);
     }
