@@ -67,7 +67,6 @@ struct OperationContext {
 
     FieldPtr prev_field = nullptr;
     FieldElementPtr prev_field_element = nullptr;
-    FieldElementPtr stale_field_element = nullptr;
     std::vector<FieldElementPtr> new_field_elements;
     std::vector<FieldElementPtr> stale_field_elements;
 
