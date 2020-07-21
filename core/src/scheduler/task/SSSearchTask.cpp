@@ -131,9 +131,9 @@ XSSSearchTask::Load(LoadType type, uint8_t device_id) {
         }
 
         if (auto job = job_.lock()) {
-//            auto search_job = std::static_pointer_cast<scheduler::SSSearchJob>(job);
-//            search_job->SearchDone(file_->id_);
-//            search_job->GetStatus() = s;
+            auto search_job = std::static_pointer_cast<scheduler::SSSearchJob>(job);
+            search_job->SearchDone(visitor_->GetSegment()->GetID());
+            search_job->GetStatus() = s;
         }
 
         return;

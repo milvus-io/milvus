@@ -36,7 +36,6 @@ namespace scheduler {
 using engine::meta::SegmentSchemaPtr;
 
 using Id2IndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
-using SegmentVisitorMap = std::unordered_map<engine::snapshot::ID_TYPE, engine::SegmentVisitorPtr>;
 
 using ResultIds = engine::ResultIds;
 using ResultDistances = engine::ResultDistances;
@@ -64,7 +63,7 @@ class SSSearchJob : public Job {
     WaitResult();
 
     void
-    SearchDone(engine::snapshot::ID_TYPE seg_id);
+    SearchDone(const engine::snapshot::ID_TYPE seg_id);
 
     ResultIds&
     GetResultIds();

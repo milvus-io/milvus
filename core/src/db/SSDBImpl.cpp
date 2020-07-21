@@ -634,64 +634,64 @@ SSDBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_
 
     TimeRecorder rc("SSDBImpl::Query");
 
-    //    snapshot::ScopedSnapshotT ss;
-    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    /* collect all valid segment */
-    std::vector<SegmentVisitor::Ptr> segment_visitors;
-    auto exec = [&] (const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
-        auto p_id = segment->GetPartitionId();
-        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
-        auto& p_name = p_ptr->GetName();
-
-        /* check partition match pattern */
-        bool match = false;
-        if (partition_patterns.empty()) {
-            match = true;
-        } else {
-            for (auto &pattern : partition_patterns) {
-                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
-                    match = true;
-                    break;
-                }
-            }
-        }
-
-        if (match) {
-            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
-            if (!visitor) {
-                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
-            }
-            segment_visitors.push_back(visitor);
-        }
-        return Status::OK();
-    };
-
-    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
-    segment_iter->Iterate();
-    STATUS_CHECK(segment_iter->GetStatus());
-
-    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
-
-    VectorsData vectors;
-    scheduler::SSSearchJobPtr job =
-        std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
-    for (auto& sv : segment_visitors) {
-        job->AddSegmentVisitor(sv);
-    }
-
-    // step 2: put search job to scheduler and wait result
-    scheduler::JobMgrInst::GetInstance()->Put(job);
-    job->WaitResult();
-
-    if (!job->GetStatus().ok()) {
-        return job->GetStatus();
-    }
-
-    // step 3: construct results
-    result.row_num_ = job->vector_count();
-    result.result_ids_ = job->GetResultIds();
-    result.result_distances_ = job->GetResultDistances();
+//    snapshot::ScopedSnapshotT ss;
+//    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+//
+//    /* collect all valid segment */
+//    std::vector<SegmentVisitor::Ptr> segment_visitors;
+//    auto exec = [&] (const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
+//        auto p_id = segment->GetPartitionId();
+//        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
+//        auto& p_name = p_ptr->GetName();
+//
+//        /* check partition match pattern */
+//        bool match = false;
+//        if (partition_patterns.empty()) {
+//            match = true;
+//        } else {
+//            for (auto &pattern : partition_patterns) {
+//                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
+//                    match = true;
+//                    break;
+//                }
+//            }
+//        }
+//
+//        if (match) {
+//            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
+//            if (!visitor) {
+//                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
+//            }
+//            segment_visitors.push_back(visitor);
+//        }
+//        return Status::OK();
+//    };
+//
+//    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
+//    segment_iter->Iterate();
+//    STATUS_CHECK(segment_iter->GetStatus());
+//
+//    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
+//
+//    VectorsData vectors;
+//    scheduler::SSSearchJobPtr job =
+//        std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
+//    for (auto& sv : segment_visitors) {
+//        job->AddSegmentVisitor(sv);
+//    }
+//
+//    // step 2: put search job to scheduler and wait result
+//    scheduler::JobMgrInst::GetInstance()->Put(job);
+//    job->WaitResult();
+//
+//    if (!job->GetStatus().ok()) {
+//        return job->GetStatus();
+//    }
+//
+//    // step 3: construct results
+//    result.row_num_ = job->vector_count();
+//    result.result_ids_ = job->GetResultIds();
+//    result.result_distances_ = job->GetResultDistances();
 
     // step 4: get entities by result ids
     // STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));

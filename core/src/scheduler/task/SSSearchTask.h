@@ -47,7 +47,7 @@ class XSSSearchTask : public Task {
 //    GetIndexId() const;
 
  public:
-    const std::shared_ptr<server::Context> context_;
+    const server::ContextPtr context_;
 
     engine::SegmentVisitorPtr visitor_;
 

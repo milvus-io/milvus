@@ -49,13 +49,12 @@ SSSearchJob::WaitResult() {
 }
 
 void
-SSSearchJob::SearchDone(engine::snapshot::ID_TYPE seg_id) {
+SSSearchJob::SearchDone(const engine::snapshot::ID_TYPE seg_id) {
     std::unique_lock<std::mutex> lock(mutex_);
     segment_visitor_map_.erase(seg_id);
     if (segment_visitor_map_.empty()) {
         cv_.notify_all();
     }
-
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld finish segment: %ld", "search", 0, id(), seg_id);
 }
 
