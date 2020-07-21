@@ -65,7 +65,7 @@ class InActiveResourcesGCEvent : public MetaEvent, public Operations {
         std::vector<typename ResourceT::Ptr> resources;
         STATUS_CHECK(store->GetInActiveResources<ResourceT>(resources));
 
-        for (auto & res: resources) {
+        for (auto& res : resources) {
             std::string res_path = GetResPath<ResourceT>(dir_root_, res);
             if (res_path.empty()) {
                 /* std::cout << "[GC] No remove action for " << res_->ToString() << std::endl; */
