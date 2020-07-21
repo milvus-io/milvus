@@ -921,7 +921,7 @@ SSDBImpl::TimingWalThread() {
 
 Status
 SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
-    auto collections_flushed = [&](const std::string collection_name,
+    auto collections_flushed = [&](const std::string& collection_name,
                                    const std::set<std::string>& target_collection_names) -> uint64_t {
         uint64_t max_lsn = 0;
         if (options_.wal_enable_ && !target_collection_names.empty()) {
