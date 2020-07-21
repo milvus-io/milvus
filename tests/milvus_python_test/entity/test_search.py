@@ -66,9 +66,9 @@ def init_binary_data(connect, collection, nb=6000, insert=True, partition_tags=N
         insert_raw_vectors, insert_entities = gen_binary_entities(nb)
     if insert is True:
         if partition_tags is None:
-            ids = connect.insert(collection, add_vectors)
+            ids = connect.insert(collection, insert_entities)
         else:
-            ids = connect.insert(collection, add_vectors, partition_tag=partition_tags)
+            ids = connect.insert(collection, insert_entities, partition_tag=partition_tags)
         connect.flush([collection])
     return insert_raw_vectors, insert_entities, ids
 
@@ -200,7 +200,7 @@ class TestSearchBase:
         nq = get_nq
 
         index_type = get_simple_index["index_type"]
-        if index_type == "IVFPQ":
+        if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, default_index_name, get_simple_index)
@@ -226,7 +226,7 @@ class TestSearchBase:
         nq = get_nq
 
         index_type = get_simple_index["index_type"]
-        if index_type == "IVFPQ":
+        if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
         connect.create_partition(collection, tag)
         entities, ids = init_data(connect, collection)
@@ -245,7 +245,7 @@ class TestSearchBase:
             res = connect.search(collection, query, partition_tags=[tag])
             assert len(res) == nq
 
-    def test_search_index_partition_B(self, connect, collection, get_simple_index, get_nq):
+    def test_search_index_partition_B(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
         method: search with the given vectors, check the result
@@ -255,7 +255,7 @@ class TestSearchBase:
         nq = get_nq
 
         index_type = get_simple_index["index_type"]
-        if index_type == "IVFPQ":
+        if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
         connect.create_partition(collection, tag)
         entities, ids = init_data(connect, collection, partition_tags=tag)
@@ -283,9 +283,13 @@ class TestSearchBase:
         nq = get_nq
         entities, ids = init_data(connect, collection)
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq)
-        res = connect.search(collection, query, partition_tags=["new_tag"])
-        assert len(res) == nq
-        assert len(res[0]) == 0
+        if top_k > top_k_limit:
+            with pytest.raises(Exception) as e:
+                res = connect.search(collection, query, partition_tags=["new_tag"])
+        else:
+            res = connect.search(collection, query, partition_tags=["new_tag"])
+            assert len(res) == nq
+            assert len(res[0]) == 0
 
     @pytest.mark.level(2)
     def test_search_index_partitions(self, connect, collection, get_simple_index, get_top_k):
@@ -298,7 +302,7 @@ class TestSearchBase:
         nq = 2
         new_tag = "new_tag"
         index_type = get_simple_index["index_type"]
-        if index_type == "IVFPQ":
+        if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
         connect.create_partition(collection, tag)
         connect.create_partition(collection, new_tag)
@@ -320,8 +324,9 @@ class TestSearchBase:
             assert res[0]._distances[0] > epsilon
             assert res[1]._distances[0] > epsilon
 
+    # TODO:
     @pytest.mark.level(2)
-    def test_search_index_partitions_B(self, connect, collection, get_simple_index, get_top_k):
+    def _test_search_index_partitions_B(self, connect, collection, get_simple_index, get_top_k):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
         method: search collection with the given vectors and tags, check the result
@@ -329,9 +334,10 @@ class TestSearchBase:
         '''
         top_k = get_top_k
         nq = 2
+        tag = "tag"
         new_tag = "new_tag"
         index_type = get_simple_index["index_type"]
-        if index_type == "IVFPQ":
+        if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
         connect.create_partition(collection, tag)
         connect.create_partition(collection, new_tag)
@@ -391,7 +397,7 @@ class TestSearchBase:
         nq = get_nq
 
         index_type = get_simple_index["index_type"]
-        if index_type == "IVFPQ":
+        if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
         entities, ids = init_data(connect, ip_collection)
         connect.create_index(ip_collection, field_name, default_index_name, get_simple_index)
@@ -417,7 +423,7 @@ class TestSearchBase:
         nq = get_nq
 
         index_type = get_simple_index["index_type"]
-        if index_type == "IVFPQ":
+        if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
         connect.create_partition(ip_collection, tag)
         entities, ids = init_data(connect, ip_collection)
@@ -447,7 +453,7 @@ class TestSearchBase:
         nq = 2
         new_tag = "new_tag"
         index_type = get_simple_index["index_type"]
-        if index_type == "IVFPQ":
+        if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
         connect.create_partition(ip_collection, tag)
         connect.create_partition(ip_collection, new_tag)
@@ -464,11 +470,11 @@ class TestSearchBase:
             assert check_id_result(res[0], ids[0])
             assert not check_id_result(res[1], new_ids[0])
             assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
-            assert res[0]._distances[0] < epsilon
             assert res[1]._distances[0] >= 1 - gen_inaccuracy(res[1]._distances[0])
             res = connect.search(ip_collection, query, partition_tags=["new_tag"])
             assert res[0]._distances[0] < 1 - gen_inaccuracy(res[0]._distances[0])
-            assert res[1]._distances[0] >= 1 - gen_inaccuracy(res[1]._distances[0])
+            # TODO:
+            # assert res[1]._distances[0] >= 1 - gen_inaccuracy(res[1]._distances[0])
 
     @pytest.mark.level(2)
     def test_search_without_connect(self, dis_connect, collection):
@@ -591,12 +597,10 @@ class TestSearchBase:
         query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, ham_collection, nb=1, insert=False)
         distance_0 = hamming(query_int_vectors[0], int_vectors[0])
         distance_1 = hamming(query_int_vectors[0], int_vectors[1])
-        res = connect.search(ham_collection, query_entities, params=)
-        logging.getLogger().info(status)
-        logging.getLogger().info(result)
-        assert abs(result[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
+        res = connect.search(ham_collection, query_entities)
+        assert abs(res[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
 
-    def test_search_distance_substructure_flat_index(self, connect, substructure_collection):
+    def _test_search_distance_substructure_flat_index(self, connect, substructure_collection):
         '''
         target: search ip_collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
@@ -621,7 +625,7 @@ class TestSearchBase:
         logging.getLogger().info(result)
         assert len(result[0]) == 0
 
-    def test_search_distance_substructure_flat_index_B(self, connect, substructure_collection):
+    def _test_search_distance_substructure_flat_index_B(self, connect, substructure_collection):
         '''
         target: search ip_collection, and check the result: distance
         method: compare the return distance value with value computed with SUB 
@@ -650,7 +654,7 @@ class TestSearchBase:
         assert result[1][0].distance <= epsilon
         assert result[1][0].id == ids[1]
 
-    def test_search_distance_superstructure_flat_index(self, connect, superstructure_collection):
+    def _test_search_distance_superstructure_flat_index(self, connect, superstructure_collection):
         '''
         target: search ip_collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
@@ -675,7 +679,7 @@ class TestSearchBase:
         logging.getLogger().info(result)
         assert len(result[0]) == 0
 
-    def test_search_distance_superstructure_flat_index_B(self, connect, superstructure_collection):
+    def _test_search_distance_superstructure_flat_index_B(self, connect, superstructure_collection):
         '''
         target: search ip_collection, and check the result: distance
         method: compare the return distance value with value computed with SUPER
@@ -704,7 +708,7 @@ class TestSearchBase:
         assert result[1][0].id in ids
         assert result[1][0].distance <= epsilon
 
-    def test_search_distance_tanimoto_flat_index(self, connect, tanimoto_collection):
+    def _test_search_distance_tanimoto_flat_index(self, connect, tanimoto_collection):
         '''
         target: search ip_collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
@@ -730,7 +734,7 @@ class TestSearchBase:
         assert abs(result[0][0].distance - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.timeout(30)
-    def test_search_concurrent_multithreads(self, args):
+    def test_search_concurrent_multithreads(self, connect, args):
         '''
         target: test concurrent search with multiprocessess
         method: search with 10 processes, each process uses dependent connection
@@ -761,7 +765,7 @@ class TestSearchBase:
             t.join()
 
     @pytest.mark.timeout(30)
-    def test_search_concurrent_multithreads_single_connection(self, args):
+    def test_search_concurrent_multithreads_single_connection(self, connect, args):
         '''
         target: test concurrent search with multiprocessess
         method: search with 10 processes, each process uses dependent connection
@@ -925,7 +929,7 @@ class TestSearchInvalid(object):
             pytest.skip("Skip case")
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1, search_params=search_params["search_params"])
         with pytest.raises(Exception) as e:
-            res = connect.search(collection_name, query)
+            res = connect.search(collection, query)
 
     def test_search_with_empty_params(self, connect, collection, args, get_simple_index):
         '''
@@ -939,7 +943,7 @@ class TestSearchInvalid(object):
         connect.create_index(collection, field_name, default_index_name, get_simple_index)
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1, search_params={})
         with pytest.raises(Exception) as e:
-            res = connect.search(collection_name, query)
+            res = connect.search(collection, query)
 
 
 def check_id_result(result, id):
