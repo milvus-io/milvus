@@ -150,7 +150,8 @@ SSVectorIndexFormat::construct_index(const std::string& index_name, knowhere::Bi
         }
 
         index->Load(index_data);
-        index->SetIndexSize(length);
+        index->UpdateIndexSize();
+        LOG_ENGINE_DEBUG_ << "index file size " << length << " index size " << index->IndexSize();
     } else {
         std::string err_msg = "Fail to create vector index";
         LOG_ENGINE_ERROR_ << err_msg;

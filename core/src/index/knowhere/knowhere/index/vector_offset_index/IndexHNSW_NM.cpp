@@ -187,5 +187,13 @@ IndexHNSW_NM::Dim() {
     return (*(size_t*)index_->dist_func_param_);
 }
 
+void
+IndexHNSW_NM::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = index_->cal_size();
+}
+
 }  // namespace knowhere
 }  // namespace milvus

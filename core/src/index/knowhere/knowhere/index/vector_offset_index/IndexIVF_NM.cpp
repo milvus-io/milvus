@@ -351,5 +351,18 @@ IVF_NM::Dim() {
     return index_->d;
 }
 
+void
+IVF_NM::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    auto ivf_index = dynamic_cast<faiss::IndexIVFFlat*>(index_.get());
+    auto nb = ivf_index->invlists->compute_ntotal();
+    auto nlist = ivf_index->nlist;
+    auto d = ivf_index->d;
+    // ivf ids and quantizer
+    index_size_ = nb * sizeof(int64_t) + nlist * d * sizeof(float);
+}
+
 }  // namespace knowhere
 }  // namespace milvus
