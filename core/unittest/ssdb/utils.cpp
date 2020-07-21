@@ -300,6 +300,18 @@ SSSchedulerTest::TearDown() {
     BaseTest::TearDown();
 }
 
+void
+SSEventTest::SetUp() {
+    auto uri = "mock://:@:/";
+    store_ = Store::Build(uri);
+    store_->DoReset();
+}
+
+void
+SSEventTest::TearDown() {
+
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int
 main(int argc, char **argv) {
