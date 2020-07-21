@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include "codecs/VectorIndexFormat.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 #include "storage/FSHandler.h"
 
 namespace milvus {

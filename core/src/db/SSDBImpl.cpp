@@ -115,26 +115,26 @@ SSDBImpl::Start() {
         //        // for distribute version, some nodes are read only
         //        if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         //            // background wal thread
-        //            bg_wal_thread_ = std::thread(&SSDBImpl::BackgroundWalThread, this);
+        //            bg_wal_thread_ = std::thread(&SSDBImpl::TimingWalThread, this);
         //        }
     } else {
         // for distribute version, some nodes are read only
         if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
             // background flush thread
-            bg_flush_thread_ = std::thread(&SSDBImpl::BackgroundFlushThread, this);
+            bg_flush_thread_ = std::thread(&SSDBImpl::TimingFlushThread, this);
         }
     }
 
     // for distribute version, some nodes are read only
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         // background build index thread
-        bg_index_thread_ = std::thread(&SSDBImpl::BackgroundIndexThread, this);
+        bg_index_thread_ = std::thread(&SSDBImpl::TimingIndexThread, this);
     }
 
     // background metric thread
     fiu_do_on("options_metric_enable", options_.metric_enable_ = true);
     if (options_.metric_enable_) {
-        bg_metric_thread_ = std::thread(&SSDBImpl::BackgroundMetricThread, this);
+        bg_metric_thread_ = std::thread(&SSDBImpl::TimingMetricThread, this);
     }
 
     return Status::OK();
@@ -279,7 +279,8 @@ SSDBImpl::GetCollectionRowCount(const std::string& collection_name, uint64_t& ro
 }
 
 Status
-SSDBImpl::PreloadCollection(const server::ContextPtr& context, const std::string& collection_name, bool force) {
+SSDBImpl::LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
+                         const std::vector<std::string>& field_names, bool force) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
@@ -626,19 +627,15 @@ SSDBImpl::DropIndex(const std::string& collection_id) {
 }
 
 Status
-SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection_name,
-                const std::vector<std::string>& partition_patterns, query::GeneralQueryPtr general_query,
-                query::QueryPtr query_ptr, std::vector<std::string>& field_names,
-                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                engine::QueryResult& result) {
+SSDBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResult& result) {
     CHECK_INITIALIZED;
 
     milvus::server::ContextChild tracer(context, "Query");
 
-    TimeRecorder rc("HybridQuery");
+    TimeRecorder rc("SSDBImpl::Query");
 
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+    //    snapshot::ScopedSnapshotT ss;
+    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     /* collect all valid segment */
     std::vector<SegmentVisitor::Ptr> segment_visitors;
@@ -733,7 +730,7 @@ SSDBImpl::InternalFlush(const std::string& collection_id) {
 }
 
 void
-SSDBImpl::BackgroundFlushThread() {
+SSDBImpl::TimingFlushThread() {
     SetThreadName("flush_thread");
     server::SystemInfo::GetInstance().Init();
     while (true) {
@@ -783,7 +780,7 @@ SSDBImpl::StartMetricTask() {
 }
 
 void
-SSDBImpl::BackgroundMetricThread() {
+SSDBImpl::TimingMetricThread() {
     SetThreadName("metric_thread");
     server::SystemInfo::GetInstance().Init();
     while (true) {
@@ -826,7 +823,7 @@ SSDBImpl::BackgroundBuildIndexTask() {
 }
 
 void
-SSDBImpl::BackgroundIndexThread() {
+SSDBImpl::TimingIndexThread() {
     SetThreadName("index_thread");
     server::SystemInfo::GetInstance().Init();
     while (true) {
@@ -856,7 +853,7 @@ SSDBImpl::WaitBuildIndexFinish() {
 }
 
 void
-SSDBImpl::BackgroundWalThread() {
+SSDBImpl::TimingWalThread() {
     SetThreadName("wal_thread");
     server::SystemInfo::GetInstance().Init();
 
