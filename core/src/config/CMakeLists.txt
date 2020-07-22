@@ -39,14 +39,4 @@ if (BUILD_UNIT_TEST STREQUAL "ON")
             yaml-cpp
         )
 
-    add_test(
-        TARGET ConfigMgrTest
-        SOURCES
-            ConfigMgrTest.cpp
-        LIBS 
-            config
-            ${gtest_libraries}
-            yaml-cpp
-        )
-
 endif()
