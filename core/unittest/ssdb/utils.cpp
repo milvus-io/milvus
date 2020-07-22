@@ -141,7 +141,7 @@ void
 BaseTest::SnapshotStart(bool mock_store) {
     /* auto uri = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
     auto uri = "mock://:@:/";
-    auto store = Store::Build(uri);
+    auto store = Store::Build(uri, "/tmp/milvus_ss/db");
 
     milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();

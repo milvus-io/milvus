@@ -18,7 +18,6 @@
 #include <string>
 #include <thread>
 
-#include "config/Config.h"
 #include "db/snapshot/Event.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/Operations.h"
@@ -139,14 +138,9 @@ class ResourceHolder {
 
     virtual void
     OnNoRefCallBack(ResourcePtr resource) {
-        auto& config = server::Config::GetInstance();
-        std::string path;
-        config.GetStorageConfigPath(path);
-        auto root_path = utils::ConstructCollectionRootPath(path);
-
         resource->Deactivate();
         Release(resource->GetID());
-        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(root_path, resource);
+        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(resource);
         EventExecutor::GetInstance().Submit(evt_ptr);
     }
 

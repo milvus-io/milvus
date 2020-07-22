@@ -49,11 +49,12 @@ class Store : public std::enable_shared_from_this<Store> {
  public:
     using Ptr = typename std::shared_ptr<Store>;
 
-    explicit Store(meta::MetaAdapterPtr adapter) : adapter_(adapter) {
+    explicit Store(meta::MetaAdapterPtr adapter, const std::string& root_path)
+        : adapter_(adapter), root_path_(root_path) {
     }
 
     static Store::Ptr
-    Build(const std::string& uri) {
+    Build(const std::string& uri, const std::string& root_path) {
         utils::MetaUriInfo uri_info;
         LOG_ENGINE_DEBUG_ << "MetaUri: " << uri << std::endl;
         auto status = utils::ParseMetaUri(uri, uri_info);
@@ -69,16 +70,21 @@ class Store : public std::enable_shared_from_this<Store> {
             options.backend_uri_ = uri;
             auto engine = std::make_shared<meta::MySqlEngine>(options);
             auto adapter = std::make_shared<meta::MetaAdapter>(engine);
-            return std::make_shared<Store>(adapter);
+            return std::make_shared<Store>(adapter, root_path);
         } else if (strcasecmp(uri_info.dialect_.c_str(), "mock") == 0) {
             LOG_ENGINE_INFO_ << "Using Mock. Should only be used in test environment";
             auto engine = std::make_shared<meta::MockMetaEngine>();
             auto adapter = std::make_shared<meta::MetaAdapter>(engine);
-            return std::make_shared<Store>(adapter);
+            return std::make_shared<Store>(adapter, root_path);
         } else {
             LOG_ENGINE_ERROR_ << "Invalid dialect in URI: dialect = " << uri_info.dialect_;
             throw InvalidArgumentException("URI dialect is not mysql / sqlite / mock");
         }
+    }
+
+    std::string
+    GetRootPath() const {
+        return root_path_ + "/tables";
     }
 
     template <typename OpT>
@@ -364,6 +370,7 @@ class Store : public std::enable_shared_from_this<Store> {
     }
 
     meta::MetaAdapterPtr adapter_;
+    std::string root_path_;
 };
 
 using StorePtr = Store::Ptr;

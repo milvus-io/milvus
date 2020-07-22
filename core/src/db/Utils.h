@@ -30,9 +30,6 @@ namespace utils {
 int64_t
 GetMicroSecTimeStamp();
 
-std::string
-ConstructCollectionRootPath(const std::string& root_path);
-
 Status
 CreateCollectionPath(const DBMetaOptions& options, const std::string& collection_id);
 Status
