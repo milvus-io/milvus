@@ -13,10 +13,12 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <vector>
 
 #include "db/meta/MetaAdapter.h"
+#include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Snapshots.h"
@@ -217,30 +219,41 @@ DropAllIndexOperation::DropAllIndexOperation(const OperationContext& context, Sc
 
 Status
 DropAllIndexOperation::PreCheck() {
-    if (context_.stale_field_element == nullptr) {
+    if (context_.stale_field_elements.size() == 0) {
         std::stringstream emsg;
-        emsg << GetRepr() << ". Stale field element is requried";
+        emsg << GetRepr() << ". Stale field element is empty";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
 
-    if (!GetStartedSS()->GetResource<FieldElement>(context_.stale_field_element->GetID())) {
+    std::set<ID_TYPE> field_ids;
+
+    for (auto& stale_field_element : context_.stale_field_elements) {
+        if (!GetStartedSS()->GetResource<FieldElement>(stale_field_element->GetID())) {
+            std::stringstream emsg;
+            emsg << GetRepr() << ".  Specified field element " << stale_field_element->GetName();
+            emsg << " is stale";
+            return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+        }
+        field_ids.insert(stale_field_element->GetFieldId());
+    }
+
+    if (field_ids.size() > 1) {
         std::stringstream emsg;
-        emsg << GetRepr() << ".  Specified field element " << context_.stale_field_element->GetName();
-        emsg << " is stale";
+        emsg << GetRepr() << ".  All stale field elements should be of same field";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
+
     // TODO: Check type
     return Status::OK();
 }
 
 Status
 DropAllIndexOperation::DoExecute(StorePtr store) {
-    auto& segment_files = GetAdjustedSS()->GetResources<SegmentFile>();
+    /* auto& segment_files = GetAdjustedSS()->GetResources<SegmentFile>(); */
 
     OperationContext cc_context;
     {
         auto context = context_;
-        context.stale_field_elements.push_back(context.stale_field_element);
 
         FieldCommitOperation fc_op(context, GetAdjustedSS());
         STATUS_CHECK(fc_op(store));
@@ -264,20 +277,29 @@ DropAllIndexOperation::DoExecute(StorePtr store) {
     }
 
     std::map<ID_TYPE, std::vector<SegmentCommitPtr>> p_sc_map;
-    for (auto& kv : segment_files) {
-        if (kv.second->GetFieldElementId() != context_.stale_field_element->GetID()) {
-            continue;
-        }
-
+    auto executor = [&](const Segment::Ptr& segment, SegmentIterator* handler) -> Status {
         auto context = context_;
-        context.stale_segment_file = kv.second.Get();
+        for (auto& stale_element : context.stale_field_elements) {
+            auto segment_file = handler->ss_->GetSegmentFile(segment->GetID(), stale_element->GetID());
+            if (segment_file) {
+                context.stale_segment_files.push_back(segment_file);
+            }
+        }
+        if (context.stale_segment_files.size() == 0) {
+            return Status::OK();
+        }
         SegmentCommitOperation sc_op(context, GetAdjustedSS());
         STATUS_CHECK(sc_op(store));
         STATUS_CHECK(sc_op.GetResource(context.new_segment_commit));
         auto segc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(meta::oUpdate).CreatePtr();
         AddStepWithLsn(*context.new_segment_commit, context.lsn, segc_ctx_p);
         p_sc_map[context.new_segment_commit->GetPartitionId()].push_back(context.new_segment_commit);
-    }
+        return Status::OK();
+    };
+
+    auto segment_iterator = std::make_shared<SegmentIterator>(GetAdjustedSS(), executor);
+    segment_iterator->Iterate();
+    STATUS_CHECK(segment_iterator->GetStatus());
 
     for (auto& kv : p_sc_map) {
         auto& partition_id = kv.first;
@@ -306,7 +328,7 @@ DropIndexOperation::DropIndexOperation(const OperationContext& context, ScopedSn
 
 Status
 DropIndexOperation::PreCheck() {
-    if (context_.stale_segment_file == nullptr) {
+    if (context_.stale_segment_files.size() == 0) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Stale segment is requried";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
