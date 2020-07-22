@@ -5,7 +5,8 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.10.2 (TBD)
 
 ## Bug
--   \#2890 Fix the wrong index size
+-   \#2890 Fix the index size caculation in cache
+-   \#2952 Fix the result merging of IVF_PQ IP
 
 ## Feature
 
