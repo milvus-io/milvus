@@ -27,6 +27,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2813 To implemente RNSG IP
 -   \#2852 Fix Prometheus rebuild problem.
 -   \#2890 Fix wrong index size
+-   \#2952 Fix the result merging of IVF_PQ IP
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
