@@ -18,7 +18,7 @@
 namespace milvus {
 namespace scheduler {
 
-SSBuildIndexJob::SSBuildIndexJob() : Job(JobType::SS_BUILD) {
+SSBuildIndexJob::SSBuildIndexJob(const std::string& dir_root) : Job(JobType::SS_BUILD), dir_root_(dir_root) {
     SetIdentity("SSBuildIndexJob");
     AddCacheInsertDataListener();
 }

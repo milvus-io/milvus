@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "db/SnapshotVisitor.h"
 #include "db/engine/SSExecutionEngine.h"
 #include "scheduler/Definition.h"
@@ -22,7 +24,8 @@ namespace scheduler {
 
 class XSSBuildIndexTask : public Task {
  public:
-    explicit XSSBuildIndexTask(const engine::SegmentVisitorPtr& visitor, TaskLabelPtr label);
+    explicit XSSBuildIndexTask(const std::string& dir_root, const engine::SegmentVisitorPtr& visitor,
+                               TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;

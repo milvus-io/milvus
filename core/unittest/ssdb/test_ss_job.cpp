@@ -88,7 +88,7 @@ TEST_F(SSSchedulerTest, SSJobTest) {
 
     /* create BuildIndexJob */
     milvus::scheduler::SSBuildIndexJobPtr build_index_job =
-        std::make_shared<milvus::scheduler::SSBuildIndexJob>();
+        std::make_shared<milvus::scheduler::SSBuildIndexJob>("");
     for (auto& sv : segment_visitors) {
         build_index_job->AddSegmentVisitor(sv);
     }
@@ -99,7 +99,7 @@ TEST_F(SSSchedulerTest, SSJobTest) {
 
     /* create SearchJob */
     milvus::scheduler::SSSearchJobPtr search_job =
-        std::make_shared<milvus::scheduler::SSSearchJob>(nullptr, nullptr);
+        std::make_shared<milvus::scheduler::SSSearchJob>(nullptr, "", nullptr);
     for (auto& sv : segment_visitors) {
         search_job->AddSegmentVisitor(sv);
     }

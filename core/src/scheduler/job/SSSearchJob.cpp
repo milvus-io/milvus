@@ -15,8 +15,9 @@
 namespace milvus {
 namespace scheduler {
 
-SSSearchJob::SSSearchJob(const server::ContextPtr& context, query::QueryPtr query_ptr)
-    : Job(JobType::SS_SEARCH), context_(context), query_ptr_(query_ptr) {
+SSSearchJob::SSSearchJob(const server::ContextPtr& context, const std::string& dir_root,
+                         const query::QueryPtr& query_ptr)
+    : Job(JobType::SS_SEARCH), context_(context), dir_root_(dir_root), query_ptr_(query_ptr) {
 }
 
 void
@@ -47,27 +48,12 @@ SSSearchJob::SearchDone(const engine::snapshot::ID_TYPE seg_id) {
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld finish segment: %ld", "search", 0, id(), seg_id);
 }
 
-engine::QueryResultPtr&
-SSSearchJob::GetQueryResult() {
-    return query_result_;
-}
-
-Status&
-SSSearchJob::GetStatus() {
-    return status_;
-}
-
 json
 SSSearchJob::Dump() const {
     json ret{{"extra_params", extra_params_.dump()}};
     auto base = Job::Dump();
     ret.insert(base.begin(), base.end());
     return ret;
-}
-
-const server::ContextPtr&
-SSSearchJob::GetContext() const {
-    return context_;
 }
 
 }  // namespace scheduler

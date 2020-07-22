@@ -40,7 +40,7 @@ namespace scheduler {
 
 class SSSearchJob : public Job {
  public:
-    SSSearchJob(const server::ContextPtr& context, query::QueryPtr query_ptr);
+    SSSearchJob(const server::ContextPtr& context, const std::string& dir_root, const query::QueryPtr& query_ptr);
 
  public:
     void
@@ -52,37 +52,48 @@ class SSSearchJob : public Job {
     void
     SearchDone(const engine::snapshot::ID_TYPE seg_id);
 
-    engine::QueryResultPtr&
-    GetQueryResult();
-
-    Status&
-    GetStatus();
-
     json
     Dump() const override;
 
  public:
     const server::ContextPtr&
-    GetContext() const;
+    GetContext() const {
+        return context_;
+    }
 
     const milvus::json&
     extra_params() const {
         return extra_params_;
     }
 
+    const std::string&
+    dir_root() const {
+        return dir_root_;
+    }
+
     const SegmentVisitorMap&
-    segment_visitor_map() {
+    segment_visitor_map() const {
         return segment_visitor_map_;
+    }
+
+    const query::QueryPtr
+    query_ptr() const {
+        return query_ptr_;
+    }
+
+    engine::QueryResultPtr&
+    query_result() {
+        return query_result_;
+    }
+
+    Status&
+    status() {
+        return status_;
     }
 
     std::mutex&
     mutex() {
         return mutex_;
-    }
-
-    query::QueryPtr
-    query_ptr() {
-        return query_ptr_;
     }
 
     // SearchTimeStat&
@@ -95,12 +106,13 @@ class SSSearchJob : public Job {
 
     milvus::json extra_params_;
 
+    std::string dir_root_;
     SegmentVisitorMap segment_visitor_map_;
+
+    query::QueryPtr query_ptr_;
 
     engine::QueryResultPtr query_result_;
     Status status_;
-
-    query::QueryPtr query_ptr_;
 
     std::mutex mutex_;
     std::condition_variable cv_;

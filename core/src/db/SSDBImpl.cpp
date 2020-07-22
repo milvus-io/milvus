@@ -652,7 +652,7 @@ SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection
 
     LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
 
-    scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SSSearchJob>(nullptr, query_ptr);
+    scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SSSearchJob>(nullptr, options_.meta_.path_, query_ptr);
     for (auto& sv : segment_visitors) {
         job->AddSegmentVisitor(sv);
     }
@@ -661,15 +661,15 @@ SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitFinish();
 
-    if (!job->GetStatus().ok()) {
-        return job->GetStatus();
+    if (!job->status().ok()) {
+        return job->status();
     }
 
-    result = job->GetQueryResult();
+    result = job->query_result();
 
     rc.ElapseFromBegin("Engine query totally cost");
 
-    return job->GetStatus();
+    return job->status();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

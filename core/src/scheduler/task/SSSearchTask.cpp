@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "scheduler/task/SearchTask.h"
+#include "scheduler/task/SSSearchTask.h"
 
 #include <fiu-local.h>
 
@@ -22,28 +22,23 @@
 
 #include "db/Utils.h"
 #include "db/engine/SSExecutionEngineImpl.h"
-#include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SSSearchJob.h"
-#include "scheduler/task/SSSearchTask.h"
 #include "segment/SegmentReader.h"
-#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace scheduler {
 
-XSSSearchTask::XSSSearchTask(const server::ContextPtr& context, const engine::SegmentVisitorPtr& visitor,
-                             TaskLabelPtr label)
+XSSSearchTask::XSSSearchTask(const server::ContextPtr& context, const std::string& dir_root,
+                             const engine::SegmentVisitorPtr& visitor, TaskLabelPtr label)
     : Task(TaskType::SearchTask, std::move(label)), context_(context), visitor_(visitor) {
-    engine_ = std::make_shared<engine::SSExecutionEngineImpl>("", visitor);
+    engine_ = std::make_shared<engine::SSExecutionEngineImpl>(dir_root, visitor);
 }
 
 void
 XSSSearchTask::Load(LoadType type, uint8_t device_id) {
-    // milvus::server::ContextFollower tracer(context_, "XSearchTask::Load " + std::to_string(file_->id_));
-
     auto seg_id = visitor_->GetSegment()->GetID();
     TimeRecorder rc(LogOut("[%s][%ld]", "search", seg_id));
     Status stat = Status::OK();
@@ -87,7 +82,7 @@ XSSSearchTask::Load(LoadType type, uint8_t device_id) {
         if (auto job = job_.lock()) {
             auto search_job = std::static_pointer_cast<scheduler::SSSearchJob>(job);
             search_job->SearchDone(seg_id);
-            search_job->GetStatus() = s;
+            search_job->status() = s;
         }
 
         return;
@@ -122,8 +117,8 @@ XSSSearchTask::Execute() {
 
             fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
             if (!s.ok()) {
-                search_job->GetStatus() = s;
                 search_job->SearchDone(seg_id);
+                search_job->status() = s;
                 return;
             }
 
@@ -143,7 +138,7 @@ XSSSearchTask::Execute() {
             span = rc.RecordSection("reduce topk done");
         } catch (std::exception& ex) {
             LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
-            search_job->GetStatus() = Status(SERVER_UNEXPECTED_ERROR, ex.what());
+            search_job->status() = Status(SERVER_UNEXPECTED_ERROR, ex.what());
         }
 
         /* step 4: notify to send result to client */

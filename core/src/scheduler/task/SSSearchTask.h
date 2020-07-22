@@ -27,8 +27,8 @@ namespace scheduler {
 // TODO(wxyu): rewrite
 class XSSSearchTask : public Task {
  public:
-    explicit XSSSearchTask(const server::ContextPtr& context, const engine::SegmentVisitorPtr& visitor,
-                           TaskLabelPtr label);
+    explicit XSSSearchTask(const server::ContextPtr& context, const std::string& dir_root,
+                           const engine::SegmentVisitorPtr& visitor, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;

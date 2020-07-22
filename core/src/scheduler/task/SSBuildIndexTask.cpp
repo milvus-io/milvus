@@ -9,30 +9,24 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "scheduler/task/SSBuildIndexTask.h"
-
 #include <fiu-local.h>
-
 #include <memory>
-#include <string>
-#include <thread>
 #include <utility>
 
 #include "db/Utils.h"
 #include "db/engine/SSExecutionEngineImpl.h"
-#include "metrics/Metrics.h"
 #include "scheduler/job/SSBuildIndexJob.h"
-#include "utils/CommonUtil.h"
-#include "utils/Exception.h"
+#include "scheduler/task/SSBuildIndexTask.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace scheduler {
 
-XSSBuildIndexTask::XSSBuildIndexTask(const engine::SegmentVisitorPtr& visitor, TaskLabelPtr label)
+XSSBuildIndexTask::XSSBuildIndexTask(const std::string& dir_root, const engine::SegmentVisitorPtr& visitor,
+                                     TaskLabelPtr label)
     : Task(TaskType::BuildIndexTask, std::move(label)), visitor_(visitor) {
-    engine_ = std::make_shared<engine::SSExecutionEngineImpl>("", visitor);
+    engine_ = std::make_shared<engine::SSExecutionEngineImpl>(dir_root, visitor);
 }
 
 void
@@ -79,7 +73,7 @@ XSSBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
 
             if (auto job = job_.lock()) {
                 auto build_index_job = std::static_pointer_cast<scheduler::SSBuildIndexJob>(job);
-                build_index_job->GetStatus() = s;
+                build_index_job->status() = s;
                 build_index_job->BuildIndexDone(seg_id);
             }
 
@@ -101,7 +95,7 @@ XSSBuildIndexTask::Execute() {
         auto build_index_job = std::static_pointer_cast<scheduler::SSBuildIndexJob>(job);
         if (engine_ == nullptr) {
             build_index_job->BuildIndexDone(seg_id);
-            build_index_job->GetStatus() = Status(DB_ERROR, "source index is null");
+            build_index_job->status() = Status(DB_ERROR, "source index is null");
             return;
         }
 

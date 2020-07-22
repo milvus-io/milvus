@@ -32,7 +32,7 @@ namespace scheduler {
 
 class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
  public:
-    SSBuildIndexJob();
+    explicit SSBuildIndexJob(const std::string& dir_root);
 
     ~SSBuildIndexJob() = default;
 
@@ -50,27 +50,33 @@ class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
     Dump() const override;
 
  public:
-    Status&
-    GetStatus() {
-        return status_;
+    const std::string&
+    dir_root() const {
+        return dir_root_;
     }
 
     const SegmentVisitorMap&
-    segment_visitor_map() {
+    segment_visitor_map() const {
         return segment_visitor_map_;
     }
 
-    //    engine::DBOptions
-    //    options() const {
-    //        return options_;
-    //    }
+    Status&
+    status() {
+        return status_;
+    }
+
+    // engine::DBOptions
+    // options() const {
+    //     return options_;
+    // }
 
     // protected:
-    //    void
-    //    OnCacheInsertDataChanged(bool value) override;
+    // void
+    // OnCacheInsertDataChanged(bool value) override;
 
  private:
-    //    engine::DBOptions options_;
+    // engine::DBOptions options_;
+    std::string dir_root_;
     SegmentVisitorMap segment_visitor_map_;
 
     Status status_;
