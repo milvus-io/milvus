@@ -400,7 +400,7 @@ class TestInsertBase:
         '''
         tmp_entity = add_field(copy.deepcopy(entity))
         with pytest.raises(Exception):
-            connect.insert(collection_name, tmp_entity)
+            connect.insert(collection, tmp_entity)
 
     def test_insert_with_field_vector_more(self, connect, collection):
         '''
@@ -410,7 +410,7 @@ class TestInsertBase:
         '''
         tmp_entity = add_vector_field(copy.deepcopy(entity))
         with pytest.raises(Exception):
-            connect.insert(collection_name, tmp_entity)
+            connect.insert(collection, tmp_entity)
 
     def test_insert_with_field_less(self, connect, collection):
         '''
@@ -420,7 +420,7 @@ class TestInsertBase:
         '''
         tmp_entity = remove_field(copy.deepcopy(entity))
         with pytest.raises(Exception):
-            connect.insert(collection_name, tmp_entity)
+            connect.insert(collection, tmp_entity)
 
     def test_insert_with_field_vector_less(self, connect, collection):
         '''
@@ -430,7 +430,7 @@ class TestInsertBase:
         '''
         tmp_entity = remove_vector_field(copy.deepcopy(entity))
         with pytest.raises(Exception):
-            connect.insert(collection_name, tmp_entity)
+            connect.insert(collection, tmp_entity)
 
     def test_insert_with_no_field_vector_value(self, connect, collection):
         '''
@@ -441,7 +441,7 @@ class TestInsertBase:
         tmp_entity = copy.deepcopy(entity)
         del tmp_entity[-1]["values"]
         with pytest.raises(Exception):
-            connect.insert(collection_name, tmp_entity)
+            connect.insert(collection, tmp_entity)
 
     def test_insert_with_no_field_vector_type(self, connect, collection):
         '''
@@ -452,7 +452,7 @@ class TestInsertBase:
         tmp_entity = copy.deepcopy(entity)
         del tmp_entity[-1]["type"]
         with pytest.raises(Exception):
-            connect.insert(collection_name, tmp_entity)
+            connect.insert(collection, tmp_entity)
 
     def test_insert_with_no_field_vector_name(self, connect, collection):
         '''
@@ -463,7 +463,7 @@ class TestInsertBase:
         tmp_entity = copy.deepcopy(entity)
         del tmp_entity[-1]["field"]
         with pytest.raises(Exception):
-            connect.insert(collection_name, tmp_entity)
+            connect.insert(collection, tmp_entity)
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(30)
@@ -630,9 +630,9 @@ class TestInsertMultiCollections:
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
             ids = connect.insert(collection_name, entities)
-            connect.flush([collection])
+            connect.flush([collection_name])
             assert len(ids) == nb
-            count = connect.count_entities(collection)
+            count = connect.count_entities(collection_name)
             assert count == nb
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -793,7 +793,7 @@ class TestInsertInvalid(object):
     def test_insert_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception):
-            connect.insert(collection, entity)
+            connect.insert(collection_name, entity)
 
     def test_insert_with_invalid_tag_name(self, connect, collection, get_tag_name):
         tag_name = get_tag_name
