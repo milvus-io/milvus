@@ -25,11 +25,10 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2768 After building the index, the number of vectors increases
 -   \#2776 Fix too many data copies during creating IVF index
 -   \#2813 To implemente RNSG IP
--   \#2890 Fix wrong index size
 -   \#2852 Fix Prometheus rebuild problem.
+-   \#2890 Fix wrong index size
 
 ## Feature
-    \#2940 Add option to build.sh for cuda arch
 -   \#2319 Redo metadata to support MVCC
 -   \#2509 Count up query statistics for debug ease
 -   \#2572 Support structured data index
@@ -38,6 +37,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2798 hnsw-sq8 support
 -   \#2802 Add new index: IVFSQ8NR
 -   \#2834 Add C++ sdk support 4 hnsw_sq8nr
+-   \#2940 Add option to build.sh for cuda arch
 
 ## Improvement
 -   \#2543 Remove secondary_path related code
