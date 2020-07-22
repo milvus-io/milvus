@@ -73,7 +73,7 @@ struct VectorRecord {
 
 struct VectorQuery {
     std::string field_name;
-    milvus::json extra_params;
+    milvus::json extra_params = {};
     int64_t topk;
     float boost;
     VectorRecord query_vector;
