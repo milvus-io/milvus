@@ -200,10 +200,10 @@ def gen_single_filter_fields():
 def gen_single_vector_fields():
     fields = []
     for metric_type in ['HAMMING', 'IP', 'JACCARD', 'L2', 'SUBSTRUCTURE', 'SUPERSTRUCTURE', 'TANIMOTO']:
-        for data_type in [DataType.VECTOR, DataType.BINARY_VECTOR]:
+        for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
             if metric_type in ["L2", "IP"] and data_type == DataType.BINARY_VECTOR:
                 continue
-            if metric_type not in ["L2", "IP"] and data_type == DataType.VECTOR:
+            if metric_type not in ["L2", "IP"] and data_type == DataType.FLOAT_VECTOR:
                 continue
             field = {"field": data_type.name, "type": data_type, "params": {"metric_type": metric_type, "dimension": dimension}}
             fields.append(field)
@@ -216,7 +216,7 @@ def gen_default_fields():
             {"field": "int8", "type": DataType.INT8},
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": "vector", "type": DataType.VECTOR, "params": {"metric_type": "L2", "dimension": dimension}}
+            {"field": "vector", "type": DataType.FLOAT_VECTOR, "params": {"metric_type": "L2", "dimension": dimension}}
         ],
         "segment_size": segment_size
     }
@@ -229,7 +229,7 @@ def gen_entities(nb, is_normal=False):
         {"field": "int8", "type": DataType.INT8, "values": [1 for i in range(nb)]},
         {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
-        {"field": "vector", "type": DataType.VECTOR, "values": vectors}
+        {"field": "vector", "type": DataType.FLOAT_VECTOR, "values": vectors}
     ]
     return entities
 
@@ -254,7 +254,7 @@ def gen_entities_by_fields(fields, nb, dimension):
             field_value = [3.0 for i in range(nb)]
         elif field["type"] == DataType.BINARY_VECTOR:
             field_value = gen_binary_vectors(nb, dimension)[1]
-        elif field["type"] == DataType.VECTOR:
+        elif field["type"] == DataType.FLOAT_VECTOR:
             field_value = gen_vectors(nb, dimension)
         field.update({"values": field_value})
         entities.append(field)
@@ -307,7 +307,7 @@ def add_vector_field(entities, is_normal=False):
     vectors = gen_vectors(nb, dimension, is_normal)
     field = {
         "field": gen_unique_str(), 
-        "type": DataType.VECTOR, 
+        "type": DataType.FLOAT_VECTOR,
         "values": vectors
     }
     entities.append(field)
@@ -317,7 +317,7 @@ def add_vector_field(entities, is_normal=False):
 def update_fields_metric_type(fields, metric_type):
     tmp_fields = copy.deepcopy(fields)
     if metric_type in ["L2", "IP"]:
-        tmp_fields["fields"][-1]["type"] = DataType.VECTOR
+        tmp_fields["fields"][-1]["type"] = DataType.FLOAT_VECTOR
     else:
         tmp_fields["fields"][-1]["type"] = DataType.BINARY_VECTOR
     tmp_fields["fields"][-1]["params"]["metric_type"] = metric_type
@@ -360,7 +360,7 @@ def add_vector_field(nb, dimension=dimension):
     field_name = gen_unique_str()
     field = {
         "field": field_name,
-        "type": DataType.VECTOR,
+        "type": DataType.FLOAT_VECTOR,
         "values": gen_vectors(nb, dimension)
     }
     return field_name
@@ -449,9 +449,9 @@ def gen_invalid_strs():
 
 def gen_invalid_field_types():
     field_types = [
-            1,
+            # 1,
             "=c",
-            0,
+            # 0,
             None,
             "",
             "a".join("a" for i in range(256))

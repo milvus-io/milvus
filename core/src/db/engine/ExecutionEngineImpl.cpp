@@ -954,8 +954,8 @@ ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, met
 
 Status
 ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
-                                  std::unordered_map<std::string, meta::hybrid::DataType>& attr_type, std::vector<float>& distances,
-                                  std::vector<int64_t>& search_ids, bool hybrid) {
+                                  std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                                  std::vector<float>& distances, std::vector<int64_t>& search_ids, bool hybrid) {
     try {
         faiss::ConcurrentBitsetPtr bitset;
         std::string vector_placeholder;

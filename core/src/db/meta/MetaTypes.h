@@ -86,7 +86,7 @@ namespace meta {
 
 constexpr int32_t DEFAULT_ENGINE_TYPE = (int)EngineType::FAISS_IDMAP;
 constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
-constexpr int32_t DEFAULT_INDEX_FILE_SIZE = GB;
+constexpr int32_t DEFAULT_INDEX_FILE_SIZE = 1024;
 constexpr char CURRENT_VERSION[] = MILVUS_VERSION;
 
 constexpr int64_t FLAG_MASK_NO_USERID = 0x1;
