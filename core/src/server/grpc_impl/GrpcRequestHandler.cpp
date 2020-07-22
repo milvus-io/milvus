@@ -1265,6 +1265,10 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     Status status = request_handler_.InsertEntity(GetContext(context), collection_name, partition_tag, row_num,
                                                   field_names, attr_data, vectors);
 
+    if (!status.ok()) {
+        SET_RESPONSE(response->mutable_status(), status, context);
+        return ::grpc::Status::OK;
+    }
     response->mutable_entity_id_array()->Resize(static_cast<int>(vectors.begin()->second.id_array_.size()), 0);
     memcpy(response->mutable_entity_id_array()->mutable_data(), vectors.begin()->second.id_array_.data(),
            vectors.begin()->second.id_array_.size() * sizeof(int64_t));
