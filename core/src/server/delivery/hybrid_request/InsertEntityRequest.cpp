@@ -73,7 +73,7 @@ InsertEntityRequest::OnExecute() {
         }
 
         auto vector_datas_it = vector_datas_.begin();
-            if (vector_datas_it->second.float_data_.empty() && vector_datas_it->second.binary_data_.empty()) {
+        if (vector_datas_it->second.float_data_.empty() && vector_datas_it->second.binary_data_.empty()) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
                           "The entity array is empty. Make sure you have entered vector records.");
         }
