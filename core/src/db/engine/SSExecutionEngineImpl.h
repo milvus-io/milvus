@@ -37,7 +37,7 @@ class SSExecutionEngineImpl : public SSExecutionEngine {
     Search(const query::QueryPtr& query_ptr, QueryResult& result) override;
 
     Status
-    BuildIndex(const std::string& field_name, const CollectionIndex& index) override;
+    BuildIndex(const std::string& field_name, const CollectionIndex& index, knowhere::VecIndexPtr& new_index) override;
 
  private:
     knowhere::VecIndexPtr

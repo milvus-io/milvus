@@ -37,7 +37,7 @@ class SSExecutionEngine {
     Search(const query::QueryPtr& query_ptr, QueryResult& result) = 0;
 
     virtual Status
-    BuildIndex(const std::string& field_name, const CollectionIndex& index) = 0;
+    BuildIndex(const std::string& field_name, const CollectionIndex& index, knowhere::VecIndexPtr& new_index) = 0;
 };
 
 using SSExecutionEnginePtr = std::shared_ptr<SSExecutionEngine>;

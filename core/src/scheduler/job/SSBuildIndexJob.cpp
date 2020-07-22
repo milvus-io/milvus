@@ -18,29 +18,33 @@
 namespace milvus {
 namespace scheduler {
 
-SSBuildIndexJob::SSBuildIndexJob(engine::DBOptions options) : Job(JobType::SS_BUILD), options_(std::move(options)) {
-    SetIdentity("SSBuildIndexJob");
-    AddCacheInsertDataListener();
-}
-
-void
-SSBuildIndexJob::AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor) {
-    if (visitor != nullptr) {
-        segment_visitor_map_[visitor->GetSegment()->GetID()] = visitor;
-    }
+SSBuildIndexJob::SSBuildIndexJob(engine::DBOptions options,
+                                 const std::string& collection_name,
+                                 const engine::snapshot::IDS_TYPE& segment_ids)
+    : Job(JobType::SS_BUILD),
+      options_(std::move(options)),
+      collection_name_(collection_name),
+      segment_ids_(segment_ids) {
 }
 
 void
 SSBuildIndexJob::WaitBuildIndexFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return segment_visitor_map_.empty(); });
+    cv_.wait(lock, [this] {
+        return segment_ids_.empty();
+    });
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] BuildIndexJob %ld all done", "build index", 0, id());
 }
 
 void
 SSBuildIndexJob::BuildIndexDone(const engine::snapshot::ID_TYPE seg_id) {
     std::unique_lock<std::mutex> lock(mutex_);
-    segment_visitor_map_.erase(seg_id);
+    for (engine::snapshot::IDS_TYPE::iterator iter = segment_ids_.begin(); iter != segment_ids_.end(); iter++) {
+        if (*iter == seg_id) {
+            segment_ids_.erase(iter);
+            break;
+        }
+    }
     cv_.notify_all();
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] BuildIndexJob %ld finish segment: %ld", "build index", 0, id(), seg_id);
 }
@@ -48,16 +52,11 @@ SSBuildIndexJob::BuildIndexDone(const engine::snapshot::ID_TYPE seg_id) {
 json
 SSBuildIndexJob::Dump() const {
     json ret{
-        {"number_of_to_index_file", segment_visitor_map_.size()},
+        {"number_of_to_index_segment", segment_ids_.size()},
     };
     auto base = Job::Dump();
     ret.insert(base.begin(), base.end());
     return ret;
-}
-
-void
-SSBuildIndexJob::OnCacheInsertDataChanged(bool value) {
-    options_.insert_cache_immediately_ = value;
 }
 
 }  // namespace scheduler

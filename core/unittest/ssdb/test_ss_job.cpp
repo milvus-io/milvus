@@ -24,9 +24,8 @@ class TestJob : public Job {
 
 TEST(SSJobTest, TestJob) {
     engine::DBOptions options;
-    auto build_index_ptr = std::make_shared<SSBuildIndexJob>(options);
-    build_index_ptr->Dump();
-    build_index_ptr->AddSegmentVisitor(nullptr);
+//    auto build_index_ptr = std::make_shared<SSBuildIndexJob>(options);
+//    build_index_ptr->Dump();
 
     TestJob test_job;
     test_job.Dump();

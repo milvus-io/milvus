@@ -22,32 +22,22 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/handler/CacheConfigHandler.h"
-//#include "db/meta/Meta.h"
+#include "db/snapshot/ResourceTypes.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/Job.h"
 
 namespace milvus {
 namespace scheduler {
 
-// using engine::meta::SegmentSchemaPtr;
-
-// using Id2ToIndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
-// using Id2ToTableFileMap = std::unordered_map<size_t, SegmentSchema>;
-
-class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
+class SSBuildIndexJob : public Job {
  public:
-    explicit SSBuildIndexJob(engine::DBOptions options);
+    explicit SSBuildIndexJob(engine::DBOptions options,
+                             const std::string& collection_name,
+                             const engine::snapshot::IDS_TYPE& segment_ids);
 
     ~SSBuildIndexJob() = default;
 
  public:
-    //    bool
-    //    AddToIndexFiles(const SegmentSchemaPtr& to_index_file);
-
-    void
-    AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor);
-
     void
     WaitBuildIndexFinish();
 
@@ -63,19 +53,14 @@ class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
         return status_;
     }
 
-    //    Id2ToIndexMap&
-    //    to_index_files() {
-    //        return to_index_files_;
-    //    }
+    const engine::snapshot::IDS_TYPE&
+    segment_ids() {
+        return segment_ids_;
+    }
 
-    //    engine::meta::MetaPtr
-    //    meta() const {
-    //        return meta_ptr_;
-    //    }
-
-    const SegmentVisitorMap&
-    segment_visitor_map() {
-        return segment_visitor_map_;
+    const std::string&
+    collection_name() {
+        return collection_name_;
     }
 
     engine::DBOptions
@@ -83,15 +68,10 @@ class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
         return options_;
     }
 
- protected:
-    void
-    OnCacheInsertDataChanged(bool value) override;
-
  private:
-    //    Id2ToIndexMap to_index_files_;
-    //    engine::meta::MetaPtr meta_ptr_;
     engine::DBOptions options_;
-    SegmentVisitorMap segment_visitor_map_;
+    std::string collection_name_;
+    engine::snapshot::IDS_TYPE segment_ids_;
 
     Status status_;
     std::mutex mutex_;

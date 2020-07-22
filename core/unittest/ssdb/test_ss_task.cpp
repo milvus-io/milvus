@@ -40,8 +40,8 @@ TEST(SSTaskTest, INVALID_INDEX) {
     auto search_task = std::make_shared<XSSSearchTask>(dummy_context, nullptr, nullptr);
     search_task->Load(LoadType::TEST, 10);
 
-    auto build_task = std::make_shared<XSSBuildIndexTask>(nullptr, nullptr);
-    build_task->Load(LoadType::TEST, 10);
+//    auto build_task = std::make_shared<SSBuildIndexTask>(nullptr, nullptr);
+//    build_task->Load(LoadType::TEST, 10);
 
 //    build_task->Execute();
 }
