@@ -11,6 +11,7 @@
 
 #include "knowhere/index/vector_index/ConfAdapter.h"
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -327,6 +328,8 @@ ANNOYConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 ANNOYConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    CheckIntByRange(knowhere::IndexParams::search_k, std::numeric_limits<int64_t>::min(),
+                    std::numeric_limits<int64_t>::max());
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 

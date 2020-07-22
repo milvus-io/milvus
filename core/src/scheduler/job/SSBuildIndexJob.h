@@ -30,26 +30,18 @@
 namespace milvus {
 namespace scheduler {
 
-// using engine::meta::SegmentSchemaPtr;
-
-// using Id2ToIndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
-// using Id2ToTableFileMap = std::unordered_map<size_t, SegmentSchema>;
-
 class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
  public:
-    explicit SSBuildIndexJob(engine::DBOptions options);
+    explicit SSBuildIndexJob(const std::string& dir_root);
 
     ~SSBuildIndexJob() = default;
 
  public:
-    //    bool
-    //    AddToIndexFiles(const SegmentSchemaPtr& to_index_file);
-
     void
     AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor);
 
     void
-    WaitBuildIndexFinish();
+    WaitFinish();
 
     void
     BuildIndexDone(const engine::snapshot::ID_TYPE seg_id);
@@ -58,39 +50,33 @@ class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
     Dump() const override;
 
  public:
-    Status&
-    GetStatus() {
-        return status_;
+    const std::string&
+    dir_root() const {
+        return dir_root_;
     }
 
-    //    Id2ToIndexMap&
-    //    to_index_files() {
-    //        return to_index_files_;
-    //    }
-
-    //    engine::meta::MetaPtr
-    //    meta() const {
-    //        return meta_ptr_;
-    //    }
-
     const SegmentVisitorMap&
-    segment_visitor_map() {
+    segment_visitor_map() const {
         return segment_visitor_map_;
     }
 
-    engine::DBOptions
-    options() const {
-        return options_;
+    Status&
+    status() {
+        return status_;
     }
 
- protected:
-    void
-    OnCacheInsertDataChanged(bool value) override;
+    // engine::DBOptions
+    // options() const {
+    //     return options_;
+    // }
+
+    // protected:
+    // void
+    // OnCacheInsertDataChanged(bool value) override;
 
  private:
-    //    Id2ToIndexMap to_index_files_;
-    //    engine::meta::MetaPtr meta_ptr_;
-    engine::DBOptions options_;
+    // engine::DBOptions options_;
+    std::string dir_root_;
     SegmentVisitorMap segment_visitor_map_;
 
     Status status_;

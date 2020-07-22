@@ -62,12 +62,11 @@ struct OperationContext {
     CollectionCommitPtr new_collection_commit = nullptr;
     CollectionPtr new_collection = nullptr;
 
-    SegmentFilePtr stale_segment_file = nullptr;
+    SegmentFile::VecT stale_segment_files;
     std::vector<SegmentPtr> stale_segments;
 
     FieldPtr prev_field = nullptr;
     FieldElementPtr prev_field_element = nullptr;
-    FieldElementPtr stale_field_element = nullptr;
     std::vector<FieldElementPtr> new_field_elements;
     std::vector<FieldElementPtr> stale_field_elements;
 

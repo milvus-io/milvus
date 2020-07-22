@@ -215,33 +215,10 @@ SSDBTest::SetUp() {
     BaseTest::SetUp();
     BaseTest::SnapshotStart(false);
     db_ = std::make_shared<milvus::engine::SSDBImpl>(GetOptions());
-
-    auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
-    res_mgr->Clear();
-    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, false));
-    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
-
-    auto default_conn = milvus::scheduler::Connection("IO", 500.0);
-    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
-    res_mgr->Connect("disk", "cpu", default_conn);
-#ifdef MILVUS_GPU_VERSION
-    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("0", "GPU", 0));
-    res_mgr->Connect("cpu", "0", PCIE);
-#endif
-    res_mgr->Start();
-    milvus::scheduler::SchedInst::GetInstance()->Start();
-    milvus::scheduler::JobMgrInst::GetInstance()->Start();
-    milvus::scheduler::CPUBuilderInst::GetInstance()->Start();
 }
 
 void
 SSDBTest::TearDown() {
-    milvus::scheduler::JobMgrInst::GetInstance()->Stop();
-    milvus::scheduler::SchedInst::GetInstance()->Stop();
-    milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
-    milvus::scheduler::ResMgrInst::GetInstance()->Stop();
-    milvus::scheduler::ResMgrInst::GetInstance()->Clear();
-
     BaseTest::SnapshotStop();
     db_ = nullptr;
     auto options = GetOptions();
@@ -278,6 +255,46 @@ SSMetaTest::SetUp() {
 
 void
 SSMetaTest::TearDown() {
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void
+SSSchedulerTest::SetUp() {
+    BaseTest::SetUp();
+    BaseTest::SnapshotStart(true);
+    auto options = milvus::engine::DBOptions();
+    options.wal_enable_ = false;
+    db_ = std::make_shared<milvus::engine::SSDBImpl>(options);
+
+    auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
+    res_mgr->Clear();
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, false));
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
+
+    auto default_conn = milvus::scheduler::Connection("IO", 500.0);
+    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
+    res_mgr->Connect("disk", "cpu", default_conn);
+#ifdef MILVUS_GPU_VERSION
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("0", "GPU", 0));
+    res_mgr->Connect("cpu", "0", PCIE);
+#endif
+    res_mgr->Start();
+    milvus::scheduler::SchedInst::GetInstance()->Start();
+    milvus::scheduler::JobMgrInst::GetInstance()->Start();
+    milvus::scheduler::CPUBuilderInst::GetInstance()->Start();
+}
+
+void
+SSSchedulerTest::TearDown() {
+    milvus::scheduler::JobMgrInst::GetInstance()->Stop();
+    milvus::scheduler::SchedInst::GetInstance()->Stop();
+    milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Clear();
+
+    db_ = nullptr;
+    BaseTest::SnapshotStop();
+    BaseTest::TearDown();
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
