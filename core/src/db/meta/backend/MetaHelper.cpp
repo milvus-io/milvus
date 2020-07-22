@@ -32,9 +32,18 @@ MetaHelper::MetaQueryContextToSql(const MetaQueryContext& context, std::string& 
 
     std::vector<std::string> filter_conditions;
     for (auto& attr : context.filter_attrs_) {
-        filter_conditions.emplace_back(attr.first + "=" + attr.second);
-
         std::string filter_str;
+        if (attr.second.size() < 1) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Invalid filter attrs. ");
+        } else if (attr.second.size() == 1) {
+            filter_conditions.emplace_back(attr.first + "=" + attr.second[0]);
+        } else {
+            std::string in_condition;
+            StringHelpFunctions::MergeStringWithDelimeter(attr.second, ",", in_condition);
+            in_condition = attr.first + " IN (" + in_condition + ")";
+            filter_conditions.emplace_back(in_condition);
+        }
+
         StringHelpFunctions::MergeStringWithDelimeter(filter_conditions, " AND ", filter_str);
         sql += " WHERE " + filter_str;
     }

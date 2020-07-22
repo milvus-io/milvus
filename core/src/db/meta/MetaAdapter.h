@@ -40,7 +40,7 @@ class MetaAdapter {
         // TODO move select logic to here
         auto session = CreateSession();
         std::vector<typename T::Ptr> resources;
-        auto status = session->Select<T, snapshot::ID_TYPE>(snapshot::IdField::Name, id, {}, resources);
+        auto status = session->Select<T, snapshot::ID_TYPE>(snapshot::IdField::Name, {id}, {}, resources);
         if (status.ok() && !resources.empty()) {
             // TODO: may need to check num of resources
             resource = resources.at(0);
@@ -51,18 +51,17 @@ class MetaAdapter {
 
     template <typename ResourceT, typename U>
     Status
-    SelectBy(const std::string& field, const U& value, std::vector<typename ResourceT::Ptr>& resources) {
+    SelectBy(const std::string& field, const std::vector<U>& values, std::vector<typename ResourceT::Ptr>& resources) {
         auto session = CreateSession();
-        return session->Select<ResourceT, U>(field, value, {}, resources);
+        return session->Select<ResourceT, U>(field, values, {}, resources);
     }
 
     template <typename ResourceT, typename U>
     Status
-    SelectResourceIDs(std::vector<int64_t>& ids, const std::string& filter_field, const U& filter_value) {
+    SelectResourceIDs(std::vector<int64_t>& ids, const std::string& filter_field, const std::vector<U>& filter_values) {
         std::vector<typename ResourceT::Ptr> resources;
         auto session = CreateSession();
-        std::vector<std::string> target_attrs = {F_ID};
-        auto status = session->Select<ResourceT, U>(filter_field, filter_value, target_attrs, resources);
+        auto status = session->Select<ResourceT, U>(filter_field, filter_values, {F_ID}, resources);
         if (!status.ok()) {
             return status;
         }

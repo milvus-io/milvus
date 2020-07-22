@@ -19,6 +19,7 @@ set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_meta.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_job.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_task.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_event.cpp
         )
 
 add_executable(test_ssdb
@@ -60,6 +61,6 @@ target_link_libraries(test_ssdb
         metrics
         stdc++
         ${unittest_libs}
-        oatpp)
+        )
 
 install(TARGETS test_ssdb DESTINATION unittest)

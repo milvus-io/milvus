@@ -42,7 +42,7 @@ class MetaSession {
  public:
     template <typename ResourceT, typename U>
     Status
-    Select(const std::string& field, const U& value, const std::vector<std::string>& target_attrs,
+    Select(const std::string& field, const std::vector<U>& value, const std::vector<std::string>& target_attrs,
            std::vector<typename ResourceT::Ptr>& resources);
 
     template <typename ResourceT>
@@ -92,15 +92,19 @@ class MetaSession {
 
 template <typename T, typename U>
 Status
-MetaSession::Select(const std::string& field, const U& value, const std::vector<std::string>& target_attrs,
-                    std::vector<typename T::Ptr>& resources) {
+MetaSession::Select(const std::string& field, const std::vector<U>& values,
+                    const std::vector<std::string>& target_attrs, std::vector<typename T::Ptr>& resources) {
     MetaQueryContext context;
     context.table_ = T::Name;
 
     if (!field.empty()) {
-        std::string field_value;
-        ResourceFieldToSqlStr(value, field_value);
-        context.filter_attrs_ = {{field, field_value}};
+        std::vector<std::string> field_values;
+        for (auto& v : values) {
+            std::string field_value;
+            ResourceFieldToSqlStr(v, field_value);
+            field_values.push_back(field_value);
+        }
+        context.filter_attrs_ = {{field, field_values}};
     }
 
     if (!target_attrs.empty()) {
@@ -139,18 +143,16 @@ MetaSession::Select(const std::string& field, const U& value, const std::vector<
             iter = raw.find(F_STATE);
             if (iter != raw.end()) {
                 auto status_int = std::stol(iter->second);
+                sf_p->ResetStatus();
                 switch (static_cast<snapshot::State>(status_int)) {
                     case snapshot::PENDING: {
-                        sf_p->ResetStatus();
                         break;
                     }
                     case snapshot::ACTIVE: {
-                        sf_p->ResetStatus();
                         sf_p->Activate();
                         break;
                     }
                     case snapshot::DEACTIVE: {
-                        sf_p->ResetStatus();
                         sf_p->Deactivate();
                         break;
                     }

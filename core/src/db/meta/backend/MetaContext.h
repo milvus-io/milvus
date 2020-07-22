@@ -24,7 +24,7 @@ struct MetaQueryContext {
     std::string table_;
     bool all_required_ = true;
     std::vector<std::string> query_fields_;
-    std::unordered_map<std::string, std::string> filter_attrs_;
+    std::unordered_map<std::string, std::vector<std::string>> filter_attrs_;
 };
 
 struct MetaApplyContext {

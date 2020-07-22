@@ -147,7 +147,7 @@ class Store : public std::enable_shared_from_this<Store> {
     GetCollection(const std::string& name, CollectionPtr& return_v) {
         // TODO: Get active collection
         std::vector<CollectionPtr> resources;
-        auto status = adapter_->SelectBy<Collection>(NameField::Name, name, resources);
+        auto status = adapter_->SelectBy<Collection, std::string>(NameField::Name, {name}, resources);
         if (!status.ok()) {
             return status;
         }
@@ -164,6 +164,13 @@ class Store : public std::enable_shared_from_this<Store> {
 
     template <typename ResourceT>
     Status
+    GetInActiveResources(std::vector<typename ResourceT::Ptr>& return_vs) {
+        std::vector<State> filter_states = {State::PENDING, State::DEACTIVE};
+        return adapter_->SelectBy<ResourceT>(StateField::Name, filter_states, return_vs);
+    }
+
+    template <typename ResourceT>
+    Status
     RemoveResource(ID_TYPE id) {
         auto rc_ctx_p =
             ResourceContextBuilder<ResourceT>().SetTable(ResourceT::Name).SetOp(meta::oDelete).SetID(id).CreatePtr();
@@ -176,7 +183,7 @@ class Store : public std::enable_shared_from_this<Store> {
     AllActiveCollectionIds(bool reversed = true) const {
         IDS_TYPE ids;
         IDS_TYPE selected_ids;
-        adapter_->SelectResourceIDs<Collection, std::string>(selected_ids, "", "");
+        adapter_->SelectResourceIDs<Collection, std::string>(selected_ids, "", {""});
 
         if (!reversed) {
             ids = selected_ids;
@@ -192,7 +199,7 @@ class Store : public std::enable_shared_from_this<Store> {
     IDS_TYPE
     AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
         IDS_TYPE ids, selected_ids;
-        adapter_->SelectResourceIDs<CollectionCommit, int64_t>(selected_ids, meta::F_COLLECTON_ID, collection_id);
+        adapter_->SelectResourceIDs<CollectionCommit, int64_t>(selected_ids, meta::F_COLLECTON_ID, {collection_id});
 
         if (!reversed) {
             ids = selected_ids;

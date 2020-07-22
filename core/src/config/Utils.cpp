@@ -251,7 +251,8 @@ ValidateDbURI(const std::string& uri) {
     if (std::regex_match(uri, pieces_match, uriRegex)) {
         std::string dialect = pieces_match[1].str();
         std::transform(dialect.begin(), dialect.end(), dialect.begin(), ::tolower);
-        if (dialect.find("mysql") == std::string::npos && dialect.find("sqlite") == std::string::npos) {
+        if (dialect.find("mysql") == std::string::npos && dialect.find("sqlite") == std::string::npos &&
+            dialect.find("mock") == std::string::npos) {
             LOG_SERVER_ERROR_ << "Invalid dialect in URI: dialect = " << dialect;
             okay = false;
         }

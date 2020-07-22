@@ -48,6 +48,16 @@ MockMetaEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs
         }
     };
 
+    auto term = [](const std::string& attr, const std::vector<std::string>& attrs) -> bool {
+        for (auto& t : attrs) {
+            if (attr == t) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
     auto& candidate_raws = resources_[context.table_];
 
     bool selected = true;
@@ -55,7 +65,12 @@ MockMetaEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs
         for (auto& raw : candidate_raws) {
             for (auto& filter_attr : context.filter_attrs_) {
                 auto iter = raw.find(filter_attr.first);
-                if (iter == raw.end() || iter->second != filter_attr.second) {
+                if (iter == raw.end()) {
+                    selected = false;
+                    break;
+                }
+
+                if (!term(iter->second, filter_attr.second)) {
                     selected = false;
                     break;
                 }
