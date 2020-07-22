@@ -51,7 +51,7 @@ static const char* CONFIG_STR =
     "\n"
     "general:\n"
     "  timezone: UTC+8\n"
-    "  meta_uri: sqlite://:@:/\n"
+    "  meta_uri: mock://:@:/\n"
     "\n"
     "network:\n"
     "  bind.address: 0.0.0.0\n"
@@ -230,6 +230,8 @@ SSDBTest::TearDown() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 SSSegmentTest::SetUp() {
+    auto& config = milvus::server::Config::GetInstance();
+    config.SetGeneralConfigMetaURI("mock://:@:/");
     BaseTest::SetUp();
     BaseTest::SnapshotStart(false);
 

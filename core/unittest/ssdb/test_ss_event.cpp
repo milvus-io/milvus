@@ -14,6 +14,18 @@
 #include "db/snapshot/InActiveResourcesGCEvent.h"
 #include "ssdb/utils.h"
 
+using CollectionCommit = milvus::engine::snapshot::CollectionCommit;
+using CollectionCommitPtr = milvus::engine::snapshot::CollectionCommitPtr;
+using PartitionCommit = milvus::engine::snapshot::PartitionCommit;
+using PartitionCommitPtr = milvus::engine::snapshot::PartitionCommitPtr;
+using SegmentCommit = milvus::engine::snapshot::SegmentCommit;
+using SegmentCommitPtr = milvus::engine::snapshot::SegmentCommitPtr;
+using SchemaCommit = milvus::engine::snapshot::SchemaCommit;
+using FieldCommit = milvus::engine::snapshot::FieldCommit;
+
+using FType = milvus::engine::FieldType;
+using FEType = milvus::engine::FieldElementType;
+
 using InActiveResourcesGCEvent = milvus::engine::snapshot::InActiveResourcesGCEvent;
 
 TEST_F(SSEventTest, TestInActiveResGcEvent) {
@@ -43,13 +55,47 @@ TEST_F(SSEventTest, TestInActiveResGcEvent) {
     status = store_->CreateResource<Partition>(std::move(p), inactive_partition);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
+    PartitionCommitPtr partition_commit;
+    status = store_->CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()),
+        partition_commit);
+    ASSERT_TRUE(status.ok()) << status.ToString();
 
     CollectionCommitPtr collection_commit;
     status = store_->CreateResource<CollectionCommit>(CollectionCommit(0, 0), collection_commit);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
+    SegmentPtr s;
+    status = store_->CreateResource<Segment>(Segment(collection->GetID(), partition->GetCollectionId()), s);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    Field::Ptr field;
+    status = store_->CreateResource<Field>(Field("f_0", 0, FType::INT64), field);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    FieldElementPtr field_element;
+    status = store_->CreateResource<FieldElement>(
+        FieldElement(collection->GetID(), field->GetID(), "fe_0", FEType::FET_INDEX), field_element);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    FieldCommit::Ptr field_commit;
+    status = store_->CreateResource<FieldCommit>(FieldCommit(collection->GetID(), field->GetID()), field_commit);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    SchemaCommit::Ptr schema;
+    status = store_->CreateResource<SchemaCommit>(SchemaCommit(collection->GetID(), {}), schema);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    SegmentFilePtr seg_file;
+    status = store_->CreateResource<SegmentFile>(
+        SegmentFile(collection->GetID(), partition->GetID(), s->GetID(), field_element->GetID()), seg_file);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    SegmentCommitPtr sc;
+    status = store_->CreateResource<SegmentCommit>(SegmentCommit(schema->GetID(), partition->GetID(), s->GetID()), sc);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
     CollectionCommitPtr inactive_collection_commit;
-    auto cc = CollectionCommit(0, 0);
+    auto cc = CollectionCommit(collection->GetID(), schema->GetID());
     cc.Deactivate();
     status = store_->CreateResource<CollectionCommit>(std::move(cc), inactive_collection_commit);
     ASSERT_TRUE(status.ok()) << status.ToString();
@@ -58,17 +104,51 @@ TEST_F(SSEventTest, TestInActiveResGcEvent) {
 
     auto event = std::make_shared<InActiveResourcesGCEvent>();
     status = event->Process(store_);
+//    milvus::engine::snapshot::EventExecutor::GetInstance().Submit(event);
+//    status = event->WaitToFinish();
     ASSERT_TRUE(status.ok()) << status.ToString();
 
-    CollectionPtr collection2;
-    status = store_->GetResource<Collection>(collection->GetID(), collection2);
-    ASSERT_FALSE(status.ok());
+    std::vector<FieldElementPtr> field_elements;
+    ASSERT_TRUE(store_->GetInActiveResources<FieldElement>(field_elements).ok());
+    ASSERT_TRUE(field_elements.empty());
 
-    CollectionPtr inactive_collection2;
-    status = store_->GetResource<Collection>(inactive_collection->GetID(), inactive_collection2);
-    ASSERT_FALSE(status.ok());
+    std::vector<Field::Ptr> fields;
+    ASSERT_TRUE(store_->GetInActiveResources<Field>(fields).ok());
+    ASSERT_TRUE(fields.empty());
 
-    PartitionPtr partition2;
-    status = store_->GetResource<Partition>(partition->GetID(), partition2);
-    ASSERT_FALSE(status.ok());
+    std::vector<FieldCommit::Ptr> field_commits;
+    ASSERT_TRUE(store_->GetInActiveResources<FieldCommit>(field_commits).ok());
+    ASSERT_TRUE(field_commits.empty());
+
+    std::vector<SegmentFilePtr> seg_files;
+    ASSERT_TRUE(store_->GetInActiveResources<SegmentFile>(seg_files).ok());
+    ASSERT_TRUE(seg_files.empty());
+
+    std::vector<SegmentCommitPtr> seg_commits;
+    ASSERT_TRUE(store_->GetInActiveResources<SegmentCommit>(seg_commits).ok());
+    ASSERT_TRUE(seg_commits.empty());
+
+    std::vector<SegmentPtr> segs;
+    ASSERT_TRUE(store_->GetInActiveResources<Segment>(segs).ok());
+    ASSERT_TRUE(segs.empty());
+
+    std::vector<SchemaCommit::Ptr> schemas;
+    ASSERT_TRUE(store_->GetInActiveResources<SchemaCommit>(schemas).ok());
+    ASSERT_TRUE(schemas.empty());
+
+    std::vector<PartitionCommitPtr> partition_commits;
+    ASSERT_TRUE(store_->GetInActiveResources<PartitionCommit>(partition_commits).ok());
+    ASSERT_TRUE(partition_commits.empty());
+
+    std::vector<PartitionPtr> partitions;
+    ASSERT_TRUE(store_->GetInActiveResources<Partition>(partitions).ok());
+    ASSERT_TRUE(partitions.empty());
+
+    std::vector<CollectionPtr> collections;
+    ASSERT_TRUE(store_->GetInActiveResources<Collection>(collections).ok());
+    ASSERT_TRUE(collections.empty());
+
+    std::vector<CollectionCommitPtr> collection_commits;
+    ASSERT_TRUE(store_->GetInActiveResources<CollectionCommit>(collection_commits).ok());
+    ASSERT_TRUE(collection_commits.empty());
 }
