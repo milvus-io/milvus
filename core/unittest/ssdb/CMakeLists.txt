@@ -58,6 +58,7 @@ add_executable(test_ssdb
 target_link_libraries(test_ssdb
         knowhere
         metrics
+        config
         stdc++
         ${unittest_libs}
         oatpp)

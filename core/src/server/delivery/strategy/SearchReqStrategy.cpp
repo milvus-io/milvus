@@ -9,8 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include "config/ServerConfig.h"
 #include "server/delivery/strategy/SearchReqStrategy.h"
-#include "config/Config.h"
 #include "server/delivery/request/SearchCombineRequest.h"
 #include "server/delivery/request/SearchRequest.h"
 #include "utils/CommonUtil.h"
@@ -25,8 +25,11 @@ namespace milvus {
 namespace server {
 
 SearchReqStrategy::SearchReqStrategy() {
-    SetIdentity("SearchReqStrategy");
-    AddSearchCombineMaxNqListener();
+    ConfigMgr::GetInstance().Attach("engine.search_combine_nq", this);
+}
+
+SearchReqStrategy::~SearchReqStrategy() {
+    ConfigMgr::GetInstance().Detach("engine.search_combine_nq", this);
 }
 
 Status
@@ -77,6 +80,11 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<Bas
     }
 
     return Status::OK();
+}
+
+void
+SearchReqStrategy::ConfigUpdate(const std::string& name) {
+    search_combine_nq_ = config.engine.search_combine_nq();
 }
 
 }  // namespace server

@@ -50,6 +50,7 @@ class DBWrapper {
     Status
     PreloadCollections(const std::string& preload_collections);
 
+
  private:
     engine::DBPtr db_;
 };

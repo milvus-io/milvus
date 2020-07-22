@@ -342,14 +342,3 @@ class SSMetaTest : public BaseTest {
     void
     TearDown() override;
 };
-
-///////////////////////////////////////////////////////////////////////////////
-class SSSchedulerTest : public BaseTest {
- protected:
-    std::shared_ptr<SSDBImpl> db_;
-
-    void
-    SetUp() override;
-    void
-    TearDown() override;
-};

@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "config/handler/EngineConfigHandler.h"
+#include "config/ConfigMgr.h"
 #include "server/delivery/strategy/RequestStrategy.h"
 #include "utils/Status.h"
 
@@ -21,12 +21,19 @@
 namespace milvus {
 namespace server {
 
-class SearchReqStrategy : public RequestStrategy, public EngineConfigHandler {
+class SearchReqStrategy : public RequestStrategy, public ConfigObserver {
  public:
     SearchReqStrategy();
 
+    ~SearchReqStrategy();
+
     Status
     ReScheduleQueue(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) override;
+ public:
+    void
+    ConfigUpdate(const std::string& name);
+ private:
+    int64_t search_combine_nq_ = 0;
 };
 
 using RequestStrategyPtr = std::shared_ptr<RequestStrategy>;

@@ -9,31 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
-
-#include <string>
-
-#include "config/Config.h"
-#include "utils/Log.h"
+#include "gtest/gtest.h"
 
 namespace milvus {
-namespace server {
 
-class ConfigHandler {
- public:
-    ConfigHandler() = default;
-    virtual ~ConfigHandler() = default;
+TEST(ConfigMgrTest, t1) {
+    ASSERT_EQ(1, 1);    
+}
 
- protected:
-    void
-    SetIdentity(const std::string& identity) {
-        auto& config = server::Config::GetInstance();
-        config.GenUniqueIdentityID(identity, identity_);
-    }
-
- protected:
-    std::string identity_;
-};
-
-}  // namespace server
-}  // namespace milvus
+}

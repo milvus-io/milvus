@@ -11,31 +11,78 @@
 
 #pragma once
 
+#include <list>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
-#include "ConfigNode.h"
-#include "utils/Status.h"
+#include "config/ServerConfig.h"
 
 namespace milvus {
-namespace server {
 
-class ConfigMgr {
- public:
-    virtual Status
-    LoadConfigFile(const std::string& filename) = 0;
+class ConfigObserver {
+public:
+    virtual 
+    ~ConfigObserver() {};
 
     virtual void
-    Print() const = 0;  // will be deleted
+    ConfigUpdate(const std::string& name) = 0;
+};
+using ConfigObserverPtr = std::shared_ptr<ConfigObserver>;
 
-    virtual std::string
-    DumpString() const = 0;
+class ConfigMgr {
+public:
+    static ConfigMgr &
+    GetInstance() {
+        return instance;
+    }
+private:
+    static ConfigMgr instance;
 
-    virtual const ConfigNode&
-    GetRootNode() const = 0;
+public:
+    ConfigMgr();
 
-    virtual ConfigNode&
-    GetRootNode() = 0;
+    ConfigMgr(const ConfigMgr&) =delete;
+    ConfigMgr& operator=(const ConfigMgr&) =delete;
+
+    ConfigMgr(ConfigMgr &&) =delete;
+    ConfigMgr& operator=(ConfigMgr &&) =delete;
+
+public:
+    void
+    Init();
+
+    void
+    Load(const std::string& path);
+
+    void
+    Set(const std::string& name, const std::string& value, bool update = true);
+
+    std::string
+    Get(const std::string& name) const;
+
+    std::string
+    Dump() const;
+
+public:
+    // Shared pointer should not be used here
+    void
+    Attach(const std::string& name, ConfigObserver* observer);
+
+    void
+    Detach(const std::string& name, ConfigObserver* observer);
+
+private:
+    void
+    Notify(const std::string& name);
+
+private:
+    std::vector<BaseConfigPtr> config_list_;
+    std::mutex mutex_;
+
+    std::unordered_map<std::string, std::list<ConfigObserver *>> observers_;
+    std::mutex observer_mutex_;
 };
 
-}  // namespace server
 }  // namespace milvus

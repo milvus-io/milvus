@@ -16,7 +16,6 @@
 #include <vector>
 
 #include "db/SnapshotVisitor.h"
-#include "db/engine/SSExecutionEngine.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/SSSearchJob.h"
 #include "scheduler/task/Task.h"
@@ -27,8 +26,8 @@ namespace scheduler {
 // TODO(wxyu): rewrite
 class XSSSearchTask : public Task {
  public:
-    explicit XSSSearchTask(const server::ContextPtr& context, const std::string& dir_root,
-                           const engine::SegmentVisitorPtr& visitor, TaskLabelPtr label);
+    explicit XSSSearchTask(const server::ContextPtr& context, const engine::SegmentVisitorPtr& visitor,
+                           TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -38,19 +37,28 @@ class XSSSearchTask : public Task {
 
  public:
     static void
-    MergeTopkToResultSet(const engine::QueryResult& src_result, size_t src_k, size_t nq, size_t topk, bool ascending,
-                         engine::QueryResult& tar_result);
+    MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const scheduler::ResultDistances& src_distances,
+                         size_t src_k, size_t nq, size_t topk, bool ascending, scheduler::ResultIds& tar_ids,
+                         scheduler::ResultDistances& tar_distances);
+
+    //    const std::string&
+    //    GetLocation() const;
+
+    //    size_t
+    //    GetIndexId() const;
 
  public:
     const server::ContextPtr context_;
 
     engine::SegmentVisitorPtr visitor_;
 
-    engine::SSExecutionEnginePtr engine_ = nullptr;
+    //    size_t index_id_ = 0;
+    int index_type_ = 0;
+    ExecutionEnginePtr index_engine_ = nullptr;
 
     // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
     // similarity -- infinity value means two vectors equal, descending reduce, IP
-    bool ascending_ = true;
+    bool ascending_reduce = true;
 };
 
 }  // namespace scheduler

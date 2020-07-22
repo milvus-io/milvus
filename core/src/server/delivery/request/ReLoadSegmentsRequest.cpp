@@ -13,7 +13,7 @@
 
 #include <fiu-local.h>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
 #include "utils/TimeRecorder.h"
@@ -35,14 +35,10 @@ ReLoadSegmentsRequest::Create(const std::shared_ptr<milvus::server::Context>& co
 
 Status
 ReLoadSegmentsRequest::OnExecute() {
-    auto& config = Config::GetInstance();
+    bool cluster_enable = config.cluster.enable();
+    auto cluster_role = config.cluster.role();
 
-    bool cluster_enable = false;
-    std::string cluster_role;
-    STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
-    STATUS_CHECK(config.GetClusterConfigRole(cluster_role));
-
-    if ((not cluster_enable) || cluster_role == "rw") {
+    if ((not cluster_enable) || cluster_role == ClusterRole::RW) {
         // TODO: No need to reload segment files
         return Status(SERVER_SUCCESS, "");
     }

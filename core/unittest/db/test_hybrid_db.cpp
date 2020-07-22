@@ -18,7 +18,7 @@
 #include <thread>
 
 #include "cache/CpuCacheMgr.h"
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "db/Constants.h"
 #include "db/DB.h"
 #include "db/DBFactory.h"

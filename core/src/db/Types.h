@@ -15,7 +15,6 @@
 
 #include <cstdint>
 #include <map>
-#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -74,7 +73,6 @@ struct QueryResult {
     std::vector<engine::VectorsData> vectors_;
     std::vector<engine::AttrsData> attrs_;
 };
-using QueryResultPtr = std::shared_ptr<QueryResult>;
 
 using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;

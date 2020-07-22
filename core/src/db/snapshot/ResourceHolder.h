@@ -18,7 +18,7 @@
 #include <string>
 #include <thread>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "db/snapshot/Event.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/Operations.h"
@@ -139,9 +139,7 @@ class ResourceHolder {
 
     virtual void
     OnNoRefCallBack(ResourcePtr resource) {
-        auto& config = server::Config::GetInstance();
-        std::string path;
-        config.GetStorageConfigPath(path);
+        std::string path = config.storage.path();
         auto root_path = utils::ConstructCollectionRootPath(path);
 
         resource->Deactivate();

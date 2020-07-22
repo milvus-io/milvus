@@ -22,7 +22,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/handler/CacheConfigHandler.h"
+#include "config/ConfigMgr.h"
 //#include "db/meta/Meta.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/Job.h"
@@ -30,18 +30,26 @@
 namespace milvus {
 namespace scheduler {
 
-class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
- public:
-    explicit SSBuildIndexJob(const std::string& dir_root);
+// using engine::meta::SegmentSchemaPtr;
 
-    ~SSBuildIndexJob() = default;
+// using Id2ToIndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
+// using Id2ToTableFileMap = std::unordered_map<size_t, SegmentSchema>;
+
+class SSBuildIndexJob : public Job, public ConfigObserver {
+ public:
+    explicit SSBuildIndexJob(engine::DBOptions options);
+
+    ~SSBuildIndexJob();
 
  public:
+    //    bool
+    //    AddToIndexFiles(const SegmentSchemaPtr& to_index_file);
+
     void
     AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor);
 
     void
-    WaitFinish();
+    WaitBuildIndexFinish();
 
     void
     BuildIndexDone(const engine::snapshot::ID_TYPE seg_id);
@@ -50,33 +58,39 @@ class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
     Dump() const override;
 
  public:
-    const std::string&
-    dir_root() const {
-        return dir_root_;
-    }
-
-    const SegmentVisitorMap&
-    segment_visitor_map() const {
-        return segment_visitor_map_;
-    }
-
     Status&
-    status() {
+    GetStatus() {
         return status_;
     }
 
-    // engine::DBOptions
-    // options() const {
-    //     return options_;
-    // }
+    //    Id2ToIndexMap&
+    //    to_index_files() {
+    //        return to_index_files_;
+    //    }
 
-    // protected:
-    // void
-    // OnCacheInsertDataChanged(bool value) override;
+    //    engine::meta::MetaPtr
+    //    meta() const {
+    //        return meta_ptr_;
+    //    }
+
+    const SegmentVisitorMap&
+    segment_visitor_map() {
+        return segment_visitor_map_;
+    }
+
+    engine::DBOptions
+    options() const {
+        return options_;
+    }
+
+ public:
+    void
+    ConfigUpdate(const std::string& name) override;
 
  private:
-    // engine::DBOptions options_;
-    std::string dir_root_;
+    //    Id2ToIndexMap to_index_files_;
+    //    engine::meta::MetaPtr meta_ptr_;
+    engine::DBOptions options_;
     SegmentVisitorMap segment_visitor_map_;
 
     Status status_;
