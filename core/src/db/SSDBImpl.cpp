@@ -610,7 +610,9 @@ SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field
     // SS TODO: Check Index Type
 
     snapshot::OperationContext context;
-    STATUS_CHECK(ss->GetFieldElement(field_name, element_name, context.stale_field_element));
+    snapshot::FieldElementPtr stale_field_element;
+    STATUS_CHECK(ss->GetFieldElement(field_name, element_name, stale_field_element));
+    context.stale_field_elements.push_back(stale_field_element);
     auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
     STATUS_CHECK(op->Push());
 

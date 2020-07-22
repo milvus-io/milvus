@@ -68,8 +68,17 @@ OperationContext::ToString() const {
         }
         ss << "]";
     }
-    if (stale_segment_file) {
-        ss << ",S_SF=" << stale_segment_file->GetID();
+    if (stale_segment_files.size() > 0) {
+        ss << ",S_SF=[";
+        bool first = true;
+        for (auto& f : stale_segment_files) {
+            if (!first) {
+                ss << INNER_DELIMITER;
+            }
+            ss << f->GetID();
+            first = false;
+        }
+        ss << "]";
     }
     if (new_segment_files.size() > 0) {
         ss << ",N_SF=[";
