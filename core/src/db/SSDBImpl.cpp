@@ -11,12 +11,15 @@
 
 #include "db/SSDBImpl.h"
 #include "cache/CpuCacheMgr.h"
+#include "config/Config.h"
 #include "db/IDGenerator.h"
 #include "db/SnapshotVisitor.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "db/merge/SSMergeTask.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/IterateHandler.h"
+#include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
@@ -82,6 +85,22 @@ SSDBImpl::Start() {
     if (initialized_.load(std::memory_order_acquire)) {
         return Status::OK();
     }
+
+    // TODO(yhz): Get storage url
+    auto& config = server::Config::GetInstance();
+    std::string path;
+    STATUS_CHECK(config.GetStorageConfigPath(path));
+
+    std::string url;
+    STATUS_CHECK(config.GetGeneralConfigMetaURI(url));
+
+    // snapshot
+    auto store = snapshot::Store::Build(url, path);
+    snapshot::OperationExecutor::Init(store);
+    snapshot::OperationExecutor::GetInstance().Start();
+    snapshot::EventExecutor::Init(store);
+    snapshot::EventExecutor::GetInstance().Start();
+    snapshot::Snapshots::GetInstance().Init(store);
 
     // LOG_ENGINE_TRACE_ << "DB service start";
     initialized_.store(true, std::memory_order_release);
@@ -175,6 +194,9 @@ SSDBImpl::Stop() {
         swn_metric_.Notify();
         bg_metric_thread_.join();
     }
+
+    snapshot::EventExecutor::GetInstance().Stop();
+    snapshot::OperationExecutor::GetInstance().Stop();
 
     // LOG_ENGINE_TRACE_ << "DB service stop";
     return Status::OK();
