@@ -24,17 +24,17 @@ namespace milvus {
 namespace scheduler {
 
 enum class LoadType {
-    DISK2CPU,
-    CPU2GPU,
-    GPU2CPU,
-    TEST,
+    DISK2CPU = 0,
+    CPU2GPU = 1,
+    GPU2CPU = 2,
+    TEST = 99,
 };
 
 enum class TaskType {
-    SearchTask,
-    DeleteTask,
-    BuildIndexTask,
-    TestTask,
+    SearchTask = 0,
+    DeleteTask = 1,
+    BuildIndexTask = 2,
+    TestTask = 99,
 };
 
 class Task;
