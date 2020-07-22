@@ -190,6 +190,7 @@ class TestSearchBase:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
 
+    @pytest.mark.level(2)
     def test_search_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -273,6 +274,7 @@ class TestSearchBase:
                 assert res[0]._distances[0] < epsilon
                 assert check_id_result(res[0], ids[0])
 
+    @pytest.mark.level(2)
     def test_search_index_partition_C(self, connect, collection, get_top_k, get_nq):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -413,6 +415,7 @@ class TestSearchBase:
             assert check_id_result(res[0], ids[0])
             assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
 
+    @pytest.mark.level(2)
     def test_search_ip_index_partition(self, connect, ip_collection, get_simple_index, get_top_k, get_nq):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
