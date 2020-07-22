@@ -36,7 +36,7 @@ SSBuildIndexJob::WaitFinish() {
 void
 SSBuildIndexJob::BuildIndexDone(const engine::snapshot::ID_TYPE seg_id) {
     std::unique_lock<std::mutex> lock(mutex_);
-    for (engine::snapshot::IDS_TYPE::iterator iter = segment_ids_.begin(); iter != segment_ids_.end(); iter++) {
+    for (engine::snapshot::IDS_TYPE::iterator iter = segment_ids_.begin(); iter != segment_ids_.end(); ++iter) {
         if (*iter == seg_id) {
             segment_ids_.erase(iter);
             break;
