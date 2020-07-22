@@ -24,8 +24,8 @@ namespace scheduler {
 
 class SSBuildIndexTask : public Task {
  public:
-    explicit SSBuildIndexTask(const std::string& collection_name, engine::snapshot::ID_TYPE segment_id,
-                              TaskLabelPtr label);
+    explicit SSBuildIndexTask(const engine::DBOptions& options, const std::string& collection_name,
+                              engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -33,9 +33,16 @@ class SSBuildIndexTask : public Task {
     void
     Execute() override;
 
+ private:
+    void
+    CreateExecEngine();
+
  public:
+    const engine::DBOptions& options_;
     std::string collection_name_;
     engine::snapshot::ID_TYPE segment_id_;
+
+    engine::SSExecutionEnginePtr execution_engine_;
 };
 
 }  // namespace scheduler

@@ -47,14 +47,19 @@ class SSBuildIndexJob : public Job {
     Dump() const override;
 
  public:
-    const engine::snapshot::IDS_TYPE&
-    segment_ids() {
-        return segment_ids_;
+    engine::DBOptions
+    options() const {
+        return options_;
     }
 
     const std::string&
     collection_name() {
         return collection_name_;
+    }
+
+    const engine::snapshot::IDS_TYPE&
+    segment_ids() {
+        return segment_ids_;
     }
 
     Status&

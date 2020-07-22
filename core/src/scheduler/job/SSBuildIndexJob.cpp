@@ -42,7 +42,9 @@ SSBuildIndexJob::BuildIndexDone(const engine::snapshot::ID_TYPE seg_id) {
             break;
         }
     }
-    cv_.notify_all();
+    if (segment_ids_.empty()) {
+        cv_.notify_all();
+    }
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] BuildIndexJob %ld finish segment: %ld", "build index", 0, id(), seg_id);
 }
 

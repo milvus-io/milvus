@@ -172,22 +172,67 @@ SSExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 }
 
 Status
-SSExecutionEngineImpl::SSExecutionEngineImpl::Load(const query::QueryPtr& query_ptr) {
+SSExecutionEngineImpl::Load(ExecutionEngineContext& context) {
+    if (context.query_ptr_ != nullptr) {
+        return LoadForSearch(context.query_ptr_);
+    } else {
+        return LoadForIndex();
+    }
+}
+
+Status
+SSExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
 
     std::vector<std::string> field_names;
     GetRequiredIndexFields(query_ptr, field_names);
+
+    return Load(field_names);
+}
+
+Status
+SSExecutionEngineImpl::LoadForIndex() {
+    std::vector<std::string> field_names;
+
+    auto field_visitors = segment_visitor_->GetFieldVisitors();
+    for (auto& pair : field_visitors) {
+        auto& field_visitor = pair.second;
+        auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
+            field_names.push_back(field_visitor->GetField()->GetName());
+            break;
+        }
+    }
+
+    return Load(field_names);
+}
+
+Status
+SSExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
+    SegmentPtr segment_ptr;
+    segment_reader_->GetSegment(segment_ptr);
+
     for (auto& name : field_names) {
         FIELD_TYPE field_type = FIELD_TYPE::NONE;
         segment_ptr->GetFieldType(name, field_type);
+
+        bool index_exist = false;
         if (field_type == FIELD_TYPE::VECTOR || field_type == FIELD_TYPE::VECTOR_FLOAT ||
             field_type == FIELD_TYPE::VECTOR_BINARY) {
             knowhere::VecIndexPtr index_ptr;
             segment_reader_->LoadVectorIndex(name, index_ptr);
+            index_exist = (index_ptr != nullptr);
         } else {
             knowhere::IndexPtr index_ptr;
             segment_reader_->LoadStructuredIndex(name, index_ptr);
+            index_exist = (index_ptr != nullptr);
+        }
+
+        // index not yet build, load raw data
+        if (!index_exist) {
+            std::vector<uint8_t> raw;
+            segment_reader_->LoadField(name, raw);
         }
     }
 
@@ -212,34 +257,42 @@ SSExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 }
 
 Status
-SSExecutionEngineImpl::Search(const query::QueryPtr& query_ptr, QueryResult& result) {
+SSExecutionEngineImpl::Search(ExecutionEngineContext& context) {
     return Status::OK();
 }
 
 Status
-SSExecutionEngineImpl::BuildIndex(const std::string& field_name, const CollectionIndex& index,
-                                  knowhere::VecIndexPtr& new_index) {
+SSExecutionEngineImpl::BuildIndex() {
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
 
-    knowhere::VecIndexPtr field_raw;
-    segment_ptr->GetVectorIndex(field_name, field_raw);
-    if (field_raw == nullptr) {
-        return Status(DB_ERROR, "Field raw not available");
+    auto field_visitors = segment_visitor_->GetFieldVisitors();
+    for (auto& pair : field_visitors) {
+        auto& field_visitor = pair.second;
+        auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
+            break;
+        }
     }
 
-    auto from_index = std::dynamic_pointer_cast<knowhere::IDMAP>(field_raw);
-    auto bin_from_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(field_raw);
-    if (from_index == nullptr && bin_from_index == nullptr) {
-        LOG_ENGINE_ERROR_ << "ExecutionEngineImpl: from_index is null, failed to build index";
-        return Status(DB_ERROR, "Field to build index");
-    }
-
-    EngineType engine_type = static_cast<EngineType>(index.engine_type_);
-    new_index = CreatetVecIndex(engine_type);
-    if (!new_index) {
-        return Status(DB_ERROR, "Unsupported index type");
-    }
+    //    knowhere::VecIndexPtr field_raw;
+    //    segment_ptr->GetVectorIndex(field_name, field_raw);
+    //    if (field_raw == nullptr) {
+    //        return Status(DB_ERROR, "Field raw not available");
+    //    }
+    //
+    //    auto from_index = std::dynamic_pointer_cast<knowhere::IDMAP>(field_raw);
+    //    auto bin_from_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(field_raw);
+    //    if (from_index == nullptr && bin_from_index == nullptr) {
+    //        LOG_ENGINE_ERROR_ << "ExecutionEngineImpl: from_index is null, failed to build index";
+    //        return Status(DB_ERROR, "Field to build index");
+    //    }
+    //
+    //    EngineType engine_type = static_cast<EngineType>(index.engine_type_);
+    //    new_index = CreatetVecIndex(engine_type);
+    //    if (!new_index) {
+    //        return Status(DB_ERROR, "Unsupported index type");
+    //    }
 
     //    milvus::json conf = index.extra_params_;
     //    conf[knowhere::meta::DIM] = Dimension();

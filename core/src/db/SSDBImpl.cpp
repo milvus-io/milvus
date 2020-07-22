@@ -36,6 +36,7 @@
 #include "wal/WalDefinations.h"
 
 #include <fiu-local.h>
+#include <src/scheduler/job/SSBuildIndexJob.h>
 #include <limits>
 #include <utility>
 
@@ -709,30 +710,7 @@ SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection
 
     TimeRecorder rc("SSDBImpl::Query");
 
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    /* collect all segment visitors */
-    std::vector<SegmentVisitor::Ptr> segment_visitors;
-    auto exec = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* handler) -> Status {
-        auto visitor = SegmentVisitor::Build(ss, segment->GetID());
-        if (!visitor) {
-            return Status(milvus::SS_ERROR, "Cannot build segment visitor");
-        }
-        segment_visitors.push_back(visitor);
-        return Status::OK();
-    };
-
-    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
-    segment_iter->Iterate();
-    STATUS_CHECK(segment_iter->GetStatus());
-
-    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
-
-    scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SSSearchJob>(nullptr, options_.meta_.path_, query_ptr);
-    for (auto& sv : segment_visitors) {
-        job->AddSegmentVisitor(sv);
-    }
+    scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SSSearchJob>(nullptr, options_, query_ptr);
 
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);
@@ -858,6 +836,17 @@ SSDBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
 
         snapshot::IDS_TYPE segment_ids;
         ss_visitor.SegmentsToIndex("", segment_ids);
+
+        scheduler::SSBuildIndexJobPtr job =
+            std::make_shared<scheduler::SSBuildIndexJob>(options_, collection_name, segment_ids);
+
+        scheduler::JobMgrInst::GetInstance()->Put(job);
+        job->WaitFinish();
+
+        if (!job->status().ok()) {
+            LOG_ENGINE_ERROR_ << job->status().message();
+            break;
+        }
     }
 }
 
