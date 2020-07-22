@@ -47,7 +47,6 @@ SSBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
     std::string type_str;
 
     if (auto job = job_.lock()) {
-        auto build_index_job = std::static_pointer_cast<scheduler::SSBuildIndexJob>(job);
         try {
             if (type == LoadType::DISK2CPU) {
                 engine::ExecutionEngineContext context;
@@ -80,6 +79,7 @@ SSBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
 
             LOG_ENGINE_ERROR_ << s.message();
 
+            auto build_index_job = std::static_pointer_cast<scheduler::SSBuildIndexJob>(job);
             build_index_job->status() = s;
             build_index_job->BuildIndexDone(segment_id_);
         }

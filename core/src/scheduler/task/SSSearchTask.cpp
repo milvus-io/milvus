@@ -56,12 +56,11 @@ SSSearchTask::Load(LoadType type, uint8_t device_id) {
     std::string type_str;
 
     if (auto job = job_.lock()) {
-        auto search_job = std::static_pointer_cast<scheduler::SSSearchJob>(job);
         try {
             fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
             if (type == LoadType::DISK2CPU) {
                 engine::ExecutionEngineContext context;
-                context.query_ptr_ = search_job->query_ptr();
+                context.query_ptr_ = query_ptr_;
                 stat = execution_engine_->Load(context);
                 type_str = "DISK2CPU";
             } else if (type == LoadType::CPU2GPU) {
@@ -125,7 +124,7 @@ SSSearchTask::Execute() {
         try {
             /* step 2: search */
             engine::ExecutionEngineContext context;
-            context.query_ptr_ = search_job->query_ptr();
+            context.query_ptr_ = query_ptr_;
             context.query_result_ = std::make_shared<engine::QueryResult>();
             auto status = execution_engine_->Search(context);
 
