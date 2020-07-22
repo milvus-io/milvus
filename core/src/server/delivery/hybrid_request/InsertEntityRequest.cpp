@@ -67,6 +67,11 @@ InsertEntityRequest::OnExecute() {
             return status;
         }
 
+        if (vector_datas_.empty()) {
+            return Status{SERVER_INVALID_ARGUMENT,
+                          "The vector field is empty, Make sure you have entered vector records"};
+        }
+
         auto vector_datas_it = vector_datas_.begin();
         if (vector_datas_it->second.float_data_.empty() && vector_datas_it->second.binary_data_.empty()) {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY,
@@ -122,12 +127,21 @@ InsertEntityRequest::OnExecute() {
 
         std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
         auto size = fields_schema.fields_schema_.size();
+        if (size - 1 != field_names_.size()) {
+            return Status{SERVER_INVALID_FIELD_NAME, "Field numbers is wrong"};
+        }
         for (const auto& field_name : field_names_) {
+            bool find_field_name = false;
             for (uint64_t i = 0; i < size; ++i) {
                 if (fields_schema.fields_schema_[i].field_name_ == field_name) {
                     field_types.insert(std::make_pair(
                         field_name, (engine::meta::hybrid::DataType)fields_schema.fields_schema_[i].field_type_));
+                    find_field_name = true;
+                    break;
                 }
+            }
+            if (not find_field_name) {
+                return Status{SERVER_INVALID_FIELD_NAME, "Field " + field_name + " not exist"};
             }
         }
 

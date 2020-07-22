@@ -343,7 +343,7 @@ def update_field_name(entities, old_name, new_name):
 
 def update_field_type(entities, old_name, new_name):
     for item in entities:
-        if item["type"] == old_name:
+        if item["field"] == old_name:
             item["type"] = new_name
     return entities
 

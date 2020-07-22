@@ -896,6 +896,7 @@ class TestCompactIP:
         connect.flush([ip_collection])
         assert connect.count_entities(ip_collection) == 0
 
+    # TODO:
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_search_after_compact(self, connect, ip_collection):
         '''
@@ -907,8 +908,12 @@ class TestCompactIP:
         assert len(ids) == nb
         connect.flush([ip_collection])
         status = connect.compact(ip_collection)
-        assert status.OK()
-        query_vecs = [entities[0]]
-        res = connect.search(ip_collection, top_k, query_records=query_vecs)
+        query = copy.deepcopy(default_single_query)
+        query["bool"]["must"][0]["vector"][field_name]["query"] = [entity[-1]["values"][0], entities[-1]["values"][0],
+                                                                   entities[-1]["values"][-1]]
+        res = connect.search(ip_collection, query)
         logging.getLogger().info(res)
-        assert status.OK()
+        assert len(res) == len(query["bool"]["must"][0]["vector"][field_name]["query"])
+        assert res[0]._distances[0] < 1 - epsilon
+        assert res[1]._distances[0] > 1 - epsilon
+        assert res[2]._distances[0] > 1 - epsilon
