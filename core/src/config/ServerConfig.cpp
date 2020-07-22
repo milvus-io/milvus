@@ -10,10 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <sstream>
+#include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "config/ServerConfig.h"
-
 
 namespace milvus {
 
@@ -32,7 +33,7 @@ ParsePreloadCollection(const std::string& str) {
     std::vector<std::string> collections;
     std::string collection;
 
-    while(std::getline(ss, collection, ',')) {
+    while (std::getline(ss, collection, ',')) {
         collections.push_back(collection);
     }
     return collections;
@@ -45,12 +46,11 @@ ParseGPUDevices(const std::string& str) {
     std::unordered_set<int64_t> device_set;
     std::string device;
 
-    while(std::getline(ss, device, ',')) {
+    while (std::getline(ss, device, ',')) {
         device_set.insert(std::stoll(device.substr(3)));
     }
 
-    for (auto dev : device_set)
-        devices.push_back(dev);
+    for (auto dev : device_set) devices.push_back(dev);
     return devices;
 }
 

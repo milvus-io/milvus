@@ -280,8 +280,8 @@ Server::Start() {
         LogConfigInFile(config_filename_);
         LogCpuInfo();
         LOG_SERVER_INFO_ << "\n\n"
-                     << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
-                     << ConfigMgr::GetInstance().Dump();
+                         << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
+                         << ConfigMgr::GetInstance().Dump();
 
         server::Metrics::GetInstance().Init();
         server::SystemInfo::GetInstance().Init();

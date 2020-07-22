@@ -28,7 +28,7 @@ namespace server {
 Status
 StorageChecker::CheckStoragePermission() {
     /* Check log file write permission */
-    const std::string &logs_path = config.logs.path();
+    const std::string& logs_path = config.logs.path();
     int ret = access(logs_path.c_str(), F_OK | R_OK | W_OK);
     fiu_do_on("StorageChecker.CheckStoragePermission.logs_path_access_fail", ret = -1);
     if (0 != ret) {
@@ -44,7 +44,7 @@ StorageChecker::CheckStoragePermission() {
     }
 
     /* Check db directory write permission */
-    const std::string &primary_path = config.storage.path();
+    const std::string& primary_path = config.storage.path();
 
     ret = access(primary_path.c_str(), F_OK | R_OK | W_OK);
     fiu_do_on("StorageChecker.CheckStoragePermission.db_primary_path_access_fail", ret = -1);
@@ -58,7 +58,7 @@ StorageChecker::CheckStoragePermission() {
 
     /* Check wal directory write permission */
     if (config.wal.enable()) {
-        const std::string &wal_path = config.wal.path();
+        const std::string& wal_path = config.wal.path();
 
         ret = access(wal_path.c_str(), F_OK | R_OK | W_OK);
         fiu_do_on("StorageChecker.CheckStoragePermission.wal_path_access_fail", ret = -1);

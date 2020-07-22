@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "config/ServerConfig.h"
@@ -22,9 +23,9 @@
 namespace milvus {
 
 class ConfigObserver {
-public:
-    virtual 
-    ~ConfigObserver() {};
+ public:
+    virtual ~ConfigObserver() {
+    }
 
     virtual void
     ConfigUpdate(const std::string& name) = 0;
@@ -32,24 +33,27 @@ public:
 using ConfigObserverPtr = std::shared_ptr<ConfigObserver>;
 
 class ConfigMgr {
-public:
-    static ConfigMgr &
+ public:
+    static ConfigMgr&
     GetInstance() {
         return instance;
     }
-private:
+
+ private:
     static ConfigMgr instance;
 
-public:
+ public:
     ConfigMgr();
 
-    ConfigMgr(const ConfigMgr&) =delete;
-    ConfigMgr& operator=(const ConfigMgr&) =delete;
+    ConfigMgr(const ConfigMgr&) = delete;
+    ConfigMgr&
+    operator=(const ConfigMgr&) = delete;
 
-    ConfigMgr(ConfigMgr &&) =delete;
-    ConfigMgr& operator=(ConfigMgr &&) =delete;
+    ConfigMgr(ConfigMgr&&) = delete;
+    ConfigMgr&
+    operator=(ConfigMgr&&) = delete;
 
-public:
+ public:
     void
     Init();
 
@@ -65,7 +69,7 @@ public:
     std::string
     Dump() const;
 
-public:
+ public:
     // Shared pointer should not be used here
     void
     Attach(const std::string& name, ConfigObserver* observer);
@@ -73,15 +77,15 @@ public:
     void
     Detach(const std::string& name, ConfigObserver* observer);
 
-private:
+ private:
     void
     Notify(const std::string& name);
 
-private:
+ private:
     std::vector<BaseConfigPtr> config_list_;
     std::mutex mutex_;
 
-    std::unordered_map<std::string, std::list<ConfigObserver *>> observers_;
+    std::unordered_map<std::string, std::list<ConfigObserver*>> observers_;
     std::mutex observer_mutex_;
 };
 

@@ -250,7 +250,7 @@ template <typename ResourceT>
 void
 ApplyRollBack(std::set<std::shared_ptr<ResourceContext<ResourceT>>>& step_context_set) {
     std::string path = config.storage.path();
-    
+
     auto root_path = utils::ConstructCollectionRootPath(path);
 
     for (auto& step_context : step_context_set) {

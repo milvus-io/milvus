@@ -12,8 +12,8 @@
 #include <cstring>
 #include <functional>
 
-#include "gtest/gtest.h"
 #include "config/ServerConfig.h"
+#include "gtest/gtest.h"
 
 namespace milvus {
 
@@ -225,13 +225,13 @@ class ValidFloatingConfigTest : public testing::Test, public Utils<double> {
 };
 
 TEST_F(ValidFloatingConfigTest, init_load_update_get_test) {
-    auto validate = std::bind(&ValidFloatingConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
+    auto validate =
+        std::bind(&ValidFloatingConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
     auto update = std::bind(&ValidFloatingConfigTest::update_fn, this, std::placeholders::_1, std::placeholders::_2,
                             std::placeholders::_3);
 
     double floating_value = 0.0;
-    auto floating_config =
-        CreateFloatingConfig("f", _MODIFIABLE, -10.0, 10.0, &floating_value, 3.14, validate, update);
+    auto floating_config = CreateFloatingConfig("f", _MODIFIABLE, -10.0, 10.0, &floating_value, 3.14, validate, update);
     ASSERT_FLOAT_EQ(floating_value, 0.0);
     ASSERT_EQ(floating_config->modifiable_, true);
 

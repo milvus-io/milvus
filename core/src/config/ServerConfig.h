@@ -12,6 +12,9 @@
 #pragma once
 
 #include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "config/ConfigType.h"
 
@@ -20,19 +23,19 @@ namespace milvus {
 extern std::mutex&
 GetConfigMutex();
 
-template<typename T>
+template <typename T>
 class ConfigValue {
-public:
-    explicit
-    ConfigValue(T init_value) : value(std::move(init_value)) {}
+ public:
+    explicit ConfigValue(T init_value) : value(std::move(init_value)) {
+    }
 
-    const T &
+    const T&
     operator()() {
         std::lock_guard<std::mutex> lock(GetConfigMutex());
         return value;
     }
 
-public:
+ public:
     T value;
 };
 
@@ -41,7 +44,7 @@ enum ClusterRole {
     RO,
 };
 
-const configEnum ClusterRoleMap {
+const configEnum ClusterRoleMap{
     {"rw", ClusterRole::RW},
     {"ro", ClusterRole::RO},
 };
@@ -53,7 +56,7 @@ enum SimdType {
     AVX512,
 };
 
-const configEnum SimdMap {
+const configEnum SimdMap{
     {"auto", SimdType::AUTO},
     {"sse", SimdType::SSE},
     {"avx2", SimdType::AVX2},
@@ -83,7 +86,7 @@ struct ServerConfig {
             ConfigValue<int64_t> port{0};
         } http;
     } network;
-    
+
     struct DB {
         ConfigValue<double> archive_disk_threshold{0.0};
         ConfigValue<int64_t> archive_days_threshold{0};
@@ -156,4 +159,3 @@ ParsePreloadCollection(const std::string&);
 std::vector<int64_t>
 ParseGPUDevices(const std::string&);
 }  // namespace milvus
-

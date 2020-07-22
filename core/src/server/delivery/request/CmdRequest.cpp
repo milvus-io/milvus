@@ -17,6 +17,7 @@
 #include "utils/TimeRecorder.h"
 
 #include <memory>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -60,7 +61,7 @@ CmdRequest::OnExecute() {
             std::stringstream ss(cmd_);
             std::vector<std::string> words;
             std::string word;
-            while(std::getline(ss, word, ' ')) {
+            while (std::getline(ss, word, ' ')) {
                 words.push_back(word);
             }
             if (words.size() == 2) {
@@ -76,7 +77,7 @@ CmdRequest::OnExecute() {
             std::stringstream ss(cmd_);
             std::vector<std::string> words;
             std::string word;
-            while(std::getline(ss, word, ' ')) {
+            while (std::getline(ss, word, ' ')) {
                 words.push_back(word);
             }
             if (words.size() == 3) {

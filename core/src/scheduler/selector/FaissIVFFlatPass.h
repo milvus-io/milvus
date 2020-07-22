@@ -32,7 +32,7 @@ namespace scheduler {
 class FaissIVFFlatPass : public Pass, public ConfigObserver {
  public:
     FaissIVFFlatPass();
-    
+
     ~FaissIVFFlatPass();
 
  public:

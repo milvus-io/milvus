@@ -11,10 +11,4 @@
 
 #include "gtest/gtest.h"
 
-namespace milvus {
-
-TEST(ConfigMgrTest, t1) {
-    ASSERT_EQ(1, 1);    
-}
-
-}
+namespace milvus {}  // namespace milvus

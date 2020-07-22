@@ -71,8 +71,7 @@ GpuCacheMgr::GetInstance(int64_t gpu_id) {
 
 void
 GpuCacheMgr::ConfigUpdate(const std::string& name) {
-    for (auto &it : instance_)
-        it.second->SetCapacity(config.gpu.cache_size());
+    for (auto& it : instance_) it.second->SetCapacity(config.gpu.cache_size());
 }
 
 #endif

@@ -22,8 +22,8 @@
 #include "db/DBFactory.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "utils/CommonUtil.h"
-#include "utils/Log.h"
 #include "utils/ConfigUtils.h"
+#include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 
 namespace milvus {

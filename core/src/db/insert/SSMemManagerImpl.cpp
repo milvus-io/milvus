@@ -15,8 +15,8 @@
 #include <thread>
 
 #include "SSVectorSource.h"
-#include "db/Constants.h"
 #include "config/ServerConfig.h"
+#include "db/Constants.h"
 #include "db/snapshot/Snapshots.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/Log.h"

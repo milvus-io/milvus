@@ -93,7 +93,7 @@ GpuChecker::CheckGpuEnvironment() {
     std::string err_msg;
 
     bool gpu_enable = config.gpu.enable();
-    
+
     if (!gpu_enable) {
         return Status::OK();
     }

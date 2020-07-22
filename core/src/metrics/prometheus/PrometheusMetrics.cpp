@@ -49,7 +49,8 @@ PrometheusMetrics::Init() {
         auto labels = prometheus::Gateway::GetInstanceLabel(hostportstr);
 
         // Init pushgateway
-        gateway_ = std::make_shared<prometheus::Gateway>(push_address, std::to_string(push_port), "milvus_metrics", labels);
+        gateway_ =
+            std::make_shared<prometheus::Gateway>(push_address, std::to_string(push_port), "milvus_metrics", labels);
 
         // Init Exposer
         // exposer_ptr_ = std::make_shared<prometheus::Exposer>(bind_address, uri, num_threads);

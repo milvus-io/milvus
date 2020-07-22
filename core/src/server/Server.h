@@ -12,8 +12,8 @@
 #pragma once
 
 #include <string>
-#include "utils/Status.h"
 #include "config/ConfigMgr.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace server {
