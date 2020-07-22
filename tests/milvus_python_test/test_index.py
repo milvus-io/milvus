@@ -123,10 +123,10 @@ class TestIndexBase:
         connect.create_index(collection, field_name, default_index_name, get_simple_index)
         logging.getLogger().info(connect.get_collection_stats(collection))
         nq = get_nq
-        query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq)
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        res = connect.search(collection, query, search_params=search_param)
+        query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
+        res = connect.search(collection, query)
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -138,6 +138,7 @@ class TestIndexBase:
         expected: return search success
         '''
         ids = connect.insert(collection, entities)
+
         def build(connect):
             connect.create_index(collection, field_name, default_index_name, default_index)
 
@@ -267,10 +268,10 @@ class TestIndexBase:
         connect.create_index(ip_collection, field_name, default_index_name, get_simple_index)
         logging.getLogger().info(connect.get_collection_stats(ip_collection))
         nq = get_nq
-        query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq)
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        res = connect.search(ip_collection, query, search_params=search_param)
+        query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
+        res = connect.search(ip_collection, query)
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -282,6 +283,7 @@ class TestIndexBase:
         expected: return search success
         '''
         ids = connect.insert(ip_collection, entities)
+
         def build(connect):
             connect.create_index(ip_collection, field_name, default_index_name, default_index)
 
@@ -519,6 +521,7 @@ class TestIndexJAC:
       The following cases are used to test `create_index` function
     ******************************************************************
     """
+
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, jac_collection, get_jaccard_index):
         '''
@@ -570,6 +573,8 @@ class TestIndexJAC:
         method: create collection and add entities in it, create index, call describe index
         expected: return code 0, and index instructure
         '''
+        if get_jaccard_index["index_type"] == "BIN_FLAT":
+            pytest.skip("GetCollectionStats skip BIN_FLAT")
         ids = connect.insert(jac_collection, binary_entities)
         connect.flush([jac_collection])
         connect.create_index(jac_collection, binary_field_name, default_index_name, get_jaccard_index)
@@ -583,6 +588,8 @@ class TestIndexJAC:
         method: create collection, create partition and add entities in it, create index, call describe index
         expected: return code 0, and index instructure
         '''
+        if get_jaccard_index["index_type"] == "BIN_FLAT":
+            pytest.skip("GetCollectionStats skip BIN_FLAT")
         connect.create_partition(jac_collection, tag)
         ids = connect.insert(jac_collection, binary_entities, partition_tag=tag)
         connect.flush([jac_collection])
@@ -649,7 +656,7 @@ class TestIndexMultiCollections(object):
         threads = []
         collection = []
         j = 0
-        while j < (threads_num*loop_num):
+        while j < (threads_num * loop_num):
             collection_name = gen_unique_str("test_create_index_multiprocessing")
             collection.append(collection_name)
             param = {'collection_name': collection_name,
@@ -663,17 +670,19 @@ class TestIndexMultiCollections(object):
             i = 0
             while i < loop_num:
                 # assert connect.has_collection(collection[ids*process_num+i])
-                ids = connect.insert(collection[ids*threads_num+i], vectors)
-                connect.create_index(collection[ids*threads_num+i], IndexType.IVFLAT, {"nlist": NLIST})
+                ids = connect.insert(collection[ids * threads_num + i], vectors)
+                connect.create_index(collection[ids * threads_num + i], IndexType.IVFLAT, {"nlist": NLIST})
                 assert status.OK()
                 query_vec = [vectors[0]]
                 top_k = 1
                 search_param = {"nprobe": nprobe}
-                status, result = connect.search(collection[ids*threads_num+i], top_k, query_vec, params=search_param)
+                status, result = connect.search(collection[ids * threads_num + i], top_k, query_vec,
+                                                params=search_param)
                 assert len(result) == 1
                 assert len(result[0]) == top_k
                 assert result[0][0].distance == 0.0
                 i = i + 1
+
         for i in range(threads_num):
             m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
             ids = i
@@ -726,6 +735,7 @@ class TestIndexInvalid(object):
     """
     Test create / describe / drop index interfaces with invalid collection names
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_strs()
@@ -800,7 +810,7 @@ class TestIndexAsync:
         '''
         ids = connect.insert(collection, entities)
         logging.getLogger().info("start index")
-        future = connect.create_index(collection, field_name, default_index_name, get_simple_index, _async=True) 
+        future = connect.create_index(collection, field_name, default_index_name, get_simple_index, _async=True)
         logging.getLogger().info("before result")
         res = future.result()
         # TODO:
@@ -821,7 +831,8 @@ class TestIndexAsync:
         '''
         ids = connect.insert(collection, entities)
         logging.getLogger().info("start index")
-        future = connect.create_index(collection, field_name, default_index_name, get_simple_index, _async=True, _callback=self.check_result) 
+        future = connect.create_index(collection, field_name, default_index_name, get_simple_index, _async=True,
+                                      _callback=self.check_result)
         logging.getLogger().info("before result")
         res = future.result()
         # TODO:

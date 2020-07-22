@@ -94,10 +94,7 @@ class TestCreateBase:
         connect.create_partition(collection, tag)
         tag_name = gen_unique_str()
         connect.create_partition(collection, tag_name)
-        res = connect.list_partitions(collection)
-        tag_list = []
-        for item in res:
-            tag_list.append(item.tag)
+        tag_list = connect.list_partitions(collection)
         assert tag in tag_list
         assert tag_name in tag_list
         assert "_default" in tag_list
@@ -303,8 +300,6 @@ class TestDropBase:
         connect.drop_partition(collection, tag)
         res = connect.list_partitions(collection)
         tag_list = []
-        for item in res:
-            tag_list.append(item.tag)
         assert tag not in tag_list
 
     def test_drop_partition_tag_not_existed(self, connect, collection):
@@ -341,10 +336,7 @@ class TestDropBase:
         time.sleep(2)
         with pytest.raises(Exception) as e:
             connect.drop_partition(collection, tag)
-        res = connect.list_partitions(collection)
-        tag_list = []
-        for item in res:
-            tag_list.append(item.tag)
+        tag_list = connect.list_partitions(collection)
         assert tag not in tag_list
 
     def test_drop_partition_create(self, connect, collection):
@@ -357,10 +349,7 @@ class TestDropBase:
         connect.drop_partition(collection, tag)
         time.sleep(2)
         connect.create_partition(collection, tag)
-        res = connect.list_partitions(collection)
-        tag_list = []
-        for item in res:
-            tag_list.append(item.tag)
+        tag_list = connect.list_partitions(collection)
         assert tag in tag_list
 
 
