@@ -18,7 +18,7 @@
 namespace milvus {
 namespace scheduler {
 
-SSBuildIndexJob::SSBuildIndexJob(engine::DBOptions options) : Job(JobType::SS_BUILD), options_(std::move(options)) {
+SSBuildIndexJob::SSBuildIndexJob(const std::string& dir_root) : Job(JobType::SS_BUILD), dir_root_(dir_root) {
     SetIdentity("SSBuildIndexJob");
     AddCacheInsertDataListener();
 }
@@ -31,7 +31,7 @@ SSBuildIndexJob::AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor) {
 }
 
 void
-SSBuildIndexJob::WaitBuildIndexFinish() {
+SSBuildIndexJob::WaitFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return segment_visitor_map_.empty(); });
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] BuildIndexJob %ld all done", "build index", 0, id());
@@ -55,10 +55,10 @@ SSBuildIndexJob::Dump() const {
     return ret;
 }
 
-void
-SSBuildIndexJob::OnCacheInsertDataChanged(bool value) {
-    options_.insert_cache_immediately_ = value;
-}
+// void
+// SSBuildIndexJob::OnCacheInsertDataChanged(bool value) {
+//    options_.insert_cache_immediately_ = value;
+//}
 
 }  // namespace scheduler
 }  // namespace milvus
