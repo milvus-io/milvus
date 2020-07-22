@@ -496,8 +496,7 @@ SSDBImpl::Flush() {
 }
 
 Status
-SSDBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                  double threshold) {
+SSDBImpl::Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -589,7 +588,7 @@ SSDBImpl::GetEntityIDs(const std::string& collection_id, int64_t segment_id, IDN
 }
 
 Status
-SSDBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+SSDBImpl::CreateIndex(const server::ContextPtr& context, const std::string& collection_id,
                       const std::string& field_name, const CollectionIndex& index) {
     return Status::OK();
 }
@@ -627,95 +626,50 @@ SSDBImpl::DropIndex(const std::string& collection_id) {
 }
 
 Status
-SSDBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResult& result) {
+SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection_name, const query::QueryPtr& query_ptr,
+                engine::QueryResultPtr& result) {
     CHECK_INITIALIZED;
-
-    milvus::server::ContextChild tracer(context, "Query");
 
     TimeRecorder rc("SSDBImpl::Query");
 
-    //    snapshot::ScopedSnapshotT ss;
-    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-    //
-    //    /* collect all valid segment */
-    //    std::vector<SegmentVisitor::Ptr> segment_visitors;
-    //    auto exec = [&] (const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
-    //        auto p_id = segment->GetPartitionId();
-    //        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
-    //        auto& p_name = p_ptr->GetName();
-    //
-    //        /* check partition match pattern */
-    //        bool match = false;
-    //        if (partition_patterns.empty()) {
-    //            match = true;
-    //        } else {
-    //            for (auto &pattern : partition_patterns) {
-    //                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
-    //                    match = true;
-    //                    break;
-    //                }
-    //            }
-    //        }
-    //
-    //        if (match) {
-    //            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
-    //            if (!visitor) {
-    //                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
-    //            }
-    //            segment_visitors.push_back(visitor);
-    //        }
-    //        return Status::OK();
-    //    };
-    //
-    //    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
-    //    segment_iter->Iterate();
-    //    STATUS_CHECK(segment_iter->GetStatus());
-    //
-    //    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
-    //
-    //    VectorsData vectors;
-    //    scheduler::SSSearchJobPtr job =
-    //        std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
-    //    for (auto& sv : segment_visitors) {
-    //        job->AddSegmentVisitor(sv);
-    //    }
-    //
-    //    // step 2: put search job to scheduler and wait result
-    //    scheduler::JobMgrInst::GetInstance()->Put(job);
-    //    job->WaitResult();
-    //
-    //    if (!job->GetStatus().ok()) {
-    //        return job->GetStatus();
-    //    }
-    //
-    //    // step 3: construct results
-    //    result.row_num_ = job->vector_count();
-    //    result.result_ids_ = job->GetResultIds();
-    //    result.result_distances_ = job->GetResultDistances();
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    // step 4: get entities by result ids
-    // STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));
+    /* collect all segment visitors */
+    std::vector<SegmentVisitor::Ptr> segment_visitors;
+    auto exec = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* handler) -> Status {
+        auto visitor = SegmentVisitor::Build(ss, segment->GetID());
+        if (!visitor) {
+            return Status(milvus::SS_ERROR, "Cannot build segment visitor");
+        }
+        segment_visitors.push_back(visitor);
+        return Status::OK();
+    };
 
-    // step 5: filter entities by field names
-    //    std::vector<engine::AttrsData> filter_attrs;
-    //    for (auto attr : result.attrs_) {
-    //        AttrsData attrs_data;
-    //        attrs_data.attr_type_ = attr.attr_type_;
-    //        attrs_data.attr_count_ = attr.attr_count_;
-    //        attrs_data.id_array_ = attr.id_array_;
-    //        for (auto& name : field_names) {
-    //            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
-    //                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
-    //            }
-    //        }
-    //        filter_attrs.emplace_back(attrs_data);
-    //    }
+    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
+    segment_iter->Iterate();
+    STATUS_CHECK(segment_iter->GetStatus());
+
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
+
+    scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SSSearchJob>(nullptr, options_.meta_.path_, query_ptr);
+    for (auto& sv : segment_visitors) {
+        job->AddSegmentVisitor(sv);
+    }
+
+    /* put search job to scheduler and wait job finish */
+    scheduler::JobMgrInst::GetInstance()->Put(job);
+    job->WaitFinish();
+
+    if (!job->status().ok()) {
+        return job->status();
+    }
+
+    result = job->query_result();
 
     rc.ElapseFromBegin("Engine query totally cost");
 
-    // tracer.Context()->GetTraceContext()->GetSpan()->Finish();
-
-    return Status::OK();
+    return job->status();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
