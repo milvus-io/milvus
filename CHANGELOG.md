@@ -26,8 +26,8 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2768 After building the index, the number of vectors increases
 -   \#2776 Fix too many data copies during creating IVF index
 -   \#2813 To implemente RNSG IP
--   \#2890 Fix wrong index size
--   \#2957 There is no exisitence check of annoy search parameter
+-   \#2890 Fix the index size caculation in cache
+-   \#2952 Fix the result merging of IVF_PQ IP
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
