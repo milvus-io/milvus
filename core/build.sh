@@ -87,7 +87,7 @@ parameter:
 -m: build with MKL(default: OFF)
 -e: build without prometheus(default: OFF)
 -i: build FIU_ENABLE(default: OFF)
--s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61'
+-s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
 -h: help
 
 usage:
