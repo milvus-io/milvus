@@ -241,6 +241,7 @@ SSExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
 
 Status
 SSExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
+#ifdef MILVUS_GPU_VERSION
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
 
@@ -252,7 +253,7 @@ SSExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
     }
 
     indice.swap(new_map);
-
+#endif
     return Status::OK();
 }
 
