@@ -24,7 +24,7 @@
 #include "db/Utils.h"
 #include "db/meta/MetaNames.h"
 #include "db/meta/backend/MetaHelper.h"
-#include "db/meta/backend/MetaField.h"
+#include "db/meta/backend/MetaSchema.h"
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
 
@@ -32,65 +32,6 @@ namespace milvus::engine::meta {
 
 ////////// private namespace //////////
 namespace {
-
-using MetaFields = std::vector<MetaField>;
-
-class MetaSchema {
- public:
-    MetaSchema(const std::string& name, const MetaFields& fields) : name_(name), fields_(fields) {
-    }
-
-    std::string
-    name() const {
-        return name_;
-    }
-
-    std::string
-    ToString() const {
-        std::string result;
-        for (auto& field : fields_) {
-            if (!result.empty()) {
-                result += ",";
-            }
-            result += field.ToString();
-        }
-
-//        std::string constraints;
-//        for (auto& constraint : constraint_fields_) {
-//            if (!constraints.empty()) {
-//                constraints += ",";
-//            }
-//            constraints += constraint.name();
-//        }
-//
-//        if (!constraints.empty()) {
-//            result += ",constraint uq unique(" + constraints + ")";
-//        }
-
-        return result;
-    }
-
-    // if the outer fields contains all this MetaSchema fields, return true
-    // otherwise return false
-    bool
-    IsEqual(const MetaFields& fields) const {
-        std::vector<std::string> found_field;
-        for (const auto& this_field : fields_) {
-            for (const auto& outer_field : fields) {
-                if (this_field.IsEqual(outer_field)) {
-                    found_field.push_back(this_field.name());
-                    break;
-                }
-            }
-        }
-
-        return found_field.size() == fields_.size();
-    }
-
- private:
-    std::string name_;
-    MetaFields fields_;
-};
 
 static const auto MetaIdField = MetaField(F_ID, "BIGINT", "PRIMARY KEY AUTO_INCREMENT");
 static const MetaField MetaCollectionIdField = MetaField(F_COLLECTON_ID, "BIGINT", "NOT NULL");

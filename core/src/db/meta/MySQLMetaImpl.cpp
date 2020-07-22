@@ -33,6 +33,7 @@
 #include "MetaConsts.h"
 #include "db/IDGenerator.h"
 #include "db/Utils.h"
+#include "db/meta/backend/MetaSchema.h"
 #include "metrics/Metrics.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -76,131 +77,44 @@ HandleException(const std::string& desc, const char* what = nullptr) {
     return Status(DB_META_TRANSACTION_FAILED, msg);
 }
 
-class MetaField {
- public:
-    MetaField(const std::string& name, const std::string& type, const std::string& setting)
-        : name_(name), type_(type), setting_(setting) {
-    }
-
-    std::string
-    name() const {
-        return name_;
-    }
-
-    std::string
-    ToString() const {
-        return name_ + " " + type_ + " " + setting_;
-    }
-
-    // mysql field type has additional information. for instance, a filed type is defined as 'BIGINT'
-    // we get the type from sql is 'bigint(20)', so we need to ignore the '(20)'
-    bool
-    IsEqual(const MetaField& field) const {
-        size_t name_len_min = field.name_.length() > name_.length() ? name_.length() : field.name_.length();
-        size_t type_len_min = field.type_.length() > type_.length() ? type_.length() : field.type_.length();
-
-        // only check field type, don't check field width, for example: VARCHAR(255) and VARCHAR(100) is equal
-        std::vector<std::string> type_split;
-        milvus::StringHelpFunctions::SplitStringByDelimeter(type_, "(", type_split);
-        if (!type_split.empty()) {
-            type_len_min = type_split[0].length() > type_len_min ? type_len_min : type_split[0].length();
-        }
-
-        // field name must be equal, ignore type width
-        return strncasecmp(field.name_.c_str(), name_.c_str(), name_len_min) == 0 &&
-               strncasecmp(field.type_.c_str(), type_.c_str(), type_len_min) == 0;
-    }
-
- private:
-    std::string name_;
-    std::string type_;
-    std::string setting_;
-};
-
-using MetaFields = std::vector<MetaField>;
-
-class MetaSchema {
- public:
-    MetaSchema(const std::string& name, const MetaFields& fields) : name_(name), fields_(fields) {
-    }
-
-    std::string
-    name() const {
-        return name_;
-    }
-
-    std::string
-    ToString() const {
-        std::string result;
-        for (auto& field : fields_) {
-            if (!result.empty()) {
-                result += ",";
-            }
-            result += field.ToString();
-        }
-        return result;
-    }
-
-    // if the outer fields contains all this MetaSchema fields, return true
-    // otherwise return false
-    bool
-    IsEqual(const MetaFields& fields) const {
-        std::vector<std::string> found_field;
-        for (const auto& this_field : fields_) {
-            for (const auto& outer_field : fields) {
-                if (this_field.IsEqual(outer_field)) {
-                    found_field.push_back(this_field.name());
-                    break;
-                }
-            }
-        }
-
-        return found_field.size() == fields_.size();
-    }
-
- private:
-    std::string name_;
-    MetaFields fields_;
-};
-
 // Environment schema
 static const MetaSchema ENVIRONMENT_SCHEMA(META_ENVIRONMENT, {
-                                                                 MetaField("global_lsn", "BIGINT", "NOT NULL"),
+    MetaField("global_lsn", "BIGINT", "NOT NULL"),
                                                              });
 
 // Tables schema
 static const MetaSchema TABLES_SCHEMA(META_TABLES, {
-                                                       MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
-                                                       MetaField("table_id", "VARCHAR(255)", "UNIQUE NOT NULL"),
-                                                       MetaField("state", "INT", "NOT NULL"),
-                                                       MetaField("dimension", "SMALLINT", "NOT NULL"),
-                                                       MetaField("created_on", "BIGINT", "NOT NULL"),
-                                                       MetaField("flag", "BIGINT", "DEFAULT 0 NOT NULL"),
-                                                       MetaField("index_file_size", "BIGINT", "DEFAULT 1024 NOT NULL"),
-                                                       MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
-                                                       MetaField("index_params", "VARCHAR(512)", "NOT NULL"),
-                                                       MetaField("metric_type", "INT", "DEFAULT 1 NOT NULL"),
-                                                       MetaField("owner_table", "VARCHAR(255)", "NOT NULL"),
-                                                       MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
-                                                       MetaField("version", "VARCHAR(64)",
+    MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
+    MetaField("table_id", "VARCHAR(255)", "UNIQUE NOT NULL"),
+    MetaField("state", "INT", "NOT NULL"),
+    MetaField("dimension", "SMALLINT", "NOT NULL"),
+    MetaField("created_on", "BIGINT", "NOT NULL"),
+    MetaField("flag", "BIGINT", "DEFAULT 0 NOT NULL"),
+    MetaField("index_file_size", "BIGINT", "DEFAULT 1024 NOT NULL"),
+    MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
+    MetaField("index_params", "VARCHAR(512)", "NOT NULL"),
+    MetaField("metric_type", "INT", "DEFAULT 1 NOT NULL"),
+    MetaField("owner_table", "VARCHAR(255)", "NOT NULL"),
+    MetaField("partition_tag", "VARCHAR(255)", "NOT NULL"),
+    MetaField("version", "VARCHAR(64)",
                                                                  std::string("DEFAULT '") + CURRENT_VERSION + "'"),
-                                                       MetaField("flush_lsn", "BIGINT", "DEFAULT 0 NOT NULL"),
+    MetaField("flush_lsn", "BIGINT", "DEFAULT 0 NOT NULL"),
                                                    });
 
 // TableFiles schema
 static const MetaSchema TABLEFILES_SCHEMA(META_TABLEFILES, {
-                                                               MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
-                                                               MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
-                                                               MetaField("segment_id", "VARCHAR(255)", "NOT NULL"),
-                                                               MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
-                                                               MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
-                                                               MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"),
-                                                               MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
-                                                               MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"),
-                                                               MetaField("updated_time", "BIGINT", "NOT NULL"),
-                                                               MetaField("created_on", "BIGINT", "NOT NULL"),
-                                                               MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
-                                                               MetaField("flush_lsn", "BIGINT", "DEFAULT 0 NOT NULL"),
+    MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
+    MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
+    MetaField("segment_id", "VARCHAR(255)", "NOT NULL"),
+    MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
+    MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
+    MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"),
+    MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
+    MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"),
+    MetaField("updated_time", "BIGINT", "NOT NULL"),
+    MetaField("created_on", "BIGINT", "NOT NULL"),
+    MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
+    MetaField("flush_lsn", "BIGINT", "DEFAULT 0 NOT NULL"),
                                                            });
 
 // Fields schema
