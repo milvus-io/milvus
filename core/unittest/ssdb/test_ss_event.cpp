@@ -21,11 +21,17 @@ TEST_F(SSEventTest, TestInActiveResGcEvent) {
     auto status = store_->CreateResource(Collection("test_gc_c1"), collection);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
+    CollectionPtr inactive_collection;
+    auto c = Collection("test_gc_c2");
+    c.Deactivate();
+    status = store_->CreateResource(std::move(c), inactive_collection);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
     PartitionPtr partition;
     status = store_->CreateResource<Partition>(Partition("test_gc_c1_p1", collection->GetID()), partition);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
-    // TODO(yhz): Create a temp file under "test_gc_c1" to check if disk file has been deleted
+    // TODO(yhz): Check if disk file has been deleted
 
     auto event = std::make_shared<InActiveResourcesGCEvent>();
     status = event->Process(store_);
@@ -33,6 +39,10 @@ TEST_F(SSEventTest, TestInActiveResGcEvent) {
 
     CollectionPtr collection2;
     status = store_->GetResource<Collection>(collection->GetID(), collection2);
+    ASSERT_FALSE(status.ok());
+
+    CollectionPtr inactive_collection2;
+    status = store_->GetResource<Collection>(inactive_collection->GetID(), inactive_collection2);
     ASSERT_FALSE(status.ok());
 
     PartitionPtr partition2;
