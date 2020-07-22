@@ -141,7 +141,11 @@ void
 BaseTest::SnapshotStart(bool mock_store) {
     /* auto uri = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
     auto uri = "mock://:@:/";
-    auto store = Store::Build(uri, "/tmp/milvus_ss/db");
+    auto& config = milvus::server::Config::GetInstance();
+    config.SetGeneralConfigMetaURI(uri);
+    std::string path = "/tmp/milvus_ss/db";
+    config.SetStorageConfigPath(path);
+    auto store = Store::Build(uri, path);
 
     milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
@@ -230,8 +234,6 @@ SSDBTest::TearDown() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 SSSegmentTest::SetUp() {
-    auto& config = milvus::server::Config::GetInstance();
-    config.SetGeneralConfigMetaURI("mock://:@:/");
     BaseTest::SetUp();
     BaseTest::SnapshotStart(false);
 
@@ -305,13 +307,12 @@ SSSchedulerTest::TearDown() {
 void
 SSEventTest::SetUp() {
     auto uri = "mock://:@:/";
-    store_ = Store::Build(uri);
+    store_ = Store::Build(uri, "/tmp/milvus_ss/db");
     store_->DoReset();
 }
 
 void
 SSEventTest::TearDown() {
-
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
