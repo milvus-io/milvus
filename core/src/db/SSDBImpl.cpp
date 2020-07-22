@@ -87,6 +87,14 @@ SSDBImpl::Start() {
     initialized_.store(true, std::memory_order_release);
 
     // TODO: merge files
+    std::set<std::string> merge_collection_ids;
+    std::vector<meta::CollectionSchema> collection_schema_array;
+
+    std::vector<std::string> collection_ids;
+    snapshot::Snapshots::GetInstance().GetCollectionNames(collection_ids);
+    merge_collection_ids.insert(collection_ids.begin(), collection_ids.end());
+
+    StartMergeTask(merge_collection_ids, true);
 
     // wal
     if (options_.wal_enable_) {

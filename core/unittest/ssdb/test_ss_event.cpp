@@ -27,8 +27,31 @@ TEST_F(SSEventTest, TestInActiveResGcEvent) {
     status = store_->CreateResource(std::move(c), inactive_collection);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
+    CollectionPtr active_collection;
+    auto c_2 = Collection("test_gc_c3");
+    c_2.Activate();
+    status = store_->CreateResource(std::move(c_2), active_collection);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
     PartitionPtr partition;
     status = store_->CreateResource<Partition>(Partition("test_gc_c1_p1", collection->GetID()), partition);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    PartitionPtr inactive_partition;
+    auto p = Partition("test_gc_c1_p2", collection->GetID());
+    p.Deactivate();
+    status = store_->CreateResource<Partition>(std::move(p), inactive_partition);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+
+    CollectionCommitPtr collection_commit;
+    status = store_->CreateResource<CollectionCommit>(CollectionCommit(0, 0), collection_commit);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    CollectionCommitPtr inactive_collection_commit;
+    auto cc = CollectionCommit(0, 0);
+    cc.Deactivate();
+    status = store_->CreateResource<CollectionCommit>(std::move(cc), inactive_collection_commit);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     // TODO(yhz): Check if disk file has been deleted
