@@ -11,8 +11,10 @@
 
 #pragma once
 
-#include "db/snapshot/ResourceTypes.h"
+#include <string>
+
 #include "db/engine/SSExecutionEngine.h"
+#include "db/snapshot/ResourceTypes.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/SSBuildIndexJob.h"
 #include "scheduler/task/Task.h"
@@ -22,8 +24,7 @@ namespace scheduler {
 
 class SSBuildIndexTask : public Task {
  public:
-    explicit SSBuildIndexTask(const std::string& collection_name,
-                              engine::snapshot::ID_TYPE segment_id,
+    explicit SSBuildIndexTask(const std::string& collection_name, engine::snapshot::ID_TYPE segment_id,
                               TaskLabelPtr label);
 
     void

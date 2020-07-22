@@ -31,15 +31,14 @@ namespace scheduler {
 
 class SSBuildIndexJob : public Job {
  public:
-    explicit SSBuildIndexJob(engine::DBOptions options,
-                             const std::string& collection_name,
+    explicit SSBuildIndexJob(engine::DBOptions options, const std::string& collection_name,
                              const engine::snapshot::IDS_TYPE& segment_ids);
 
     ~SSBuildIndexJob() = default;
 
  public:
     void
-    WaitBuildIndexFinish();
+    WaitFinish();
 
     void
     BuildIndexDone(const engine::snapshot::ID_TYPE seg_id);
@@ -48,11 +47,6 @@ class SSBuildIndexJob : public Job {
     Dump() const override;
 
  public:
-    Status&
-    GetStatus() {
-        return status_;
-    }
-
     const engine::snapshot::IDS_TYPE&
     segment_ids() {
         return segment_ids_;
@@ -63,9 +57,9 @@ class SSBuildIndexJob : public Job {
         return collection_name_;
     }
 
-    engine::DBOptions
-    options() const {
-        return options_;
+    Status&
+    status() {
+        return status_;
     }
 
  private:

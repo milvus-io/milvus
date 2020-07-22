@@ -59,21 +59,29 @@ GetRequiredIndexFields(const query::QueryPtr& query_ptr, std::vector<std::string
 Status
 MappingMetricType(MetricType metric_type, milvus::json& conf) {
     switch (metric_type) {
-        case MetricType::IP:conf[knowhere::Metric::TYPE] = knowhere::Metric::IP;
+        case MetricType::IP:
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::IP;
             break;
-        case MetricType::L2:conf[knowhere::Metric::TYPE] = knowhere::Metric::L2;
+        case MetricType::L2:
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::L2;
             break;
-        case MetricType::HAMMING:conf[knowhere::Metric::TYPE] = knowhere::Metric::HAMMING;
+        case MetricType::HAMMING:
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::HAMMING;
             break;
-        case MetricType::JACCARD:conf[knowhere::Metric::TYPE] = knowhere::Metric::JACCARD;
+        case MetricType::JACCARD:
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::JACCARD;
             break;
-        case MetricType::TANIMOTO:conf[knowhere::Metric::TYPE] = knowhere::Metric::TANIMOTO;
+        case MetricType::TANIMOTO:
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::TANIMOTO;
             break;
-        case MetricType::SUBSTRUCTURE:conf[knowhere::Metric::TYPE] = knowhere::Metric::SUBSTRUCTURE;
+        case MetricType::SUBSTRUCTURE:
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::SUBSTRUCTURE;
             break;
-        case MetricType::SUPERSTRUCTURE:conf[knowhere::Metric::TYPE] = knowhere::Metric::SUPERSTRUCTURE;
+        case MetricType::SUPERSTRUCTURE:
+            conf[knowhere::Metric::TYPE] = knowhere::Metric::SUPERSTRUCTURE;
             break;
-        default:return Status(DB_ERROR, "Unsupported metric type");
+        default:
+            return Status(DB_ERROR, "Unsupported metric type");
     }
 
     return Status::OK();
@@ -209,8 +217,7 @@ SSExecutionEngineImpl::Search(const query::QueryPtr& query_ptr, QueryResult& res
 }
 
 Status
-SSExecutionEngineImpl::BuildIndex(const std::string& field_name,
-                                  const CollectionIndex& index,
+SSExecutionEngineImpl::BuildIndex(const std::string& field_name, const CollectionIndex& index,
                                   knowhere::VecIndexPtr& new_index) {
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);

@@ -18,8 +18,7 @@
 namespace milvus {
 namespace scheduler {
 
-SSBuildIndexJob::SSBuildIndexJob(engine::DBOptions options,
-                                 const std::string& collection_name,
+SSBuildIndexJob::SSBuildIndexJob(engine::DBOptions options, const std::string& collection_name,
                                  const engine::snapshot::IDS_TYPE& segment_ids)
     : Job(JobType::SS_BUILD),
       options_(std::move(options)),
@@ -28,11 +27,9 @@ SSBuildIndexJob::SSBuildIndexJob(engine::DBOptions options,
 }
 
 void
-SSBuildIndexJob::WaitBuildIndexFinish() {
+SSBuildIndexJob::WaitFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] {
-        return segment_ids_.empty();
-    });
+    cv_.wait(lock, [this] { return segment_ids_.empty(); });
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] BuildIndexJob %ld all done", "build index", 0, id());
 }
 

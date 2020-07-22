@@ -94,8 +94,7 @@ class SSDBImpl {
     Flush();
 
     Status
-    Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-            double threshold = 0.0);
+    Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold = 0.0);
 
     Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
@@ -118,7 +117,8 @@ class SSDBImpl {
     DropIndex(const std::string& collection_name);
 
     Status
-    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResult& result);
+    Query(const server::ContextPtr& context, const std::string& collection_name, const query::QueryPtr& query_ptr,
+          engine::QueryResultPtr& result);
 
  private:
     void
