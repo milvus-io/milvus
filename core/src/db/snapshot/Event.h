@@ -35,7 +35,7 @@ class ResourceGCEvent : public MetaEvent {
  public:
     using Ptr = std::shared_ptr<ResourceGCEvent>;
 
-    explicit ResourceGCEvent(const std::string& root_path, class ResourceT::Ptr res) : dir_root_(root_path), res_(res) {
+    explicit ResourceGCEvent(class ResourceT::Ptr res) : res_(res) {
     }
 
     ~ResourceGCEvent() = default;
@@ -47,7 +47,8 @@ class ResourceGCEvent : public MetaEvent {
         STATUS_CHECK((*sd_op)(store));
 
         /* TODO: physically clean resource */
-        std::string res_path = GetResPath<ResourceT>(dir_root_, res_);
+        auto res_prefix = store->GetRootPath();
+        std::string res_path = GetResPath<ResourceT>(res_prefix, res_);
         /* if (!boost::filesystem::exists(res_path)) { */
         /*     return Status::OK(); */
         /* } */
@@ -72,7 +73,6 @@ class ResourceGCEvent : public MetaEvent {
 
  private:
     class ResourceT::Ptr res_;
-    std::string dir_root_;
 };
 
 }  // namespace snapshot

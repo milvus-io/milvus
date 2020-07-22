@@ -139,12 +139,9 @@ class ResourceHolder {
 
     virtual void
     OnNoRefCallBack(ResourcePtr resource) {
-        std::string path = config.storage.path();
-        auto root_path = utils::ConstructCollectionRootPath(path);
-
         resource->Deactivate();
         Release(resource->GetID());
-        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(root_path, resource);
+        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(resource);
         EventExecutor::GetInstance().Submit(evt_ptr);
     }
 
