@@ -23,6 +23,7 @@
 #include <oatpp/web/client/ApiClient.hpp>
 #include <oatpp/web/client/HttpRequestExecutor.hpp>
 
+#include "config/ConfigMgr.h"
 #include "config/ServerConfig.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
