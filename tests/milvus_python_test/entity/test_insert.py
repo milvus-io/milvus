@@ -408,7 +408,7 @@ class TestInsertBase:
         method: add entity vector field
         expected: error raised
         '''
-        tmp_entity = add_vector_field(copy.deepcopy(entity))
+        tmp_entity = add_vector_field(nb, dim)
         with pytest.raises(Exception):
             connect.insert(collection_name, tmp_entity)
 
