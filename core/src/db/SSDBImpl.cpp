@@ -631,9 +631,14 @@ SSDBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std
         return status;
     }
 
-    // step 5: iterate segments need to be build index, wait until all segments are built
-    SnapshotVisitor ss_visitor(collection_name);
+    // step 5: start background build index thread
+    std::vector<std::string> collection_names = {collection_name};
+    WaitBuildIndexFinish();
+    StartBuildIndexTask(collection_names);
+
+    // step 6: iterate segments need to be build index, wait until all segments are built
     while (true) {
+        SnapshotVisitor ss_visitor(collection_name);
         snapshot::IDS_TYPE segment_ids;
         ss_visitor.SegmentsToIndex(field_name, segment_ids);
         if (segment_ids.empty()) {
@@ -863,11 +868,12 @@ void
 SSDBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
     std::unique_lock<std::mutex> lock(build_index_mutex_);
 
-    //    for (auto collection_name : collection_names) {
-    //        SnapshotVisitor ss_visitor(collection_name);
-    //        snapshot::IDS_TYPE segment_ids;
-    //        ss_visitor.SegmentsToIndex(field_name, segment_ids);
-    //    }
+    for (auto collection_name : collection_names) {
+        SnapshotVisitor ss_visitor(collection_name);
+
+        snapshot::IDS_TYPE segment_ids;
+        ss_visitor.SegmentsToIndex("", segment_ids);
+    }
 }
 
 void

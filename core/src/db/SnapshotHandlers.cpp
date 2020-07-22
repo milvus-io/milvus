@@ -98,10 +98,22 @@ SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commi
     }
 
     auto segment_visitor = engine::SegmentVisitor::Build(ss_, segment_commit->GetSegmentId());
-    auto field_visitor = segment_visitor->GetFieldVisitor(field_name_);
-    auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-    if (element_visitor == nullptr || element_visitor->GetFile() == nullptr) {
-        segment_ids_.push_back(segment_commit->GetSegmentId());
+    if (field_name_.empty()) {
+        auto field_visitors = segment_visitor->GetFieldVisitors();
+        for (auto& pair : field_visitors) {
+            auto& field_visitor = pair.second;
+            auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+            if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
+                segment_ids_.push_back(segment_commit->GetSegmentId());
+                break;
+            }
+        }
+    } else {
+        auto field_visitor = segment_visitor->GetFieldVisitor(field_name_);
+        auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
+            segment_ids_.push_back(segment_commit->GetSegmentId());
+        }
     }
 
     return Status::OK();
