@@ -27,11 +27,11 @@
 #include "db/DB.h"
 #include "db/IndexFailedChecker.h"
 #include "db/SimpleWaitNotify.h"
-#include "db/snapshot/Context.h"
 #include "db/Types.h"
 #include "db/insert/MemManager.h"
 #include "db/merge/MergeManager.h"
 #include "db/meta/FilesHolder.h"
+#include "db/snapshot/Context.h"
 #include "utils/ThreadPool.h"
 #include "wal/WalManager.h"
 
@@ -310,7 +310,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                              const std::unordered_map<std::string, int64_t>& attr_sizes,
                              const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types);
 
-///////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////
     /* Mocked SSDBImpl interfaces, will be removed */
     Status
     CreateCollection(const snapshot::CreateCollectionContext& context) override {
@@ -426,7 +426,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
         assert(false);
         return Status::OK();
     }
-///////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////
 
  private:
     DBOptions options_;

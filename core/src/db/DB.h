@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -187,7 +188,7 @@ class DB {
                           std::unordered_map<std::string, int64_t>& attr_size,
                           std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) = 0;
 
-///////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////
     /* mocked SSDBImpl interfaces, will be removed */
     virtual Status
     CreateCollection(const snapshot::CreateCollectionContext& context) = 0;
@@ -259,7 +260,7 @@ class DB {
     virtual Status
     Query(const server::ContextPtr& context, const std::string& collection_name, const query::QueryPtr& query_ptr,
           engine::QueryResultPtr& result) = 0;
-///////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;
