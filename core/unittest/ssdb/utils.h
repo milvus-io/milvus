@@ -286,6 +286,10 @@ class BaseTest : public ::testing::Test {
  protected:
     void
     InitLog();
+    void
+    SnapshotStart(bool mock_store);
+    void
+    SnapshotStop();
 
     void
     SetUp() override;
@@ -333,6 +337,17 @@ class SSMetaTest : public BaseTest {
     MetaAdapterPtr meta_;
 
  protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+class SSSchedulerTest : public BaseTest {
+ protected:
+    std::shared_ptr<SSDBImpl> db_;
+
     void
     SetUp() override;
     void

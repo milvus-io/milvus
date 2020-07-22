@@ -12,9 +12,11 @@
 #include "db/SSDBImpl.h"
 #include "cache/CpuCacheMgr.h"
 #include "db/IDGenerator.h"
+#include "db/SnapshotVisitor.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "db/merge/SSMergeTask.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
@@ -24,6 +26,7 @@
 #include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/job/SSSearchJob.h"
 #include "segment/SSSegmentReader.h"
 #include "segment/SSSegmentWriter.h"
 #include "utils/Exception.h"
@@ -493,8 +496,7 @@ SSDBImpl::Flush() {
 }
 
 Status
-SSDBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                  double threshold) {
+SSDBImpl::Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -586,7 +588,7 @@ SSDBImpl::GetEntityIDs(const std::string& collection_id, int64_t segment_id, IDN
 }
 
 Status
-SSDBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+SSDBImpl::CreateIndex(const server::ContextPtr& context, const std::string& collection_id,
                       const std::string& field_name, const CollectionIndex& index) {
     return Status::OK();
 }
@@ -608,7 +610,9 @@ SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field
     // SS TODO: Check Index Type
 
     snapshot::OperationContext context;
-    STATUS_CHECK(ss->GetFieldElement(field_name, element_name, context.stale_field_element));
+    snapshot::FieldElementPtr stale_field_element;
+    STATUS_CHECK(ss->GetFieldElement(field_name, element_name, stale_field_element));
+    context.stale_field_elements.push_back(stale_field_element);
     auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
     STATUS_CHECK(op->Push());
 
@@ -624,67 +628,50 @@ SSDBImpl::DropIndex(const std::string& collection_id) {
 }
 
 Status
-SSDBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResult& result) {
+SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection_name, const query::QueryPtr& query_ptr,
+                engine::QueryResultPtr& result) {
     CHECK_INITIALIZED;
-
-    auto query_ctx = context->Child("Query");
 
     TimeRecorder rc("SSDBImpl::Query");
 
-    //    snapshot::ScopedSnapshotT ss;
-    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    //    auto handler = std::make_shared<HybridQueryHelperSegmentHandler>(nullptr, ss, partition_patterns);
-    //    handler->Iterate();
-    //    STATUS_CHECK(handler->GetStatus());
-    //
-    //    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", handler->segments_.size());
-    //
-    //    VectorsData vectors;
-    //    scheduler::SearchJobPtr job =
-    //        std::make_shared<scheduler::SearchJob>(query_ctx, general_query, query_ptr, attr_type, vectors);
-    //    for (auto& segment : handler->segments_) {
-    //        // job->AddSegment(segment);
-    //    }
-    //
-    //    // step 2: put search job to scheduler and wait result
-    //    scheduler::JobMgrInst::GetInstance()->Put(job);
-    //    job->WaitResult();
-    //
-    //    if (!job->GetStatus().ok()) {
-    //        return job->GetStatus();
-    //    }
-    //
-    //    // step 3: construct results
-    //    result.row_num_ = job->vector_count();
-    //    result.result_ids_ = job->GetResultIds();
-    //    result.result_distances_ = job->GetResultDistances();
-    //
-    //    // step 4: get entities by result ids
-    //    STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));
-    //
-    //    // step 5: filter entities by field names
-    //    //    std::vector<engine::AttrsData> filter_attrs;
-    //    //    for (auto attr : result.attrs_) {
-    //    //        AttrsData attrs_data;
-    //    //        attrs_data.attr_type_ = attr.attr_type_;
-    //    //        attrs_data.attr_count_ = attr.attr_count_;
-    //    //        attrs_data.id_array_ = attr.id_array_;
-    //    //        for (auto& name : field_names) {
-    //    //            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
-    //    //                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
-    //    //            }
-    //    //        }
-    //    //        filter_attrs.emplace_back(attrs_data);
-    //    //    }
-    //    //
-    //    //    result.attrs_ = filter_attrs;
+    /* collect all segment visitors */
+    std::vector<SegmentVisitor::Ptr> segment_visitors;
+    auto exec = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* handler) -> Status {
+        auto visitor = SegmentVisitor::Build(ss, segment->GetID());
+        if (!visitor) {
+            return Status(milvus::SS_ERROR, "Cannot build segment visitor");
+        }
+        segment_visitors.push_back(visitor);
+        return Status::OK();
+    };
+
+    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
+    segment_iter->Iterate();
+    STATUS_CHECK(segment_iter->GetStatus());
+
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
+
+    scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SSSearchJob>(nullptr, options_.meta_.path_, query_ptr);
+    for (auto& sv : segment_visitors) {
+        job->AddSegmentVisitor(sv);
+    }
+
+    /* put search job to scheduler and wait job finish */
+    scheduler::JobMgrInst::GetInstance()->Put(job);
+    job->WaitFinish();
+
+    if (!job->status().ok()) {
+        return job->status();
+    }
+
+    result = job->query_result();
 
     rc.ElapseFromBegin("Engine query totally cost");
 
-    query_ctx->GetTraceContext()->GetSpan()->Finish();
-
-    return Status::OK();
+    return job->status();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
