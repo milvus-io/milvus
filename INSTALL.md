@@ -52,7 +52,7 @@
 
 For GPU-enabled version, you will also need:
 
--   CUDA 10.0 or higher
+-   CUDA 10.x (10.0, 10.1, 10.2)
 
 -   NVIDIA driver 418 or higher
 
