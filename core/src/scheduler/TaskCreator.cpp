@@ -85,7 +85,7 @@ std::vector<TaskPtr>
 TaskCreator::Create(const SSSearchJobPtr& job) {
     std::vector<TaskPtr> tasks;
     for (auto& sv : job->segment_visitor_map()) {
-        auto task = std::make_shared<XSSSearchTask>(job->GetContext(), sv.second, nullptr);
+        auto task = std::make_shared<XSSSearchTask>(job->GetContext(), job->dir_root(), sv.second, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);
     }
@@ -96,7 +96,7 @@ std::vector<TaskPtr>
 TaskCreator::Create(const SSBuildIndexJobPtr& job) {
     std::vector<TaskPtr> tasks;
     for (auto& sv : job->segment_visitor_map()) {
-        auto task = std::make_shared<XSSBuildIndexTask>(sv.second, nullptr);
+        auto task = std::make_shared<XSSBuildIndexTask>(job->dir_root(), sv.second, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);
     }
