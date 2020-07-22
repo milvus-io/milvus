@@ -11,64 +11,156 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
-#include <vector>
 
 #include "db/snapshot/Resources.h"
 #include "utils/Status.h"
+#include "utils/StringHelpFunctions.h"
 
 namespace milvus::engine::snapshot {
 
+static const char* COLLECTION_PREFIX = "C_";
+static const char* PARTITION_PREFIX = "P_";
+static const char* SEGMENT_PREFIX = "S_";
+static const char* SEGMENT_FILE_PREFIX = "F_";
+
 template <class ResourceT>
-inline Status
-GetResFiles(std::vector<std::string>& file_list, typename ResourceT::Ptr& res_ptr) {
-    return Status::OK();
+inline std::string
+GetResPath(const std::string& root, const typename ResourceT::Ptr& res_ptr) {
+    return std::string();
 }
 
 template <>
-inline Status
-GetResFiles<Collection>(std::vector<std::string>& file_list, Collection::Ptr& res_ptr) {
+inline std::string
+GetResPath<Collection>(const std::string& root, const Collection::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << res_ptr->GetID();
+    ss << root;
+    if (!StringHelpFunctions::EndWithSlash(root)) {
+        ss << "/";
+    }
+    ss << COLLECTION_PREFIX << res_ptr->GetID();
 
-    file_list.push_back(ss.str());
-    return Status::OK();
+    return ss.str();
 }
 
 template <>
-inline Status
-GetResFiles<Partition>(std::vector<std::string>& file_list, Partition::Ptr& res_ptr) {
+inline std::string
+GetResPath<Partition>(const std::string& root, const Partition::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << res_ptr->GetCollectionId() << "/";
-    ss << res_ptr->GetID();
+    ss << root;
+    if (!StringHelpFunctions::EndWithSlash(root)) {
+        ss << "/";
+    }
+    ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
+    ss << PARTITION_PREFIX << res_ptr->GetID();
 
-    file_list.push_back(ss.str());
-    return Status::OK();
+    return ss.str();
 }
 
 template <>
-inline Status
-GetResFiles<Segment>(std::vector<std::string>& file_list, Segment::Ptr& res_ptr) {
+inline std::string
+GetResPath<Segment>(const std::string& root, const Segment::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << res_ptr->GetCollectionId() << "/";
-    ss << res_ptr->GetPartitionId() << "/";
-    ss << res_ptr->GetID();
+    ss << root;
+    if (!StringHelpFunctions::EndWithSlash(root)) {
+        ss << "/";
+    }
+    ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
+    ss << PARTITION_PREFIX << res_ptr->GetPartitionId() << "/";
+    ss << SEGMENT_PREFIX << res_ptr->GetID();
 
-    file_list.push_back(ss.str());
-    return Status::OK();
+    return ss.str();
 }
 
 template <>
-inline Status
-GetResFiles<SegmentFile>(std::vector<std::string>& file_list, SegmentFile::Ptr& res_ptr) {
+inline std::string
+GetResPath<SegmentFile>(const std::string& root, const SegmentFile::Ptr& res_ptr) {
     std::stringstream ss;
-    ss << res_ptr->GetCollectionId() << "/";
-    ss << res_ptr->GetPartitionId() << "/";
-    ss << res_ptr->GetSegmentId() << "/";
-    ss << res_ptr->GetID();
+    ss << root;
+    if (!StringHelpFunctions::EndWithSlash(root)) {
+        ss << "/";
+    }
+    ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
+    ss << PARTITION_PREFIX << res_ptr->GetPartitionId() << "/";
+    ss << SEGMENT_PREFIX << res_ptr->GetSegmentId() << "/";
+    ss << SEGMENT_FILE_PREFIX << res_ptr->GetID();
 
-    file_list.push_back(ss.str());
-    return Status::OK();
+    return ss.str();
+}
+
+///////////////////////////////////////////////////////////////////////////////////////
+/// Default resource creator
+template <typename T>
+inline typename T::Ptr
+CreateResPtr() {
+    return nullptr;
+}
+
+template <>
+inline Collection::Ptr
+CreateResPtr<Collection>() {
+    return std::make_shared<Collection>("");
+}
+
+template <>
+inline CollectionCommit::Ptr
+CreateResPtr<CollectionCommit>() {
+    return std::make_shared<CollectionCommit>(0, 0);
+}
+
+template <>
+inline Partition::Ptr
+CreateResPtr<Partition>() {
+    return std::make_shared<Partition>("", 0);
+}
+
+template <>
+inline PartitionCommit::Ptr
+CreateResPtr<PartitionCommit>() {
+    return std::make_shared<PartitionCommit>(0, 0);
+}
+
+template <>
+inline Segment::Ptr
+CreateResPtr<Segment>() {
+    return std::make_shared<Segment>(0, 0);
+}
+
+template <>
+inline SegmentCommit::Ptr
+CreateResPtr<SegmentCommit>() {
+    return std::make_shared<SegmentCommit>(0, 0, 0);
+}
+
+template <>
+inline SegmentFile::Ptr
+CreateResPtr<SegmentFile>() {
+    return std::make_shared<SegmentFile>(0, 0, 0, 0);
+}
+
+template <>
+inline SchemaCommit::Ptr
+CreateResPtr<SchemaCommit>() {
+    return std::make_shared<SchemaCommit>(0);
+}
+
+template <>
+inline Field::Ptr
+CreateResPtr<Field>() {
+    return std::make_shared<Field>("", 0, 0);
+}
+
+template <>
+inline FieldCommit::Ptr
+CreateResPtr<FieldCommit>() {
+    return std::make_shared<FieldCommit>(0, 0);
+}
+
+template <>
+inline FieldElement::Ptr
+CreateResPtr<FieldElement>() {
+    return std::make_shared<FieldElement>(0, 0, "", 0);
 }
 
 }  // namespace milvus::engine::snapshot

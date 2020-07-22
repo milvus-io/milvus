@@ -196,7 +196,7 @@ class WebRequestHandler {
     CreatePartition(const OString& collection_name, const PartitionRequestDto::ObjectWrapper& param);
 
     StatusDto::ObjectWrapper
-    ShowPartitions(const OString& collection_name, const OQueryParams& query_params, const OString& body,
+    ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
                    PartitionListDto::ObjectWrapper& partition_list_dto);
 
     StatusDto::ObjectWrapper

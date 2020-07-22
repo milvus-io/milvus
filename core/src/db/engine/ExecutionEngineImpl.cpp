@@ -92,6 +92,23 @@ IsBinaryIndexType(knowhere::IndexType type) {
     return type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP || type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
 }
 
+codec::ExternalData
+GetIndexDataType(EngineType type) {
+    switch (type) {
+        case EngineType::FAISS_IVFFLAT:
+        case EngineType::HNSW:
+        case EngineType::NSG_MIX:
+            return codec::ExternalData::ExternalData_RawData;
+
+        case EngineType::HNSW_SQ8NM:
+        case EngineType::FAISS_IVFSQ8NR:
+            return codec::ExternalData::ExternalData_SQ8;
+
+        default:
+            return codec::ExternalData::ExternalData_None;
+    }
+}
+
 }  // namespace
 
 #ifdef MILVUS_GPU_VERSION
@@ -191,6 +208,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, mode);
             break;
         }
+        case EngineType::FAISS_IVFSQ8NR: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, mode);
+            break;
+        }
 #ifdef MILVUS_GPU_VERSION
         case EngineType::FAISS_IVFSQ8H: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, mode);
@@ -221,6 +242,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 #endif
         case EngineType::HNSW: {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW, mode);
+            break;
+        }
+        case EngineType::HNSW_SQ8NM: {
+            index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_HNSW_SQ8NM, mode);
             break;
         }
         case EngineType::ANNOY: {
@@ -371,7 +396,7 @@ ExecutionEngineImpl::Serialize() {
 
     // here we reset index size by file size,
     // since some index type(such as SQ8) data size become smaller after serialized
-    index_->SetIndexSize(CommonUtil::GetFileSize(location_));
+    index_->UpdateIndexSize();
     LOG_ENGINE_DEBUG_ << "Finish serialize index file: " << location_ << " size: " << index_->Size();
 
     if (index_->Size() == 0) {
@@ -448,7 +473,10 @@ ExecutionEngineImpl::Load(bool to_cache) {
             try {
                 segment::SegmentPtr segment_ptr;
                 segment_reader_ptr->GetSegment(segment_ptr);
-                auto status = segment_reader_ptr->LoadVectorIndex(location_, segment_ptr->vector_index_ptr_);
+
+                auto external_data = GetIndexDataType(index_type_);
+                auto status =
+                    segment_reader_ptr->LoadVectorIndex(location_, external_data, segment_ptr->vector_index_ptr_);
                 index_ = segment_ptr->vector_index_ptr_->GetVectorIndex();
 
                 if (index_ == nullptr) {
@@ -802,29 +830,29 @@ ProcessIndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr& 
 
 Status
 ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const std::string& field_name,
-                                      const DataType& data_type, milvus::json& term_values_json) {
+                                      const meta::hybrid::DataType& data_type, milvus::json& term_values_json) {
     switch (data_type) {
-        case DataType::INT8: {
+        case meta::hybrid::DataType::INT8: {
             ProcessIndexedTermQuery<int8_t>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
             break;
         }
-        case DataType::INT16: {
+        case meta::hybrid::DataType::INT16: {
             ProcessIndexedTermQuery<int16_t>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
             break;
         }
-        case DataType::INT32: {
+        case meta::hybrid::DataType::INT32: {
             ProcessIndexedTermQuery<int32_t>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
             break;
         }
-        case DataType::INT64: {
+        case meta::hybrid::DataType::INT64: {
             ProcessIndexedTermQuery<int64_t>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
             break;
         }
-        case DataType::FLOAT: {
+        case meta::hybrid::DataType::FLOAT: {
             ProcessIndexedTermQuery<float>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
             break;
         }
-        case DataType::DOUBLE: {
+        case meta::hybrid::DataType::DOUBLE: {
             ProcessIndexedTermQuery<double>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
             break;
         }
@@ -835,7 +863,7 @@ ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const 
 
 Status
 ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::TermQueryPtr term_query,
-                                      std::unordered_map<std::string, DataType>& attr_type) {
+                                      std::unordered_map<std::string, meta::hybrid::DataType>& attr_type) {
     auto status = Status::OK();
     auto term_query_json = term_query->json_obj;
     auto term_it = term_query_json.begin();
@@ -876,31 +904,31 @@ ProcessIndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr&
 }
 
 Status
-ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const DataType& data_type,
+ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const meta::hybrid::DataType& data_type,
                                        knowhere::IndexPtr& index_ptr, milvus::json& range_values_json) {
     auto status = Status::OK();
     switch (data_type) {
-        case DataType::INT8: {
+        case meta::hybrid::DataType::INT8: {
             ProcessIndexedRangeQuery<int8_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case DataType::INT16: {
+        case meta::hybrid::DataType::INT16: {
             ProcessIndexedRangeQuery<int16_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case DataType::INT32: {
+        case meta::hybrid::DataType::INT32: {
             ProcessIndexedRangeQuery<int32_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case DataType::INT64: {
+        case meta::hybrid::DataType::INT64: {
             ProcessIndexedRangeQuery<int64_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case DataType::FLOAT: {
+        case meta::hybrid::DataType::FLOAT: {
             ProcessIndexedRangeQuery<float>(bitset, index_ptr, range_values_json);
             break;
         }
-        case DataType::DOUBLE: {
+        case meta::hybrid::DataType::DOUBLE: {
             ProcessIndexedRangeQuery<double>(bitset, index_ptr, range_values_json);
             break;
         }
@@ -911,7 +939,7 @@ ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const
 }
 
 Status
-ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, DataType>& attr_type,
+ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
                                        faiss::ConcurrentBitsetPtr& bitset, query::RangeQueryPtr range_query) {
     auto status = Status::OK();
     auto range_query_json = range_query->json_obj;
@@ -926,7 +954,7 @@ ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, Dat
 
 Status
 ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
-                                  std::unordered_map<std::string, DataType>& attr_type, std::vector<float>& distances,
+                                  std::unordered_map<std::string, meta::hybrid::DataType>& attr_type, std::vector<float>& distances,
                                   std::vector<int64_t>& search_ids, bool hybrid) {
     try {
         faiss::ConcurrentBitsetPtr bitset;
@@ -979,7 +1007,7 @@ ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
 
 Status
 ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
-                                     std::unordered_map<std::string, DataType>& attr_type,
+                                     std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
                                      std::string& vector_placeholder) {
     Status status = Status::OK();
     if (general_query->leaf == nullptr) {
@@ -1065,7 +1093,7 @@ ExecutionEngineImpl::Search(std::vector<int64_t>& ids, std::vector<float>& dista
     uint64_t nq = job->nq();
     uint64_t topk = job->topk();
 
-    const engine::VectorsData& vectors = job->vectors();
+    const VectorsData& vectors = job->vectors();
 
     ids.resize(topk * nq);
     distances.resize(topk * nq);

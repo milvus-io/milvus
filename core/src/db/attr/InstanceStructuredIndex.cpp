@@ -64,7 +64,7 @@ InstanceStructuredIndex::CreateStructuredIndex(const std::string& collection_id,
         std::vector<std::string> field_names;
 
         for (auto& field_schema : fields_schema.fields_schema_) {
-            if (field_schema.field_type_ != (int32_t)engine::meta::hybrid::DataType::FLOAT_VECTOR) {
+            if (field_schema.field_type_ != (int32_t)engine::meta::hybrid::DataType::VECTOR_FLOAT) {
                 attr_types.insert(
                     std::make_pair(field_schema.field_name_, (engine::meta::hybrid::DataType)field_schema.field_type_));
                 field_names.emplace_back(field_schema.field_name_);

@@ -26,10 +26,13 @@
 namespace milvus {
 namespace codec {
 
+enum ExternalData { ExternalData_None, ExternalData_RawData, ExternalData_SQ8 };
+
 class VectorIndexFormat {
  public:
     virtual void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, segment::VectorIndexPtr& vector_index) = 0;
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, ExternalData external_data,
+         segment::VectorIndexPtr& vector_index) = 0;
 
     virtual void
     write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,

@@ -54,17 +54,24 @@ struct OperationContext {
     ScopedSnapshotT prev_ss;
     SegmentPtr new_segment = nullptr;
     SegmentCommitPtr new_segment_commit = nullptr;
+    std::vector<SegmentCommitPtr> new_segment_commits;
     PartitionPtr new_partition = nullptr;
     PartitionCommitPtr new_partition_commit = nullptr;
+    std::vector<PartitionCommitPtr> new_partition_commits;
     SchemaCommitPtr new_schema_commit = nullptr;
     CollectionCommitPtr new_collection_commit = nullptr;
     CollectionPtr new_collection = nullptr;
 
-    SegmentFilePtr stale_segment_file = nullptr;
+    SegmentFile::VecT stale_segment_files;
     std::vector<SegmentPtr> stale_segments;
 
     FieldPtr prev_field = nullptr;
     FieldElementPtr prev_field_element = nullptr;
+    std::vector<FieldElementPtr> new_field_elements;
+    std::vector<FieldElementPtr> stale_field_elements;
+
+    std::vector<FieldCommitPtr> new_field_commits;
+    std::vector<FieldCommitPtr> stale_field_commits;
 
     SegmentPtr prev_segment = nullptr;
     SegmentCommitPtr prev_segment_commit = nullptr;

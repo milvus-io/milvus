@@ -17,6 +17,8 @@
 #include <mutex>
 #include <string>
 #include <thread>
+
+#include "config/Config.h"
 #include "db/snapshot/Event.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/Operations.h"
@@ -48,11 +50,12 @@ class ResourceHolder {
     }
 
     ScopedT
-    GetResource(ID_TYPE id, bool scoped = true) {
-        // TODO: Temp to use Load here. Will be removed when resource is loaded just post Compound
-        // Operations.
-        return Load(Store::GetInstance(), id, scoped);
+    GetResource(StorePtr store, ID_TYPE id, bool scoped = true) {
+        return Load(store, id, scoped);
+    }
 
+    ScopedT
+    GetResource(ID_TYPE id, bool scoped = true) {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             auto cit = id_map_.find(id);
@@ -75,13 +78,15 @@ class ResourceHolder {
         return ReleaseNoLock(id);
     }
 
-    // TODO: Resource should be loaded into holder in OperationExecutor thread
     ScopedT
-    Load(Store& store, ID_TYPE id, bool scoped = true) {
+    Load(StorePtr store, ID_TYPE id, bool scoped = true) {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             auto cit = id_map_.find(id);
             if (cit != id_map_.end()) {
+                if (!cit->second->IsActive()) {
+                    return ScopedT();
+                }
                 return ScopedT(cit->second, scoped);
             }
         }
@@ -90,14 +95,6 @@ class ResourceHolder {
             return ScopedT();
         }
         return ScopedT(ret, scoped);
-    }
-
-    virtual bool
-    HardDelete(ID_TYPE id) {
-        auto op = std::make_shared<HardDeleteOperation<ResourceT>>(id);
-        // TODO:
-        (*op)(Store::GetInstance());
-        return true;
     }
 
     virtual void
@@ -142,20 +139,27 @@ class ResourceHolder {
 
     virtual void
     OnNoRefCallBack(ResourcePtr resource) {
-        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(resource);
-        EventExecutor::GetInstance().Submit(evt_ptr);
+        auto& config = server::Config::GetInstance();
+        std::string path;
+        config.GetStorageConfigPath(path);
+        auto root_path = utils::ConstructCollectionRootPath(path);
+
+        resource->Deactivate();
         Release(resource->GetID());
+        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(root_path, resource);
+        EventExecutor::GetInstance().Submit(evt_ptr);
     }
 
     virtual ResourcePtr
-    DoLoad(Store& store, ID_TYPE id) {
+    DoLoad(StorePtr store, ID_TYPE id) {
         LoadOperationContext context;
         context.id = id;
         auto op = std::make_shared<LoadOperation<ResourceT>>(context);
         (*op)(store);
         typename ResourceT::Ptr c;
         auto status = op->GetResource(c);
-        if (status.ok()) {
+        if (status.ok() && c->IsActive()) {
+            /* if (status.ok()) { */
             Add(c);
             return c;
         }

@@ -17,8 +17,10 @@ namespace engine {
 namespace snapshot {
 
 Status
-CollectionCommitOperation::DoExecute(Store& store) {
+CollectionCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
+    auto row_cnt = 0;
+    auto size = 0;
     if (!prev_resource) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Cannot find prev collection commit resource";
@@ -26,19 +28,39 @@ CollectionCommitOperation::DoExecute(Store& store) {
     }
     resource_ = std::make_shared<CollectionCommit>(*prev_resource);
     resource_->ResetStatus();
+    row_cnt = resource_->GetRowCount();
+    size = resource_->GetSize();
+
+    auto handle_new_pc = [&](PartitionCommitPtr& pc) {
+        auto prev_partition_commit = GetStartedSS()->GetPartitionCommitByPartitionId(pc->GetPartitionId());
+        if (prev_partition_commit) {
+            resource_->GetMappings().erase(prev_partition_commit->GetID());
+            row_cnt -= prev_partition_commit->GetRowCount();
+            size -= prev_partition_commit->GetSize();
+        }
+        resource_->GetMappings().insert(pc->GetID());
+        row_cnt += pc->GetRowCount();
+        size += pc->GetSize();
+    };
+
     if (context_.stale_partition_commit) {
         resource_->GetMappings().erase(context_.stale_partition_commit->GetID());
+        row_cnt -= context_.stale_partition_commit->GetRowCount();
+        size -= context_.stale_partition_commit->GetSize();
     } else if (context_.new_partition_commit) {
-        auto prev_partition_commit =
-            GetStartedSS()->GetPartitionCommitByPartitionId(context_.new_partition_commit->GetPartitionId());
-        if (prev_partition_commit)
-            resource_->GetMappings().erase(prev_partition_commit->GetID());
-        resource_->GetMappings().insert(context_.new_partition_commit->GetID());
-    } else if (context_.new_schema_commit) {
+        handle_new_pc(context_.new_partition_commit);
+    } else if (context_.new_partition_commits.size() > 0) {
+        for (auto& pc : context_.new_partition_commits) {
+            handle_new_pc(pc);
+        }
+    }
+    if (context_.new_schema_commit) {
         resource_->SetSchemaId(context_.new_schema_commit->GetID());
     }
     resource_->SetID(0);
-    AddStep(*BaseT::resource_, false);
+    resource_->SetRowCount(row_cnt);
+    resource_->SetSize(size);
+    AddStep(*BaseT::resource_, nullptr, false);
     return Status::OK();
 }
 
@@ -52,12 +74,12 @@ PartitionOperation::PreCheck() {
 }
 
 Status
-PartitionOperation::DoExecute(Store& store) {
+PartitionOperation::DoExecute(StorePtr store) {
     auto status = CheckStale();
     if (!status.ok())
         return status;
     resource_ = std::make_shared<Partition>(context_.name, GetStartedSS()->GetCollection()->GetID());
-    AddStep(*resource_, false);
+    AddStep(*resource_, nullptr, false);
     return status;
 }
 
@@ -72,23 +94,41 @@ PartitionCommitOperation::PreCheck() {
 
 PartitionCommitPtr
 PartitionCommitOperation::GetPrevResource() const {
-    auto& segment_commit = context_.new_segment_commit;
-    if (!segment_commit)
-        return nullptr;
-    return GetStartedSS()->GetPartitionCommitByPartitionId(segment_commit->GetPartitionId());
+    if (context_.new_segment_commit) {
+        return GetStartedSS()->GetPartitionCommitByPartitionId(context_.new_segment_commit->GetPartitionId());
+    } else if (context_.new_segment_commits.size() > 0) {
+        return GetStartedSS()->GetPartitionCommitByPartitionId(context_.new_segment_commits[0]->GetPartitionId());
+    }
+    return nullptr;
 }
 
 Status
-PartitionCommitOperation::DoExecute(Store& store) {
+PartitionCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
+    auto row_cnt = 0;
+    auto size = 0;
     if (prev_resource) {
         resource_ = std::make_shared<PartitionCommit>(*prev_resource);
         resource_->SetID(0);
         resource_->ResetStatus();
-        auto prev_segment_commit =
-            GetStartedSS()->GetSegmentCommitBySegmentId(context_.new_segment_commit->GetSegmentId());
-        if (prev_segment_commit)
-            resource_->GetMappings().erase(prev_segment_commit->GetID());
+        row_cnt = resource_->GetRowCount();
+        size = resource_->GetSize();
+        auto erase_sc = [&](SegmentCommitPtr& sc) {
+            if (!sc)
+                return;
+            auto prev_sc = GetStartedSS()->GetSegmentCommitBySegmentId(sc->GetSegmentId());
+            if (prev_sc) {
+                resource_->GetMappings().erase(prev_sc->GetID());
+                row_cnt -= prev_sc->GetRowCount();
+                size -= prev_sc->GetSize();
+            }
+        };
+
+        erase_sc(context_.new_segment_commit);
+        for (auto& sc : context_.new_segment_commits) {
+            erase_sc(sc);
+        }
+
         if (context_.stale_segments.size() > 0) {
             for (auto& stale_segment : context_.stale_segments) {
                 if (stale_segment->GetPartitionId() != prev_resource->GetPartitionId()) {
@@ -99,6 +139,8 @@ PartitionCommitOperation::DoExecute(Store& store) {
                 }
                 auto stale_segment_commit = GetStartedSS()->GetSegmentCommitBySegmentId(stale_segment->GetID());
                 resource_->GetMappings().erase(stale_segment_commit->GetID());
+                row_cnt -= stale_segment_commit->GetRowCount();
+                size -= stale_segment_commit->GetSize();
             }
         }
     } else {
@@ -113,21 +155,19 @@ PartitionCommitOperation::DoExecute(Store& store) {
 
     if (context_.new_segment_commit) {
         resource_->GetMappings().insert(context_.new_segment_commit->GetID());
+        row_cnt += context_.new_segment_commit->GetRowCount();
+        size += context_.new_segment_commit->GetSize();
+    } else if (context_.new_segment_commits.size() > 0) {
+        for (auto& sc : context_.new_segment_commits) {
+            resource_->GetMappings().insert(sc->GetID());
+            row_cnt += sc->GetRowCount();
+            size += sc->GetSize();
+        }
     }
-    AddStep(*resource_, false);
+    resource_->SetRowCount(row_cnt);
+    resource_->SetSize(size);
+    AddStep(*resource_, nullptr, false);
     return Status::OK();
-}
-
-SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
-    : BaseT(context, prev_ss) {
-}
-
-SegmentCommit::Ptr
-SegmentCommitOperation::GetPrevResource() const {
-    if (context_.new_segment_files.size() > 0) {
-        return GetStartedSS()->GetSegmentCommitBySegmentId(context_.new_segment_files[0]->GetSegmentId());
-    }
-    return nullptr;
 }
 
 SegmentOperation::SegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss) : BaseT(context, prev_ss) {
@@ -144,7 +184,7 @@ SegmentOperation::PreCheck() {
 }
 
 Status
-SegmentOperation::DoExecute(Store& store) {
+SegmentOperation::DoExecute(StorePtr store) {
     if (!context_.prev_partition) {
         std::stringstream emsg;
         emsg << GetRepr() << ". prev_partition should be specified in context";
@@ -153,21 +193,38 @@ SegmentOperation::DoExecute(Store& store) {
     auto prev_num = GetStartedSS()->GetMaxSegmentNumByPartition(context_.prev_partition->GetID());
     resource_ = std::make_shared<Segment>(context_.prev_partition->GetCollectionId(), context_.prev_partition->GetID(),
                                           prev_num + 1);
-    AddStep(*resource_, false);
+    AddStep(*resource_, nullptr, false);
     return Status::OK();
 }
 
-Status
-SegmentCommitOperation::DoExecute(Store& store) {
-    auto prev_resource = GetPrevResource();
+SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+}
 
+SegmentCommit::Ptr
+SegmentCommitOperation::GetPrevResource() const {
+    if (context_.new_segment_files.size() > 0) {
+        return GetStartedSS()->GetSegmentCommitBySegmentId(context_.new_segment_files[0]->GetSegmentId());
+    } else if (context_.stale_segment_files.size() != 0) {
+        return GetStartedSS()->GetSegmentCommitBySegmentId(context_.stale_segment_files[0]->GetSegmentId());
+    }
+    return nullptr;
+}
+
+Status
+SegmentCommitOperation::DoExecute(StorePtr store) {
+    auto prev_resource = GetPrevResource();
+    auto size = 0;
     if (prev_resource) {
         resource_ = std::make_shared<SegmentCommit>(*prev_resource);
         resource_->SetID(0);
         resource_->ResetStatus();
-        if (context_.stale_segment_file) {
-            resource_->GetMappings().erase(context_.stale_segment_file->GetID());
+        size = resource_->GetSize();
+        for (auto& stale_file : context_.stale_segment_files) {
+            resource_->GetMappings().erase(stale_file->GetID());
+            size -= stale_file->GetSize();
         }
+
     } else {
         resource_ = std::make_shared<SegmentCommit>(GetStartedSS()->GetLatestSchemaCommitId(),
                                                     context_.new_segment_files[0]->GetPartitionId(),
@@ -175,18 +232,102 @@ SegmentCommitOperation::DoExecute(Store& store) {
     }
     for (auto& new_segment_file : context_.new_segment_files) {
         resource_->GetMappings().insert(new_segment_file->GetID());
+        size += new_segment_file->GetSize();
     }
-    AddStep(*resource_, false);
+    resource_->SetSize(size);
+    AddStep(*resource_, nullptr, false);
     return Status::OK();
 }
 
 Status
 SegmentCommitOperation::PreCheck() {
-    if (context_.new_segment_files.size() == 0) {
+    if (context_.stale_segment_files.size() == 0 && context_.new_segment_files.size() == 0) {
         std::stringstream emsg;
         emsg << GetRepr() << ". new_segment_files should not be empty in context";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    } else if (context_.stale_segment_files.size() > 0 && context_.new_segment_files.size() > 0) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". new_segment_files should be empty in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
+    return Status::OK();
+}
+
+FieldCommitOperation::FieldCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+}
+
+FieldCommit::Ptr
+FieldCommitOperation::GetPrevResource() const {
+    auto get_resource = [&](FieldElementPtr fe) -> FieldCommitPtr {
+        auto& field_commits = GetStartedSS()->GetResources<FieldCommit>();
+        for (auto& kv : field_commits) {
+            if (kv.second->GetFieldId() == fe->GetFieldId()) {
+                return kv.second.Get();
+            }
+        }
+        return nullptr;
+    };
+
+    if (context_.new_field_elements.size() > 0) {
+        return get_resource(context_.new_field_elements[0]);
+    } else if (context_.stale_field_elements.size() > 0) {
+        return get_resource(context_.stale_field_elements[0]);
+    }
+    return nullptr;
+}
+
+Status
+FieldCommitOperation::DoExecute(StorePtr store) {
+    auto prev_resource = GetPrevResource();
+
+    if (prev_resource) {
+        resource_ = std::make_shared<FieldCommit>(*prev_resource);
+        resource_->SetID(0);
+        resource_->ResetStatus();
+        for (auto& fe : context_.stale_field_elements) {
+            resource_->GetMappings().erase(fe->GetID());
+        }
+    } else {
+        // TODO
+    }
+
+    for (auto& fe : context_.new_field_elements) {
+        resource_->GetMappings().insert(fe->GetID());
+    }
+
+    AddStep(*resource_, nullptr, false);
+    return Status::OK();
+}
+
+SchemaCommitOperation::SchemaCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+}
+
+SchemaCommit::Ptr
+SchemaCommitOperation::GetPrevResource() const {
+    return GetStartedSS()->GetSchemaCommit();
+}
+
+Status
+SchemaCommitOperation::DoExecute(StorePtr store) {
+    auto prev_resource = GetPrevResource();
+    if (!prev_resource) {
+        return Status(SS_INVALID_CONTEX_ERROR, "Cannot get schema commit");
+    }
+
+    resource_ = std::make_shared<SchemaCommit>(*prev_resource);
+    resource_->SetID(0);
+    resource_->ResetStatus();
+    for (auto& fc : context_.stale_field_commits) {
+        resource_->GetMappings().erase(fc->GetID());
+    }
+
+    for (auto& fc : context_.new_field_commits) {
+        resource_->GetMappings().insert(fc->GetID());
+    }
+
+    AddStep(*resource_, nullptr, false);
     return Status::OK();
 }
 
@@ -195,11 +336,13 @@ SegmentFileOperation::SegmentFileOperation(const SegmentFileContext& sc, ScopedS
 }
 
 Status
-SegmentFileOperation::DoExecute(Store& store) {
-    auto field_element_id = GetStartedSS()->GetFieldElementId(context_.field_name, context_.field_element_name);
-    resource_ = std::make_shared<SegmentFile>(context_.collection_id, context_.partition_id, context_.segment_id,
-                                              field_element_id);
-    AddStep(*resource_, false);
+SegmentFileOperation::DoExecute(StorePtr store) {
+    FieldElementPtr fe;
+    STATUS_CHECK(GetStartedSS()->GetFieldElement(context_.field_name, context_.field_element_name, fe));
+    resource_ =
+        std::make_shared<SegmentFile>(context_.collection_id, context_.partition_id, context_.segment_id, fe->GetID());
+    //    auto seg_ctx_p = ResourceContextBuilder<SegmentFile>().SetResource(resource_).SetOp(oAdd).CreatePtr();
+    AddStep(*resource_, nullptr, false);
     return Status::OK();
 }
 

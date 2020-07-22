@@ -93,8 +93,8 @@ CreateHybridCollectionRequest::OnExecute() {
             if (!field_params_.at(field_name).empty()) {
                 auto field_param = field_params_.at(field_name);
                 schema.field_params_ = field_param;
-                if (field_type.second == engine::meta::hybrid::DataType::FLOAT_VECTOR ||
-                    field_type.second == engine::meta::hybrid::DataType::BINARY_VECTOR) {
+                if (field_type.second == engine::meta::hybrid::DataType::VECTOR_FLOAT ||
+                    field_type.second == engine::meta::hybrid::DataType::VECTOR_BINARY) {
                     vector_param = milvus::json::parse(field_param);
                     if (vector_param.contains("dimension")) {
                         dimension = vector_param["dimension"].get<uint16_t>();

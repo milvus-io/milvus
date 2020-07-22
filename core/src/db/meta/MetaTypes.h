@@ -17,11 +17,71 @@
 #include <vector>
 
 #include "db/Constants.h"
-#include "db/engine/ExecutionEngine.h"
+#include "knowhere/index/IndexType.h"
 #include "src/version.h"
 
 namespace milvus {
 namespace engine {
+
+// TODO(linxj): replace with VecIndex::IndexType
+enum class EngineType {
+    INVALID = 0,
+    FAISS_IDMAP = 1,
+    FAISS_IVFFLAT = 2,
+    FAISS_IVFSQ8 = 3,
+    NSG_MIX = 4,
+    FAISS_IVFSQ8H = 5,
+    FAISS_PQ = 6,
+#ifdef MILVUS_SUPPORT_SPTAG
+    SPTAG_KDT = 7,
+    SPTAG_BKT = 8,
+#endif
+    FAISS_BIN_IDMAP = 9,
+    FAISS_BIN_IVFFLAT = 10,
+    HNSW = 11,
+    ANNOY = 12,
+    FAISS_IVFSQ8NR = 13,
+    HNSW_SQ8NM = 14,
+    MAX_VALUE = HNSW_SQ8NM,
+};
+
+static std::map<std::string, EngineType> s_map_engine_type = {
+    {knowhere::IndexEnum::INDEX_FAISS_IDMAP, EngineType::FAISS_IDMAP},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, EngineType::FAISS_IVFFLAT},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFPQ, EngineType::FAISS_PQ},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, EngineType::FAISS_IVFSQ8},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, EngineType::FAISS_IVFSQ8NR},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, EngineType::FAISS_IVFSQ8H},
+    {knowhere::IndexEnum::INDEX_NSG, EngineType::NSG_MIX},
+#ifdef MILVUS_SUPPORT_SPTAG
+    {knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, EngineType::SPTAG_KDT},
+    {knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, EngineType::SPTAG_BKT},
+#endif
+    {knowhere::IndexEnum::INDEX_HNSW, EngineType::HNSW},
+    {knowhere::IndexEnum::INDEX_HNSW_SQ8NM, EngineType::HNSW_SQ8NM},
+    {knowhere::IndexEnum::INDEX_ANNOY, EngineType::ANNOY}};
+
+enum class MetricType {
+    L2 = 1,              // Euclidean Distance
+    IP = 2,              // Cosine Similarity
+    HAMMING = 3,         // Hamming Distance
+    JACCARD = 4,         // Jaccard Distance
+    TANIMOTO = 5,        // Tanimoto Distance
+    SUBSTRUCTURE = 6,    // Substructure Distance
+    SUPERSTRUCTURE = 7,  // Superstructure Distance
+    MAX_VALUE = SUPERSTRUCTURE
+};
+
+static std::map<std::string, MetricType> s_map_metric_type = {
+    {"L2", MetricType::L2},
+    {"IP", MetricType::IP},
+    {"HAMMING", MetricType::HAMMING},
+    {"JACCARD", MetricType::JACCARD},
+    {"TANIMOTO", MetricType::TANIMOTO},
+    {"SUBSTRUCTURE", MetricType::SUBSTRUCTURE},
+    {"SUPERSTRUCTURE", MetricType::SUPERSTRUCTURE},
+};
+
 namespace meta {
 
 constexpr int32_t DEFAULT_ENGINE_TYPE = (int)EngineType::FAISS_IDMAP;
@@ -101,22 +161,24 @@ using Table2FileRef = std::map<std::string, File2RefCount>;
 
 namespace hybrid {
 
-enum class DataType {
-    INT8 = 1,
-    INT16 = 2,
-    INT32 = 3,
-    INT64 = 4,
+enum DataType {
+    NONE = 0,
+    BOOL = 1,
+    INT8 = 2,
+    INT16 = 3,
+    INT32 = 4,
+    INT64 = 5,
+
+    FLOAT = 10,
+    DOUBLE = 11,
 
     STRING = 20,
 
-    BOOL = 30,
+    UID = 30,
 
-    FLOAT = 40,
-    DOUBLE = 41,
-
-    FLOAT_VECTOR = 100,
-    BINARY_VECTOR = 101,
-    UNKNOWN = 9999,
+    VECTOR_BINARY = 100,
+    VECTOR_FLOAT = 101,
+    VECTOR = 200,
 };
 
 struct VectorFieldSchema {
@@ -134,23 +196,6 @@ struct VectorFieldsSchema {
 using VectorFieldSchemaPtr = std::shared_ptr<VectorFieldSchema>;
 
 struct FieldSchema {
-    typedef enum {
-        INT8 = 1,
-        INT16 = 2,
-        INT32 = 3,
-        INT64 = 4,
-
-        STRING = 20,
-
-        BOOL = 30,
-
-        FLOAT = 40,
-        DOUBLE = 41,
-
-        VECTOR = 100,
-        UNKNOWN = 9999,
-    } FIELD_TYPE;
-
     // TODO(yukun): need field_id?
     std::string collection_id_;
     std::string field_name_;

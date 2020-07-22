@@ -31,12 +31,18 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/attr db_attr_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/merge db_merge_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/snapshot db_snapshot_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/search search_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/query query_files)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta/backend db_meta_backend_files)
+set(db_meta_files
+        ${db_meta_main_files}
+        ${db_meta_backend_files}
+        )
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -121,6 +127,7 @@ set(storage_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/snapshot codecs_snapshot_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
 

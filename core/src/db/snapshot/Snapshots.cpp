@@ -11,10 +11,16 @@
 
 #include "db/snapshot/Snapshots.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/EventExecutor.h"
+#include "db/snapshot/InActiveResourcesGCEvent.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
+
+/* Status */
+/* Snapshots::DropAll() { */
+/* } */
 
 Status
 Snapshots::DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn) {
@@ -76,7 +82,7 @@ Snapshots::DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_
 }
 
 Status
-Snapshots::LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) {
+Snapshots::LoadSnapshot(StorePtr store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) {
     SnapshotHolderPtr holder;
     auto status = LoadHolder(store, collection_id, holder);
     if (!status.ok())
@@ -124,7 +130,7 @@ Snapshots::GetCollectionNames(std::vector<std::string>& names) const {
 }
 
 Status
-Snapshots::LoadNoLock(Store& store, ID_TYPE collection_id, SnapshotHolderPtr& holder) {
+Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& holder) {
     auto op = std::make_shared<GetSnapshotIDsOperation>(collection_id, false);
     /* op->Push(); */
     (*op)(store);
@@ -137,23 +143,24 @@ Snapshots::LoadNoLock(Store& store, ID_TYPE collection_id, SnapshotHolderPtr& ho
     holder = std::make_shared<SnapshotHolder>(collection_id,
                                               std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
     for (auto c_c_id : collection_commit_ids) {
-        holder->Add(c_c_id);
+        holder->Add(store, c_c_id);
     }
     return Status::OK();
 }
 
-void
-Snapshots::Init() {
+Status
+Snapshots::Init(StorePtr store) {
+    auto event = std::make_shared<InActiveResourcesGCEvent>();
+    EventExecutor::GetInstance().Submit(event);
+    STATUS_CHECK(event->WaitToFinish());
     auto op = std::make_shared<GetCollectionIDsOperation>();
-    op->Push();
+    STATUS_CHECK((*op)(store));
     auto& collection_ids = op->GetIDs();
     SnapshotHolderPtr holder;
-    // TODO
-    for (auto collection_id : collection_ids) {
-        /* GetHolder(collection_id, holder); */
-        auto& store = Store::GetInstance();
-        LoadHolder(store, collection_id, holder);
+    for (auto& collection_id : collection_ids) {
+        STATUS_CHECK(LoadHolder(store, collection_id, holder));
     }
+    return Status::OK();
 }
 
 Status
@@ -181,7 +188,7 @@ Snapshots::GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder) co
 }
 
 Status
-Snapshots::LoadHolder(Store& store, const ID_TYPE& collection_id, SnapshotHolderPtr& holder) {
+Snapshots::LoadHolder(StorePtr store, const ID_TYPE& collection_id, SnapshotHolderPtr& holder) {
     Status status;
     {
         std::shared_lock<std::shared_timed_mutex> lock(mutex_);

@@ -18,9 +18,6 @@
 #include <utility>
 #include <vector>
 
-#include "hnswlib/hnswalg.h"
-#include "hnswlib/space_ip.h"
-#include "hnswlib/space_l2.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
@@ -89,7 +86,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         return;
     }
 
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR(dataset_ptr)
 
     metric_type_ = config[Metric::TYPE];
     if (metric_type_ == Metric::L2) {
@@ -113,7 +110,7 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
     auto k = config[meta::TOPK].get<int64_t>();
     auto search_k = config[IndexParams::search_k].get<int64_t>();
     auto all_num = rows * k;
@@ -160,6 +157,14 @@ IndexAnnoy::Dim() {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     return index_->get_dim();
+}
+
+void
+IndexAnnoy::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = index_->cal_size();
 }
 
 }  // namespace knowhere

@@ -22,23 +22,33 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-using EventPtr = std::shared_ptr<Event>;
+using EventPtr = std::shared_ptr<MetaEvent>;
 using ThreadPtr = std::shared_ptr<std::thread>;
 using EventQueue = BlockingQueue<EventPtr>;
 
 class EventExecutor {
  public:
-    EventExecutor() = default;
-    EventExecutor(const EventExecutor&) = delete;
-
     ~EventExecutor() {
         Stop();
     }
 
+    static void
+    Init(StorePtr store) {
+        auto& instance = GetInstanceImpl();
+        if (instance.initialized_) {
+            return;
+        }
+        instance.store_ = store;
+        instance.initialized_ = true;
+    }
+
     static EventExecutor&
     GetInstance() {
-        static EventExecutor inst;
-        return inst;
+        auto& instance = GetInstanceImpl();
+        if (!instance.initialized_) {
+            throw std::runtime_error("OperationExecutor should be init");
+        }
+        return instance;
     }
 
     Status
@@ -68,15 +78,25 @@ class EventExecutor {
     }
 
  private:
+    static EventExecutor&
+    GetInstanceImpl() {
+        static EventExecutor executor;
+        return executor;
+    }
+
     void
     ThreadMain() {
+        Status status;
         while (true) {
             EventPtr evt = queue_.Take();
             if (evt == nullptr) {
                 break;
             }
-            std::cout << std::this_thread::get_id() << " Dequeue Event " << std::endl;
-            evt->Process();
+            /* std::cout << std::this_thread::get_id() << " Dequeue Event " << std::endl; */
+            status = evt->Process(store_);
+            if (!status.ok()) {
+                std::cout << "EventExecutor Handle Event Error: " << status.ToString() << std::endl;
+            }
         }
     }
 
@@ -84,13 +104,17 @@ class EventExecutor {
     Enqueue(const EventPtr& evt) {
         queue_.Put(evt);
         if (evt != nullptr) {
-            std::cout << std::this_thread::get_id() << " Enqueue Event " << std::endl;
+            /* std::cout << std::this_thread::get_id() << " Enqueue Event " << std::endl; */
         }
     }
 
- private:
+    EventExecutor() = default;
+    EventExecutor(const EventExecutor&) = delete;
+
     ThreadPtr thread_ptr_ = nullptr;
     EventQueue queue_;
+    std::atomic_bool initialized_ = false;
+    StorePtr store_;
 };
 
 }  // namespace snapshot

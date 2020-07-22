@@ -18,6 +18,7 @@
 
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
+#include "segment/Segment.h"
 
 namespace milvus {
 namespace engine {
@@ -41,10 +42,14 @@ struct MXLogRecord {
     const IDNumber* ids;
     uint32_t data_size;
     const void* data;
-    std::vector<std::string> field_names;
-    std::unordered_map<std::string, uint64_t> attr_nbytes;
-    std::unordered_map<std::string, uint64_t> attr_data_size;
-    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
+    std::vector<std::string> field_names;  // will be removed
+    //    std::vector<uint32_t> attrs_size;
+    //    std::vector<const void* > attrs_data;
+    std::unordered_map<std::string, uint64_t> attr_nbytes;            // will be removed
+    std::unordered_map<std::string, uint64_t> attr_data_size;         // will be removed
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;  // will be removed
+
+    engine::DataChunkPtr data_chunk;  // for hybird data transfer
 };
 
 struct MXLogConfiguration {

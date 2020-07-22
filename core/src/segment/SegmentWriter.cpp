@@ -150,8 +150,8 @@ SegmentWriter::Serialize() {
 
 Status
 SegmentWriter::WriteVectors() {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetVectorsFormat()->write(fs_ptr_, segment_ptr_->vectors_ptr_);
     } catch (std::exception& e) {
@@ -166,8 +166,8 @@ SegmentWriter::WriteVectors() {
 
 Status
 SegmentWriter::WriteAttrs() {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetAttrsFormat()->write(fs_ptr_, segment_ptr_->attrs_ptr_);
     } catch (std::exception& e) {
@@ -186,8 +186,8 @@ SegmentWriter::WriteVectorIndex(const std::string& location) {
         return Status(SERVER_WRITE_ERROR, "Invalid parameter of WriteVectorIndex");
     }
 
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetVectorIndexFormat()->write(fs_ptr_, location, segment_ptr_->vector_index_ptr_);
     } catch (std::exception& e) {
@@ -202,8 +202,8 @@ SegmentWriter::WriteVectorIndex(const std::string& location) {
 
 Status
 SegmentWriter::WriteAttrsIndex() {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetAttrsIndexFormat()->write(fs_ptr_, segment_ptr_->attrs_index_ptr_);
     } catch (std::exception& e) {
@@ -218,8 +218,9 @@ SegmentWriter::WriteAttrsIndex() {
 
 Status
 SegmentWriter::WriteBloomFilter() {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
+
         fs_ptr_->operation_ptr_->CreateDirectory();
 
         TimeRecorder recorder("SegmentWriter::WriteBloomFilter");
@@ -250,8 +251,8 @@ SegmentWriter::WriteBloomFilter() {
 
 Status
 SegmentWriter::WriteDeletedDocs() {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         DeletedDocsPtr deleted_docs_ptr = std::make_shared<DeletedDocs>();
         default_codec.GetDeletedDocsFormat()->write(fs_ptr_, deleted_docs_ptr);
@@ -267,8 +268,8 @@ SegmentWriter::WriteDeletedDocs() {
 
 Status
 SegmentWriter::WriteDeletedDocs(const DeletedDocsPtr& deleted_docs) {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetDeletedDocsFormat()->write(fs_ptr_, deleted_docs);
     } catch (std::exception& e) {
@@ -283,8 +284,8 @@ SegmentWriter::WriteDeletedDocs(const DeletedDocsPtr& deleted_docs) {
 
 Status
 SegmentWriter::WriteBloomFilter(const IdBloomFilterPtr& id_bloom_filter_ptr) {
-    codec::DefaultCodec default_codec;
     try {
+        auto& default_codec = codec::DefaultCodec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetIdBloomFilterFormat()->write(fs_ptr_, id_bloom_filter_ptr);
     } catch (std::exception& e) {
@@ -387,6 +388,11 @@ SegmentWriter::Size() {
 size_t
 SegmentWriter::VectorCount() {
     return segment_ptr_->vectors_ptr_->GetCount();
+}
+
+void
+SegmentWriter::SetSegmentName(const std::string& name) {
+    segment_ptr_->vectors_ptr_->SetName(name);
 }
 
 }  // namespace segment

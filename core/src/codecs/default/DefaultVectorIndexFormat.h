@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <mutex>
 #include <string>
 
 #include "codecs/VectorIndexFormat.h"
@@ -30,7 +29,7 @@ class DefaultVectorIndexFormat : public VectorIndexFormat {
     DefaultVectorIndexFormat() = default;
 
     void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, ExternalData externalData,
          segment::VectorIndexPtr& vector_index) override;
 
     void
@@ -48,12 +47,8 @@ class DefaultVectorIndexFormat : public VectorIndexFormat {
 
  private:
     knowhere::VecIndexPtr
-    read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path);
-
- private:
-    std::mutex mutex_;
-
-    const std::string vector_index_extension_ = "";
+    read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path, const std::string& extern_key = "",
+                  const knowhere::BinaryPtr& extern_data = nullptr);
 };
 
 }  // namespace codec

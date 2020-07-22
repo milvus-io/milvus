@@ -584,9 +584,9 @@ class TestGetInvalid(object):
             res = connect.get_entity_by_id(collection_name, ids)
 
     @pytest.mark.level(2)
-    def test_get_entities_with_invalid_field_name(self, connect, get_field_name):
+    def test_get_entities_with_invalid_field_name(self, connect, collection, get_field_name):
         field_name = get_field_name
         ids = [1]
         fields = [field_name]
         with pytest.raises(Exception):
-            res = connect.get_entity_by_id(collection_name, ids, fields=fields)
+            res = connect.get_entity_by_id(collection, ids, fields=fields)

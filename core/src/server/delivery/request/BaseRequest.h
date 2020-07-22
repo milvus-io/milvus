@@ -225,14 +225,15 @@ class BaseRequest {
  protected:
     const std::shared_ptr<milvus::server::Context> context_;
 
-    mutable std::mutex finish_mtx_;
-    std::condition_variable finish_cond_;
-
     RequestType type_;
     std::string request_group_;
     bool async_;
-    bool done_;
     Status status_;
+
+ private:
+    mutable std::mutex finish_mtx_;
+    std::condition_variable finish_cond_;
+    bool done_;
 
  public:
     const std::shared_ptr<milvus::server::Context>&

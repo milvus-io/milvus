@@ -5,7 +5,9 @@ import threading
 import logging
 from multiprocessing import Pool, Process
 import pytest
-from milvus import IndexType, MetricType
+import numpy as np
+
+from milvus import DataType
 from utils import *
 
 dim = 128
@@ -366,11 +368,6 @@ class TestSearchBase:
     # 
     @pytest.mark.level(2)
     def test_search_ip_flat(self, connect, ip_collection, get_simple_index, get_top_k, get_nq):
-        '''
-        target: test basic search fuction, all the search params is corrent, test all index params, and build
-        method: search with the given vectors, check the result
-        expected: the length of the result is top_k
-        '''
         '''
         target: test basic search fuction, all the search params is corrent, change top-k value
         method: search with the given vectors, check the result

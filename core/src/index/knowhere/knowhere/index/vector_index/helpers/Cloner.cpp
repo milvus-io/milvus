@@ -19,6 +19,8 @@
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
+#include "knowhere/index/vector_offset_index/IndexIVFSQNR_NM.h"
+#include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 
 namespace milvus {
 namespace knowhere {
@@ -29,7 +31,6 @@ CopyIndexData(const VecIndexPtr& dst_index, const VecIndexPtr& src_index) {
     /* do real copy */
     auto uids = src_index->GetUids();
     dst_index->SetUids(uids);
-
     dst_index->SetBlacklist(src_index->GetBlacklist());
     dst_index->SetIndexSize(src_index->IndexSize());
 }
@@ -50,9 +51,13 @@ CopyCpuToGpu(const VecIndexPtr& index, const int64_t device_id, const Config& co
     VecIndexPtr result;
     if (auto device_index = std::dynamic_pointer_cast<IVFSQHybrid>(index)) {
         result = device_index->CopyCpuToGpu(device_id, config);
+    } else if (auto cpu_index = std::dynamic_pointer_cast<IVF_NM>(index)) {
+        result = cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto device_index = std::dynamic_pointer_cast<GPUIndex>(index)) {
         result = device_index->CopyGpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IVFSQ>(index)) {
+        result = cpu_index->CopyCpuToGpu(device_id, config);
+    } else if (auto cpu_index = std::dynamic_pointer_cast<IVFSQNR_NM>(index)) {
         result = cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IVFPQ>(index)) {
         result = cpu_index->CopyCpuToGpu(device_id, config);

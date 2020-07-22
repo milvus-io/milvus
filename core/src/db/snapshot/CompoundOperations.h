@@ -44,9 +44,11 @@ class CompoundBaseOperation : public Operations {
     Status
     PreCheck() override {
         // TODO
-        /* if (GetContextLsn() <= GetStartedSS()->GetMaxLsn()) { */
-        /*     return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation"); */
-        /* } */
+        if (GetContextLsn() == 0) {
+            SetContextLsn(GetStartedSS()->GetMaxLsn());
+        } else if (GetContextLsn() <= GetStartedSS()->GetMaxLsn()) {
+            return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation");
+        }
         return Status::OK();
     }
 
@@ -56,22 +58,66 @@ class CompoundBaseOperation : public Operations {
     }
 };
 
-class BuildOperation : public CompoundBaseOperation<BuildOperation> {
+class AddSegmentFileOperation : public CompoundBaseOperation<AddSegmentFileOperation> {
  public:
-    using BaseT = CompoundBaseOperation<BuildOperation>;
+    using BaseT = CompoundBaseOperation<AddSegmentFileOperation>;
     static constexpr const char* Name = "B";
 
-    BuildOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+    AddSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
 
+    Status
+    CommitRowCountDelta(SIZE_TYPE delta, bool sub = true);
+
  protected:
     Status
     CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const;
+
+    SIZE_TYPE delta_ = 0;
+    bool sub_;
+};
+
+class AddFieldElementOperation : public CompoundBaseOperation<AddFieldElementOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<AddFieldElementOperation>;
+    static constexpr const char* Name = "AFE";
+
+    AddFieldElementOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    Status
+    PreCheck() override;
+
+    Status DoExecute(StorePtr) override;
+};
+
+class DropIndexOperation : public CompoundBaseOperation<DropIndexOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<DropIndexOperation>;
+    static constexpr const char* Name = "DI";
+
+    DropIndexOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    Status
+    PreCheck() override;
+
+    Status DoExecute(StorePtr) override;
+};
+
+class DropAllIndexOperation : public CompoundBaseOperation<DropAllIndexOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<DropAllIndexOperation>;
+    static constexpr const char* Name = "DAI";
+
+    DropAllIndexOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    Status
+    PreCheck() override;
+
+    Status DoExecute(StorePtr) override;
 };
 
 class NewSegmentOperation : public CompoundBaseOperation<NewSegmentOperation> {
@@ -81,14 +127,19 @@ class NewSegmentOperation : public CompoundBaseOperation<NewSegmentOperation> {
 
     NewSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     CommitNewSegment(SegmentPtr& created);
 
     Status
     CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
+
+    Status
+    CommitRowCount(SIZE_TYPE row_cnt);
+
+ protected:
+    SIZE_TYPE row_cnt_ = 0;
 };
 
 class MergeOperation : public CompoundBaseOperation<MergeOperation> {
@@ -98,8 +149,7 @@ class MergeOperation : public CompoundBaseOperation<MergeOperation> {
 
     MergeOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     CommitNewSegment(SegmentPtr&);
@@ -117,8 +167,7 @@ class CreateCollectionOperation : public CompoundBaseOperation<CreateCollectionO
 
     explicit CreateCollectionOperation(const CreateCollectionContext& context);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     GetSnapshot(ScopedSnapshotT& ss) const override;
@@ -148,8 +197,7 @@ class CreatePartitionOperation : public CompoundBaseOperation<CreatePartitionOpe
     Status
     CommitNewPartition(const PartitionContext& context, PartitionPtr& partition);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -161,8 +209,7 @@ class DropPartitionOperation : public CompoundBaseOperation<DropPartitionOperati
     static constexpr const char* Name = "DP";
     DropPartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     const LSN_TYPE&
     GetContextLsn() const override {
@@ -182,8 +229,7 @@ class GetSnapshotIDsOperation : public Operations {
 
     explicit GetSnapshotIDsOperation(ID_TYPE collection_id, bool reversed = true);
 
-    Status
-    DoExecute(Store& store) override;
+    Status DoExecute(StorePtr) override;
 
     const IDS_TYPE&
     GetIDs() const;
@@ -200,8 +246,7 @@ class GetCollectionIDsOperation : public Operations {
 
     explicit GetCollectionIDsOperation(bool reversed = true);
 
-    Status
-    DoExecute(Store& store) override;
+    Status DoExecute(StorePtr) override;
 
     const IDS_TYPE&
     GetIDs() const;
@@ -220,8 +265,7 @@ class DropCollectionOperation : public CompoundBaseOperation<DropCollectionOpera
         : BaseT(context, prev_ss) {
     }
 
-    Status
-    DoExecute(Store& store) override;
+    Status DoExecute(StorePtr) override;
 
  private:
     ID_TYPE collection_id_;

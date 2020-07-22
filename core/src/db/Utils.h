@@ -20,10 +20,18 @@
 
 namespace milvus {
 namespace engine {
+namespace snapshot {
+class Segment;
+class Partition;
+class Collection;
+}  // namespace snapshot
 namespace utils {
 
 int64_t
 GetMicroSecTimeStamp();
+
+std::string
+ConstructCollectionRootPath(const std::string& root_path);
 
 Status
 CreateCollectionPath(const DBMetaOptions& options, const std::string& collection_id);
@@ -81,7 +89,6 @@ ExitOnWriteError(Status& status);
 
 void
 EraseFromCache(const std::string& item_key);
-
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

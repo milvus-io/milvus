@@ -14,7 +14,9 @@
 #include "db/meta/FilesHolder.h"
 #include "db/snapshot/Snapshot.h"
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 
 namespace milvus {
@@ -33,6 +35,157 @@ class SnapshotVisitor {
     snapshot::ScopedSnapshotT ss_;
     Status status_;
 };
+
+class SegmentFieldElementVisitor {
+ public:
+    using Ptr = std::shared_ptr<SegmentFieldElementVisitor>;
+
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id, snapshot::ID_TYPE field_element_id);
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, const snapshot::FieldElementPtr& field_element,
+          const snapshot::SegmentPtr& segment, const snapshot::SegmentFilePtr& segment_file);
+
+    SegmentFieldElementVisitor() = default;
+
+    void
+    SetFieldElement(snapshot::FieldElementPtr field_element) {
+        field_element_ = field_element;
+    }
+
+    void
+    SetFile(snapshot::SegmentFilePtr file) {
+        file_ = file;
+    }
+
+    const snapshot::FieldElementPtr
+    GetElement() const {
+        return field_element_;
+    }
+
+    const snapshot::SegmentFilePtr
+    GetFile() const {
+        return file_;
+    }
+
+ protected:
+    snapshot::FieldElementPtr field_element_;
+    snapshot::SegmentFilePtr file_;
+};
+using SegmentFieldElementVisitorPtr = std::shared_ptr<SegmentFieldElementVisitor>;
+
+class SegmentFieldVisitor {
+ public:
+    using Ptr = std::shared_ptr<SegmentFieldVisitor>;
+    using ElementT = typename SegmentFieldElementVisitor::Ptr;
+    using ElementsMapT = std::map<snapshot::ID_TYPE, ElementT>;
+
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id, snapshot::ID_TYPE field_id);
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, const snapshot::FieldPtr& field, const snapshot::SegmentPtr& segment,
+          const snapshot::SegmentFile::VecT& segment_files);
+
+    SegmentFieldVisitor() = default;
+
+    const ElementsMapT&
+    GetElementVistors() const {
+        return elements_map_;
+    }
+    const snapshot::FieldPtr&
+    GetField() const {
+        return field_;
+    }
+
+    void
+    SetField(snapshot::FieldPtr field) {
+        field_ = field;
+    }
+
+    void
+    InsertElement(ElementT element) {
+        elements_map_[element->GetElement()->GetID()] = element;
+    }
+
+    const ElementT
+    GetElementVisitor(const FieldElementType elem_type) const {
+        for (auto& kv : elements_map_) {
+            auto& ev = kv.second;
+            if (ev->GetElement()->GetFtype() == elem_type) {
+                return ev;
+            }
+        }
+        return nullptr;
+    }
+
+ protected:
+    ElementsMapT elements_map_;
+    snapshot::FieldPtr field_;
+};
+using SegmentFieldVisitorPtr = SegmentFieldVisitor::Ptr;
+
+class SegmentVisitor {
+ public:
+    using Ptr = std::shared_ptr<SegmentVisitor>;
+    using FieldVisitorT = typename SegmentFieldVisitor::Ptr;
+    using IdMapT = std::map<snapshot::ID_TYPE, FieldVisitorT>;
+    using NameMapT = std::map<std::string, FieldVisitorT>;
+
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id);
+    static Ptr
+    Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& segment,
+          const snapshot::SegmentFile::VecT& segment_files);
+
+    SegmentVisitor() = default;
+
+    const IdMapT&
+    GetFieldVisitors() const {
+        return id_map_;
+    }
+
+    FieldVisitorT
+    GetFieldVisitor(snapshot::ID_TYPE field_id) const {
+        auto it = id_map_.find(field_id);
+        if (it == id_map_.end()) {
+            return nullptr;
+        }
+        return it->second;
+    }
+
+    FieldVisitorT
+    GetFieldVisitor(const std::string& field_name) const {
+        auto it = name_map_.find(field_name);
+        if (it == name_map_.end()) {
+            return nullptr;
+        }
+        return it->second;
+    }
+
+    const snapshot::SegmentPtr&
+    GetSegment() const {
+        return segment_;
+    }
+
+    void
+    SetSegment(snapshot::SegmentPtr segment) {
+        segment_ = segment;
+    }
+    void
+    InsertField(FieldVisitorT field_visitor) {
+        id_map_[field_visitor->GetField()->GetID()] = field_visitor;
+        name_map_[field_visitor->GetField()->GetName()] = field_visitor;
+    }
+
+    std::string
+    ToString() const;
+
+ protected:
+    snapshot::SegmentPtr segment_;
+    IdMapT id_map_;
+    NameMapT name_map_;
+};
+using SegmentVisitorPtr = SegmentVisitor::Ptr;
 
 }  // namespace engine
 }  // namespace milvus

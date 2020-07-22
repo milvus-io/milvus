@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <faiss/IndexFlat.h>
+#include <faiss/IndexScalarQuantizer.h>
 #include <faiss/gpu/GpuCloner.h>
 #include <faiss/index_factory.h>
 
@@ -26,14 +28,19 @@ namespace knowhere {
 
 void
 GPUIVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
     gpu_id_ = config[knowhere::meta::DEVICEID];
 
-    std::stringstream index_type;
-    index_type << "IVF" << config[IndexParams::nlist] << ","
-               << "SQ" << config[IndexParams::nbits];
+    // std::stringstream index_type;
+    // index_type << "IVF" << config[IndexParams::nlist] << ","
+    //            << "SQ" << config[IndexParams::nbits];
+    // faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    // auto build_index = faiss::index_factory(dim, index_type.str().c_str(), metric_type);
+
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), metric_type);
+    faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
+    auto build_index = new faiss::IndexIVFScalarQuantizer(
+        coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), faiss::QuantizerType::QT_8bit, metric_type);
 
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (gpu_res != nullptr) {

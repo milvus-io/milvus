@@ -218,7 +218,7 @@ TEST_F(DBTest, HYBRID_DB_TEST) {
     //    stat = db_->CreateIndex(COLLECTION_NAME, index);
     ASSERT_TRUE(stat.ok());
 }
-
+/*
 TEST_F(DBTest, HYBRID_SEARCH_TEST) {
     milvus::engine::meta::CollectionSchema collection_info;
     milvus::engine::meta::hybrid::FieldsSchema fields_info;

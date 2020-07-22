@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -32,6 +33,9 @@ namespace engine {
 typedef segment::doc_id_t IDNumber;
 typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
+
+typedef faiss::Index::distance_t VectorDistance;
+typedef std::vector<VectorDistance> VectorDistances;
 
 typedef std::vector<faiss::Index::idx_t> ResultIds;
 typedef std::vector<faiss::Index::distance_t> ResultDistances;
@@ -72,9 +76,28 @@ struct QueryResult {
     std::vector<engine::VectorsData> vectors_;
     std::vector<engine::AttrsData> attrs_;
 };
+using QueryResultPtr = std::shared_ptr<QueryResult>;
 
 using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;
+
+extern const char* DEFAULT_UID_NAME;
+
+extern const char* DEFAULT_RAW_DATA_NAME;
+extern const char* DEFAULT_BLOOM_FILTER_NAME;
+extern const char* DEFAULT_DELETED_DOCS_NAME;
+extern const char* DEFAULT_INDEX_NAME;
+
+using FieldType = meta::hybrid::DataType;
+
+enum FieldElementType {
+    FET_NONE = 0,
+    FET_RAW = 1,
+    FET_BLOOM_FILTER = 2,
+    FET_DELETED_DOCS = 3,
+    FET_INDEX = 4,
+    FET_COMPRESS_SQ8 = 5,
+};
 
 }  // namespace engine
 }  // namespace milvus

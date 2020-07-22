@@ -1,5 +1,5 @@
 #!/bin/bash
-
+#
 BUILD_OUTPUT_DIR="cmake_build"
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="OFF"
@@ -139,7 +139,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   fi
   echo "cpplint check passed!"
 
-  # clang-format check
+  clang-format check
   make check-clang-format
   if [ $? -ne 0 ]; then
     echo "ERROR! clang-format check failed"
@@ -157,5 +157,5 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 else
 
   # compile and build
-  make -j 8 install || exit 1
+    make -j 8 install || exit 1
 fi

@@ -24,7 +24,8 @@ namespace codec {
 
 class DefaultCodec : public Codec {
  public:
-    DefaultCodec();
+    static DefaultCodec&
+    instance();
 
     VectorsFormatPtr
     GetVectorsFormat() override;
@@ -44,6 +45,12 @@ class DefaultCodec : public Codec {
     IdBloomFilterFormatPtr
     GetIdBloomFilterFormat() override;
 
+    VectorCompressFormatPtr
+    GetVectorCompressFormat() override;
+
+ private:
+    DefaultCodec();
+
  private:
     VectorsFormatPtr vectors_format_ptr_;
     AttrsFormatPtr attrs_format_ptr_;
@@ -51,6 +58,7 @@ class DefaultCodec : public Codec {
     AttrsIndexFormatPtr attrs_index_format_ptr_;
     DeletedDocsFormatPtr deleted_docs_format_ptr_;
     IdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
+    VectorCompressFormatPtr vector_compress_format_ptr_;
 };
 
 }  // namespace codec

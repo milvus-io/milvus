@@ -78,6 +78,8 @@ WebErrorMap(ErrorCode code) {
     }
 }
 
+using FloatJson = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t, float>;
+
 /////////////////////////////////// Private methods ///////////////////////////////////////
 void
 WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg) {
@@ -1473,7 +1475,7 @@ WebRequestHandler::CreatePartition(const OString& collection_name, const Partiti
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryParams& query_params, const OString& body,
+WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
                                   PartitionListDto::ObjectWrapper& partition_list_dto) {
     int64_t offset = 0;
     auto status = ParseQueryInteger(query_params, "offset", offset);
@@ -1490,35 +1492,6 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
     if (offset < 0 || page_size < 0) {
         ASSIGN_RETURN_STATUS_DTO(
             Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
-    }
-
-    if (nullptr != body.get() && body->getSize() > 0) {
-        auto body_json = nlohmann::json::parse(body->c_str());
-        if (!body_json.contains("filter")) {
-            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'filter\' is required.")
-        }
-        auto filter_json = body_json["filter"];
-        if (filter_json.contains("partition_tag")) {
-            std::string tag = filter_json["partition_tag"];
-            bool exists = false;
-            status = request_handler_.HasPartition(context_ptr_, collection_name->std_str(), tag, exists);
-            if (!status.ok()) {
-                ASSIGN_RETURN_STATUS_DTO(status)
-            }
-            auto partition_dto = PartitionFieldsDto::createShared();
-            if (exists) {
-                partition_list_dto->count = 1;
-                partition_dto->partition_tag = tag.c_str();
-            } else {
-                partition_list_dto->count = 0;
-            }
-            partition_list_dto->partitions = partition_list_dto->partitions->createShared();
-            partition_list_dto->partitions->pushBack(partition_dto);
-
-            ASSIGN_RETURN_STATUS_DTO(status)
-        } else {
-            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Unknown field.")
-        }
     }
 
     bool all_required = false;
@@ -1819,7 +1792,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
                 attr_values.emplace_back(attr_value);
                 break;
             }
-            case engine::meta::hybrid::DataType::FLOAT_VECTOR: {
+            case engine::meta::hybrid::DataType::VECTOR_FLOAT: {
                 bool bin_flag;
                 status = IsBinaryCollection(collection_name->c_str(), bin_flag);
                 if (!status.ok()) {
@@ -1923,8 +1896,9 @@ WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams&
             ASSIGN_RETURN_STATUS_DTO(status)
         }
 
-        nlohmann::json json;
-        AddStatusToJson(json, status.code(), status.message());
+        FloatJson json;
+        json["code"] = (int64_t)status.code();
+        json["message"] = status.message();
         if (vectors_json.empty()) {
             json["vectors"] = std::vector<int64_t>();
         } else {

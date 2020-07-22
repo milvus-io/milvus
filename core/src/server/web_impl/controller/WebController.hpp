@@ -510,7 +510,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(ShowPartitions)
 
     ENDPOINT("GET", "/collections/{collection_name}/partitions", ShowPartitions, PATH(String, collection_name),
-             QUERIES(const QueryParams&, query_params), BODY_STRING(String, body)) {
+             QUERIES(const QueryParams&, query_params)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() +
                         "/partitions\'");
         tr.RecordSection("Received request.");
@@ -522,7 +522,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto handler = WebRequestHandler();
 
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.ShowPartitions(collection_name, query_params, body, partition_list_dto);
+        auto status_dto = handler.ShowPartitions(collection_name, query_params, partition_list_dto);
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_200, partition_list_dto);

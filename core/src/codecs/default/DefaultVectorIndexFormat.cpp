@@ -18,6 +18,7 @@
 #include <boost/filesystem.hpp>
 #include <memory>
 
+#include "codecs/default/DefaultCodec.h"
 #include "codecs/default/DefaultVectorIndexFormat.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/index/vector_index/VecIndex.h"
@@ -31,7 +32,8 @@ namespace milvus {
 namespace codec {
 
 knowhere::VecIndexPtr
-DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path) {
+DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, const std::string& path,
+                                        const std::string& extern_key, const knowhere::BinaryPtr& extern_data) {
     milvus::TimeRecorder recorder("read_index");
     knowhere::BinarySet load_data_list;
 
@@ -91,8 +93,15 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
     auto index =
         vec_index_factory.CreateVecIndex(knowhere::OldIndexTypeToStr(current_type), knowhere::IndexMode::MODE_CPU);
     if (index != nullptr) {
+        if (extern_data != nullptr) {
+            LOG_ENGINE_DEBUG_ << "load index with " << extern_key << " " << extern_data->size;
+            load_data_list.Append(extern_key, extern_data);
+            length += extern_data->size;
+        }
+
         index->Load(load_data_list);
-        index->SetIndexSize(length);
+        index->UpdateIndexSize();
+        LOG_ENGINE_DEBUG_ << "index file size " << length << " index size " << index->IndexSize();
     } else {
         LOG_ENGINE_ERROR_ << "Fail to create vector index: " << path;
     }
@@ -102,9 +111,7 @@ DefaultVectorIndexFormat::read_internal(const storage::FSHandlerPtr& fs_ptr, con
 
 void
 DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                               segment::VectorIndexPtr& vector_index) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
+                               ExternalData externalData, segment::VectorIndexPtr& vector_index) {
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
@@ -112,21 +119,48 @@ DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::s
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    knowhere::VecIndexPtr index = read_internal(fs_ptr, location);
+    knowhere::VecIndexPtr index = nullptr;
+    switch (externalData) {
+        case ExternalData_None: {
+            index = read_internal(fs_ptr, location);
+            break;
+        }
+        case ExternalData_RawData: {
+            auto& default_codec = codec::DefaultCodec::instance();
+            knowhere::BinaryPtr raw_data = nullptr;
+            default_codec.GetVectorsFormat()->read_vectors(fs_ptr, raw_data);
+
+            index = read_internal(fs_ptr, location, RAW_DATA, raw_data);
+            break;
+        }
+        case ExternalData_SQ8: {
+            auto& default_codec = codec::DefaultCodec::instance();
+            knowhere::BinaryPtr sq8_data = nullptr;
+            default_codec.GetVectorCompressFormat()->read(fs_ptr, location, sq8_data);
+
+            index = read_internal(fs_ptr, location, SQ8_DATA, sq8_data);
+            break;
+        }
+    }
+
     vector_index->SetVectorIndex(index);
 }
 
 void
 DefaultVectorIndexFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
                                 const segment::VectorIndexPtr& vector_index) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
     milvus::TimeRecorder recorder("write_index");
 
     knowhere::VecIndexPtr index = vector_index->GetVectorIndex();
 
     auto binaryset = index->Serialize(knowhere::Config());
     int32_t index_type = knowhere::StrToOldIndexType(index->index_type());
+
+    auto sq8_data = binaryset.Erase(SQ8_DATA);
+    if (sq8_data != nullptr) {
+        auto& default_codec = codec::DefaultCodec::instance();
+        default_codec.GetVectorCompressFormat()->write(fs_ptr, location, sq8_data);
+    }
 
     recorder.RecordSection("Start");
     if (!fs_ptr->writer_ptr_->open(location)) {

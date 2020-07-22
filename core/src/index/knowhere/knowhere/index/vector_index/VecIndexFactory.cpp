@@ -16,12 +16,15 @@
 #include "knowhere/index/vector_index/IndexAnnoy.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 #include "knowhere/index/vector_index/IndexBinaryIVF.h"
-#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexNSG.h"
+#include "knowhere/index/vector_offset_index/IndexHNSW_NM.h"
+#include "knowhere/index/vector_offset_index/IndexHNSW_SQ8NM.h"
+#include "knowhere/index/vector_offset_index/IndexIVFSQNR_NM.h"
+#include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
+#include "knowhere/index/vector_offset_index/IndexNSG_NM.h"
 #ifdef MILVUS_SUPPORT_SPTAG
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #endif
@@ -34,6 +37,8 @@
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
+#include "knowhere/index/vector_offset_index/gpu/IndexGPUIVFSQNR_NM.h"
+#include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
 #endif
 
 namespace milvus {
@@ -47,10 +52,10 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
     } else if (type == IndexEnum::INDEX_FAISS_IVFFLAT) {
 #ifdef MILVUS_GPU_VERSION
         if (mode == IndexMode::MODE_GPU) {
-            return std::make_shared<knowhere::GPUIVF>(gpu_device);
+            return std::make_shared<knowhere::GPUIVF_NM>(gpu_device);
         }
 #endif
-        return std::make_shared<knowhere::IVF>();
+        return std::make_shared<knowhere::IVF_NM>();
     } else if (type == IndexEnum::INDEX_FAISS_IVFPQ) {
 #ifdef MILVUS_GPU_VERSION
         if (mode == IndexMode::MODE_GPU) {
@@ -74,7 +79,7 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
     } else if (type == IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         return std::make_shared<knowhere::BinaryIVF>();
     } else if (type == IndexEnum::INDEX_NSG) {
-        return std::make_shared<knowhere::NSG>(-1);
+        return std::make_shared<knowhere::NSG_NM>(-1);
 #ifdef MILVUS_SUPPORT_SPTAG
     } else if (type == IndexEnum::INDEX_SPTAG_KDT_RNT) {
         return std::make_shared<knowhere::CPUSPTAGRNG>("KDT");
@@ -82,9 +87,13 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
         return std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
 #endif
     } else if (type == IndexEnum::INDEX_HNSW) {
-        return std::make_shared<knowhere::IndexHNSW>();
+        return std::make_shared<knowhere::IndexHNSW_NM>();
     } else if (type == IndexEnum::INDEX_ANNOY) {
         return std::make_shared<knowhere::IndexAnnoy>();
+    } else if (type == IndexEnum::INDEX_FAISS_IVFSQ8NR) {
+        return std::make_shared<knowhere::IVFSQNR_NM>();
+    } else if (type == IndexEnum::INDEX_HNSW_SQ8NM) {
+        return std::make_shared<knowhere::IndexHNSW_SQ8NM>();
     } else {
         return nullptr;
     }

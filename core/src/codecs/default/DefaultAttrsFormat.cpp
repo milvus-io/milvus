@@ -78,8 +78,6 @@ DefaultAttrsFormat::read_uids_internal(const storage::FSHandlerPtr& fs_ptr, cons
 
 void
 DefaultAttrsFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::segment::AttrsPtr& attrs_read) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     auto is_directory = boost::filesystem::is_directory(dir_path);
     fiu_do_on("read_id_directory_false", is_directory = false);
@@ -120,8 +118,6 @@ DefaultAttrsFormat::read(const milvus::storage::FSHandlerPtr& fs_ptr, milvus::se
 
 void
 DefaultAttrsFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const milvus::segment::AttrsPtr& attrs_ptr) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
     TimeRecorder rc("write attributes");
 
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
@@ -195,8 +191,6 @@ DefaultAttrsFormat::write(const milvus::storage::FSHandlerPtr& fs_ptr, const mil
 void
 DefaultAttrsFormat::read_attrs(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& field_name, off_t offset,
                                size_t num_bytes, std::vector<uint8_t>& raw_attrs) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
@@ -222,8 +216,6 @@ DefaultAttrsFormat::read_attrs(const milvus::storage::FSHandlerPtr& fs_ptr, cons
 
 void
 DefaultAttrsFormat::read_uids(const milvus::storage::FSHandlerPtr& fs_ptr, std::vector<int64_t>& uids) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
     std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
     auto is_directory = boost::filesystem::is_directory(dir_path);
     fiu_do_on("is_directory_false", is_directory = false);

@@ -113,6 +113,8 @@ const char* CONFIG_ENGINE_OMP_THREAD_NUM = "omp_thread_num";
 const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
 const char* CONFIG_ENGINE_SIMD_TYPE = "simd_type";
 const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT = "auto";
+const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ = "search_combine_nq";
+const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT = "64";
 
 /* gpu resource config */
 const char* CONFIG_GPU_RESOURCE = "gpu";
@@ -197,6 +199,9 @@ Config::Config() {
     // engine config
     std::string node_blas_threshold = std::string(CONFIG_ENGINE) + "." + CONFIG_ENGINE_USE_BLAS_THRESHOLD;
     config_callback_[node_blas_threshold] = empty_map;
+
+    std::string node_search_combine = std::string(CONFIG_ENGINE) + "." + CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ;
+    config_callback_[node_search_combine] = empty_map;
 
     // gpu resources config
     std::string node_gpu_enable = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_ENABLE;
@@ -451,6 +456,7 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetEngineConfigUseBlasThreshold(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT));
     STATUS_CHECK(SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT));
     STATUS_CHECK(SetEngineConfigSimdType(CONFIG_ENGINE_SIMD_TYPE_DEFAULT));
+    STATUS_CHECK(SetEngineSearchCombineMaxNq(CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT));
 
     /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
@@ -578,6 +584,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetEngineConfigOmpThreadNum(value);
         } else if (child_key == CONFIG_ENGINE_SIMD_TYPE) {
             status = SetEngineConfigSimdType(value);
+        } else if (child_key == CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ) {
+            status = SetEngineSearchCombineMaxNq(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
@@ -1344,6 +1352,18 @@ Config::CheckEngineConfigSimdType(const std::string& value) {
     return Status::OK();
 }
 
+Status
+Config::CheckEngineSearchCombineMaxNq(const std::string& value) {
+    fiu_return_on("check_config_search_combine_nq_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
+    if (!ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid omp thread num: " + value +
+                          ". Possible reason: engine_config.omp_thread_num is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
 /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
 Status
@@ -1967,6 +1987,15 @@ Config::GetEngineConfigSimdType(std::string& value) {
     return CheckEngineConfigSimdType(value);
 }
 
+Status
+Config::GetEngineSearchCombineMaxNq(int64_t& value) {
+    std::string str =
+        GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT);
+    //    STATUS_CHECK(CheckEngineSearchCombineMaxNq(str));
+    value = std::stoll(str);
+    return Status::OK();
+}
+
 /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
 Status
@@ -2361,8 +2390,16 @@ Config::SetEngineConfigSimdType(const std::string& value) {
     return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_SIMD_TYPE, value);
 }
 
+Status
+Config::SetEngineSearchCombineMaxNq(const std::string& value) {
+    STATUS_CHECK(CheckEngineSearchCombineMaxNq(value));
+    STATUS_CHECK(SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ, value));
+    return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ, value);
+}
+
 /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::SetGpuResourceConfigEnable(const std::string& value) {
     STATUS_CHECK(CheckGpuResourceConfigEnable(value));
@@ -2407,6 +2444,7 @@ Config::SetGpuResourceConfigBuildIndexResources(const std::string& value) {
     STATUS_CHECK(SetConfigValueInMem(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value));
     return ExecCallBacks(CONFIG_GPU_RESOURCE, CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES, value);
 }
+
 #endif
 
 /* tracing config */

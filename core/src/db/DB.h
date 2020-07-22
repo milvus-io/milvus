@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -27,8 +26,6 @@
 
 namespace milvus {
 namespace engine {
-
-class Env;
 
 class DB {
  public:

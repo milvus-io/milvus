@@ -11,9 +11,14 @@
 
 #pragma once
 
+#include "db/Utils.h"
+#include "db/meta/MetaAdapter.h"
+#include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Utils.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
 #include "utils/Status.h"
 
 #include <stdlib.h>
@@ -24,6 +29,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <set>
 #include <shared_mutex>
 #include <sstream>
 #include <string>
@@ -39,227 +45,185 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-class Store {
+class Store : public std::enable_shared_from_this<Store> {
  public:
-    using MockIDST =
-        std::tuple<ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE, ID_TYPE>;
-    using MockResourcesT = std::tuple<CollectionCommit::MapT, Collection::MapT, SchemaCommit::MapT, FieldCommit::MapT,
-                                      Field::MapT, FieldElement::MapT, PartitionCommit::MapT, Partition::MapT,
-                                      SegmentCommit::MapT, Segment::MapT, SegmentFile::MapT>;
+    using Ptr = typename std::shared_ptr<Store>;
 
-    static Store&
-    GetInstance() {
-        static Store store;
-        return store;
+    explicit Store(meta::MetaAdapterPtr adapter) : adapter_(adapter) {
     }
 
-    template <typename... ResourceT>
-    bool
-    DoCommit(ResourceT&&... resources) {
-        auto t = std::make_tuple(std::forward<ResourceT>(resources)...);
-        auto& t_size = std::tuple_size<decltype(t)>::value;
-        if (t_size == 0) {
-            return false;
+    static Store::Ptr
+    Build(const std::string& uri) {
+        utils::MetaUriInfo uri_info;
+        LOG_ENGINE_DEBUG_ << "MetaUri: " << uri << std::endl;
+        auto status = utils::ParseMetaUri(uri, uri_info);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << "Wrong URI format: URI = " << uri;
+            throw InvalidArgumentException("Wrong URI format ");
         }
-        StartTransaction();
-        std::apply([this](auto&&... resource) { ((std::cout << CommitResource(resource) << "\n"), ...); }, t);
-        FinishTransaction();
-        return true;
+
+        if (strcasecmp(uri_info.dialect_.c_str(), "mysql") == 0) {
+            LOG_ENGINE_INFO_ << "Using MySQL";
+            DBMetaOptions options;
+            /* options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
+            options.backend_uri_ = uri;
+            auto engine = std::make_shared<meta::MySqlEngine>(options);
+            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
+            return std::make_shared<Store>(adapter);
+        } else if (strcasecmp(uri_info.dialect_.c_str(), "mock") == 0) {
+            LOG_ENGINE_INFO_ << "Using Mock. Should only be used in test environment";
+            auto engine = std::make_shared<meta::MockMetaEngine>();
+            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
+            return std::make_shared<Store>(adapter);
+        } else {
+            LOG_ENGINE_ERROR_ << "Invalid dialect in URI: dialect = " << uri_info.dialect_;
+            throw InvalidArgumentException("URI dialect is not mysql / sqlite / mock");
+        }
     }
 
     template <typename OpT>
     Status
-    DoCommitOperation(OpT& op) {
-        for (auto& step_v : op.GetSteps()) {
-            auto id = ProcessOperationStep(step_v);
-            op.SetStepResult(id);
+    ApplyOperation(OpT& op) {
+        auto session = adapter_->CreateSession();
+        std::apply(
+            [&](auto&... step_context_set) {
+                std::size_t n{0};
+                ((ApplyOpStep(op, n++, step_context_set, session)), ...);
+            },
+            op.GetStepHolders());
+
+        ID_TYPE result_id;
+        auto status = session->Commit(result_id);
+        if (status.ok()) {
+            op.SetStepResult(result_id);
         }
-        return Status::OK();
+
+        return status;
+    }
+
+    template <typename T, typename OpT>
+    void
+    ApplyOpStep(OpT& op, size_t pos, std::set<std::shared_ptr<ResourceContext<T>>>& step_context_set,
+                const meta::SessionPtr& session) {
+        for (auto& step_context : step_context_set) {
+            session->Apply<T>(step_context);
+        }
+        if (pos == op.GetPos()) {
+            session->ResultPos();
+        }
     }
 
     template <typename OpT>
-    void
+    Status
     Apply(OpT& op) {
-        op.ApplyToStore(*this);
-    }
-
-    void
-    StartTransaction() {
-    }
-
-    void
-    FinishTransaction() {
-    }
-
-    template <typename ResourceT>
-    bool
-    CommitResource(ResourceT&& resource) {
-        std::cout << "Commit " << resource.Name << " " << resource.GetID() << std::endl;
-        auto res = CreateResource<typename std::remove_reference<ResourceT>::type>(std::move(resource));
-        if (!res)
-            return false;
-        return true;
+        return op.ApplyToStore(this->shared_from_this());
     }
 
     template <typename ResourceT>
     Status
     GetResource(ID_TYPE id, typename ResourceT::Ptr& return_v) {
-        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
-        auto& resources = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(resources_);
-        auto it = resources.find(id);
-        if (it == resources.end()) {
-            /* std::cout << "Can't find " << ResourceT::Name << " " << id << " in ("; */
-            /* for (auto& i : resources) { */
-            /*     std::cout << i.first << ","; */
-            /* } */
-            /* std::cout << ")"; */
-            return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
+        auto status = adapter_->Select<ResourceT>(id, return_v);
+
+        if (!status.ok()) {
+            return status;
         }
-        auto& c = it->second;
-        return_v = std::make_shared<ResourceT>(*c);
-        /* std::cout << "<<< [Load] " << ResourceT::Name << " " << id
-         * << " IsActive=" << return_v->IsActive() << std::endl; */
+
+        if (return_v == nullptr) {
+            std::string err = "Cannot select resource " + std::string(ResourceT::Name) +
+                              " from DB: No resource which id = " + std::to_string(id);
+            return Status(SS_NOT_FOUND_ERROR, err);
+        }
+
         return Status::OK();
     }
 
     Status
     GetCollection(const std::string& name, CollectionPtr& return_v) {
-        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
-        auto it = name_ids_.find(name);
-        if (it == name_ids_.end()) {
-            return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
-        }
-        auto& id = it->second;
-        lock.unlock();
-        return GetResource<Collection>(id, return_v);
-    }
-
-    Status
-    RemoveCollection(ID_TYPE id) {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-        auto& resources = std::get<Collection::MapT>(resources_);
-        auto it = resources.find(id);
-        if (it == resources.end()) {
-            return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
+        // TODO: Get active collection
+        std::vector<CollectionPtr> resources;
+        auto status = adapter_->SelectBy<Collection>(NameField::Name, name, resources);
+        if (!status.ok()) {
+            return status;
         }
 
-        auto name = it->second->GetName();
-        resources.erase(it);
-        name_ids_.erase(name);
-        /* std::cout << ">>> [Remove] Collection " << id << std::endl; */
-        return Status::OK();
+        for (auto& res : resources) {
+            if (res->IsActive()) {
+                return_v = res;
+                return Status::OK();
+            }
+        }
+
+        return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
     }
 
     template <typename ResourceT>
     Status
     RemoveResource(ID_TYPE id) {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-        auto& resources = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(resources_);
-        auto it = resources.find(id);
-        if (it == resources.end()) {
-            return Status(SS_NOT_FOUND_ERROR, "DB resource not found");
-        }
+        auto rc_ctx_p =
+            ResourceContextBuilder<ResourceT>().SetTable(ResourceT::Name).SetOp(meta::oDelete).SetID(id).CreatePtr();
 
-        resources.erase(it);
-        /* std::cout << ">>> [Remove] " << ResourceT::Name << " " << id << std::endl; */
-        return Status::OK();
+        int64_t result_id;
+        return adapter_->Apply<ResourceT>(rc_ctx_p, result_id);
     }
 
     IDS_TYPE
     AllActiveCollectionIds(bool reversed = true) const {
-        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         IDS_TYPE ids;
-        auto& resources = std::get<Collection::MapT>(resources_);
+        IDS_TYPE selected_ids;
+        adapter_->SelectResourceIDs<Collection, std::string>(selected_ids, "", "");
+
         if (!reversed) {
-            for (auto& kv : resources) {
-                ids.push_back(kv.first);
-            }
+            ids = selected_ids;
         } else {
-            for (auto kv = resources.rbegin(); kv != resources.rend(); ++kv) {
-                ids.push_back(kv->first);
+            for (auto it = selected_ids.rbegin(); it != selected_ids.rend(); ++it) {
+                ids.push_back(*it);
             }
         }
+
         return ids;
     }
 
     IDS_TYPE
     AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
-        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
-        IDS_TYPE ids;
-        auto& resources = std::get<CollectionCommit::MapT>(resources_);
+        IDS_TYPE ids, selected_ids;
+        adapter_->SelectResourceIDs<CollectionCommit, int64_t>(selected_ids, meta::F_COLLECTON_ID, collection_id);
+
         if (!reversed) {
-            for (auto& kv : resources) {
-                if (kv.second->GetCollectionId() == collection_id) {
-                    ids.push_back(kv.first);
-                }
-            }
+            ids = selected_ids;
         } else {
-            for (auto kv = resources.rbegin(); kv != resources.rend(); ++kv) {
-                if (kv->second->GetCollectionId() == collection_id) {
-                    ids.push_back(kv->first);
-                }
+            for (auto it = selected_ids.rbegin(); it != selected_ids.rend(); ++it) {
+                ids.push_back(*it);
             }
         }
+
         return ids;
-    }
-
-    Status
-    CreateCollection(Collection&& collection, CollectionPtr& return_v) {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-        auto& resources = std::get<Collection::MapT>(resources_);
-        if (!collection.HasAssigned() && (name_ids_.find(collection.GetName()) != name_ids_.end()) &&
-            (resources[name_ids_[collection.GetName()]]->IsActive()) && !collection.IsDeactive()) {
-            return Status(SS_DUPLICATED_ERROR, "Duplicated");
-        }
-        auto c = std::make_shared<Collection>(collection);
-        auto& id = std::get<Index<Collection::MapT, MockResourcesT>::value>(ids_);
-        c->SetID(++id);
-        c->ResetCnt();
-        resources[c->GetID()] = c;
-        name_ids_[c->GetName()] = c->GetID();
-        lock.unlock();
-        GetResource<Collection>(c->GetID(), return_v);
-        return Status::OK();
-    }
-
-    template <typename ResourceT>
-    Status
-    UpdateResource(ResourceT&& resource, typename ResourceT::Ptr& return_v) {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-        auto& resources = std::get<typename ResourceT::MapT>(resources_);
-        auto res = std::make_shared<ResourceT>(resource);
-        auto& id = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(ids_);
-        res->ResetCnt();
-        resources[res->GetID()] = res;
-        lock.unlock();
-        GetResource<ResourceT>(res->GetID(), return_v);
-        return Status::OK();
     }
 
     template <typename ResourceT>
     Status
     CreateResource(ResourceT&& resource, typename ResourceT::Ptr& return_v) {
-        if (resource.HasAssigned()) {
-            return UpdateResource<ResourceT>(std::move(resource), return_v);
+        auto res_p = std::make_shared<ResourceT>(resource);
+        auto res_ctx_p = ResourceContextBuilder<ResourceT>().SetOp(meta::oAdd).SetResource(res_p).CreatePtr();
+
+        int64_t result_id;
+        auto status = adapter_->Apply<ResourceT>(res_ctx_p, result_id);
+        if (!status.ok()) {
+            return status;
         }
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-        auto& resources = std::get<typename ResourceT::MapT>(resources_);
-        auto res = std::make_shared<ResourceT>(resource);
-        auto& id = std::get<Index<typename ResourceT::MapT, MockResourcesT>::value>(ids_);
-        res->SetID(++id);
-        res->ResetCnt();
-        resources[res->GetID()] = res;
-        lock.unlock();
-        auto status = GetResource<ResourceT>(res->GetID(), return_v);
-        /* std::cout << ">>> [Create] " << ResourceT::Name << " " << id << std::endl; */
+
+        return_v = std::make_shared<ResourceT>(resource);
+        return_v->SetID(result_id);
+        return_v->ResetCnt();
+
         return Status::OK();
     }
 
     void
     DoReset() {
-        ids_ = MockIDST();
-        resources_ = MockResourcesT();
-        name_ids_.clear();
+        auto status = adapter_->TruncateAll();
+        if (!status.ok()) {
+            std::cout << "TruncateAll failed: " << status.ToString() << std::endl;
+        }
     }
 
     void
@@ -269,219 +233,140 @@ class Store {
     }
 
  private:
-    ID_TYPE
-    ProcessOperationStep(const std::any& step_v) {
-        if (const auto it = any_flush_vistors_.find(std::type_index(step_v.type())); it != any_flush_vistors_.cend()) {
-            return it->second(step_v);
-        } else {
-            std::cerr << "Unregisted step type " << std::quoted(step_v.type().name());
-            return 0;
-        }
-    }
-
-    template <class T, class F>
-    inline std::pair<const std::type_index, std::function<ID_TYPE(std::any const&)>>
-    to_any_visitor(F const& f) {
-        return {std::type_index(typeid(T)), [g = f](std::any const& a) -> ID_TYPE {
-                    if constexpr (std::is_void_v<T>)
-                        return g();
-                    else
-                        return g(std::any_cast<T const&>(a));
-                }};
-    }
-
-    template <class T, class F>
-    inline void
-    register_any_visitor(F const& f) {
-        /* std::cout << "Register visitor for type " << std::quoted(typeid(T).name()) << '\n'; */
-        any_flush_vistors_.insert(to_any_visitor<T>(f));
-    }
-
-    Store() {
-        register_any_visitor<Collection::Ptr>([this](auto c) {
-            CollectionPtr n;
-            CreateResource<Collection>(Collection(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<CollectionCommit::Ptr>([this](auto c) {
-            using T = CollectionCommit;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<SchemaCommit::Ptr>([this](auto c) {
-            using T = SchemaCommit;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<FieldCommit::Ptr>([this](auto c) {
-            using T = FieldCommit;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<Field::Ptr>([this](auto c) {
-            using T = Field;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<FieldElement::Ptr>([this](auto c) {
-            using T = FieldElement;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<PartitionCommit::Ptr>([this](auto c) {
-            using T = PartitionCommit;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<Partition::Ptr>([this](auto c) {
-            using T = Partition;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<Segment::Ptr>([this](auto c) {
-            using T = Segment;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<SegmentCommit::Ptr>([this](auto c) {
-            using T = SegmentCommit;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-        register_any_visitor<SegmentFile::Ptr>([this](auto c) {
-            using T = SegmentFile;
-            using PtrT = typename T::Ptr;
-            PtrT n;
-            CreateResource<T>(T(*c), n);
-            return n->GetID();
-        });
-    }
-
     void
     DoMock() {
         Status status;
+        ID_TYPE result_id;
         unsigned int seed = 123;
         auto random = rand_r(&seed) % 2 + 4;
         std::vector<std::any> all_records;
+        std::unordered_map<ID_TYPE, FieldCommitPtr> field_commit_records;
+        std::unordered_map<std::string, ID_TYPE> id_map = {
+            {Collection::Name, 0}, {Field::Name, 0}, {FieldElement::Name, 0}, {Partition::Name, 0}};
+
         for (auto i = 1; i <= random; i++) {
             std::stringstream name;
-            name << "c_" << std::get<Index<Collection::MapT, MockResourcesT>::value>(ids_) + 1;
+            name << "c_" << ++id_map[Collection::Name];
 
             auto tc = Collection(name.str());
             tc.Activate();
             CollectionPtr c;
-            CreateCollection(std::move(tc), c);
+            CreateResource<Collection>(std::move(tc), c);
             all_records.push_back(c);
 
             MappingT schema_c_m;
             auto random_fields = rand_r(&seed) % 2 + 1;
             for (auto fi = 1; fi <= random_fields; ++fi) {
                 std::stringstream fname;
-                fname << "f_" << fi << "_" << std::get<Index<Field::MapT, MockResourcesT>::value>(ids_) + 1;
+                fname << "f_" << fi << "_" << ++id_map[FieldElement::Name];
+
+                Field temp_f(fname.str(), fi, FieldType::VECTOR);
                 FieldPtr field;
-                CreateResource<Field>(Field(fname.str(), fi, FieldType::VECTOR), field);
+
+                temp_f.Activate();
+                CreateResource<Field>(std::move(temp_f), field);
                 all_records.push_back(field);
                 MappingT f_c_m = {};
 
                 auto random_elements = rand_r(&seed) % 2 + 2;
                 for (auto fei = 1; fei <= random_elements; ++fei) {
                     std::stringstream fename;
-                    fename << "fe_" << fei << "_";
-                    fename << std::get<Index<FieldElement::MapT, MockResourcesT>::value>(ids_) + 1;
+                    fename << "fe_" << field->GetID() << "_" << ++id_map[FieldElement::Name];
 
                     FieldElementPtr element;
-                    CreateResource<FieldElement>(FieldElement(c->GetID(), field->GetID(), fename.str(), fei), element);
+                    FieldElement temp_fe(c->GetID(), field->GetID(), fename.str(), fei);
+                    temp_fe.Activate();
+                    CreateResource<FieldElement>(std::move(temp_fe), element);
                     all_records.push_back(element);
                     f_c_m.insert(element->GetID());
                 }
                 FieldCommitPtr f_c;
-                CreateResource<FieldCommit>(FieldCommit(c->GetID(), field->GetID(), f_c_m), f_c);
+                CreateResource<FieldCommit>(FieldCommit(c->GetID(), field->GetID(), f_c_m, 0, 0, ACTIVE), f_c);
                 all_records.push_back(f_c);
+                field_commit_records.insert(std::pair<ID_TYPE, FieldCommitPtr>(f_c->GetID(), f_c));
                 schema_c_m.insert(f_c->GetID());
             }
 
             SchemaCommitPtr schema;
-            CreateResource<SchemaCommit>(SchemaCommit(c->GetID(), schema_c_m), schema);
+            CreateResource<SchemaCommit>(SchemaCommit(c->GetID(), schema_c_m, 0, 0, ACTIVE), schema);
             all_records.push_back(schema);
 
             auto random_partitions = rand_r(&seed) % 2 + 1;
             MappingT c_c_m;
             for (auto pi = 1; pi <= random_partitions; ++pi) {
                 std::stringstream pname;
-                pname << "p_" << i << "_" << std::get<Index<Partition::MapT, MockResourcesT>::value>(ids_) + 1;
+                pname << "p_" << i << "_" << ++id_map[Partition::Name];
                 PartitionPtr p;
-                CreateResource<Partition>(Partition(pname.str(), c->GetID()), p);
+                CreateResource<Partition>(Partition(pname.str(), c->GetID(), 0, 0, ACTIVE), p);
                 all_records.push_back(p);
 
                 auto random_segments = rand_r(&seed) % 2 + 1;
                 MappingT p_c_m;
                 for (auto si = 1; si <= random_segments; ++si) {
                     SegmentPtr s;
-                    CreateResource<Segment>(Segment(c->GetID(), p->GetID(), si), s);
+                    CreateResource<Segment>(Segment(c->GetID(), p->GetID(), si, 0, 0, ACTIVE), s);
                     all_records.push_back(s);
                     auto& schema_m = schema->GetMappings();
                     MappingT s_c_m;
                     for (auto field_commit_id : schema_m) {
-                        auto& field_commit = std::get<FieldCommit::MapT>(resources_)[field_commit_id];
+                        auto& field_commit = field_commit_records.at(field_commit_id);
                         auto& f_c_m = field_commit->GetMappings();
-                        for (auto field_element_id : f_c_m) {
+                        for (auto& field_element_id : f_c_m) {
                             SegmentFilePtr sf;
                             CreateResource<SegmentFile>(
-                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_commit_id), sf);
+                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_element_id, 0, 0, 0, 0, ACTIVE),
+                                sf);
                             all_records.push_back(sf);
 
                             s_c_m.insert(sf->GetID());
                         }
                     }
                     SegmentCommitPtr s_c;
-                    CreateResource<SegmentCommit>(SegmentCommit(schema->GetID(), p->GetID(), s->GetID(), s_c_m), s_c);
+                    CreateResource<SegmentCommit>(
+                        SegmentCommit(schema->GetID(), p->GetID(), s->GetID(), s_c_m, 0, 0, 0, 0, ACTIVE), s_c);
                     all_records.push_back(s_c);
                     p_c_m.insert(s_c->GetID());
                 }
                 PartitionCommitPtr p_c;
-                CreateResource<PartitionCommit>(PartitionCommit(c->GetID(), p->GetID(), p_c_m), p_c);
+                CreateResource<PartitionCommit>(PartitionCommit(c->GetID(), p->GetID(), p_c_m, 0, 0, 0, 0, ACTIVE),
+                                                p_c);
                 all_records.push_back(p_c);
                 c_c_m.insert(p_c->GetID());
             }
             CollectionCommitPtr c_c;
-            CreateResource<CollectionCommit>(CollectionCommit(c->GetID(), schema->GetID(), c_c_m), c_c);
+            CollectionCommit temp_cc(c->GetID(), schema->GetID(), c_c_m);
+            temp_cc.Activate();
+            CreateResource<CollectionCommit>(std::move(temp_cc), c_c);
             all_records.push_back(c_c);
         }
         for (auto& record : all_records) {
             if (record.type() == typeid(std::shared_ptr<Collection>)) {
                 const auto& r = std::any_cast<std::shared_ptr<Collection>>(record);
                 r->Activate();
+                auto t_c_p = ResourceContextBuilder<Collection>()
+                                 .SetOp(meta::oUpdate)
+                                 .SetResource(r)
+                                 .AddAttr(meta::F_STATE)
+                                 .CreatePtr();
+
+                adapter_->Apply<Collection>(t_c_p, result_id);
             } else if (record.type() == typeid(std::shared_ptr<CollectionCommit>)) {
                 const auto& r = std::any_cast<std::shared_ptr<CollectionCommit>>(record);
                 r->Activate();
+                auto t_cc_p = ResourceContextBuilder<CollectionCommit>()
+                                  .SetOp(meta::oUpdate)
+                                  .SetResource(r)
+                                  .AddAttr(meta::F_STATE)
+                                  .CreatePtr();
+                adapter_->Apply<CollectionCommit>(t_cc_p, result_id);
             }
         }
     }
 
-    MockResourcesT resources_;
-    MockIDST ids_;
-    std::map<std::string, ID_TYPE> name_ids_;
-    std::unordered_map<std::type_index, std::function<ID_TYPE(std::any const&)>> any_flush_vistors_;
-    mutable std::shared_timed_mutex mutex_;
+    meta::MetaAdapterPtr adapter_;
 };
+
+using StorePtr = Store::Ptr;
 
 }  // namespace snapshot
 }  // namespace engine

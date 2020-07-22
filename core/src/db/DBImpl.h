@@ -12,7 +12,6 @@
 #pragma once
 
 #include <atomic>
-#include <condition_variable>
 #include <list>
 #include <map>
 #include <memory>
@@ -27,6 +26,7 @@
 #include "config/handler/EngineConfigHandler.h"
 #include "db/DB.h"
 #include "db/IndexFailedChecker.h"
+#include "db/SimpleWaitNotify.h"
 #include "db/Types.h"
 #include "db/insert/MemManager.h"
 #include "db/merge/MergeManager.h"
@@ -323,47 +323,6 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     std::thread bg_flush_thread_;
     std::thread bg_metric_thread_;
     std::thread bg_index_thread_;
-
-    struct SimpleWaitNotify {
-        bool notified_ = false;
-        std::mutex mutex_;
-        std::condition_variable cv_;
-
-        void
-        Wait() {
-            std::unique_lock<std::mutex> lck(mutex_);
-            if (!notified_) {
-                cv_.wait(lck);
-            }
-            notified_ = false;
-        }
-
-        void
-        Wait_Until(const std::chrono::system_clock::time_point& tm_pint) {
-            std::unique_lock<std::mutex> lck(mutex_);
-            if (!notified_) {
-                cv_.wait_until(lck, tm_pint);
-            }
-            notified_ = false;
-        }
-
-        void
-        Wait_For(const std::chrono::system_clock::duration& tm_dur) {
-            std::unique_lock<std::mutex> lck(mutex_);
-            if (!notified_) {
-                cv_.wait_for(lck, tm_dur);
-            }
-            notified_ = false;
-        }
-
-        void
-        Notify() {
-            std::unique_lock<std::mutex> lck(mutex_);
-            notified_ = true;
-            lck.unlock();
-            cv_.notify_one();
-        }
-    };
 
     SimpleWaitNotify swn_wal_;
     SimpleWaitNotify swn_flush_;

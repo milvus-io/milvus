@@ -68,7 +68,7 @@ IDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR_DATA_ID(dataset_ptr)
     index_->add_with_ids(rows, (float*)p_data, p_ids);
 }
 
@@ -96,7 +96,7 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
     int64_t k = config[meta::TOPK].get<int64_t>();
     auto elems = rows * k;
@@ -141,6 +141,22 @@ IDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
     return ret_ds;
 }
 #endif
+
+int64_t
+IDMAP::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->ntotal;
+}
+
+int64_t
+IDMAP::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->d;
+}
 
 VecIndexPtr
 IDMAP::CopyCpuToGpu(const int64_t device_id, const Config& config) {

@@ -22,8 +22,10 @@
 #include "DeletedDocsFormat.h"
 #include "IdBloomFilterFormat.h"
 #include "IdIndexFormat.h"
+#include "VectorCompressFormat.h"
 #include "VectorIndexFormat.h"
 #include "VectorsFormat.h"
+#include "utils/Exception.h"
 
 namespace milvus {
 namespace codec {
@@ -31,35 +33,39 @@ namespace codec {
 class Codec {
  public:
     virtual VectorsFormatPtr
-    GetVectorsFormat() = 0;
+    GetVectorsFormat() {
+        throw Exception(SERVER_UNSUPPORTED_ERROR, "vectors not supported");
+    }
 
     virtual AttrsFormatPtr
-    GetAttrsFormat() = 0;
+    GetAttrsFormat() {
+        throw Exception(SERVER_UNSUPPORTED_ERROR, "attr not supported");
+    }
 
     virtual VectorIndexFormatPtr
-    GetVectorIndexFormat() = 0;
+    GetVectorIndexFormat() {
+        throw Exception(SERVER_UNSUPPORTED_ERROR, "vectors index not supported");
+    }
 
     virtual AttrsIndexFormatPtr
-    GetAttrsIndexFormat() = 0;
+    GetAttrsIndexFormat() {
+        throw Exception(SERVER_UNSUPPORTED_ERROR, "attr index not supported");
+    }
 
     virtual DeletedDocsFormatPtr
-    GetDeletedDocsFormat() = 0;
+    GetDeletedDocsFormat() {
+        throw Exception(SERVER_UNSUPPORTED_ERROR, "delete doc index not supported");
+    }
 
     virtual IdBloomFilterFormatPtr
-    GetIdBloomFilterFormat() = 0;
+    GetIdBloomFilterFormat() {
+        throw Exception(SERVER_UNSUPPORTED_ERROR, "id bloom filter not supported");
+    }
 
-    // TODO(zhiru)
-    /*
-    virtual AttrsFormat
-    GetAttrsFormat() = 0;
-
-    virtual AttrsIndexFormat
-    GetAttrsIndexFormat() = 0;
-
-    virtual IdIndexFormat
-    GetIdIndexFormat() = 0;
-
-    */
+    virtual VectorCompressFormatPtr
+    GetVectorCompressFormat() {
+        throw Exception(SERVER_UNSUPPORTED_ERROR, "vector compress not supported");
+    }
 };
 
 }  // namespace codec

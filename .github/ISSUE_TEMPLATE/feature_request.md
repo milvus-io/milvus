@@ -7,6 +7,8 @@ assignees: ''
 
 ---
 
+**Please state you issue using the following template and, most importantly, in English.**
+
 **Is your feature request related to a problem? Please describe.**
 A clear and concise description of what the problem is. E.g. I wish I could use Milvus to do [...]
 

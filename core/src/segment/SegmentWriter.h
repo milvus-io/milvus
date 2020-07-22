@@ -82,6 +82,9 @@ class SegmentWriter {
     Status
     WriteAttrsIndex();
 
+    void
+    SetSegmentName(const std::string& name);
+
  private:
     Status
     WriteVectors();

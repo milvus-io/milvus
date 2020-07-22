@@ -9,9 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "knowhere/index/vector_index/IndexType.h"
 #include <unordered_map>
+
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/IndexType.h"
 
 namespace milvus {
 namespace knowhere {
@@ -37,6 +38,8 @@ static std::unordered_map<int32_t, std::string> old_index_type_str_map = {
 #endif
     {(int32_t)OldIndexType::HNSW, IndexEnum::INDEX_HNSW},
     {(int32_t)OldIndexType::ANNOY, IndexEnum::INDEX_ANNOY},
+    {(int32_t)OldIndexType::HNSW_SQ8NM, IndexEnum::INDEX_HNSW_SQ8NM},
+    {(int32_t)OldIndexType::FAISS_IVFSQ8NR, IndexEnum::INDEX_FAISS_IVFSQ8NR},
     {(int32_t)OldIndexType::FAISS_BIN_IDMAP, IndexEnum::INDEX_FAISS_BIN_IDMAP},
     {(int32_t)OldIndexType::FAISS_BIN_IVFLAT_CPU, IndexEnum::INDEX_FAISS_BIN_IVFFLAT},
 };
@@ -55,6 +58,8 @@ static std::unordered_map<std::string, int32_t> str_old_index_type_map = {
 #endif
     {IndexEnum::INDEX_HNSW, (int32_t)OldIndexType::HNSW},
     {IndexEnum::INDEX_ANNOY, (int32_t)OldIndexType::ANNOY},
+    {IndexEnum::INDEX_FAISS_IVFSQ8NR, (int32_t)OldIndexType::FAISS_IVFSQ8NR},
+    {IndexEnum::INDEX_HNSW_SQ8NM, (int32_t)OldIndexType::HNSW_SQ8NM},
     {IndexEnum::INDEX_FAISS_BIN_IDMAP, (int32_t)OldIndexType::FAISS_BIN_IDMAP},
     {IndexEnum::INDEX_FAISS_BIN_IVFFLAT, (int32_t)OldIndexType::FAISS_BIN_IVFLAT_CPU},
 };
@@ -66,6 +71,7 @@ const char* INDEX_FAISS_IDMAP = "IDMAP";
 const char* INDEX_FAISS_IVFFLAT = "IVF_FLAT";
 const char* INDEX_FAISS_IVFPQ = "IVF_PQ";
 const char* INDEX_FAISS_IVFSQ8 = "IVF_SQ8";
+const char* INDEX_FAISS_IVFSQ8NR = "IVF_SQ8NR";
 const char* INDEX_FAISS_IVFSQ8H = "IVF_SQ8_HYBRID";
 const char* INDEX_FAISS_BIN_IDMAP = "BIN_IDMAP";
 const char* INDEX_FAISS_BIN_IVFFLAT = "BIN_IVF_FLAT";
@@ -76,6 +82,7 @@ const char* INDEX_SPTAG_BKT_RNT = "SPTAG_BKT_RNT";
 #endif
 const char* INDEX_HNSW = "HNSW";
 const char* INDEX_ANNOY = "ANNOY";
+const char* INDEX_HNSW_SQ8NM = "HNSW_SQ8NM";
 }  // namespace IndexEnum
 
 std::string

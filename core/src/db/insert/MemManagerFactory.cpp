@@ -11,6 +11,7 @@
 
 #include "db/insert/MemManagerFactory.h"
 #include "MemManagerImpl.h"
+#include "SSMemManagerImpl.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -28,6 +29,11 @@ namespace engine {
 MemManagerPtr
 MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options) {
     return std::make_shared<MemManagerImpl>(meta, options);
+}
+
+SSMemManagerPtr
+MemManagerFactory::SSBuild(const DBOptions& options) {
+    return std::make_shared<SSMemManagerImpl>(options);
 }
 
 }  // namespace engine

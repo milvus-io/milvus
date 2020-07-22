@@ -1,11 +1,10 @@
 **What type of PR is this?**
 
-api-change / bug / improvement / documentation / feature
+API-change / BUG / Improvement / Documentation / Feature
 
-**Need this PR be picked to master branch?**
+**Which branch you want to cherry-pick to?**
 
-Yes / No
-
+Not Available
 
 **Which issue(s) this PR fixes:**
 
@@ -13,9 +12,12 @@ Fixes #
 
 **What this PR does / why we need it:**
 
+Not Available
 
 **Special notes for your reviewer:**
 
+Not Available
 
 **Additional documentation (e.g. design docs, usage docs, etc.):**
 
+Not Available

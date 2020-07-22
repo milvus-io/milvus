@@ -230,24 +230,24 @@ namespace milvus {
 namespace grpc {
 
 enum DataType : int {
-  NULL_ = 0,
-  INT8 = 1,
-  INT16 = 2,
-  INT32 = 3,
-  INT64 = 4,
+  NONE = 0,
+  BOOL = 1,
+  INT8 = 2,
+  INT16 = 3,
+  INT32 = 4,
+  INT64 = 5,
+  FLOAT = 10,
+  DOUBLE = 11,
   STRING = 20,
-  BOOL = 30,
-  FLOAT = 40,
-  DOUBLE = 41,
-  FLOAT_VECTOR = 100,
-  BINARY_VECTOR = 101,
-  UNKNOWN = 9999,
+  VECTOR_BINARY = 100,
+  VECTOR_FLOAT = 101,
+  VECTOR = 200,
   DataType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   DataType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool DataType_IsValid(int value);
-constexpr DataType DataType_MIN = NULL_;
-constexpr DataType DataType_MAX = UNKNOWN;
+constexpr DataType DataType_MIN = NONE;
+constexpr DataType DataType_MAX = VECTOR;
 constexpr int DataType_ARRAYSIZE = DataType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* DataType_descriptor();

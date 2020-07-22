@@ -33,6 +33,7 @@
 #include "server/web_impl/dto/StatusDto.hpp"
 #include "server/web_impl/dto/VectorDto.hpp"
 #include "server/web_impl/handler/WebRequestHandler.h"
+#include "server/web_impl/utils/Util.h"
 #include "src/version.h"
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
@@ -954,29 +955,6 @@ TEST_F(WebControllerTest, PARTITION) {
     ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
 }
 
-TEST_F(WebControllerTest, PARTITION_FILTER) {
-    const OString collection_name = "test_controller_partition_" + OString(RandomName().c_str());
-    GenCollection(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
-
-    nlohmann::json body_json;
-    body_json["filter"]["partition_tag"] = "tag_not_exists_";
-    auto response = client_ptr->showPartitions(collection_name, "0", "10", body_json.dump().c_str());
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-    auto result_dto = response->readBodyToDto<milvus::server::web::PartitionListDto>(object_mapper.get());
-    ASSERT_EQ(result_dto->count->getValue(), 0);
-
-    auto par_param = milvus::server::web::PartitionRequestDto::createShared();
-    par_param->partition_tag = "tag01";
-    response = client_ptr->createPartition(collection_name, par_param);
-    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-
-    body_json["filter"]["partition_tag"] = "tag01";
-    response = client_ptr->showPartitions(collection_name, "0", "10", body_json.dump().c_str());
-    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-    result_dto = response->readBodyToDto<milvus::server::web::PartitionListDto>(object_mapper.get());
-    ASSERT_EQ(result_dto->count->getValue(), 1);
-}
-
 TEST_F(WebControllerTest, SHOW_SEGMENTS) {
     OString collection_name = OString("test_milvus_web_segments_test_") + RandomName().c_str();
 
@@ -1203,6 +1181,7 @@ TEST_F(WebControllerTest, SEARCH_BIN) {
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 
+#if 0
 TEST_F(WebControllerTest, SEARCH_BY_IDS) {
 #ifdef MILVUS_GPU_VERSION
     auto& config = milvus::server::Config::GetInstance();
@@ -1249,6 +1228,7 @@ TEST_F(WebControllerTest, SEARCH_BY_IDS) {
     //        ASSERT_EQ(std::to_string(ids.at(j)), id.get<std::string>());
     //    }
 }
+#endif
 
 TEST_F(WebControllerTest, GET_VECTORS_BY_IDS) {
     const OString collection_name = "test_milvus_web_get_vector_by_id_test_" + OString(RandomName().c_str());
@@ -1576,4 +1556,113 @@ TEST_F(WebControllerTest, LOAD) {
     load_json["load"]["collection_name"] = "sssssssssssssssssssssssfsfsfsrrrttt";
     response = client_ptr->op("task", load_json.dump().c_str(), conncetion_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+}
+
+class WebUtilTest : public ::testing::Test {
+ public:
+    std::string key;
+    OString value;
+    int64_t intValue;
+    std::string stringValue;
+    bool boolValue;
+    OQueryParams params;
+
+    void
+    SetUp() override {
+        key = "offset";
+    }
+
+    void
+    TearDown() override {
+    };
+};
+
+
+TEST_F(WebUtilTest, ParseQueryInteger) {
+    value = "5";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryInteger(params, key, intValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(5, intValue);
+}
+
+TEST_F(WebUtilTest, ParQueryIntegerIllegalQueryParam) {
+    value = "-5";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryInteger(params, key, intValue);
+    ASSERT_EQ(status.code(), milvus::server::web::ILLEGAL_QUERY_PARAM);
+    ASSERT_STREQ(status.message().c_str(),
+                 "Query param \'offset\' is illegal, only non-negative integer supported");
+}
+
+TEST_F(WebUtilTest, ParQueryIntegerQueryParamLoss) {
+    value = "5";
+
+    params.put("offset", value);
+    fiu_enable("WebUtils.ParseQueryInteger.null_query_get", 1, nullptr, 0);
+    milvus::Status status = milvus::server::web::ParseQueryInteger(params, key, intValue, false);
+    ASSERT_EQ(status.code(), milvus::server::web::QUERY_PARAM_LOSS);
+    std::string msg = "Query param \"" + key + "\" is required";
+    ASSERT_STREQ(status.message().c_str(), msg.c_str());
+}
+
+
+TEST_F(WebUtilTest, ParseQueryBoolTrue) {
+    value = "True";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(boolValue);
+}
+
+TEST_F(WebUtilTest, ParQueryBoolFalse) {
+    value = "False";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(!boolValue);
+}
+
+TEST_F(WebUtilTest, ParQueryBoolIllegalQuery) {
+    value = "Hello";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue);
+    ASSERT_EQ(status.code(), milvus::server::web::ILLEGAL_QUERY_PARAM);
+    ASSERT_STREQ(status.message().c_str(), "Query param \'all_required\' must be a bool");
+}
+
+TEST_F(WebUtilTest, ParQueryBoolQueryParamLoss) {
+    value = "Hello";
+
+    params.put("offset", value);
+    fiu_enable("WebUtils.ParseQueryBool.null_query_get", 1, nullptr, 0);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue, false);
+    ASSERT_EQ(status.code(), milvus::server::web::QUERY_PARAM_LOSS);
+    std::string msg = "Query param \"" + key + "\" is required";
+    ASSERT_STREQ(status.message().c_str(), msg.c_str());
+}
+
+TEST_F(WebUtilTest, ParseQueryStr) {
+    value = "Are you ok?";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryStr(params, key, stringValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_STREQ(value->c_str(), stringValue.c_str());
+}
+
+TEST_F(WebUtilTest, ParQueryStrQueryParamLoss) {
+    value = "Are you ok?";
+
+    params.put("offset", value);
+    fiu_enable("WebUtils.ParseQueryStr.null_query_get", 1, nullptr, 0);
+    milvus::Status status = milvus::server::web::ParseQueryStr(params, key, stringValue, false);
+    ASSERT_EQ(status.code(), milvus::server::web::QUERY_PARAM_LOSS);
+    std::string msg = "Query param \"" + key + "\" is required";
+    ASSERT_STREQ(status.message().c_str(), msg.c_str());
 }

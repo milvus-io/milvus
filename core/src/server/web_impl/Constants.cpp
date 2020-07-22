@@ -23,6 +23,8 @@ const char* NAME_ENGINE_TYPE_RNSG = "RNSG";
 const char* NAME_ENGINE_TYPE_IVFPQ = "IVFPQ";
 const char* NAME_ENGINE_TYPE_HNSW = "HNSW";
 const char* NAME_ENGINE_TYPE_ANNOY = "ANNOY";
+const char* NAME_ENGINE_TYPE_IVFSQ8NR = "IVFSQ8NR";
+const char* NAME_ENGINE_TYPE_HNSWSQ8NM = "HNSWSQ8NM";
 
 const char* NAME_METRIC_TYPE_L2 = "L2";
 const char* NAME_METRIC_TYPE_IP = "IP";
@@ -54,7 +56,8 @@ const std::unordered_map<engine::EngineType, std::string> IndexMap = {
     {engine::EngineType::FAISS_PQ, NAME_ENGINE_TYPE_IVFPQ},
     {engine::EngineType::HNSW, NAME_ENGINE_TYPE_HNSW},
     {engine::EngineType::ANNOY, NAME_ENGINE_TYPE_ANNOY},
-};
+    {engine::EngineType::FAISS_IVFSQ8NR, NAME_ENGINE_TYPE_IVFSQ8NR},
+    {engine::EngineType::HNSW_SQ8NM, NAME_ENGINE_TYPE_HNSWSQ8NM}};
 
 const std::unordered_map<std::string, engine::EngineType> IndexNameMap = {
     {NAME_ENGINE_TYPE_FLAT, engine::EngineType::FAISS_IDMAP},
@@ -65,7 +68,8 @@ const std::unordered_map<std::string, engine::EngineType> IndexNameMap = {
     {NAME_ENGINE_TYPE_IVFPQ, engine::EngineType::FAISS_PQ},
     {NAME_ENGINE_TYPE_HNSW, engine::EngineType::HNSW},
     {NAME_ENGINE_TYPE_ANNOY, engine::EngineType::ANNOY},
-};
+    {NAME_ENGINE_TYPE_IVFSQ8NR, engine::EngineType::FAISS_IVFSQ8NR},
+    {NAME_ENGINE_TYPE_HNSWSQ8NM, engine::EngineType::HNSW_SQ8NM}};
 
 const std::unordered_map<engine::MetricType, std::string> MetricMap = {
     {engine::MetricType::L2, NAME_METRIC_TYPE_L2},

@@ -20,6 +20,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -43,14 +44,14 @@ using ScopedResourcesT =
 class Snapshot : public ReferenceProxy {
  public:
     using Ptr = std::shared_ptr<Snapshot>;
-    explicit Snapshot(ID_TYPE id);
+    explicit Snapshot(StorePtr, ID_TYPE);
 
     ID_TYPE
     GetID() const {
         return GetCollectionCommit()->GetID();
     }
 
-    [[nodiscard]] ID_TYPE
+    ID_TYPE
     GetCollectionId() const {
         auto it = GetResources<Collection>().cbegin();
         return it->first;
@@ -67,17 +68,17 @@ class Snapshot : public ReferenceProxy {
         return GetResource<SchemaCommit>(id);
     }
 
-    [[nodiscard]] const std::string&
+    const std::string&
     GetName() const {
         return GetResources<Collection>().cbegin()->second->GetName();
     }
 
-    [[nodiscard]] size_t
+    size_t
     NumberOfPartitions() const {
         return GetResources<Partition>().size();
     }
 
-    [[nodiscard]] const LSN_TYPE&
+    const LSN_TYPE&
     GetMaxLsn() const {
         return max_lsn_;
     }
@@ -94,7 +95,8 @@ class Snapshot : public ReferenceProxy {
 
     Status
     GetPartitionId(const std::string& name, ID_TYPE& id) const {
-        auto it = partition_names_map_.find(name);
+        std::string real_name = name.empty() ? DEFAULT_PARTITON_TAG : name;
+        auto it = partition_names_map_.find(real_name);
         if (it == partition_names_map_.end()) {
             return Status(SS_NOT_FOUND_ERROR, "Specified partition name not found");
         }
@@ -107,10 +109,26 @@ class Snapshot : public ReferenceProxy {
         return GetResources<CollectionCommit>().cbegin()->second.Get();
     }
 
-    [[nodiscard]] ID_TYPE
+    const std::set<ID_TYPE>&
+    GetSegmentFileIds(ID_TYPE segment_id) const {
+        auto it = seg_segfiles_map_.find(segment_id);
+        if (it == seg_segfiles_map_.end()) {
+            return empty_set_;
+        }
+        return it->second;
+    }
+
+    SegmentFilePtr
+    GetSegmentFile(ID_TYPE segment_id, ID_TYPE field_element_id) const;
+
+    ID_TYPE
     GetLatestSchemaCommitId() const {
         return latest_schema_commit_id_;
     }
+
+    Status
+    GetFieldElement(const std::string& field_name, const std::string& field_element_name,
+                    FieldElementPtr& field_element) const;
 
     // PXU TODO: add const. Need to change Scopedxxxx::Get
     SegmentCommitPtr
@@ -163,7 +181,7 @@ class Snapshot : public ReferenceProxy {
         handler->SetStatus(status);
     }
 
-    [[nodiscard]] std::vector<std::string>
+    std::vector<std::string>
     GetFieldNames() const {
         std::vector<std::string> names;
         for (auto& kv : field_names_map_) {
@@ -172,19 +190,22 @@ class Snapshot : public ReferenceProxy {
         return std::move(names);
     }
 
-    [[nodiscard]] bool
+    bool
     HasField(const std::string& name) const {
         auto it = field_names_map_.find(name);
         return it != field_names_map_.end();
     }
 
-    [[nodiscard]] bool
+    FieldPtr
+    GetField(const std::string& name) const;
+
+    bool
     HasFieldElement(const std::string& field_name, const std::string& field_element_name) const {
         auto id = GetFieldElementId(field_name, field_element_name);
         return id > 0;
     }
 
-    [[nodiscard]] ID_TYPE
+    ID_TYPE
     GetSegmentFileId(const std::string& field_name, const std::string& field_element_name, ID_TYPE segment_id) const {
         auto field_element_id = GetFieldElementId(field_name, field_element_name);
         auto it = element_segfiles_map_.find(field_element_id);
@@ -198,17 +219,17 @@ class Snapshot : public ReferenceProxy {
         return its->second;
     }
 
-    [[nodiscard]] bool
+    bool
     HasSegmentFile(const std::string& field_name, const std::string& field_element_name, ID_TYPE segment_id) const {
         auto id = GetSegmentFileId(field_name, field_element_name, segment_id);
         return id > 0;
     }
 
-    [[nodiscard]] ID_TYPE
+    ID_TYPE
     GetFieldElementId(const std::string& field_name, const std::string& field_element_name) const {
         auto itf = field_element_names_map_.find(field_name);
         if (itf == field_element_names_map_.end())
-            return false;
+            return 0;
         auto itfe = itf->second.find(field_element_name);
         if (itfe == itf->second.end()) {
             return 0;
@@ -280,7 +301,7 @@ class Snapshot : public ReferenceProxy {
     }
 
     template <typename ResourceT>
-    [[nodiscard]] const typename ResourceT::ScopedMapT&
+    const typename ResourceT::ScopedMapT&
     GetResources() const {
         return std::get<Index<typename ResourceT::ScopedMapT, ScopedResourcesT>::value>(resources_);
     }
@@ -293,7 +314,6 @@ class Snapshot : public ReferenceProxy {
         if (it == resources.end()) {
             return nullptr;
         }
-
         return it->second.Get();
     }
 
@@ -319,56 +339,17 @@ class Snapshot : public ReferenceProxy {
     std::map<std::string, ID_TYPE> partition_names_map_;
     std::map<std::string, std::map<std::string, ID_TYPE>> field_element_names_map_;
     std::map<ID_TYPE, std::map<ID_TYPE, ID_TYPE>> element_segfiles_map_;
+    std::map<ID_TYPE, std::set<ID_TYPE>> seg_segfiles_map_;
     std::map<ID_TYPE, ID_TYPE> seg_segc_map_;
     std::map<ID_TYPE, ID_TYPE> p_pc_map_;
     ID_TYPE latest_schema_commit_id_ = 0;
     std::map<ID_TYPE, NUM_TYPE> p_max_seg_num_;
     LSN_TYPE max_lsn_;
+    std::set<ID_TYPE> empty_set_;
 };
 
 using GCHandler = std::function<void(Snapshot::Ptr)>;
 using ScopedSnapshotT = ScopedResource<Snapshot>;
-
-template <typename T>
-struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
-    using ResourceT = T;
-    using ThisT = IterateHandler<ResourceT>;
-    using Ptr = std::shared_ptr<ThisT>;
-
-    explicit IterateHandler(ScopedSnapshotT ss) : ss_(ss) {
-    }
-
-    virtual Status
-    PreIterate() {
-        return Status::OK();
-    }
-    virtual Status
-    Handle(const typename ResourceT::Ptr& resource) = 0;
-    virtual Status
-    PostIterate() {
-        return Status::OK();
-    }
-
-    void
-    SetStatus(Status status) {
-        std::unique_lock<std::mutex> lock(mtx_);
-        status_ = status;
-    }
-    Status
-    GetStatus() const {
-        std::unique_lock<std::mutex> lock(mtx_);
-        return status_;
-    }
-
-    virtual void
-    Iterate() {
-        ss_->IterateResources<ThisT>(this->shared_from_this());
-    }
-
-    ScopedSnapshotT ss_;
-    Status status_;
-    mutable std::mutex mtx_;
-};
 
 }  // namespace snapshot
 }  // namespace engine

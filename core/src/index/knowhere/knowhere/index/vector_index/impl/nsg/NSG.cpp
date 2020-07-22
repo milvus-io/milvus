@@ -31,27 +31,27 @@ namespace impl {
 
 unsigned int seed = 100;
 
-NsgIndex::NsgIndex(const size_t& dimension, const size_t& n, std::string metric)
+NsgIndex::NsgIndex(const size_t& dimension, const size_t& n, Metric_Type metric)
     : dimension(dimension), ntotal(n), metric_type(metric) {
-    if (metric == knowhere::Metric::L2) {
+    if (metric == Metric_Type::Metric_Type_L2) {
         distance_ = new DistanceL2;
-    } else if (metric == knowhere::Metric::IP) {
+    } else if (metric == Metric_Type::Metric_Type_IP) {
         distance_ = new DistanceIP;
     }
 }
 
 NsgIndex::~NsgIndex() {
-    delete[] ori_data_;
+    // delete[] ori_data_;
     delete[] ids_;
     delete distance_;
 }
 
 void
-NsgIndex::Build_with_ids(size_t nb, const float* data, const int64_t* ids, const BuildParams& parameters) {
+NsgIndex::Build_with_ids(size_t nb, float* data, const int64_t* ids, const BuildParams& parameters) {
     ntotal = nb;
-    ori_data_ = new float[ntotal * dimension];
+    // ori_data_ = new float[ntotal * dimension];
     ids_ = new int64_t[ntotal];
-    memcpy((void*)ori_data_, (void*)data, sizeof(float) * ntotal * dimension);
+    // memcpy((void*)ori_data_, (void*)data, sizeof(float) * ntotal * dimension);
     memcpy((void*)ids_, (void*)ids, sizeof(int64_t) * ntotal);
 
     search_length = parameters.search_length;
@@ -59,13 +59,13 @@ NsgIndex::Build_with_ids(size_t nb, const float* data, const int64_t* ids, const
     candidate_pool_size = parameters.candidate_pool_size;
 
     TimeRecorder rc("NSG", 1);
-    InitNavigationPoint();
+    InitNavigationPoint(data);
     rc.RecordSection("init");
 
-    Link();
+    Link(data);
     rc.RecordSection("Link");
 
-    CheckConnectivity();
+    CheckConnectivity(data);
     rc.RecordSection("Connect");
     rc.ElapseFromBegin("finish");
 
@@ -89,14 +89,14 @@ NsgIndex::Build_with_ids(size_t nb, const float* data, const int64_t* ids, const
 }
 
 void
-NsgIndex::InitNavigationPoint() {
+NsgIndex::InitNavigationPoint(float* data) {
     // calculate the center of vectors
     auto center = new float[dimension];
     memset(center, 0, sizeof(float) * dimension);
 
     for (size_t i = 0; i < ntotal; i++) {
         for (size_t j = 0; j < dimension; j++) {
-            center[j] += ori_data_[i * dimension + j];
+            center[j] += data[i * dimension + j];
         }
     }
     for (size_t j = 0; j < dimension; j++) {
@@ -106,7 +106,7 @@ NsgIndex::InitNavigationPoint() {
     // select navigation point
     std::vector<Neighbor> resset;
     navigation_point = rand_r(&seed) % ntotal;  // random initialize navigating point
-    GetNeighbors(center, resset, knng);
+    GetNeighbors(center, data, resset, knng);
     navigation_point = resset[0].id;
 
     // Debug code
@@ -124,7 +124,7 @@ NsgIndex::InitNavigationPoint() {
 
 // Specify Link
 void
-NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, std::vector<Neighbor>& fullset,
+NsgIndex::GetNeighbors(const float* query, float* data, std::vector<Neighbor>& resset, std::vector<Neighbor>& fullset,
                        boost::dynamic_bitset<>& has_calculated_dist) {
     auto& graph = knng;
     size_t buffer_size = search_length;
@@ -174,7 +174,7 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, std::v
                 continue;
             }
 
-            float dist = distance_->Compare(ori_data_ + dimension * id, query, dimension);
+            float dist = distance_->Compare(data + dimension * id, query, dimension);
             resset[i] = Neighbor(id, dist, false);
 
             //// difference from other GetNeighbors
@@ -199,7 +199,7 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, std::v
                         continue;
                     has_calculated_dist[id] = true;
 
-                    float dist = distance_->Compare(query, ori_data_ + dimension * id, dimension);
+                    float dist = distance_->Compare(query, data + dimension * id, dimension);
                     Neighbor nn(id, dist, false);
                     fullset.push_back(nn);
 
@@ -226,7 +226,7 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, std::v
 
 // FindUnconnectedNode
 void
-NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, std::vector<Neighbor>& fullset) {
+NsgIndex::GetNeighbors(const float* query, float* data, std::vector<Neighbor>& resset, std::vector<Neighbor>& fullset) {
     auto& graph = nsg;
     size_t buffer_size = search_length;
 
@@ -276,7 +276,7 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, std::v
                 continue;
             }
 
-            float dist = distance_->Compare(ori_data_ + id * dimension, query, dimension);
+            float dist = distance_->Compare(data + id * dimension, query, dimension);
             resset[i] = Neighbor(id, dist, false);
         }
         std::sort(resset.begin(), resset.end());  // sort by distance
@@ -297,7 +297,7 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, std::v
                         continue;
                     has_calculated_dist[id] = true;
 
-                    float dist = distance_->Compare(ori_data_ + dimension * id, query, dimension);
+                    float dist = distance_->Compare(data + dimension * id, query, dimension);
                     Neighbor nn(id, dist, false);
                     fullset.push_back(nn);
 
@@ -323,7 +323,8 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, std::v
 }
 
 void
-NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, Graph& graph, SearchParams* params) {
+NsgIndex::GetNeighbors(const float* query, float* data, std::vector<Neighbor>& resset, Graph& graph,
+                       SearchParams* params) {
     size_t buffer_size = params ? params->search_length : search_length;
 
     if (buffer_size > ntotal) {
@@ -367,7 +368,7 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, Graph&
                 KNOWHERE_THROW_MSG("Build Index Error, id > ntotal");
             }
 
-            float dist = distance_->Compare(ori_data_ + id * dimension, query, dimension);
+            float dist = distance_->Compare(data + id * dimension, query, dimension);
             resset[i] = Neighbor(id, dist, false);
         }
         std::sort(resset.begin(), resset.end());  // sort by distance
@@ -388,7 +389,7 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, Graph&
                         continue;
                     has_calculated_dist[id] = true;
 
-                    float dist = distance_->Compare(query, ori_data_ + dimension * id, dimension);
+                    float dist = distance_->Compare(query, data + dimension * id, dimension);
 
                     if (dist >= resset[buffer_size - 1].distance)
                         continue;
@@ -406,7 +407,6 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, Graph&
                     // std::cout << "pos: " << pos << ", nn: " << nn.id << ":" << nn.distance << ", nup: " <<
                     // nearest_updated_pos << std::endl;
                     /////
-
                     // trick: avoid search query search_length < init_ids.size() ...
                     if (buffer_size + 1 < resset.size())
                         ++buffer_size;
@@ -422,7 +422,7 @@ NsgIndex::GetNeighbors(const float* query, std::vector<Neighbor>& resset, Graph&
 }
 
 void
-NsgIndex::Link() {
+NsgIndex::Link(float* data) {
     float* cut_graph_dist = new float[ntotal * out_degree];
     nsg.resize(ntotal);
 
@@ -437,8 +437,8 @@ NsgIndex::Link() {
             fullset.clear();
             temp.clear();
             flags.reset();
-            GetNeighbors(ori_data_ + dimension * n, temp, fullset, flags);
-            SyncPrune(n, fullset, flags, cut_graph_dist);
+            GetNeighbors(data + dimension * n, data, temp, fullset, flags);
+            SyncPrune(data, n, fullset, flags, cut_graph_dist);
         }
 
         // Debug code
@@ -464,20 +464,20 @@ NsgIndex::Link() {
 #pragma omp for schedule(dynamic, 100)
     for (unsigned n = 0; n < ntotal; ++n) {
         faiss::BuilderSuspend::check_wait();
-        InterInsert(n, mutex_vec, cut_graph_dist);
+        InterInsert(data, n, mutex_vec, cut_graph_dist);
     }
     delete[] cut_graph_dist;
 }
 
 void
-NsgIndex::SyncPrune(size_t n, std::vector<Neighbor>& pool, boost::dynamic_bitset<>& has_calculated,
+NsgIndex::SyncPrune(float* data, size_t n, std::vector<Neighbor>& pool, boost::dynamic_bitset<>& has_calculated,
                     float* cut_graph_dist) {
     // avoid lose nearest neighbor in knng
     for (size_t i = 0; i < knng[n].size(); ++i) {
         auto id = knng[n][i];
         if (has_calculated[id])
             continue;
-        float dist = distance_->Compare(ori_data_ + dimension * n, ori_data_ + dimension * id, dimension);
+        float dist = distance_->Compare(data + dimension * n, data + dimension * id, dimension);
         pool.emplace_back(Neighbor(id, dist, true));
     }
 
@@ -490,7 +490,7 @@ NsgIndex::SyncPrune(size_t n, std::vector<Neighbor>& pool, boost::dynamic_bitset
     }
     result.push_back(pool[cursor]);  // init result with nearest neighbor
 
-    SelectEdge(cursor, pool, result, true);
+    SelectEdge(data, cursor, pool, result, true);
 
     // filling the cut_graph
     auto& des_id_pool = nsg[n];
@@ -507,7 +507,7 @@ NsgIndex::SyncPrune(size_t n, std::vector<Neighbor>& pool, boost::dynamic_bitset
 
 //>> Optimize: remove read-lock
 void
-NsgIndex::InterInsert(unsigned n, std::vector<std::mutex>& mutex_vec, float* cut_graph_dist) {
+NsgIndex::InterInsert(float* data, unsigned n, std::vector<std::mutex>& mutex_vec, float* cut_graph_dist) {
     auto& current = n;
 
     auto& neighbor_id_pool = nsg[current];
@@ -555,7 +555,7 @@ NsgIndex::InterInsert(unsigned n, std::vector<std::mutex>& mutex_vec, float* cut
             std::sort(wait_for_link_pool.begin(), wait_for_link_pool.end());
             result.push_back(wait_for_link_pool[start]);
 
-            SelectEdge(start, wait_for_link_pool, result);
+            SelectEdge(data, start, wait_for_link_pool, result);
 
             {
                 LockGuard lk(mutex_vec[current_neighbor]);
@@ -580,7 +580,8 @@ NsgIndex::InterInsert(unsigned n, std::vector<std::mutex>& mutex_vec, float* cut
 }
 
 void
-NsgIndex::SelectEdge(unsigned& cursor, std::vector<Neighbor>& sort_pool, std::vector<Neighbor>& result, bool limit) {
+NsgIndex::SelectEdge(float* data, unsigned& cursor, std::vector<Neighbor>& sort_pool, std::vector<Neighbor>& result,
+                     bool limit) {
     auto& pool = sort_pool;
 
     /*
@@ -594,8 +595,7 @@ NsgIndex::SelectEdge(unsigned& cursor, std::vector<Neighbor>& sort_pool, std::ve
         auto& p = pool[cursor];
         bool should_link = true;
         for (size_t t = 0; t < result.size(); ++t) {
-            float dist =
-                distance_->Compare(ori_data_ + dimension * result[t].id, ori_data_ + dimension * p.id, dimension);
+            float dist = distance_->Compare(data + dimension * result[t].id, data + dimension * p.id, dimension);
 
             if (dist < p.distance) {
                 should_link = false;
@@ -608,7 +608,7 @@ NsgIndex::SelectEdge(unsigned& cursor, std::vector<Neighbor>& sort_pool, std::ve
 }
 
 void
-NsgIndex::CheckConnectivity() {
+NsgIndex::CheckConnectivity(float* data) {
     auto root = navigation_point;
     boost::dynamic_bitset<> has_linked{ntotal, 0};
     int64_t linked_count = 0;
@@ -619,7 +619,7 @@ NsgIndex::CheckConnectivity() {
         if (linked_count >= static_cast<int64_t>(ntotal)) {
             break;
         }
-        FindUnconnectedNode(has_linked, root);
+        FindUnconnectedNode(data, has_linked, root);
     }
 }
 
@@ -657,7 +657,7 @@ NsgIndex::DFS(size_t root, boost::dynamic_bitset<>& has_linked, int64_t& linked_
 }
 
 void
-NsgIndex::FindUnconnectedNode(boost::dynamic_bitset<>& has_linked, int64_t& root) {
+NsgIndex::FindUnconnectedNode(float* data, boost::dynamic_bitset<>& has_linked, int64_t& root) {
     // find any of unlinked-node
     size_t id = ntotal;
     for (size_t i = 0; i < ntotal; i++) {  // find not link
@@ -672,7 +672,7 @@ NsgIndex::FindUnconnectedNode(boost::dynamic_bitset<>& has_linked, int64_t& root
 
     // search unlinked-node's neighbor
     std::vector<Neighbor> tmp, pool;
-    GetNeighbors(ori_data_ + dimension * id, tmp, pool);
+    GetNeighbors(data + dimension * id, data, tmp, pool);
     std::sort(pool.begin(), pool.end());
 
     size_t found = 0;
@@ -831,21 +831,23 @@ NsgIndex::FindUnconnectedNode(boost::dynamic_bitset<>& has_linked, int64_t& root
 // }
 
 void
-NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, const unsigned& k, float* dist,
-                 int64_t* ids, SearchParams& params, faiss::ConcurrentBitsetPtr bitset) {
+NsgIndex::Search(const float* query, float* data, const unsigned& nq, const unsigned& dim, const unsigned& k,
+                 float* dist, int64_t* ids, SearchParams& params, faiss::ConcurrentBitsetPtr bitset) {
     std::vector<std::vector<Neighbor>> resset(nq);
 
     TimeRecorder rc("NsgIndex::search", 1);
     if (nq == 1) {
-        GetNeighbors(query, resset[0], nsg, &params);
+        GetNeighbors(query, data, resset[0], nsg, &params);
     } else {
 #pragma omp parallel for
         for (unsigned int i = 0; i < nq; ++i) {
             const float* single_query = query + i * dim;
-            GetNeighbors(single_query, resset[i], nsg, &params);
+            GetNeighbors(single_query, data, resset[i], nsg, &params);
         }
     }
     rc.RecordSection("search");
+
+    bool is_ip = (metric_type == Metric_Type::Metric_Type_IP);
     for (unsigned int i = 0; i < nq; ++i) {
         unsigned int pos = 0;
         for (unsigned int j = 0; j < resset[i].size(); ++j) {
@@ -853,7 +855,7 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
                 break;  // already top k
             if (!bitset || !bitset->test((faiss::ConcurrentBitset::id_type_t)resset[i][j].id)) {
                 ids[i * k + pos] = ids_[resset[i][j].id];
-                dist[i * k + pos] = resset[i][j].distance;
+                dist[i * k + pos] = is_ip ? -resset[i][j].distance : resset[i][j].distance;
                 ++pos;
             }
         }
@@ -869,6 +871,22 @@ NsgIndex::Search(const float* query, const unsigned& nq, const unsigned& dim, co
 void
 NsgIndex::SetKnnGraph(Graph& g) {
     knng = std::move(g);
+}
+
+int64_t
+NsgIndex::GetSize() {
+    int64_t ret = 0;
+    ret += sizeof(*this);
+    ret += ntotal * dimension * sizeof(float);
+    ret += ntotal * sizeof(int64_t);
+    ret += sizeof(*distance_);
+    for (auto i = 0; i < nsg.size(); ++i) {
+        ret += nsg[i].size() * sizeof(node_t);
+    }
+    for (auto i = 0; i < knng.size(); ++i) {
+        ret += knng[i].size() * sizeof(node_t);
+    }
+    return ret;
 }
 
 }  // namespace impl
