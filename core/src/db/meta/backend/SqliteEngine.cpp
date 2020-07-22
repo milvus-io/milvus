@@ -11,9 +11,154 @@
 
 #include "db/meta/backend/SqliteEngine.h"
 
+#include <functional>
 #include <iostream>
+#include <unordered_map>
+#include <vector>
+
+#include "db/meta/MetaNames.h"
+#include "db/meta/backend/MetaHelper.h"
+#include "db/meta/backend/MetaSchema.h"
 
 namespace milvus::engine::meta {
+
+////////// private namespace //////////
+namespace {
+static const auto MetaIdField = MetaField(F_ID, "BIGINT", "PRIMARY KEY AUTO_INCREMENT");
+static const MetaField MetaCollectionIdField = MetaField(F_COLLECTON_ID, "BIGINT", "NOT NULL");
+static const MetaField MetaPartitionIdField = MetaField(F_PARTITION_ID, "BIGINT", "NOT NULL");
+static const MetaField MetaSchemaIdField = MetaField(F_SCHEMA_ID, "BIGINT", "NOT NULL");
+static const MetaField MetaSegmentIdField = MetaField(F_SEGMENT_ID, "BIGINT", "NOT NULL");
+static const MetaField MetaFieldElementIdField = MetaField(F_FIELD_ELEMENT_ID, "BIGINT", "NOT NULL");
+static const MetaField MetaFieldIdField = MetaField(F_FIELD_ID, "BIGINT", "NOT NULL");
+static const MetaField MetaNameField = MetaField(F_NAME, "VARCHAR(255)", "NOT NULL");
+static const MetaField MetaMappingsField = MetaField(F_MAPPINGS, "JSON", "NOT NULL");
+static const MetaField MetaNumField = MetaField(F_NUM, "BIGINT", "NOT NULL");
+static const MetaField MetaLSNField = MetaField(F_LSN, "BIGINT", "NOT NULL");
+static const MetaField MetaFtypeField = MetaField(F_FTYPE, "BIGINT", "NOT NULL");
+static const MetaField MetaStateField = MetaField(F_STATE, "TINYINT", "NOT NULL");
+static const MetaField MetaCreatedOnField = MetaField(F_CREATED_ON, "BIGINT", "NOT NULL");
+static const MetaField MetaUpdatedOnField = MetaField(F_UPDATED_ON, "BIGINT", "NOT NULL");
+static const MetaField MetaParamsField = MetaField(F_PARAMS, "JSON", "NOT NULL");
+static const MetaField MetaSizeField = MetaField(F_SIZE, "BIGINT", "NOT NULL");
+static const MetaField MetaRowCountField = MetaField(F_ROW_COUNT, "BIGINT", "NOT NULL");
+
+// Environment schema
+static const MetaSchema COLLECTION_SCHEMA(TABLE_COLLECTION,
+                                          {MetaIdField, MetaNameField, MetaLSNField, MetaParamsField, MetaStateField,
+                                           MetaCreatedOnField, MetaUpdatedOnField});
+
+// Tables schema
+static const MetaSchema COLLECTIONCOMMIT_SCHEMA(TABLE_COLLECTION_COMMIT,
+                                                {MetaIdField, MetaCollectionIdField, MetaSchemaIdField,
+                                                 MetaMappingsField, MetaRowCountField, MetaSizeField, MetaLSNField,
+                                                 MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
+
+// TableFiles schema
+static const MetaSchema PARTITION_SCHEMA(TABLE_PARTITION,
+                                         {MetaIdField, MetaNameField, MetaCollectionIdField, MetaLSNField,
+                                          MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
+
+// Fields schema
+static const MetaSchema PARTITIONCOMMIT_SCHEMA(TABLE_PARTITION_COMMIT,
+                                               {MetaIdField, MetaCollectionIdField, MetaPartitionIdField,
+                                                MetaMappingsField, MetaRowCountField, MetaSizeField, MetaStateField,
+                                                MetaLSNField, MetaCreatedOnField, MetaUpdatedOnField});
+
+static const MetaSchema SEGMENT_SCHEMA(TABLE_SEGMENT, {
+    MetaIdField,
+    MetaCollectionIdField,
+    MetaPartitionIdField,
+    MetaNumField,
+    MetaLSNField,
+    MetaStateField,
+    MetaCreatedOnField,
+    MetaUpdatedOnField,
+});
+
+static const MetaSchema SEGMENTCOMMIT_SCHEMA(TABLE_SEGMENT_COMMIT, {
+    MetaIdField,
+    MetaSchemaIdField,
+    MetaPartitionIdField,
+    MetaSegmentIdField,
+    MetaMappingsField,
+    MetaRowCountField,
+    MetaSizeField,
+    MetaLSNField,
+    MetaStateField,
+    MetaCreatedOnField,
+    MetaUpdatedOnField,
+});
+
+static const MetaSchema SEGMENTFILE_SCHEMA(TABLE_SEGMENT_FILE,
+                                           {MetaIdField, MetaCollectionIdField, MetaPartitionIdField,
+                                            MetaSegmentIdField, MetaFieldElementIdField, MetaRowCountField,
+                                            MetaSizeField, MetaLSNField, MetaStateField, MetaCreatedOnField,
+                                            MetaUpdatedOnField});
+
+static const MetaSchema SCHEMACOMMIT_SCHEMA(TABLE_SCHEMA_COMMIT, {
+    MetaIdField,
+    MetaCollectionIdField,
+    MetaMappingsField,
+    MetaLSNField,
+    MetaStateField,
+    MetaCreatedOnField,
+    MetaUpdatedOnField,
+});
+
+static const MetaSchema FIELD_SCHEMA(TABLE_FIELD,
+                                     {MetaIdField, MetaNameField, MetaNumField, MetaFtypeField, MetaParamsField,
+                                      MetaLSNField, MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
+
+static const MetaSchema FIELDCOMMIT_SCHEMA(TABLE_FIELD_COMMIT,
+                                           {MetaIdField, MetaCollectionIdField, MetaFieldIdField, MetaMappingsField,
+                                            MetaLSNField, MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
+
+static const MetaSchema FIELDELEMENT_SCHEMA(TABLE_FIELD_ELEMENT,
+                                            {MetaIdField, MetaCollectionIdField, MetaFieldIdField, MetaNameField,
+                                             MetaFtypeField, MetaParamsField, MetaLSNField, MetaStateField,
+                                             MetaCreatedOnField, MetaUpdatedOnField});
+
+/////////////////////////////////////////////////////
+static AttrsMapList * QueryData = nullptr;
+static AttrsMapList * InsertData = nullptr;
+static AttrsMapList * UpdateData = nullptr;
+static AttrsMapList * DeleteData = nullptr;
+
+static int
+QueryCallback(void *data, int argc, char **argv, char **azColName) {
+    AttrsMap raw;
+    for (size_t i = 0; i < argc; i++) {
+        // TODO: here check argv[i]. Refer to 'https://www.tutorialspoint.com/sqlite/sqlite_c_cpp.htm'
+        raw.insert(std::make_pair(azColName[i], argv[i]));
+    }
+
+    if (!QueryData) {
+        // TODO: check return value -1 or 1
+        return -1;
+    }
+
+    QueryData->push_back(raw);
+
+    return 0;
+}
+
+static int
+InsertCallBack(void *data, int argc, char **argv, char **azColName) {
+    return 0;
+}
+
+static int
+UpdateCallBack(void *data, int argc, char **argv, char **azColName) {
+    return 0;
+}
+
+static int
+DeleteCallBack(void *data, int argc, char **argv, char **azColName) {
+    return 0;
+}
+
+}  // namespace
 
 SqliteEngine::SqliteEngine(const DBMetaOptions& options) : options_(options) {
     std::string meta_path = options_.path_ + "/meta.sqlite";
@@ -34,22 +179,114 @@ SqliteEngine::~SqliteEngine() {
 
 Status
 SqliteEngine::Initialize() {
+    auto create_schema = [&](const MetaSchema& schema) {
+        std::string create_table_str = "CREATE TABLE IF NOT EXISTS " + schema.name() + "(" + schema.ToString() + ");";
+        auto rc = sqlite3_exec(db_, create_table_str.c_str(), nullptr, nullptr, nullptr);
+        if (rc != SQLITE_OK) {
+            std::string err = "Cannot create Sqlite table: ";
+            err += sqlite3_errmsg(db_);
+            throw std::runtime_error(err);
+        }
+    };
+
+    create_schema(COLLECTION_SCHEMA);
+    create_schema(COLLECTIONCOMMIT_SCHEMA);
+    create_schema(PARTITION_SCHEMA);
+    create_schema(PARTITIONCOMMIT_SCHEMA);
+    create_schema(SEGMENT_SCHEMA);
+    create_schema(SEGMENTCOMMIT_SCHEMA);
+    create_schema(SEGMENTFILE_SCHEMA);
+    create_schema(SCHEMACOMMIT_SCHEMA);
+    create_schema(FIELD_SCHEMA);
+    create_schema(FIELDCOMMIT_SCHEMA);
+    create_schema(FIELDELEMENT_SCHEMA);
+
+    return Status::OK();
+}
+
+//int
+//SqliteEngine::QueryCallBack(void *data, int argc, char **argv, char **azColName) {
+//    return 0;
+//}
+
+Status
+SqliteEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
+    std::string sql;
+
+    STATUS_CHECK(MetaHelper::MetaQueryContextToSql(context, sql));
+    std::lock_guard<std::mutex> lock(meta_mutex_);
+
+//    char *zErrMsg = 0;
+//    const char* data = "Callback function called";
+    QueryData = &attrs;
+    auto rc = sqlite3_exec(db_, sql.c_str(), QueryCallback, nullptr, nullptr);
+
+    if (rc != SQLITE_OK) {
+        std::string err = "Query fail:";
+        err += sqlite3_errmsg(db_);
+        std::cerr << err << std::endl;
+        return Status(1, err);
+    }
+
+    QueryData = nullptr;
 
     return Status::OK();
 }
 
 Status
-SqliteEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
-    return Status();
-}
-
-Status
 SqliteEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
+    std::vector<std::string> sqls;
+
+    std::string sql;
+    for (const auto& context: sql_contexts) {
+        STATUS_CHECK(MetaHelper::MetaApplyContextToSql(context, sql));
+        sqls.push_back(sql);
+    }
+
+    std::lock_guard<std::mutex> lock(meta_mutex_);
+    int rc = SQLITE_OK;
+    sqlite3_exec(db_, "BEGIN", NULL, NULL, NULL);
+    for (size_t i = 0; i < sql_contexts.size(); i++) {
+        if (sql_contexts[i].op_ == oAdd) {
+            rc = sqlite3_exec(db_, sqls[i].c_str(), InsertCallBack, NULL, NULL);
+        } else if (sql_contexts[i].op_ == oUpdate) {
+            rc = sqlite3_exec(db_, sqls[i].c_str(), UpdateCallBack, NULL, NULL);
+        } else if (sql_contexts[i].op_ == oDelete) {
+            rc = sqlite3_exec(db_, sqls[i].c_str(), DeleteCallBack, NULL, NULL);
+        } else {
+            return Status(SERVER_UNEXPECTED_ERROR, "Unknown Op");
+        }
+
+        if (SQLITE_OK != rc) {
+            std::string err = "Execute Fail:";
+            err += sqlite3_errmsg(db_);
+            std::cerr << err << std::endl;
+            sqlite3_exec(db_, "ROLLBACK", NULL, NULL, NULL);
+            return Status(SERVER_UNEXPECTED_ERROR, err);
+        }
+
+        // TODO: Here Get id from execute result
+    }
+
+//    for (auto& context : sql_contexts) {
+//        std::string sql;
+//        STATUS_CHECK(MetaHelper::MetaApplyContextToSql(context, sql));
+//
+////        auto res = query.execute();
+//        if (context.op_ == oAdd) {
+//            auto id = res.insert_id();
+//            result_ids.push_back(id);
+//        } else {
+//            result_ids.push_back(context.id_);
+//        }
+//    }
+    sqlite3_exec(db_, "COMMIT", NULL, NULL, NULL);
     return Status();
 }
 
 Status
 SqliteEngine::TruncateAll() {
+//    "DELETE FROM "
     return Status();
 }
 

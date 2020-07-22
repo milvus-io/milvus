@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <mutex>
+
 #include <sqlite3.h>
 
 #include "db/Options.h"
@@ -40,9 +42,13 @@ class SqliteEngine : public MetaEngine {
     Status
     Initialize();
 
+//    int
+//    QueryCallBack(void *data, int argc, char **argv, char **azColName);
+
  private:
     DBMetaOptions options_;
     sqlite3 * db_;
+    std::mutex meta_mutex_;
 
 // private
 };

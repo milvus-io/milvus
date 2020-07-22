@@ -11,8 +11,6 @@
 
 #include "db/meta/backend/MySqlEngine.h"
 
-#include <unistd.h>
-
 #include <memory>
 #include <string>
 #include <thread>
@@ -32,7 +30,6 @@ namespace milvus::engine::meta {
 
 ////////// private namespace //////////
 namespace {
-
 static const auto MetaIdField = MetaField(F_ID, "BIGINT", "PRIMARY KEY AUTO_INCREMENT");
 static const MetaField MetaCollectionIdField = MetaField(F_COLLECTON_ID, "BIGINT", "NOT NULL");
 static const MetaField MetaPartitionIdField = MetaField(F_PARTITION_ID, "BIGINT", "NOT NULL");
