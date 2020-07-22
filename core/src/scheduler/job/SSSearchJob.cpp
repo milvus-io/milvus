@@ -47,7 +47,7 @@ SSSearchJob::SearchDone(const engine::snapshot::ID_TYPE seg_id) {
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld finish segment: %ld", "search", 0, id(), seg_id);
 }
 
-engine::QueryResult&
+engine::QueryResultPtr&
 SSSearchJob::GetQueryResult() {
     return query_result_;
 }
@@ -65,7 +65,7 @@ SSSearchJob::Dump() const {
     return ret;
 }
 
-const std::shared_ptr<server::Context>&
+const server::ContextPtr&
 SSSearchJob::GetContext() const {
     return context_;
 }

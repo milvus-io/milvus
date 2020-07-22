@@ -52,7 +52,7 @@ class SSSearchJob : public Job {
     void
     SearchDone(const engine::snapshot::ID_TYPE seg_id);
 
-    engine::QueryResult&
+    engine::QueryResultPtr&
     GetQueryResult();
 
     Status&
@@ -97,7 +97,7 @@ class SSSearchJob : public Job {
 
     SegmentVisitorMap segment_visitor_map_;
 
-    engine::QueryResult query_result_;
+    engine::QueryResultPtr query_result_;
     Status status_;
 
     query::QueryPtr query_ptr_;
