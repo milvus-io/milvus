@@ -164,7 +164,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         field_ptr1->index_params = index_param_1.dump();
 
         milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
-        field_ptr2->field_type = milvus::DataType::BINARY_VECTOR;
+        field_ptr2->field_type = milvus::DataType::VECTOR_BINARY;
         field_ptr2->field_name = "field_vec";
         JSON index_param_2;
         index_param_2["name"] = "index_3";

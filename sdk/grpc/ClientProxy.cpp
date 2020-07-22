@@ -327,7 +327,7 @@ CopyEntityToJson(::milvus::grpc::Entities& grpc_entities, JSON& json_entity) {
                 double_data.insert(std::make_pair(grpc_field.field_name(), data));
                 break;
             }
-            case ::milvus::grpc::FLOAT_VECTOR: {
+            case ::milvus::grpc::VECTOR_FLOAT: {
                 std::vector<milvus::VectorData> data(row_num);
                 for (int j = 0; j < row_num; j++) {
                     size_t dim = grpc_vector_record.records(j).float_data_size();
@@ -338,7 +338,7 @@ CopyEntityToJson(::milvus::grpc::Entities& grpc_entities, JSON& json_entity) {
                 vector_data.insert(std::make_pair(grpc_field.field_name(), data));
                 break;
             }
-            case ::milvus::grpc::BINARY_VECTOR: {
+            case ::milvus::grpc::VECTOR_BINARY: {
                 // TODO (yukun)
             }
             default: {}

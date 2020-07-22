@@ -113,7 +113,7 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     field_ptr3->index_params = index_param_3.dump();
 
     field_ptr4->field_name = "field_vec";
-    field_ptr4->field_type = milvus::DataType::FLOAT_VECTOR;
+    field_ptr4->field_type = milvus::DataType::VECTOR_FLOAT;
     JSON index_param_4;
     index_param_4["name"] = "index_3";
     field_ptr4->index_params = index_param_4.dump();

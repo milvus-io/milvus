@@ -20,20 +20,21 @@
 namespace milvus {
 
 enum class DataType {
-    INT8 = 1,
-    INT16 = 2,
-    INT32 = 3,
-    INT64 = 4,
+    NONE = 0,
+    BOOL = 1,
+    INT8 = 2,
+    INT16 = 3,
+    INT32 = 4,
+    INT64 = 5,
+
+    FLOAT = 10,
+    DOUBLE = 11,
 
     STRING = 20,
 
-    BOOL = 30,
-
-    FLOAT = 40,
-    DOUBLE = 41,
-
-    FLOAT_VECTOR = 100,
-    BINARY_VECTOR = 101,
+    VECTOR_BINARY = 100,
+    VECTOR_FLOAT = 101,
+    VECTOR = 200,
     UNKNOWN = 9999,
 };
 
