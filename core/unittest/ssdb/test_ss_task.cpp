@@ -44,18 +44,18 @@ TEST(SSTaskTest, TEST_TASK) {
 //    auto file = std::make_shared<SegmentSchema>();
 //    file->index_params_ = "{ \"nlist\": 16384 }";
 //    file->dimension_ = 64;
-    auto label = std::make_shared<BroadcastLabel>();
-
-    SSTestTask task(dummy_context, nullptr, label);
-    task.Load(LoadType::CPU2GPU, 0);
-    auto th = std::thread([&]() {
-        task.Execute();
-    });
-    task.Wait();
-
-    if (th.joinable()) {
-        th.join();
-    }
+//    auto label = std::make_shared<BroadcastLabel>();
+//
+//    SSTestTask task(dummy_context, nullptr, label);
+//    task.Load(LoadType::CPU2GPU, 0);
+//    auto th = std::thread([&]() {
+//        task.Execute();
+//    });
+//    task.Wait();
+//
+//    if (th.joinable()) {
+//        th.join();
+//    }
 
 //    static const char* CONFIG_PATH = "/tmp/milvus_test";
 //    auto options = milvus::engine::DBFactory::BuildOption();

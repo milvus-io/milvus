@@ -190,7 +190,7 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& 
         return nullptr;
     }
 
-    auto visitor = std::make_shared<SegmentVisitor>();
+    SegmentVisitorPtr visitor = std::make_shared<SegmentVisitor>(ss);
     visitor->SetSegment(segment);
 
     auto executor = [&](const snapshot::Field::Ptr& field, snapshot::FieldIterator* itr) -> Status {
@@ -219,7 +219,7 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id
         return nullptr;
     }
 
-    auto visitor = std::make_shared<SegmentVisitor>();
+    auto visitor = std::make_shared<SegmentVisitor>(ss);
     visitor->SetSegment(segment);
 
     auto executor = [&](const snapshot::Field::Ptr& field, snapshot::FieldIterator* itr) -> Status {
@@ -236,6 +236,9 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id
     iterator->Iterate();
 
     return visitor;
+}
+
+SegmentVisitor::SegmentVisitor(snapshot::ScopedSnapshotT ss) : snapshot_(ss) {
 }
 
 std::string
