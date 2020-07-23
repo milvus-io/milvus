@@ -17,8 +17,9 @@
 namespace milvus {
 namespace scheduler {
 
-SSTestTask::SSTestTask(const server::ContextPtr& context, const engine::SegmentVisitorPtr& visitor, TaskLabelPtr label)
-    : XSSSearchTask(context, "", visitor, std::move(label)) {
+SSTestTask::SSTestTask(const server::ContextPtr& context, const engine::DBOptions& options,
+                       const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
+    : SSSearchTask(context, options, query_ptr, segment_id, std::move(label)) {
 }
 
 void

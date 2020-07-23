@@ -12,6 +12,7 @@
 #pragma once
 
 #include "ExecutionEngine.h"
+#include "SSExecutionEngine.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
 
@@ -26,13 +27,8 @@ class EngineFactory {
     Build(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
           const milvus::json& index_params);
 
-    //    static ExecutionEnginePtr
-    //    Build(uint16_t dimension,
-    //          const std::string& location,
-    //          EngineType index_type,
-    //          MetricType metric_type,
-    //          std::unordered_map<std::string, DataType>& attr_type,
-    //          const milvus::json& index_params);
+    static SSExecutionEnginePtr
+    Build(const std::string& dir_root, const std::string& collection_name, int64_t segment_id);
 };
 
 }  // namespace engine
