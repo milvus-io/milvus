@@ -84,7 +84,7 @@ class Store : public std::enable_shared_from_this<Store> {
 
     std::string
     GetRootPath() const {
-        return root_path_ + "/tables";
+        return root_path_;
     }
 
     template <typename OpT>
