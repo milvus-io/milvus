@@ -540,6 +540,7 @@ TEST_F(RpcHandlerTest, INSERT_TEST) {
 
     handler->Insert(&context, &request, &entity_ids);
     ASSERT_EQ(entity_ids.entity_id_array_size(), ENTITY_COUNT);
+    entity_ids.clear_entity_id_array();
     fiu_init(0);
     fiu_enable("InsertEntityRequest.OnExecute.id_array_error", 1, NULL, 0);
     handler->Insert(&context, &request, &entity_ids);

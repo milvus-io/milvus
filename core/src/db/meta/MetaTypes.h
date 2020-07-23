@@ -57,9 +57,12 @@ static std::map<std::string, EngineType> s_map_engine_type = {
     {knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, EngineType::SPTAG_KDT},
     {knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, EngineType::SPTAG_BKT},
 #endif
+    {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, EngineType::FAISS_BIN_IDMAP},
+    {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, EngineType::FAISS_BIN_IVFFLAT},
     {knowhere::IndexEnum::INDEX_HNSW, EngineType::HNSW},
     {knowhere::IndexEnum::INDEX_HNSW_SQ8NM, EngineType::HNSW_SQ8NM},
-    {knowhere::IndexEnum::INDEX_ANNOY, EngineType::ANNOY}};
+    {knowhere::IndexEnum::INDEX_ANNOY, EngineType::ANNOY},
+};
 
 enum class MetricType {
     INVALID = 0,
