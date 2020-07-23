@@ -13,7 +13,6 @@
 
 #include <atomic>
 #include <list>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <set>

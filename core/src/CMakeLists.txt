@@ -21,10 +21,8 @@ include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 add_subdirectory(config)
 
 set(FOUND_OPENBLAS "unknown")
+
 add_subdirectory(index)
-if (FAISS_WITH_MKL)
-    add_compile_definitions("WITH_MKL")
-endif ()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 foreach (dir ${INDEX_INCLUDE_DIRS})
@@ -56,9 +54,11 @@ set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
         )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/query query_files)
+add_subdirectory(query)
+add_subdirectory(search)
+
+# Now no use of context
 aux_source_directory(${MILVUS_ENGINE_SRC}/context context_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/search search_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_files)
@@ -158,7 +158,6 @@ set(engine_files
         ${db_merge_files}
         ${db_wal_files}
         ${db_snapshot_files}
-        ${metrics_files}
         ${storage_files}
         ${thirdparty_files}
         ${utils_files}
@@ -168,11 +167,6 @@ set(engine_files
         ${codecs_snapshot_files}
         ${segment_files}
         )
-
-if (MILVUS_WITH_PROMETHEUS)
-    set(engine_files ${engine_files}
-            ${metrics_prometheus_files})
-endif ()
 
 set(grpc_lib
         grpcpp_channelz
@@ -269,14 +263,6 @@ if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
             )
 endif ()
 
-add_library(milvus_engine STATIC ${engine_files})
-add_dependencies(milvus_engine fiu)
-target_link_libraries(milvus_engine
-        knowhere
-        ${third_party_libs}
-        ${engine_libs}
-        )
-
 if (MILVUS_WITH_PROMETHEUS)
     add_library(metrics STATIC ${metrics_files} ${metrics_prometheus_files})
 else ()
@@ -296,6 +282,17 @@ endif ()
 
 target_link_libraries(metrics ${metrics_lib})
 
+
+add_library(milvus_engine STATIC ${engine_files})
+add_dependencies(milvus_engine fiu)
+target_link_libraries(milvus_engine
+        knowhere
+        ${third_party_libs}
+        ${engine_libs}
+        metrics
+        )
+
+
 add_library(tracing STATIC ${tracing_files} ${thirdparty_files})
 add_dependencies(tracing fiu)
 set(tracing_lib
@@ -313,12 +310,11 @@ set(server_libs
         metrics
         tracing
         oatpp
+        query
+        search
         )
 
 add_executable(milvus_server
-        ${metrics_files}
-        ${query_files}
-        ${search_files}
         ${context_files}
         ${scheduler_files}
         ${server_files}
