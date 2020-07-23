@@ -1507,27 +1507,27 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
         all_required = required_str == "True" || required_str == "true";
     }
 
-    std::vector<PartitionParam> partitions;
-    status = request_handler_.ShowPartitions(context_ptr_, collection_name->std_str(), partitions);
+    std::vector<std::string> partition_names;
+    status = request_handler_.ShowPartitions(context_ptr_, collection_name->std_str(), partition_names);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
     if (all_required) {
         offset = 0;
-        page_size = partitions.size();
+        page_size = partition_names.size();
     } else {
-        offset = std::min((size_t)offset, partitions.size());
-        page_size = std::min(partitions.size() - offset, (size_t)page_size);
+        offset = std::min((size_t)offset, partition_names.size());
+        page_size = std::min(partition_names.size() - offset, (size_t)page_size);
     }
 
-    partition_list_dto->count = partitions.size();
+    partition_list_dto->count = partition_names.size();
     partition_list_dto->partitions = partition_list_dto->partitions->createShared();
 
-    if (offset < (int64_t)(partitions.size())) {
+    if (offset < (int64_t)(partition_names.size())) {
         for (int64_t i = offset; i < page_size + offset; i++) {
             auto partition_dto = PartitionFieldsDto::createShared();
-            partition_dto->partition_tag = partitions.at(i).tag_.c_str();
+            partition_dto->partition_tag = partition_names.at(i).c_str();
             partition_list_dto->partitions->pushBack(partition_dto);
         }
     }

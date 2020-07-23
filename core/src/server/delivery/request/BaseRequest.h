@@ -102,18 +102,6 @@ struct IndexParam {
     }
 };
 
-struct PartitionParam {
-    std::string collection_name_;
-    std::string tag_;
-
-    PartitionParam() = default;
-
-    PartitionParam(const std::string& collection_name, const std::string& tag) {
-        collection_name_ = collection_name;
-        tag_ = tag;
-    }
-};
-
 class Context;
 
 class BaseRequest {

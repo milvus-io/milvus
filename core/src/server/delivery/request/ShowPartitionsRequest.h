@@ -24,18 +24,18 @@ class ShowPartitionsRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::vector<PartitionParam>& partition_list);
+           std::vector<std::string>& partition_list);
 
  protected:
     ShowPartitionsRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                          std::vector<PartitionParam>& partition_list);
+                          std::vector<std::string>& partition_list);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
-    std::vector<PartitionParam>& partition_list_;
+    std::vector<std::string>& partition_list_;
 };
 
 }  // namespace server

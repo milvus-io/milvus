@@ -234,8 +234,9 @@ SSDBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 }
 
 Status
-SSDBImpl::DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                             std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) {
+SSDBImpl::DescribeCollection(
+    const std::string& collection_name, snapshot::CollectionPtr& collection,
+    std::unordered_map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;

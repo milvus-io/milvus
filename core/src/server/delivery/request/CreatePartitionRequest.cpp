@@ -43,69 +43,44 @@ CreatePartitionRequest::OnExecute() {
 
     try {
         // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_collection_name",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        if (!status.ok()) {
-            return status;
-        }
-
         if (tag_ == milvus::engine::DEFAULT_PARTITON_TAG) {
             return Status(SERVER_INVALID_PARTITION_TAG, "'_default' is built-in partition tag");
         }
 
-        status = ValidatePartitionTags({tag_});
-        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_name",
+        auto status = ValidatePartitionTags({tag_});
+        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_tags",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
-        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_tags",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-            } else {
-                return status;
-            }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-            }
+        bool exist = false;
+        status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
 
         // check partition total count
-        std::vector<engine::meta::CollectionSchema> schema_array;
-        status = DBWrapper::DB()->ShowPartitions(collection_name_, schema_array);
-        if (schema_array.size() >= MAX_PARTITION_LIMIT) {
-            return Status(SERVER_UNSUPPORTED_ERROR, "The number of partitions exceeds the upper limit(4096)");
+        std::vector<std::string> partition_names;
+        status = DBWrapper::SSDB()->ShowPartitions(collection_name_, partition_names);
+        if (partition_names.size() >= MAX_PARTITION_LIMIT) {
+            std::stringstream err_ss;
+            err_ss << "The number of partitions exceeds the upper limit (" << MAX_PARTITION_LIMIT << ")";
+            return Status(SERVER_UNSUPPORTED_ERROR, err_ss.str());
         }
 
         rc.RecordSection("check validation");
 
         // step 2: create partition
-        status = DBWrapper::DB()->CreatePartition(collection_name_, "", tag_);
-        fiu_do_on("CreatePartitionRequest.OnExecute.db_already_exist", status = Status(milvus::DB_ALREADY_EXIST, ""));
+        status = DBWrapper::SSDB()->CreatePartition(collection_name_, tag_);
         fiu_do_on("CreatePartitionRequest.OnExecute.create_partition_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreatePartitionRequest.OnExecute.throw_std_exception", throw std::exception());
-        if (!status.ok()) {
-            // partition could exist
-            if (status.code() == DB_ALREADY_EXIST) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, status.message());
-            }
-            return status;
-        }
+        return status;
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
-
-    return Status::OK();
 }
 
 }  // namespace server

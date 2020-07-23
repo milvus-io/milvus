@@ -1137,10 +1137,10 @@ GrpcRequestHandler::ShowPartitions(::grpc::ServerContext* context, const ::milvu
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
-    std::vector<PartitionParam> partitions;
-    Status status = request_handler_.ShowPartitions(GetContext(context), request->collection_name(), partitions);
-    for (auto& partition : partitions) {
-        response->add_partition_tag_array(partition.tag_);
+    std::vector<std::string> partition_names;
+    Status status = request_handler_.ShowPartitions(GetContext(context), request->collection_name(), partition_names);
+    for (auto& pn : partition_names) {
+        response->add_partition_tag_array(pn);
     }
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);

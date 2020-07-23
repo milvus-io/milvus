@@ -10,12 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/DBFactory.h"
-#ifdef MILVUS_USE_SNAPSHOT
-#include "SSDBImpl.h"
-#else
 #include "DBImpl.h"
 #include "SSDBImpl.h"
-#endif
 #include "meta/MetaFactory.h"
 #include "meta/MySQLMetaImpl.h"
 #include "meta/SqliteMetaImpl.h"

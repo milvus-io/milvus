@@ -21,7 +21,7 @@ namespace server {
 class CreatePartitionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& partition_name,
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            const std::string& tag);
 
  protected:

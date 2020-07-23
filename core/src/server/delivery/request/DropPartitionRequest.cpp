@@ -38,50 +38,24 @@ DropPartitionRequest::OnExecute() {
     std::string hdr = "DropPartitionRequest(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
-    std::string collection_name = collection_name_;
-    std::string partition_tag = tag_;
-
-    // step 1: check collection name
-    auto status = ValidateCollectionName(collection_name);
-    fiu_do_on("DropPartitionRequest.OnExecute.invalid_collection_name",
-              status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-    if (!status.ok()) {
-        return status;
-    }
-
-    // step 2: check partition tag
-    if (partition_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
+    /* check partition tag */
+    if (tag_ == milvus::engine::DEFAULT_PARTITON_TAG) {
         std::string msg = "Default partition cannot be dropped.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
     }
 
-    status = ValidatePartitionTags({partition_tag});
-    if (!status.ok()) {
-        return status;
-    }
-
-    // step 3: check collection
-    // only process root collection, ignore partition collection
-    engine::meta::CollectionSchema collection_schema;
-    collection_schema.collection_id_ = collection_name_;
-    status = DBWrapper::DB()->DescribeCollection(collection_schema);
-    if (!status.ok()) {
-        if (status.code() == DB_NOT_FOUND) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-        } else {
-            return status;
-        }
-    } else {
-        if (!collection_schema.owner_collection_.empty()) {
-            return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-        }
+    /* check collection */
+    bool exist = false;
+    auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+    if (!exist) {
+        return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
     }
 
     rc.RecordSection("check validation");
 
-    // step 4: drop partition
-    return DBWrapper::DB()->DropPartitionByTag(collection_name, partition_tag);
+    /* drop partition */
+    return DBWrapper::SSDB()->DropPartition(collection_name_, tag_);
 }
 
 }  // namespace server

@@ -246,7 +246,7 @@ RequestHandler::HasPartition(const std::shared_ptr<Context>& context, const std:
 
 Status
 RequestHandler::ShowPartitions(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                               std::vector<PartitionParam>& partitions) {
+                               std::vector<std::string>& partitions) {
     BaseRequestPtr request_ptr = ShowPartitionsRequest::Create(context, collection_name, partitions);
     RequestScheduler::ExecRequest(request_ptr);
 
