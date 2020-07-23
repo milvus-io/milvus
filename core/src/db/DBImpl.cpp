@@ -22,6 +22,7 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <queue>
 #include <set>
