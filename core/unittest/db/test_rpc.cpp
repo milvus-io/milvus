@@ -58,7 +58,7 @@ ConstructMapping(::milvus::grpc::Mapping* request, const std::string& collection
 
     auto field2 = request->add_fields();
     field2->set_name("field_2");
-    field2->set_type(::milvus::grpc::DataType::FLOAT_VECTOR);
+    field2->set_type(::milvus::grpc::DataType::);
 }
 
 void
@@ -190,7 +190,7 @@ class RpcHandlerTest : public testing::Test {
 
         auto field_2 = request.add_fields();
         field_2->set_name("field_2");
-        field_2->set_type(::milvus::grpc::DataType::FLOAT_VECTOR);
+        field_2->set_type(::milvus::grpc::DataType::VECTOR_FLOAT);
         auto grpc_index_param_2 = field_2->add_index_params();
         grpc_index_param_2->set_key("name");
         grpc_index_param_2->set_value("index_2");
