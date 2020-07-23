@@ -12,21 +12,23 @@
 #-------------------------------------------------------------------------------
 
 set(test_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_hybrid_db.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_db_mysql.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_wal.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_engine.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_mem.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_meta.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_meta_mysql.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_misc.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_search.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_delete.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_search_by_id.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_hybrid_db.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_db_mysql.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_wal.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_engine.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_mem.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_meta.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_meta_mysql.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_misc.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_search.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_delete.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_search_by_id.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_rpc.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_web.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp)
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_web.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
+        )
 
 add_executable(test_db
         ${common_files}
@@ -38,6 +40,7 @@ add_executable(test_db
         ${config_files}
         ${config_handler_files}
         ${db_main_files}
+        ${db_attr_files}
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
