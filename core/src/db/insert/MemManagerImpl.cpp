@@ -314,10 +314,5 @@ MemManagerImpl::GetMaxLSN(const MemList& tables) {
     return max_lsn;
 }
 
-void
-MemManagerImpl::ConfigUpdate(const std::string& name) {
-    options_.insert_buffer_size_ = config.cache.insert_buffer_size();
-}
-
 }  // namespace engine
 }  // namespace milvus

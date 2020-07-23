@@ -17,7 +17,6 @@
 #include <string>
 #include <vector>
 
-#include "config/ServerConfig.h"
 #include "db/Constants.h"
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
@@ -40,11 +39,6 @@ MemTableFile::MemTableFile(const std::string& collection_id, const meta::MetaPtr
         utils::GetParentPath(table_file_schema_.location_, directory);
         segment_writer_ptr_ = std::make_shared<segment::SegmentWriter>(directory);
     }
-    ConfigMgr::GetInstance().Attach("cache.cache_insert_data", this);
-}
-
-MemTableFile::~MemTableFile() {
-    ConfigMgr::GetInstance().Detach("cache.cache_insert_data", this);
 }
 
 Status
@@ -245,11 +239,6 @@ MemTableFile::GetSegmentId() const {
 meta::SegmentSchema
 MemTableFile::GetSegmentSchema() const {
     return table_file_schema_;
-}
-
-void
-MemTableFile::ConfigUpdate(const std::string& name) {
-    options_.insert_cache_immediately_ = config.cache.cache_insert_data();
 }
 
 }  // namespace engine
