@@ -160,13 +160,4 @@ StringHelpFunctions::ConvertToBoolean(const std::string& str, bool& value) {
     return Status::OK();
 }
 
-bool
-StringHelpFunctions::EndWithSlash(const std::string& path) {
-    if (path.size() == 0) {
-        return false;
-    }
-
-    return *path.rbegin() == '/';
-}
-
 }  // namespace milvus
