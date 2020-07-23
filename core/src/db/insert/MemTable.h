@@ -26,13 +26,13 @@
 namespace milvus {
 namespace engine {
 
-class MemTable : public ConfigObserver {
+class MemTable {
  public:
     using MemTableFileList = std::vector<MemTableFilePtr>;
 
     MemTable(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options);
 
-    ~MemTable();
+    ~MemTable() = default;
 
     Status
     Add(const VectorSourcePtr& source);
@@ -69,10 +69,6 @@ class MemTable : public ConfigObserver {
 
     void
     SetLSN(uint64_t lsn);
-
- protected:
-    void
-    ConfigUpdate(const std::string& name) override;
 
  private:
     Status

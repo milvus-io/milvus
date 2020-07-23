@@ -26,11 +26,11 @@
 namespace milvus {
 namespace engine {
 
-class SSMemSegment : public ConfigObserver {
+class SSMemSegment {
  public:
     SSMemSegment(int64_t collection_id, int64_t partition_id, const DBOptions& options);
 
-    ~SSMemSegment();
+    ~SSMemSegment() = default;
 
  public:
     Status
@@ -56,10 +56,6 @@ class SSMemSegment : public ConfigObserver {
 
     int64_t
     GetSegmentId() const;
-
- protected:
-    void
-    ConfigUpdate(const std::string& name) override;
 
  private:
     Status

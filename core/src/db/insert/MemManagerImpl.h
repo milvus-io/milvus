@@ -29,19 +29,16 @@
 namespace milvus {
 namespace engine {
 
-class MemManagerImpl : public MemManager, public ConfigObserver {
+class MemManagerImpl : public MemManager {
  public:
     using Ptr = std::shared_ptr<MemManagerImpl>;
     using MemIdMap = std::map<std::string, MemTablePtr>;
     using MemList = std::vector<MemTablePtr>;
 
     MemManagerImpl(const meta::MetaPtr& meta, const DBOptions& options) : meta_(meta), options_(options) {
-        ConfigMgr::GetInstance().Attach("cache.insert_buffer_size", this);
     }
 
-    ~MemManagerImpl() {
-        ConfigMgr::GetInstance().Detach("cache.insert_buffer_size", this);
-    }
+    ~MemManagerImpl() = default;
 
     Status
     InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
@@ -89,10 +86,6 @@ class MemManagerImpl : public MemManager, public ConfigObserver {
 
     size_t
     GetCurrentMem() override;
-
- public:
-    void
-    ConfigUpdate(const std::string& name) override;
 
  private:
     MemTablePtr
