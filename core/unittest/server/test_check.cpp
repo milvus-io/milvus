@@ -15,7 +15,7 @@
 #include <fiu-local.h>
 #include <gtest/gtest.h>
 
-#include "config/Config.h"
+#include "config/ConfigMgr.h"
 #include "server/init/CpuChecker.h"
 #include "server/init/InstanceLockCheck.h"
 #ifdef MILVUS_GPU_VERSION
@@ -29,19 +29,17 @@ class ServerCheckerTest : public testing::Test {
  protected:
     void
     SetUp() override {
-        auto& config = ms::Config::GetInstance();
-
         logs_path = "/tmp/milvus-test/logs";
         boost::filesystem::create_directories(logs_path);
-        config.SetLogsPath(logs_path);
+        milvus::ConfigMgr::GetInstance().Set("logs.path", logs_path);
 
         db_primary_path = "/tmp/milvus-test/db";
         boost::filesystem::create_directories(db_primary_path);
-        config.SetStorageConfigPath(db_primary_path);
+        milvus::ConfigMgr::GetInstance().Set("storage.path", db_primary_path);
 
         wal_path = "/tmp/milvus-test/wal";
         boost::filesystem::create_directories(wal_path);
-        config.SetWalConfigWalPath(wal_path);
+        milvus::ConfigMgr::GetInstance().Set("wal.path", wal_path);
     }
 
     void
@@ -109,15 +107,12 @@ TEST_F(ServerCheckerTest, CPU_FAIL_TEST) {
 
 #ifdef MILVUS_GPU_VERSION
 TEST_F(ServerCheckerTest, GPU_TEST) {
-    auto& config = ms::Config::GetInstance();
-    auto status = config.SetGpuResourceConfigEnable("true");
+    milvus::ConfigMgr::GetInstance().Set("gpu.enable", "true");
+
+    auto status = ms::GpuChecker::CheckGpuEnvironment();
     ASSERT_TRUE(status.ok()) << status.message();
 
-    status = ms::GpuChecker::CheckGpuEnvironment();
-    ASSERT_TRUE(status.ok()) << status.message();
-
-    status = config.SetGpuResourceConfigEnable("false");
-    ASSERT_TRUE(status.ok()) << status.message();
+    milvus::ConfigMgr::GetInstance().Set("gpu.enable", "false");
 
     status = ms::GpuChecker::CheckGpuEnvironment();
     ASSERT_TRUE(status.ok()) << status.message();
@@ -125,9 +120,7 @@ TEST_F(ServerCheckerTest, GPU_TEST) {
 
 TEST_F(ServerCheckerTest, GPU_FAIL_TEST) {
     fiu_init(0);
-    auto& config = ms::Config::GetInstance();
-    auto status = config.SetGpuResourceConfigEnable("true");
-    ASSERT_TRUE(status.ok()) << status.message();
+    milvus::ConfigMgr::GetInstance().Set("gpu.enable", "true");
 
     fiu_enable("GpuChecker.CheckGpuEnvironment.nvml_init_fail", 1, NULL, 0);
     ASSERT_FALSE(ms::GpuChecker::CheckGpuEnvironment().ok());

@@ -18,6 +18,7 @@
 #include <string>
 #include <thread>
 
+#include "config/ServerConfig.h"
 #include "db/snapshot/Event.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/Operations.h"

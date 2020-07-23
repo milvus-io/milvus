@@ -22,8 +22,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/handler/CacheConfigHandler.h"
-#include "config/handler/EngineConfigHandler.h"
+#include "config/ConfigMgr.h"
 #include "db/DB.h"
 #include "db/IndexFailedChecker.h"
 #include "db/SimpleWaitNotify.h"
@@ -42,7 +41,7 @@ namespace meta {
 class Meta;
 }
 
-class DBImpl : public DB, public server::CacheConfigHandler, public server::EngineConfigHandler {
+class DBImpl : public DB, public ConfigObserver {
  public:
     explicit DBImpl(const DBOptions& options);
 
@@ -197,12 +196,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     Status
     FlushAttrsIndex(const std::string& collection_id) override;
 
- protected:
+ public:
     void
-    OnCacheInsertDataChanged(bool value) override;
-
-    void
-    OnUseBlasThresholdChanged(int64_t threshold) override;
+    ConfigUpdate(const std::string& name) override;
 
  private:
     Status

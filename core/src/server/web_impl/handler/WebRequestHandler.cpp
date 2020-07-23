@@ -19,8 +19,7 @@
 
 #include <fiu-local.h>
 
-#include "config/Config.h"
-#include "config/Utils.h"
+#include "config/ServerConfig.h"
 #include "metrics/SystemInfo.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Constants.h"
@@ -28,6 +27,7 @@
 #include "server/web_impl/dto/PartitionDto.hpp"
 #include "server/web_impl/utils/Util.h"
 #include "thirdparty/nlohmann/json.hpp"
+#include "utils/ConfigUtils.h"
 #include "utils/StringHelpFunctions.h"
 
 namespace milvus {
@@ -344,9 +344,9 @@ WebRequestHandler::GetConfig(std::string& result_str) {
         }
 #endif
         // check if server require start
-        Config& config = Config::GetInstance();
         bool required = false;
-        config.GetServerRestartRequired(required);
+        // TODO: Use new cofnig mgr
+        // Config::GetInstance().GetServerRestartRequired(required);
         j["restart_required"] = required;
         result_str = j.dump();
     }
@@ -398,8 +398,7 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
     AddStatusToJson(result, StatusCode::SUCCESS, msg);
 
     bool required = false;
-    Config& config = Config::GetInstance();
-    config.GetServerRestartRequired(required);
+    // Config::GetInstance().GetServerRestartRequired(required);
     result["restart_required"] = required;
 
     result_str = result.dump();
@@ -997,237 +996,241 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
 
 StatusDto::ObjectWrapper
 WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_config) {
-    std::string reply;
-    std::string cache_cmd_prefix = "get_config " + std::string(CONFIG_CACHE) + ".";
-
-    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY);
-    auto status = CommandLine(cache_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-    advanced_config->cpu_cache_capacity = std::stol(reply);
-
-    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA);
-    CommandLine(cache_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-    advanced_config->cache_insert_data = ("1" == reply || "true" == reply);
-
-    auto engine_cmd_prefix = "get_config " + std::string(CONFIG_ENGINE) + ".";
-    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD);
-    CommandLine(engine_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-    advanced_config->use_blas_threshold = std::stol(reply);
-
-#ifdef MILVUS_GPU_VERSION
-    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD);
-    CommandLine(engine_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-    advanced_config->gpu_search_threshold = std::stol(reply);
-#endif
-
-    ASSIGN_RETURN_STATUS_DTO(status)
+    //    std::string reply;
+    //    std::string cache_cmd_prefix = "get_config " + std::string(CONFIG_CACHE) + ".";
+    //
+    //    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY);
+    //    auto status = CommandLine(cache_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //    advanced_config->cpu_cache_capacity = std::stol(reply);
+    //
+    //    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA);
+    //    CommandLine(cache_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //    advanced_config->cache_insert_data = ("1" == reply || "true" == reply);
+    //
+    //    auto engine_cmd_prefix = "get_config " + std::string(CONFIG_ENGINE) + ".";
+    //    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD);
+    //    CommandLine(engine_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //    advanced_config->use_blas_threshold = std::stol(reply);
+    //
+    //#ifdef MILVUS_GPU_VERSION
+    //    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD);
+    //    CommandLine(engine_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //    advanced_config->gpu_search_threshold = std::stol(reply);
+    //#endif
+    //
+    //    ASSIGN_RETURN_STATUS_DTO(status)
+    ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& advanced_config) {
-    if (nullptr == advanced_config->cpu_cache_capacity.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cpu_cache_capacity\' miss.");
-    }
-
-    if (nullptr == advanced_config->cache_insert_data.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_insert_data\' miss.");
-    }
-
-    if (nullptr == advanced_config->use_blas_threshold.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'use_blas_threshold\' miss.");
-    }
-
-#ifdef MILVUS_GPU_VERSION
-    if (nullptr == advanced_config->gpu_search_threshold.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'gpu_search_threshold\' miss.");
-    }
-#endif
-
-    std::string reply;
-    std::string cache_cmd_prefix = "set_config " + std::string(CONFIG_CACHE) + ".";
-
-    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY) + " " +
-                                   std::to_string(advanced_config->cpu_cache_capacity->getValue());
-    auto status = CommandLine(cache_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA) + " " +
-                       std::to_string(advanced_config->cache_insert_data->getValue());
-    status = CommandLine(cache_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    auto engine_cmd_prefix = "set_config " + std::string(CONFIG_ENGINE) + ".";
-
-    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD) + " " +
-                             std::to_string(advanced_config->use_blas_threshold->getValue());
-    status = CommandLine(engine_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-#ifdef MILVUS_GPU_VERSION
-    auto gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
-    auto gpu_cmd_string = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD) + " " +
-                          std::to_string(advanced_config->gpu_search_threshold->getValue());
-    status = CommandLine(gpu_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-#endif
-
-    ASSIGN_RETURN_STATUS_DTO(status)
+    //    if (nullptr == advanced_config->cpu_cache_capacity.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cpu_cache_capacity\' miss.");
+    //    }
+    //
+    //    if (nullptr == advanced_config->cache_insert_data.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_insert_data\' miss.");
+    //    }
+    //
+    //    if (nullptr == advanced_config->use_blas_threshold.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'use_blas_threshold\' miss.");
+    //    }
+    //
+    //#ifdef MILVUS_GPU_VERSION
+    //    if (nullptr == advanced_config->gpu_search_threshold.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'gpu_search_threshold\' miss.");
+    //    }
+    //#endif
+    //
+    //    std::string reply;
+    //    std::string cache_cmd_prefix = "set_config " + std::string(CONFIG_CACHE) + ".";
+    //
+    //    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY) + " " +
+    //                                   std::to_string(advanced_config->cpu_cache_capacity->getValue());
+    //    auto status = CommandLine(cache_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //
+    //    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA) + " " +
+    //                       std::to_string(advanced_config->cache_insert_data->getValue());
+    //    status = CommandLine(cache_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //
+    //    auto engine_cmd_prefix = "set_config " + std::string(CONFIG_ENGINE) + ".";
+    //
+    //    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD) + " " +
+    //                             std::to_string(advanced_config->use_blas_threshold->getValue());
+    //    status = CommandLine(engine_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //
+    //#ifdef MILVUS_GPU_VERSION
+    //    auto gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
+    //    auto gpu_cmd_string = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD) + " " +
+    //                          std::to_string(advanced_config->gpu_search_threshold->getValue());
+    //    status = CommandLine(gpu_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //#endif
+    //
+    //    ASSIGN_RETURN_STATUS_DTO(status)
+    ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 
 #ifdef MILVUS_GPU_VERSION
 StatusDto::ObjectWrapper
 WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-    std::string reply;
-    std::string gpu_cmd_prefix = "get_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
-
-    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE);
-    auto status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-    gpu_config_dto->enable = reply == "1" || reply == "true";
-
-    if (!gpu_config_dto->enable->getValue()) {
-        ASSIGN_RETURN_STATUS_DTO(Status::OK());
-    }
-
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY);
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-    gpu_config_dto->cache_capacity = std::stol(reply);
-
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES);
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    std::vector<std::string> gpu_entry;
-    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
-
-    gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
-    for (auto& device_id : gpu_entry) {
-        gpu_config_dto->search_resources->pushBack(OString(device_id.c_str())->toUpperCase());
-    }
-    gpu_entry.clear();
-
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES);
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
-    gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
-    for (auto& device_id : gpu_entry) {
-        gpu_config_dto->build_index_resources->pushBack(OString(device_id.c_str())->toUpperCase());
-    }
-
+    //    std::string reply;
+    //    std::string gpu_cmd_prefix = "get_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
+    //
+    //    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE);
+    //    auto status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //    gpu_config_dto->enable = reply == "1" || reply == "true";
+    //
+    //    if (!gpu_config_dto->enable->getValue()) {
+    //        ASSIGN_RETURN_STATUS_DTO(Status::OK());
+    //    }
+    //
+    //    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY);
+    //    status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //    gpu_config_dto->cache_capacity = std::stol(reply);
+    //
+    //    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES);
+    //    status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    std::vector<std::string> gpu_entry;
+    //    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
+    //
+    //    gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
+    //    for (auto& device_id : gpu_entry) {
+    //        gpu_config_dto->search_resources->pushBack(OString(device_id.c_str())->toUpperCase());
+    //    }
+    //    gpu_entry.clear();
+    //
+    //    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES);
+    //    status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
+    //    gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
+    //    for (auto& device_id : gpu_entry) {
+    //        gpu_config_dto->build_index_resources->pushBack(OString(device_id.c_str())->toUpperCase());
+    //    }
+    //
+    //    ASSIGN_RETURN_STATUS_DTO(Status::OK());
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-    // Step 1: Check config param
-    if (nullptr == gpu_config_dto->enable.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'enable\' miss")
-    }
-
-    if (nullptr == gpu_config_dto->cache_capacity.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_capacity\' miss")
-    }
-
-    if (nullptr == gpu_config_dto->search_resources.get()) {
-        gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
-        gpu_config_dto->search_resources->pushBack("GPU0");
-    }
-
-    if (nullptr == gpu_config_dto->build_index_resources.get()) {
-        gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
-        gpu_config_dto->build_index_resources->pushBack("GPU0");
-    }
-
-    // Step 2: Set config
-    std::string reply;
-    std::string gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
-    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE) + " " +
-                                  std::to_string(gpu_config_dto->enable->getValue());
-    auto status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    if (!gpu_config_dto->enable->getValue()) {
-        RETURN_STATUS_DTO(SUCCESS, "Set Gpu resources to false");
-    }
-
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY) + " " +
-                      std::to_string(gpu_config_dto->cache_capacity->getValue());
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    std::vector<std::string> search_resources;
-    gpu_config_dto->search_resources->forEach(
-        [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str()); });
-
-    std::string search_resources_value;
-    for (auto& res : search_resources) {
-        search_resources_value += res + ",";
-    }
-    auto len = search_resources_value.size();
-    if (len > 0) {
-        search_resources_value.erase(len - 1);
-    }
-
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES) + " " + search_resources_value;
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    std::vector<std::string> build_resources;
-    gpu_config_dto->build_index_resources->forEach(
-        [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
-
-    std::string build_resources_value;
-    for (auto& res : build_resources) {
-        build_resources_value += res + ",";
-    }
-    len = build_resources_value.size();
-    if (len > 0) {
-        build_resources_value.erase(len - 1);
-    }
-
-    gpu_cmd_request =
-        gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) + " " + build_resources_value;
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
+    //    // Step 1: Check config param
+    //    if (nullptr == gpu_config_dto->enable.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'enable\' miss")
+    //    }
+    //
+    //    if (nullptr == gpu_config_dto->cache_capacity.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_capacity\' miss")
+    //    }
+    //
+    //    if (nullptr == gpu_config_dto->search_resources.get()) {
+    //        gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
+    //        gpu_config_dto->search_resources->pushBack("GPU0");
+    //    }
+    //
+    //    if (nullptr == gpu_config_dto->build_index_resources.get()) {
+    //        gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
+    //        gpu_config_dto->build_index_resources->pushBack("GPU0");
+    //    }
+    //
+    //    // Step 2: Set config
+    //    std::string reply;
+    //    std::string gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
+    //    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE) + " " +
+    //                                  std::to_string(gpu_config_dto->enable->getValue());
+    //    auto status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    if (!gpu_config_dto->enable->getValue()) {
+    //        RETURN_STATUS_DTO(SUCCESS, "Set Gpu resources to false");
+    //    }
+    //
+    //    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY) + " " +
+    //                      std::to_string(gpu_config_dto->cache_capacity->getValue());
+    //    status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    std::vector<std::string> search_resources;
+    //    gpu_config_dto->search_resources->forEach(
+    //        [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str());
+    //        });
+    //
+    //    std::string search_resources_value;
+    //    for (auto& res : search_resources) {
+    //        search_resources_value += res + ",";
+    //    }
+    //    auto len = search_resources_value.size();
+    //    if (len > 0) {
+    //        search_resources_value.erase(len - 1);
+    //    }
+    //
+    //    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES) + " " +
+    //    search_resources_value; status = CommandLine(gpu_cmd_request, reply); if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    std::vector<std::string> build_resources;
+    //    gpu_config_dto->build_index_resources->forEach(
+    //        [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
+    //
+    //    std::string build_resources_value;
+    //    for (auto& res : build_resources) {
+    //        build_resources_value += res + ",";
+    //    }
+    //    len = build_resources_value.size();
+    //    if (len > 0) {
+    //        build_resources_value.erase(len - 1);
+    //    }
+    //
+    //    gpu_cmd_request =
+    //        gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) + " " + build_resources_value;
+    //    status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    ASSIGN_RETURN_STATUS_DTO(Status::OK());
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 #endif
@@ -1999,8 +2002,8 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
             if (j.contains("compact")) {
                 status = Compact(j["compact"], result_str);
             }
-        } else if (op->equals("config")) {
-            status = SetConfig(j, result_str);
+            //        } else if (op->equals("config")) {
+            //            status = SetConfig(j, result_str);
         } else {
             status = Status(UNKNOWN_PATH, "Unknown path: /system/" + op->std_str());
         }

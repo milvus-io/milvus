@@ -55,6 +55,7 @@ add_executable(test_scheduler
 target_link_libraries(test_scheduler
         knowhere
         metrics
+        config
         ${unittest_libs})
 
 install(TARGETS test_scheduler DESTINATION unittest)

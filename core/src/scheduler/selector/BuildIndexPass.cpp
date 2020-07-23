@@ -20,16 +20,8 @@ namespace scheduler {
 
 void
 BuildIndexPass::Init() {
-    server::Config& config = server::Config::GetInstance();
-    Status s = config.GetGpuResourceConfigBuildIndexResources(build_gpus_);
-    fiu_do_on("BuildIndexPass.Init.get_config_fail", s = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-    if (!s.ok()) {
-        throw std::exception();
-    }
-
-    SetIdentity("BuildIndexPass");
-    AddGpuEnableListener();
-    AddGpuBuildResourcesListener();
+    gpu_enable_ = config.gpu.enable();
+    build_gpus_ = ParseGPUDevices(config.gpu.build_index_devices());
 }
 
 bool
@@ -56,6 +48,10 @@ BuildIndexPass::Run(const TaskPtr& task) {
     task->label() = label;
 
     return true;
+}
+
+void
+BuildIndexPass::ConfigUpdate(const std::string& name) {
 }
 
 }  // namespace scheduler

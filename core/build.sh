@@ -1,5 +1,10 @@
 #!/bin/bash
-#
+
+# Compile jobs variable; Usage: $ jobs=12 ./build.sh ...
+if [[ ! ${jobs+1} ]]; then
+    jobs=$(nproc)
+fi
+
 BUILD_OUTPUT_DIR="cmake_build"
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="OFF"
@@ -163,5 +168,5 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 else
 
   # compile and build
-    make -j 8 install || exit 1
+  make -j ${jobs} install || exit 1
 fi

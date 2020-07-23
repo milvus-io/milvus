@@ -32,7 +32,7 @@
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
-#include "config/Utils.h"
+#include "config/ServerConfig.h"
 #include "db/IDGenerator.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "engine/EngineFactory.h"
@@ -93,14 +93,14 @@ DBImpl::DBImpl(const DBOptions& options)
         wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
     }
 
-    SetIdentity("DBImpl");
-    AddCacheInsertDataListener();
-    AddUseBlasThresholdListener();
-
     Start();
+    ConfigMgr::GetInstance().Attach("cache.cache_insert_data", this);
+    ConfigMgr::GetInstance().Attach("engine.use_blas_threshold", this);
 }
 
 DBImpl::~DBImpl() {
+    ConfigMgr::GetInstance().Detach("engine.use_blas_threshold", this);
+    ConfigMgr::GetInstance().Detach("cache.cache_insert_data", this);
     Stop();
 }
 
@@ -3333,13 +3333,9 @@ DBImpl::BackgroundMetricThread() {
 }
 
 void
-DBImpl::OnCacheInsertDataChanged(bool value) {
-    options_.insert_cache_immediately_ = value;
-}
-
-void
-DBImpl::OnUseBlasThresholdChanged(int64_t threshold) {
-    faiss::distance_compute_blas_threshold = threshold;
+DBImpl::ConfigUpdate(const std::string& name) {
+    options_.insert_cache_immediately_ = config.cache.cache_insert_data();
+    faiss::distance_compute_blas_threshold = config.engine.use_blas_threshold();
 }
 
 void

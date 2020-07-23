@@ -46,16 +46,16 @@ TEST(SSTaskTest, TEST_TASK) {
 //    file->dimension_ = 64;
     auto label = std::make_shared<BroadcastLabel>();
 
-//    SSTestTask task(dummy_context, nullptr, label);
-//    task.Load(LoadType::CPU2GPU, 0);
-//    auto th = std::thread([&]() {
-//        task.Execute();
-//    });
-//    task.Wait();
-//
-//    if (th.joinable()) {
-//        th.join();
-//    }
+    SSTestTask task(dummy_context, nullptr, label);
+    task.Load(LoadType::CPU2GPU, 0);
+    auto th = std::thread([&]() {
+        task.Execute();
+    });
+    task.Wait();
+
+    if (th.joinable()) {
+        th.join();
+    }
 
 //    static const char* CONFIG_PATH = "/tmp/milvus_test";
 //    auto options = milvus::engine::DBFactory::BuildOption();

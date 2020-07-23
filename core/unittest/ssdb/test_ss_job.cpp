@@ -11,64 +11,25 @@
 
 #include <gtest/gtest.h>
 
-#include "db/SnapshotVisitor.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "scheduler/SchedInst.h"
 #include "scheduler/job/SSBuildIndexJob.h"
 #include "scheduler/job/SSSearchJob.h"
-#include "ssdb/utils.h"
 
-using SegmentVisitor = milvus::engine::SegmentVisitor;
+namespace milvus {
+namespace scheduler {
 
-namespace {
-milvus::Status
-CreateCollection(std::shared_ptr<SSDBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
-    CreateCollectionContext context;
-    context.lsn = lsn;
-    auto collection_schema = std::make_shared<Collection>(collection_name);
-    context.collection = collection_schema;
-    auto vector_field = std::make_shared<Field>("vector", 0,
-                                                milvus::engine::FieldType::VECTOR);
-    auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
-                                                               milvus::engine::FieldElementType::FET_INDEX);
-    auto int_field = std::make_shared<Field>("int", 0,
-                                             milvus::engine::FieldType::INT32);
-    context.fields_schema[vector_field] = {vector_field_element};
-    context.fields_schema[int_field] = {};
+class TestJob : public Job {
+ public:
+    TestJob() : Job(JobType::INVALID) {}
+};
 
-    return db->CreateCollection(context);
-}
-}  // namespace
+TEST(SSJobTest, TestJob) {
+    engine::DBOptions options;
+    auto build_index_ptr = std::make_shared<SSBuildIndexJob>(options);
+    build_index_ptr->Dump();
+    build_index_ptr->AddSegmentVisitor(nullptr);
 
-TEST_F(SSSchedulerTest, SSJobTest) {
-    LSN_TYPE lsn = 0;
-    auto next_lsn = [&]() -> decltype(lsn) {
-        return ++lsn;
-    };
-
-    std::string c1 = "c1";
-    auto status = CreateCollection(db_, c1, next_lsn());
-    ASSERT_TRUE(status.ok());
-
-    status = db_->CreatePartition(c1, "p_0");
-    ASSERT_TRUE(status.ok());
-
-    ScopedSnapshotT ss;
-    status = Snapshots::GetInstance().GetSnapshot(ss, c1);
-    ASSERT_TRUE(status.ok());
-
-    SegmentFileContext sf_context;
-    SFContextBuilder(sf_context, ss);
-
-    auto& partitions = ss->GetResources<Partition>();
-    ASSERT_EQ(partitions.size(), 2);
-    for (auto& kv : partitions) {
-        int64_t row_cnt = 100;
-        ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
-    }
-
-    status = Snapshots::GetInstance().GetSnapshot(ss, c1);
-    ASSERT_TRUE(status.ok());
+    TestJob test_job;
+    test_job.Dump();
 
     /* collect all valid segment */
     std::vector<milvus::engine::SegmentVisitorPtr> segment_visitors;
@@ -108,3 +69,6 @@ TEST_F(SSSchedulerTest, SSJobTest) {
 //    milvus::scheduler::JobMgrInst::GetInstance()->Put(search_job);
 //    search_job->WaitFinish();
 }
+
+}  // namespace scheduler
+}  // namespace milvus

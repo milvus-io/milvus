@@ -19,7 +19,6 @@
 
 #include <memory>
 
-#include "config/Config.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
 #include "utils/CommonUtil.h"

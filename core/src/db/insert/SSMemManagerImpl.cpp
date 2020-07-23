@@ -15,6 +15,7 @@
 #include <thread>
 
 #include "SSVectorSource.h"
+#include "config/ServerConfig.h"
 #include "db/Constants.h"
 #include "db/snapshot/Snapshots.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -387,8 +388,8 @@ SSMemManagerImpl::GetMaxLSN(const MemList& tables) {
 }
 
 void
-SSMemManagerImpl::OnInsertBufferSizeChanged(int64_t value) {
-    options_.insert_buffer_size_ = value * GB;
+SSMemManagerImpl::ConfigUpdate(const std::string& name) {
+    options_.insert_buffer_size_ = config.cache.insert_buffer_size();
 }
 
 }  // namespace engine

@@ -21,7 +21,7 @@
 
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "db/Utils.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/structured_index/StructuredIndexSort.h"
@@ -180,9 +180,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
     knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
 #ifdef MILVUS_GPU_VERSION
-    server::Config& config = server::Config::GetInstance();
-    bool gpu_resource_enable = true;
-    config.GetGpuResourceConfigEnable(gpu_resource_enable);
+    bool gpu_resource_enable = config.gpu.enable();
     fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled", gpu_resource_enable = false);
     if (gpu_resource_enable) {
         mode = knowhere::IndexMode::MODE_GPU;
@@ -276,13 +274,7 @@ ExecutionEngineImpl::HybridLoad() const {
 
     const std::string key = location_ + ".quantizer";
 
-    server::Config& config = server::Config::GetInstance();
-    std::vector<int64_t> gpus;
-    Status s = config.GetGpuResourceConfigSearchResources(gpus);
-    if (!s.ok()) {
-        LOG_ENGINE_ERROR_ << s.message();
-        return;
-    }
+    std::vector<int64_t> gpus = ParseGPUDevices(config.gpu.search_devices());
 
     // cache hit
     {
@@ -484,12 +476,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     LOG_ENGINE_ERROR_ << msg;
                     return Status(DB_ERROR, msg);
                 } else {
-                    bool gpu_enable = false;
-#ifdef MILVUS_GPU_VERSION
-                    server::Config& config = server::Config::GetInstance();
-                    STATUS_CHECK(config.GetGpuResourceConfigEnable(gpu_enable));
-#endif
-                    if (!gpu_enable && index_->index_mode() == knowhere::IndexMode::MODE_GPU) {
+                    if (not config.gpu.enable() && index_->index_mode() == knowhere::IndexMode::MODE_GPU) {
                         std::string err_msg = "Index with type " + index_->index_type() + " must be used in GPU mode";
                         LOG_ENGINE_ERROR_ << err_msg;
                         return Status(DB_ERROR, err_msg);
@@ -1208,13 +1195,8 @@ ExecutionEngineImpl::AttrCache() {
 Status
 ExecutionEngineImpl::Init() {
 #ifdef MILVUS_GPU_VERSION
-    server::Config& config = server::Config::GetInstance();
-    std::vector<int64_t> gpu_ids;
-    Status s = config.GetGpuResourceConfigBuildIndexResources(gpu_ids);
-    if (!s.ok()) {
-        gpu_num_ = -1;
-        return s;
-    }
+    std::vector<int64_t> gpu_ids = ParseGPUDevices(config.gpu.build_index_devices());
+
     for (auto id : gpu_ids) {
         if (gpu_num_ == id) {
             return Status::OK();

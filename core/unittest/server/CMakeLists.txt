@@ -14,7 +14,7 @@
 set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_cache.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_check.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_config.cpp
+#        ${CMAKE_CURRENT_SOURCE_DIR}/test_config.cpp
 #        ${CMAKE_CURRENT_SOURCE_DIR}/test_rpc.cpp
 #        ${CMAKE_CURRENT_SOURCE_DIR}/test_web.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_util.cpp
@@ -26,6 +26,7 @@ link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 set(util_files
         ${MILVUS_ENGINE_SRC}/db/Utils.cpp
         ${MILVUS_ENGINE_SRC}/server/ValidationUtil.cpp
+        ${MILVUS_ENGINE_SRC}/utils/ConfigUtils.cpp
         ${MILVUS_ENGINE_SRC}/utils/LogUtil.cpp
         ${MILVUS_ENGINE_SRC}/utils/SignalHandler.cpp)
 
@@ -44,6 +45,7 @@ add_executable(test_server ${server_test_files})
 target_link_libraries(test_server
         knowhere
         metrics
+        config
         stdc++
         ${unittest_libs}
         oatpp)

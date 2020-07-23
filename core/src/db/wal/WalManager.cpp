@@ -17,7 +17,7 @@
 #include <memory>
 #include <unordered_map>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "db/snapshot/Snapshots.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"

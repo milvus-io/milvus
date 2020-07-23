@@ -499,6 +499,8 @@ macro(build_prometheus)
             ${EP_LOG_OPTIONS}
             CMAKE_ARGS
             ${PROMETHEUS_CMAKE_ARGS}
+            UPDATE_COMMAND
+            ""
             BUILD_COMMAND
             ${MAKE}
             ${MAKE_BUILD_ARGS}

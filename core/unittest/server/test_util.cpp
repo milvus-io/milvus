@@ -9,11 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "config/Utils.h"
 #include "db/engine/ExecutionEngine.h"
 #include "server/ValidationUtil.h"
 #include "utils/BlockingQueue.h"
 #include "utils/CommonUtil.h"
+#include "utils/ConfigUtils.h"
 #include "utils/Error.h"
 #include "utils/Exception.h"
 #include "utils/LogUtil.h"
@@ -283,7 +283,6 @@ TEST(UtilTest, LOG_TEST) {
     std::string fname = milvus::CommonUtil::GetFileName(LOG_FILE_PATH);
     ASSERT_EQ(fname, "log_config.conf");
 
-    ASSERT_NO_THROW(milvus::LogConfigInMem());
     ASSERT_NO_THROW(milvus::LogCpuInfo());
 
     // test log config file
