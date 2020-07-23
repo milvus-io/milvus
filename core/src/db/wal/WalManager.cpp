@@ -591,9 +591,9 @@ WalManager::InsertEntities(const std::string& collection_id, const std::string& 
                            const std::unordered_map<std::string, std::vector<uint8_t>>& attrs) {
     MXLogType log_type;
     if (std::is_same<T, float>::value) {
-        log_type = MXLogType::Entity;
-    } else {
-        return false;
+        log_type = MXLogType::InsertVector;
+    } else if (std::is_same<T, uint8_t>::value) {
+        log_type = MXLogType::InsertBinary;
     }
 
     size_t entity_num = entity_ids.size();
@@ -671,9 +671,9 @@ WalManager::InsertEntities(const std::string& collection_id, const std::string& 
 }
 
 bool
-WalManager::DeleteById(const std::string& collection_id, const IDNumbers& vector_ids) {
-    size_t vector_num = vector_ids.size();
-    if (vector_num == 0) {
+WalManager::DeleteById(const std::string& collection_id, const IDNumbers& entity_ids) {
+    size_t entity_num = entity_ids.size();
+    if (entity_num == 0) {
         LOG_WAL_ERROR_ << "The ids is empty.";
         return false;
     }
@@ -687,7 +687,7 @@ WalManager::DeleteById(const std::string& collection_id, const IDNumbers& vector
     record.partition_tag = "";
 
     uint64_t new_lsn = 0;
-    for (size_t i = 0; i < vector_num; i += record.length) {
+    for (size_t i = 0; i < entity_num; i += record.length) {
         size_t surplus_space = p_buffer_->SurplusSpace();
         size_t max_rcd_num = 0;
         if (surplus_space >= head_size + unit_size) {
@@ -696,12 +696,12 @@ WalManager::DeleteById(const std::string& collection_id, const IDNumbers& vector
             max_rcd_num = (mxlog_config_.buffer_size - head_size) / unit_size;
         }
 
-        record.length = std::min(vector_num - i, max_rcd_num);
-        record.ids = vector_ids.data() + i;
+        record.length = std::min(entity_num - i, max_rcd_num);
+        record.ids = entity_ids.data() + i;
         record.data_size = 0;
         record.data = nullptr;
 
-        auto error_code = p_buffer_->Append(record);
+        auto error_code = p_buffer_->AppendEntity(record);
         if (error_code != WAL_SUCCESS) {
             p_buffer_->ResetWriteLsn(last_applied_lsn_);
             return false;

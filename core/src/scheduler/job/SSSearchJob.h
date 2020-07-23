@@ -48,12 +48,7 @@ using ResultDistances = engine::ResultDistances;
 
 class SSSearchJob : public Job {
  public:
-    SSSearchJob(const server::ContextPtr& context, int64_t topk, const milvus::json& extra_params,
-                engine::VectorsData& vectors);
-
-    SSSearchJob(const server::ContextPtr& context, query::GeneralQueryPtr general_query, query::QueryPtr query_ptr,
-                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                engine::VectorsData& vectorsData);
+    SSSearchJob(const server::ContextPtr& context, engine::DBOptions options, const query::QueryPtr& query_ptr);
 
  public:
     void
@@ -96,19 +91,9 @@ class SSSearchJob : public Job {
         return vectors_.vector_count_;
     }
 
-    const milvus::json&
-    extra_params() const {
-        return extra_params_;
-    }
-
-    const engine::VectorsData&
-    vectors() const {
-        return vectors_;
-    }
-
-    const SegmentVisitorMap&
-    segment_visitor_map() {
-        return segment_visitor_map_;
+    engine::DBOptions
+    options() const {
+        return options_;
     }
 
     std::mutex&
@@ -121,9 +106,14 @@ class SSSearchJob : public Job {
         return general_query_;
     }
 
-    query::QueryPtr
-    query_ptr() {
-        return query_ptr_;
+    const engine::snapshot::IDS_TYPE&
+    segment_ids() {
+        return segment_ids_;
+    }
+
+    Status&
+    status() {
+        return status_;
     }
 
     std::unordered_map<std::string, engine::meta::hybrid::DataType>&
@@ -136,35 +126,22 @@ class SSSearchJob : public Job {
         return vector_count_;
     }
 
-    //    SearchTimeStat&
-    //    time_stat() {
-    //        return time_stat_;
-    //    }
+ private:
+    void
+    GetSegmentsFromQuery(const query::QueryPtr& query_ptr, engine::snapshot::IDS_TYPE& segment_ids);
 
  private:
     const server::ContextPtr context_;
 
-    int64_t topk_ = 0;
-    milvus::json extra_params_;
-    // TODO: smart pointer
-    engine::VectorsData& vectors_;
+    engine::DBOptions options_;
 
-    SegmentVisitorMap segment_visitor_map_;
-
-    // TODO: column-base better ?
-    ResultIds result_ids_;
-    ResultDistances result_distances_;
-    Status status_;
-
-    query::GeneralQueryPtr general_query_;
     query::QueryPtr query_ptr_;
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type_;
-    int64_t vector_count_;
+    engine::QueryResultPtr query_result_;
+    engine::snapshot::IDS_TYPE segment_ids_;
 
+    Status status_;
     std::mutex mutex_;
     std::condition_variable cv_;
-
-    //    SearchTimeStat time_stat_;
 };
 
 using SSSearchJobPtr = std::shared_ptr<SSSearchJob>;

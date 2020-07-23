@@ -51,7 +51,7 @@ static const char* CONFIG_STR =
     "\n"
     "general:\n"
     "  timezone: UTC+8\n"
-    "  meta_uri: sqlite://:@:/\n"
+    "  meta_uri: mock://:@:/\n"
     "\n"
     "network:\n"
     "  bind.address: 0.0.0.0\n"
@@ -141,7 +141,11 @@ void
 BaseTest::SnapshotStart(bool mock_store) {
     /* auto uri = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
     auto uri = "mock://:@:/";
-    auto store = Store::Build(uri, "/tmp/milvus_ss/db");
+    auto& config = milvus::server::Config::GetInstance();
+    config.SetGeneralConfigMetaURI(uri);
+    std::string path = "/tmp/milvus_ss/db";
+    config.SetStorageConfigPath(path);
+    auto store = Store::Build(uri, path);
 
     milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
@@ -272,12 +276,66 @@ SSSegmentTest::TearDown() {
 void
 SSMetaTest::SetUp() {
     auto engine = std::make_shared<milvus::engine::meta::MockMetaEngine>();
+//    milvus::engine::DBMetaOptions options;
+//    options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
+//    auto engine = std::make_shared<milvus::engine::meta::MySqlEngine>(options);
     meta_ = std::make_shared<milvus::engine::meta::MetaAdapter>(engine);
     meta_->TruncateAll();
 }
 
 void
 SSMetaTest::TearDown() {
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void
+SSSchedulerTest::SetUp() {
+    BaseTest::SetUp();
+    BaseTest::SnapshotStart(true);
+    auto options = milvus::engine::DBOptions();
+    options.wal_enable_ = false;
+    db_ = std::make_shared<milvus::engine::SSDBImpl>(options);
+
+    auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
+    res_mgr->Clear();
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, false));
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
+
+    auto default_conn = milvus::scheduler::Connection("IO", 500.0);
+    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
+    res_mgr->Connect("disk", "cpu", default_conn);
+#ifdef MILVUS_GPU_VERSION
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("0", "GPU", 0));
+    res_mgr->Connect("cpu", "0", PCIE);
+#endif
+    res_mgr->Start();
+    milvus::scheduler::SchedInst::GetInstance()->Start();
+    milvus::scheduler::JobMgrInst::GetInstance()->Start();
+    milvus::scheduler::CPUBuilderInst::GetInstance()->Start();
+}
+
+void
+SSSchedulerTest::TearDown() {
+    milvus::scheduler::JobMgrInst::GetInstance()->Stop();
+    milvus::scheduler::SchedInst::GetInstance()->Stop();
+    milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Clear();
+
+    db_ = nullptr;
+    BaseTest::SnapshotStop();
+    BaseTest::TearDown();
+}
+
+void
+SSEventTest::SetUp() {
+    auto uri = "mock://:@:/";
+    store_ = Store::Build(uri, "/tmp/milvus_ss/db");
+    store_->DoReset();
+}
+
+void
+SSEventTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

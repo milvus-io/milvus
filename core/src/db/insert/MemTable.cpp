@@ -18,6 +18,7 @@
 #include "cache/CpuCacheMgr.h"
 #include "config/ServerConfig.h"
 #include "db/Utils.h"
+#include "db/attr/InstanceStructuredIndex.h"
 #include "db/insert/MemTable.h"
 #include "db/meta/FilesHolder.h"
 #include "knowhere/index/vector_index/VecIndex.h"
@@ -167,6 +168,13 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
         std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
+    }
+
+    {
+        status = Attr::InstanceStructuredIndex::CreateStructuredIndex(collection_id_, meta_);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << status.ToString();
+        }
     }
 
     recorder.RecordSection("Finished flushing");

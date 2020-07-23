@@ -23,11 +23,10 @@
 namespace milvus {
 namespace scheduler {
 
-// TODO(wxyu): rewrite
-class XSSSearchTask : public Task {
+class SSSearchTask : public Task {
  public:
-    explicit XSSSearchTask(const server::ContextPtr& context, const engine::SegmentVisitorPtr& visitor,
-                           TaskLabelPtr label);
+    explicit SSSearchTask(const server::ContextPtr& context, const engine::DBOptions& options,
+                          const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -35,30 +34,18 @@ class XSSSearchTask : public Task {
     void
     Execute() override;
 
- public:
-    static void
-    MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const scheduler::ResultDistances& src_distances,
-                         size_t src_k, size_t nq, size_t topk, bool ascending, scheduler::ResultIds& tar_ids,
-                         scheduler::ResultDistances& tar_distances);
-
-    //    const std::string&
-    //    GetLocation() const;
-
-    //    size_t
-    //    GetIndexId() const;
+ private:
+    void
+    CreateExecEngine();
 
  public:
-    const server::ContextPtr context_;
+    const std::shared_ptr<server::Context> context_;
 
-    engine::SegmentVisitorPtr visitor_;
+    const engine::DBOptions& options_;
+    query::QueryPtr query_ptr_;
+    engine::snapshot::ID_TYPE segment_id_;
 
-    //    size_t index_id_ = 0;
-    int index_type_ = 0;
-    ExecutionEnginePtr index_engine_ = nullptr;
-
-    // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
-    // similarity -- infinity value means two vectors equal, descending reduce, IP
-    bool ascending_reduce = true;
+    engine::SSExecutionEnginePtr execution_engine_;
 };
 
 }  // namespace scheduler
