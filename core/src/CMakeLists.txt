@@ -53,9 +53,11 @@ set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
         )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/query query_files)
+add_subdirectory(query)
+add_subdirectory(search)
+
+# Now no use of context
 aux_source_directory(${MILVUS_ENGINE_SRC}/context context_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/search search_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_files)
@@ -308,14 +310,13 @@ set(server_libs
         metrics
         tracing
         oatpp
+        query
+        search
         )
 
 add_executable(milvus_server
         ${config_files}
         ${config_handler_files}
-        ${metrics_files}
-        ${query_files}
-        ${search_files}
         ${context_files}
         ${scheduler_files}
         ${server_files}
