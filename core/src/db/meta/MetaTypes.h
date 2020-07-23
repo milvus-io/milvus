@@ -187,7 +187,6 @@ enum DataType {
 
     VECTOR_BINARY = 100,
     VECTOR_FLOAT = 101,
-    VECTOR = 200,
 };
 
 struct VectorFieldSchema {

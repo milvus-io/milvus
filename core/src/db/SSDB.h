@@ -55,7 +55,7 @@ class SSDB {
 
     virtual Status
     DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                       std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) = 0;
+                       snapshot::CollectionMappings& fields_schema) = 0;
 
     virtual Status
     HasCollection(const std::string& collection_name, bool& has_or_not) = 0;

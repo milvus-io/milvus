@@ -100,6 +100,39 @@ RequestMap(BaseRequest::RequestType request_type) {
 
 namespace {
 void
+CopyVectorData(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRowRecord>& grpc_records,
+               std::vector<uint8_t>& vectors_data) {
+    // calculate buffer size
+    int64_t float_data_size = 0, binary_data_size = 0;
+    for (auto& record : grpc_records) {
+        float_data_size += record.float_data_size();
+        binary_data_size += record.binary_data().size();
+    }
+
+    int64_t data_size = binary_data_size;
+    if (float_data_size > 0) {
+        data_size = float_data_size * sizeof(float);
+    }
+
+    // copy vector data
+    std::vector<uint8_t> binary_array(data_size, 0);
+    int64_t offset = 0;
+    if (float_data_size > 0) {
+        for (auto& record : grpc_records) {
+            int64_t single_size = record.float_data_size() * sizeof(float);
+            memcpy(&binary_array[offset], record.float_data().data(), single_size);
+            offset += single_size;
+        }
+    } else if (binary_data_size > 0) {
+        for (auto& record : grpc_records) {
+            int64_t single_size = record.binary_data().size();
+            memcpy(&binary_array[offset], record.binary_data().data(), single_size);
+            offset += single_size;
+        }
+    }
+}
+
+void
 CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRowRecord>& grpc_records,
                const google::protobuf::RepeatedField<google::protobuf::int64>& grpc_id_array,
                engine::VectorsData& vectors) {
@@ -1209,12 +1242,21 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     auto field_size = request->fields_size();
 
-    std::unordered_map<std::string, engine::VectorsData> vectors;
-    std::vector<std::string> field_names;
+    std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
 
-    std::vector<int64_t> offsets;
-    std::vector<std::vector<uint8_t>> attr_datas;
-    uint64_t row_num;
+    auto valid_row_count = [&](int32_t& base, int32_t test) -> bool {
+        if (base < 0) {
+            base = test;
+        } else if (base != test) {
+            auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "Field row count inconsist"};
+            SET_RESPONSE(response->mutable_status(), status, context);
+            return false;
+        }
+        return true;
+    };
+
+    // copy field data
+    int32_t row_num = -1;
     for (int i = 0; i < field_size; i++) {
         auto grpc_int32_size = request->fields(i).attr_record().int32_value_size();
         auto grpc_int64_size = request->fields(i).attr_record().int64_value_size();
@@ -1225,53 +1267,58 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
         std::vector<uint8_t> temp_data;
         if (grpc_int32_size > 0) {
+            if (!valid_row_count(row_num, grpc_int32_size)) {
+                return ::grpc::Status::OK;
+            }
             temp_data.resize(grpc_int32_size * sizeof(int32_t));
             memcpy(temp_data.data(), field.attr_record().int32_value().data(), grpc_int32_size * sizeof(int32_t));
-            offsets.emplace_back(grpc_int32_size * sizeof(int32_t));
         } else if (grpc_int64_size > 0) {
+            if (!valid_row_count(row_num, grpc_int64_size)) {
+                return ::grpc::Status::OK;
+            }
             temp_data.resize(grpc_int64_size * sizeof(int64_t));
             memcpy(temp_data.data(), field.attr_record().int64_value().data(), grpc_int64_size * sizeof(int64_t));
-            offsets.emplace_back(grpc_int64_size * sizeof(int64_t));
         } else if (grpc_float_size > 0) {
+            if (!valid_row_count(row_num, grpc_float_size)) {
+                return ::grpc::Status::OK;
+            }
             temp_data.resize(grpc_float_size * sizeof(float));
             memcpy(temp_data.data(), field.attr_record().float_value().data(), grpc_float_size * sizeof(float));
-            offsets.emplace_back(grpc_float_size * sizeof(float));
         } else if (grpc_double_size > 0) {
+            if (!valid_row_count(row_num, grpc_double_size)) {
+                return ::grpc::Status::OK;
+            }
             temp_data.resize(grpc_double_size * sizeof(double));
             memcpy(temp_data.data(), field.attr_record().double_value().data(), grpc_double_size * sizeof(double));
-            offsets.emplace_back(grpc_double_size * sizeof(double));
         } else {
-            // vector field
-            engine::VectorsData vector_data;
-            CopyRowRecords(field.vector_record().records(), request->entity_id_array(), vector_data);
-            vectors.insert(std::make_pair(field_name, vector_data));
-            row_num = field.vector_record().records_size();
-            continue;
+            CopyVectorData(field.vector_record().records(), temp_data);
         }
-        field_names.emplace_back(field_name);
-        attr_datas.emplace_back(temp_data);
+
+        chunk_data.insert(std::make_pair(field_name, temp_data));
     }
 
-    auto attr_size = std::accumulate(offsets.begin(), offsets.end(), decltype(offsets)::value_type(0));
-    std::vector<uint8_t> attr_data(attr_size);
-    int64_t offset = 0;
-    for (auto& attr : attr_datas) {
-        memcpy(attr_data.data() + offset, attr.data(), attr.size());
-        offset += attr.size();
+    // copy id array
+    if (request->entity_id_array_size() > 0) {
+        int64_t size = request->entity_id_array_size() * sizeof(int64_t);
+        std::vector<uint8_t> temp_data(size, 0);
+        memcpy(temp_data.data(), request->entity_id_array().data(), size);
+        chunk_data.insert(std::make_pair(engine::DEFAULT_UID_NAME, temp_data));
     }
 
     std::string collection_name = request->collection_name();
-    std::string partition_tag = request->partition_tag();
-    Status status = request_handler_.InsertEntity(GetContext(context), collection_name, partition_tag, row_num,
-                                                  field_names, attr_data, vectors);
-
+    std::string partition_name = request->partition_tag();
+    Status status = request_handler_.InsertEntity(GetContext(context), collection_name, partition_name, chunk_data);
     if (!status.ok()) {
         SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
     }
-    response->mutable_entity_id_array()->Resize(static_cast<int>(vectors.begin()->second.id_array_.size()), 0);
-    memcpy(response->mutable_entity_id_array()->mutable_data(), vectors.begin()->second.id_array_.data(),
-           vectors.begin()->second.id_array_.size() * sizeof(int64_t));
+
+    // return generated ids
+    auto pair = chunk_data.find(engine::DEFAULT_UID_NAME);
+    if (pair != chunk_data.end()) {
+        response->mutable_entity_id_array()->Resize(static_cast<int>(pair->second.size()), 0);
+        memcpy(response->mutable_entity_id_array()->mutable_data(), pair->second.data(), pair->second.size());
+    }
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);

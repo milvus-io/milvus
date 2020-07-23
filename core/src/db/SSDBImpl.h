@@ -50,7 +50,7 @@ class SSDBImpl : public SSDB {
 
     Status
     DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                       std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) override;
+                       snapshot::CollectionMappings& fields_schema) override;
 
     Status
     HasCollection(const std::string& collection_name, bool& has_or_not) override;
