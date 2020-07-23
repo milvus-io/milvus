@@ -24,6 +24,7 @@
 #include "SSSegmentReader.h"
 #include "Vectors.h"
 #include "codecs/snapshot/SSCodec.h"
+#include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -43,6 +44,8 @@ SSSegmentWriter::SSSegmentWriter(const std::string& dir_root, const engine::Segm
 
 Status
 SSSegmentWriter::Initialize() {
+    dir_root_ += engine::COLLECTIONS_FOLDER;
+
     std::string directory =
         engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
 
@@ -59,8 +62,7 @@ SSSegmentWriter::Initialize() {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
         engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
-        if (ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR_FLOAT ||
-            ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
+        if (engine::IsVectorField(field)) {
             json params = field->GetParams();
             if (params.find(knowhere::meta::DIM) == params.end()) {
                 std::string msg = "Vector field params must contain: dimension";
