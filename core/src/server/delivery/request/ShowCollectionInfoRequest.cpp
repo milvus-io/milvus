@@ -22,6 +22,7 @@
 #include "utils/TimeRecorder.h"
 
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace milvus {
@@ -53,22 +54,19 @@ ShowCollectionInfoRequest::OnExecute() {
 
     // step 2: check collection existence
     // only process root collection, ignore partition collection
-    engine::meta::CollectionSchema collection_schema;
-    collection_schema.collection_id_ = collection_name_;
-    status = DBWrapper::DB()->DescribeCollection(collection_schema);
+    engine::snapshot::CollectionPtr collection;
+    std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+    status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
     if (!status.ok()) {
         if (status.code() == DB_NOT_FOUND) {
             return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         } else {
             return status;
         }
-    } else {
-        if (!collection_schema.owner_collection_.empty()) {
-            return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-        }
     }
 
     // step 3: get partitions
+    // TODO(yukun): SSDBImpl::GetCollectionInfo has not implemented yet
     status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection_info_);
     if (!status.ok()) {
         return status;

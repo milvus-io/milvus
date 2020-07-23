@@ -19,6 +19,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "server/DBWrapper.h"
@@ -30,14 +31,14 @@ namespace milvus {
 namespace server {
 
 DeleteByIDRequest::DeleteByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                     const std::string& collection_name, const std::vector<int64_t>& vector_ids)
-    : BaseRequest(context, BaseRequest::kDeleteByID), collection_name_(collection_name), vector_ids_(vector_ids) {
+                                     const std::string& collection_name, const std::vector<int64_t>& entity_ids)
+    : BaseRequest(context, BaseRequest::kDeleteByID), collection_name_(collection_name), entity_ids_(entity_ids) {
 }
 
 BaseRequestPtr
 DeleteByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                          const std::vector<int64_t>& vector_ids) {
-    return std::shared_ptr<BaseRequest>(new DeleteByIDRequest(context, collection_name, vector_ids));
+                          const std::vector<int64_t>& entity_ids) {
+    return std::shared_ptr<BaseRequest>(new DeleteByIDRequest(context, collection_name, entity_ids));
 }
 
 Status
@@ -52,21 +53,16 @@ DeleteByIDRequest::OnExecute() {
         }
 
         // step 2: check collection existence
-        engine::meta::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        engine::snapshot::CollectionPtr collection;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-            }
         }
-
         // Check collection's index type supports delete
 #ifdef MILVUS_SUPPORT_SPTAG
         if (collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_BKT ||
@@ -80,7 +76,7 @@ DeleteByIDRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        status = DBWrapper::DB()->DeleteEntities(collection_name_, vector_ids_);
+        status = DBWrapper::SSDB()->DeleteEntities(collection_name_, entity_ids_);
         if (!status.ok()) {
             return status;
         }

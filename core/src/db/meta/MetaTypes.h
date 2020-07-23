@@ -23,6 +23,8 @@
 namespace milvus {
 namespace engine {
 
+static const char* DIMENSION = "dim";
+
 // TODO(linxj): replace with VecIndex::IndexType
 enum class EngineType {
     INVALID = 0,
