@@ -31,6 +31,7 @@
 #include "db/insert/MemManager.h"
 #include "db/merge/MergeManager.h"
 #include "db/meta/FilesHolder.h"
+#include "db/snapshot/Context.h"
 #include "utils/ThreadPool.h"
 #include "wal/WalManager.h"
 
@@ -307,6 +308,120 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                              const std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes,
                              const std::unordered_map<std::string, int64_t>& attr_sizes,
                              const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types);
+
+    ///////////////////////////////////////////////////////////////////////////////
+    /* Mocked SSDBImpl interfaces, will be removed */
+    Status
+    CreateCollection(const snapshot::CreateCollectionContext& context) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    // Status
+    // DropCollection(const std::string& name);
+
+    Status
+    DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
+                       std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    // Status
+    // HasCollection(const std::string& collection_name, bool& has_or_not);
+
+    // Status
+    // AllCollections(std::vector<std::string>& names);
+
+    // Status
+    // GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count);
+
+    Status
+    LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
+                   const std::vector<std::string>& field_names, bool force = false) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    CreatePartition(const std::string& collection_name, const std::string& partition_name) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    DropPartition(const std::string& collection_name, const std::string& partition_name) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    InsertEntities(const std::string& collection_name, const std::string& partition_name,
+                   DataChunkPtr& data_chunk) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    // Status
+    // DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids);
+
+    // Status
+    // Flush(const std::string& collection_name);
+
+    // Status
+    // Flush();
+
+    // Status
+    // Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold = 0.0);
+
+    Status
+    GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
+                  const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    GetEntityIDs(const std::string& collection_id, int64_t segment_id, IDNumbers& entity_ids) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    CreateIndex(const server::ContextPtr& context, const std::string& collection_id, const std::string& field_name,
+                const CollectionIndex& index) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    DescribeIndex(const std::string& collection_id, const std::string& field_name, CollectionIndex& index) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    DropIndex(const std::string& collection_name, const std::string& field_name) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    // Status
+    // DropIndex(const std::string& collection_id);
+
+    Status
+    Query(const server::ContextPtr& context, const std::string& collection_name, const query::QueryPtr& query_ptr,
+          engine::QueryResultPtr& result) override {
+        assert(false);
+        return Status::OK();
+    }
+    ///////////////////////////////////////////////////////////////////////////////
 
  private:
     DBOptions options_;
