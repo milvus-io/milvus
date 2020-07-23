@@ -110,7 +110,7 @@ class RequestHandler {
 
     Status
     ShowPartitions(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                   std::vector<PartitionParam>& partitions);
+                   std::vector<std::string>& partitions);
 
     Status
     DropPartition(const std::shared_ptr<Context>& context, const std::string& collection_name, const std::string& tag);
