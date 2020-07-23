@@ -58,7 +58,7 @@ ConstructMapping(::milvus::grpc::Mapping* request, const std::string& collection
 
     auto field2 = request->add_fields();
     field2->set_name("field_2");
-    field2->set_type(::milvus::grpc::DataType::);
+    field2->set_type(::milvus::grpc::DataType::VECTOR_FLOAT);
 }
 
 void
