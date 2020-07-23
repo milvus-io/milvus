@@ -122,5 +122,21 @@ DeleteSnapshotIndex(const std::string& collection_name, const std::string& field
     return Status::OK();
 }
 
+bool
+IsVectorField(const engine::snapshot::FieldPtr& field) {
+    if (field == nullptr) {
+        return false;
+    }
+
+    std::string name = field->GetName();
+    engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
+    if (ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR_FLOAT ||
+        ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
+        return true;
+    }
+
+    return false;
+}
+
 }  // namespace engine
 }  // namespace milvus

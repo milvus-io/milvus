@@ -43,6 +43,8 @@ SSSegmentWriter::SSSegmentWriter(const std::string& dir_root, const engine::Segm
 
 Status
 SSSegmentWriter::Initialize() {
+    dir_root_ += engine::COLLECTIONS_FOLDER;
+
     std::string directory =
         engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
 
