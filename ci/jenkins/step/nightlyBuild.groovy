@@ -4,7 +4,7 @@ timeout(time: 120, unit: 'MINUTES') {
             def checkResult = sh(script: "./check_ccache.sh -l ${params.JFROG_ARTFACTORY_URL}/ccache", returnStatus: true)
     
             if ("${BINARY_VERSION}" == "gpu") {
-                sh "/bin/bash --login -c \". ./before-install.sh && ./build.sh -t ${params.BUILD_TYPE} -j4 -i ${env.MILVUS_INSTALL_PREFIX} --with_fiu --coverage -l -g -u -s '-gencode=arch=compute_61,code=sm_61;-gencode=arch=compute_75,code=sm_75' \""
+                sh "/bin/bash --login -c \". ./before-install.sh && ./build.sh -t ${params.BUILD_TYPE} -j4 -i ${env.MILVUS_INSTALL_PREFIX} --with_fiu --coverage -l -g -u\""
             } else {
                 sh "/bin/bash --login -c \". ./before-install.sh && ./build.sh -t ${params.BUILD_TYPE} -j4 -i ${env.MILVUS_INSTALL_PREFIX} --with_fiu --coverage -l -u\""
             }
