@@ -48,17 +48,32 @@ DescribeHybridCollectionRequest::OnExecute() {
     TimeRecorderAuto rc(hdr);
 
     try {
-        engine::meta::CollectionSchema collection_schema;
-        engine::meta::hybrid::FieldsSchema fields_schema;
-        collection_schema.collection_id_ = collection_name_;
-        auto status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
-        fiu_do_on("DescribeHybridCollectionRequest.OnExecute.invalid_db_execute",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        engine::snapshot::CollectionPtr collection;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        auto status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             return status;
         }
+        collection_schema_.collection_name_ = collection_name_;
+        collection_schema_.extra_params_ = collection->GetParams();
+        engine::meta::hybrid::FieldsSchema fields_info;
+        for (auto field_it = fields_schema.begin(); field_it != fields_schema.end(); field_it++) {
+            engine::meta::hybrid::FieldSchema schema;
+            auto field = field_it->first;
+            schema.field_name_ = field->GetName();
+            schema.field_type_ = (int)field->GetFtype();
+            schema.field_params_ = field->GetParams().dump();
+            auto field_elements = field_it->second;
+            for (const auto& element : field_elements) {
+                if (element->GetFtype() == (int)engine::FieldElementType::FET_INDEX) {
+                    schema.index_name_ = element->GetName();
+                    schema.index_param_ = element->GetParams().dump();
+                    break;
+                }
+            }
+        }
 
-        for (const auto& schema : fields_schema.fields_schema_) {
+        for (const auto& schema : fields_info.fields_schema_) {
             auto field_name = schema.field_name_;
             collection_schema_.field_types_.insert(
                 std::make_pair(field_name, (engine::meta::hybrid::DataType)schema.field_type_));
@@ -67,7 +82,6 @@ DescribeHybridCollectionRequest::OnExecute() {
             milvus::json json_extra_param = milvus::json::parse(schema.field_params_);
             collection_schema_.field_params_.insert(std::make_pair(field_name, json_extra_param));
         }
-        collection_schema_.extra_params_["segment_size"] = collection_schema.index_file_size_ / engine::MB;
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

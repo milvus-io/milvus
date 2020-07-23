@@ -255,8 +255,7 @@ ValidateCollectionIndexType(int32_t index_type) {
 }
 
 Status
-ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& collection_schema,
-                    int32_t index_type) {
+ValidateIndexParams(const milvus::json& index_params, int64_t dimension, int32_t index_type) {
     switch (index_type) {
         case (int32_t)engine::EngineType::FAISS_IDMAP:
         case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
@@ -286,7 +285,7 @@ ValidateIndexParams(const milvus::json& index_params, const engine::meta::Collec
 
             // special check for 'm' parameter
             std::vector<int64_t> resset;
-            milvus::knowhere::IVFPQConfAdapter::GetValidMList(collection_schema.dimension_, resset);
+            milvus::knowhere::IVFPQConfAdapter::GetValidMList(dimension, resset);
             int64_t m_value = index_params[knowhere::IndexParams::m];
             if (resset.empty()) {
                 std::string msg = "Invalid collection dimension, unable to get reasonable values for 'm'";

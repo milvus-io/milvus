@@ -38,7 +38,7 @@ ShowCollectionsRequest::OnExecute() {
     TimeRecorderAuto rc("ShowCollectionsRequest");
 
     std::vector<std::string> names;
-    auto status = DBWrapper::DB()->AllCollections(names);
+    auto status = DBWrapper::SSDB()->AllCollections(names);
     fiu_do_on("ShowCollectionsRequest.OnExecute.show_collections_fail",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {

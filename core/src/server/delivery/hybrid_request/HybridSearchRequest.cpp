@@ -31,65 +31,53 @@ namespace milvus {
 namespace server {
 
 HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name, std::vector<std::string>& partition_list,
-                                         query::GeneralQueryPtr& general_query, query::QueryPtr& query_ptr,
-                                         milvus::json& json_params, std::vector<std::string>& field_names,
-                                         engine::QueryResult& result)
+                                         const query::QueryPtr& query_ptr, const milvus::json& json_params,
+                                         engine::QueryResultPtr& result)
     : BaseRequest(context, BaseRequest::kHybridSearch),
-      collection_name_(collection_name),
-      partition_list_(partition_list),
-      general_query_(general_query),
       query_ptr_(query_ptr),
       json_params_(json_params),
-      field_names_(field_names),
       result_(result) {
 }
 
 BaseRequestPtr
-HybridSearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                            std::vector<std::string>& partition_list, query::GeneralQueryPtr& general_query,
-                            query::QueryPtr& query_ptr, milvus::json& json_params,
-                            std::vector<std::string>& field_names, engine::QueryResult& result) {
-    return std::shared_ptr<BaseRequest>(new HybridSearchRequest(context, collection_name, partition_list, general_query,
-                                                                query_ptr, json_params, field_names, result));
+HybridSearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                            const milvus::json& json_params, engine::QueryResultPtr& result) {
+    return std::shared_ptr<BaseRequest>(new HybridSearchRequest(context, query_ptr, json_params, result));
 }
 
 Status
 HybridSearchRequest::OnExecute() {
     try {
         fiu_do_on("HybridSearchRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "SearchRequest(table=" + collection_name_;
+        std::string hdr = "SearchRequest(table=" + query_ptr_->collection_id;
 
         TimeRecorder rc(hdr);
 
         // step 1: check table name
-        auto status = ValidateCollectionName(collection_name_);
+        auto status = ValidateCollectionName(query_ptr_->collection_id);
         if (!status.ok()) {
             return status;
         }
 
         // step 2: check table existence
         // only process root table, ignore partition table
-        engine::meta::CollectionSchema collection_schema;
-        engine::meta::hybrid::FieldsSchema fields_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
+        engine::snapshot::CollectionPtr collection;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        status = DBWrapper::SSDB()->DescribeCollection(query_ptr_->collection_id, collection, fields_schema);
         fiu_do_on("HybridSearchRequest.OnExecute.describe_table_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(query_ptr_->collection_id));
             } else {
                 return status;
             }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-            }
         }
 
+        int64_t dimension = collection->GetParams()[engine::DIMENSION].get<int64_t>();
+
         // step 3: check partition tags
-        status = ValidatePartitionTags(partition_list_);
+        status = ValidatePartitionTags(query_ptr_->partitions);
         fiu_do_on("HybridSearchRequest.OnExecute.invalid_partition_tags",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -97,7 +85,14 @@ HybridSearchRequest::OnExecute() {
             return status;
         }
 
-        // step 3: check field names
+        // step 4: Get field info
+        std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
+        for (auto& schema : fields_schema) {
+            field_types.insert(
+                std::make_pair(schema.first->GetName(), (engine::meta::hybrid::DataType)schema.first->GetFtype()));
+        }
+
+        // step 5: check field names
         if (json_params_.contains("fields")) {
             if (json_params_["fields"].is_array()) {
                 for (auto& name : json_params_["fields"]) {
@@ -106,8 +101,8 @@ HybridSearchRequest::OnExecute() {
                         return status;
                     }
                     bool find_field_name = false;
-                    for (const auto& schema : fields_schema.fields_schema_) {
-                        if (name.get<std::string>() == schema.field_name_) {
+                    for (const auto& schema : field_types) {
+                        if (name.get<std::string>() == schema.first) {
                             find_field_name = true;
                             break;
                         }
@@ -115,20 +110,13 @@ HybridSearchRequest::OnExecute() {
                     if (not find_field_name) {
                         return Status{SERVER_INVALID_FIELD_NAME, "Field: " + name.get<std::string>() + " not exist"};
                     }
-                    field_names_.emplace_back(name.get<std::string>());
+                    query_ptr_->field_names.emplace_back(name.get<std::string>());
                 }
             }
         }
 
-        std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
-        for (auto& field_schema : fields_schema.fields_schema_) {
-            attr_type.insert(
-                std::make_pair(field_schema.field_name_, (engine::meta::hybrid::DataType)field_schema.field_type_));
-        }
-
-        result_.row_num_ = 0;
-        status = DBWrapper::DB()->HybridQuery(context_, collection_name_, partition_list_, general_query_, query_ptr_,
-                                              field_names_, attr_type, result_);
+        result_->row_num_ = 0;
+        status = DBWrapper::SSDB()->Query(context_, query_ptr_, result_);
 
 #ifdef ENABLE_CPU_PROFILING
         ProfilerStop();
@@ -138,13 +126,13 @@ HybridSearchRequest::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-        fiu_do_on("HybridSearchRequest.OnExecute.empty_result_ids", result_.result_ids_.clear());
-        if (result_.result_ids_.empty()) {
+        fiu_do_on("HybridSearchRequest.OnExecute.empty_result_ids", result_->result_ids_.clear());
+        if (result_->result_ids_.empty()) {
             auto vector_query = query_ptr_->vectors.begin()->second;
             if (!vector_query->query_vector.binary_data.empty()) {
-                result_.row_num_ = vector_query->query_vector.binary_data.size() * 8 / collection_schema.dimension_;
+                result_->row_num_ = vector_query->query_vector.binary_data.size() * 8 / dimension;
             } else if (!vector_query->query_vector.float_data.empty()) {
-                result_.row_num_ = vector_query->query_vector.float_data.size() / collection_schema.dimension_;
+                result_->row_num_ = vector_query->query_vector.float_data.size() / dimension;
             }
             return Status::OK();  // empty table
         }

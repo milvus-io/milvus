@@ -40,8 +40,7 @@ extern Status
 ValidateCollectionIndexType(int32_t index_type);
 
 extern Status
-ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& collection_schema,
-                    int32_t index_type);
+ValidateIndexParams(const milvus::json& index_params, int64_t dimension, int32_t index_type);
 
 extern Status
 ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& collection_schema,

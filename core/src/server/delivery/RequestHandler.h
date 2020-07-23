@@ -30,10 +30,6 @@ class RequestHandler {
     RequestHandler() = default;
 
     Status
-    CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t dimension,
-                     int64_t index_file_size, int64_t metric_type);
-
-    Status
     HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_collection);
 
     Status
@@ -71,10 +67,6 @@ class RequestHandler {
     SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
                const std::vector<int64_t>& id_array, int64_t topk, const milvus::json& extra_params,
                const std::vector<std::string>& partition_list, TopKQueryResult& result);
-
-    Status
-    DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                       CollectionSchema& collection_schema);
 
     Status
     CountCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);
@@ -150,14 +142,8 @@ class RequestHandler {
                   std::vector<engine::AttrsData>& attrs, std::vector<engine::VectorsData>& vectors);
 
     Status
-    HybridSearch(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                 std::vector<std::string>& partition_list, query::GeneralQueryPtr& general_query,
-                 query::QueryPtr& query_ptr, milvus::json& json_params, std::vector<std::string>& field_names,
-                 engine::QueryResult& result);
-
-    Status
-    CreateHybridIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                      const std::vector<std::string>& field_names, const milvus::json& json_params);
+    HybridSearch(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                 const milvus::json& json_params, engine::QueryResultPtr& result);
 };
 
 }  // namespace server

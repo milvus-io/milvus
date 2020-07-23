@@ -17,6 +17,8 @@
 
 #include <fiu-local.h>
 #include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -45,24 +47,26 @@ PreloadCollectionRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        engine::snapshot::CollectionPtr collection;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-            }
+        }
+
+        // TODO(yukun): if PreloadCollection interface needs to add field names as params
+        std::vector<std::string> field_names;
+        for (auto field_it : fields_schema) {
+            field_names.emplace_back(field_it.first->GetName());
         }
 
         // step 2: force load collection data into cache
         // load each segment and insert into cache even cache capacity is not enough
-        status = DBWrapper::DB()->PreloadCollection(context_, collection_name_, true);
+        status = DBWrapper::SSDB()->LoadCollection(context_, collection_name_, field_names, true);
         fiu_do_on("PreloadCollectionRequest.OnExecute.preload_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("PreloadCollectionRequest.OnExecute.throw_std_exception", throw std::exception());

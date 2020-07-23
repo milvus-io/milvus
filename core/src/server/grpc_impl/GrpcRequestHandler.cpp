@@ -1314,22 +1314,21 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
         }
     }
 
-    engine::QueryResult result;
+    engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
     std::vector<std::string> field_names;
-    status = request_handler_.HybridSearch(GetContext(context), request->collection_name(), partition_list,
-                                           general_query, query_ptr, json_params, field_names, result);
+    status = request_handler_.HybridSearch(GetContext(context), query_ptr, json_params, result);
 
     // step 6: construct and return result
-    response->set_row_num(result.row_num_);
+    response->set_row_num(result->row_num_);
     auto grpc_entity = response->mutable_entities();
-    ConstructEntityResults(result.attrs_, result.vectors_, field_names, grpc_entity);
-    grpc_entity->mutable_ids()->Resize(static_cast<int>(result.result_ids_.size()), 0);
-    memcpy(grpc_entity->mutable_ids()->mutable_data(), result.result_ids_.data(),
-           result.result_ids_.size() * sizeof(int64_t));
+    ConstructEntityResults(result->attrs_, result->vectors_, field_names, grpc_entity);
+    grpc_entity->mutable_ids()->Resize(static_cast<int>(result->result_ids_.size()), 0);
+    memcpy(grpc_entity->mutable_ids()->mutable_data(), result->result_ids_.data(),
+           result->result_ids_.size() * sizeof(int64_t));
 
-    response->mutable_distances()->Resize(static_cast<int>(result.result_distances_.size()), 0.0);
-    memcpy(response->mutable_distances()->mutable_data(), result.result_distances_.data(),
-           result.result_distances_.size() * sizeof(float));
+    response->mutable_distances()->Resize(static_cast<int>(result->result_distances_.size()), 0.0);
+    memcpy(response->mutable_distances()->mutable_data(), result->result_distances_.data(),
+           result->result_distances_.size() * sizeof(float));
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -1631,6 +1630,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();
     query::QueryPtr query_ptr = std::make_shared<query::Query>();
+    query_ptr->collection_id = request->collection_name();
+
     std::unordered_map<std::string, query::VectorQueryPtr> vectors;
 
     status = DeserializeJsonToBoolQuery(request->vector_param(), request->dsl(), boolean_query, vectors);
@@ -1663,6 +1664,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
         partition_list[i] = request->partition_tag_array(i);
     }
 
+    query_ptr->partitions = partition_list;
+
     milvus::json json_params;
     for (int i = 0; i < request->extra_params_size(); i++) {
         const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
@@ -1671,22 +1674,20 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
         }
     }
 
-    engine::QueryResult result;
-    std::vector<std::string> field_names;
-    status = request_handler_.HybridSearch(GetContext(context), request->collection_name(), partition_list,
-                                           general_query, query_ptr, json_params, field_names, result);
+    engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
+    status = request_handler_.HybridSearch(GetContext(context), query_ptr, json_params, result);
 
     // step 6: construct and return result
-    response->set_row_num(result.row_num_);
-    ConstructEntityResults(result.attrs_, result.vectors_, field_names, grpc_entity);
+    response->set_row_num(result->row_num_);
+    ConstructEntityResults(result->attrs_, result->vectors_, query_ptr->field_names, grpc_entity);
 
-    grpc_entity->mutable_ids()->Resize(static_cast<int>(result.result_ids_.size()), 0);
-    memcpy(grpc_entity->mutable_ids()->mutable_data(), result.result_ids_.data(),
-           result.result_ids_.size() * sizeof(int64_t));
+    grpc_entity->mutable_ids()->Resize(static_cast<int>(result->result_ids_.size()), 0);
+    memcpy(grpc_entity->mutable_ids()->mutable_data(), result->result_ids_.data(),
+           result->result_ids_.size() * sizeof(int64_t));
 
-    response->mutable_distances()->Resize(static_cast<int>(result.result_distances_.size()), 0.0);
-    memcpy(response->mutable_distances()->mutable_data(), result.result_distances_.data(),
-           result.result_distances_.size() * sizeof(float));
+    response->mutable_distances()->Resize(static_cast<int>(result->result_distances_.size()), 0.0);
+    memcpy(response->mutable_distances()->mutable_data(), result->result_distances_.data(),
+           result->result_distances_.size() * sizeof(float));
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);

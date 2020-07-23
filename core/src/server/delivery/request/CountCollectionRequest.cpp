@@ -18,6 +18,8 @@
 
 #include <fiu-local.h>
 #include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -46,18 +48,14 @@ CountCollectionRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        engine::snapshot::CollectionPtr collection;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
-            }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 
@@ -65,7 +63,7 @@ CountCollectionRequest::OnExecute() {
 
         // step 2: get row count
         uint64_t row_count = 0;
-        status = DBWrapper::DB()->GetCollectionRowCount(collection_name_, row_count);
+        status = DBWrapper::SSDB()->GetCollectionRowCount(collection_name_, row_count);
         fiu_do_on("CountCollectionRequest.OnExecute.db_not_found", status = Status(DB_NOT_FOUND, ""));
         fiu_do_on("CountCollectionRequest.OnExecute.status_error", status = Status(SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CountCollectionRequest.OnExecute.throw_std_exception", throw std::exception());

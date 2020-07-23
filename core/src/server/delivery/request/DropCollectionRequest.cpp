@@ -17,6 +17,7 @@
 
 #include <fiu-local.h>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace milvus {
@@ -47,9 +48,10 @@ DropCollectionRequest::OnExecute() {
 
         // step 2: check collection existence
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        engine::snapshot::CollectionPtr collection;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+
+        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
         fiu_do_on("DropCollectionRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
         fiu_do_on("DropCollectionRequest.OnExecute.describe_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
@@ -60,16 +62,12 @@ DropCollectionRequest::OnExecute() {
             } else {
                 return status;
             }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-            }
         }
 
         rc.RecordSection("check validation");
 
         // step 3: Drop collection
-        status = DBWrapper::DB()->DropCollection(collection_name_);
+        status = DBWrapper::SSDB()->DropCollection(collection_name_);
         fiu_do_on("DropCollectionRequest.OnExecute.drop_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -77,7 +75,7 @@ DropCollectionRequest::OnExecute() {
         }
 
         // step 4: flush to trigger CleanUpFilesWithTTL
-        status = DBWrapper::DB()->Flush();
+        status = DBWrapper::SSDB()->Flush();
 
         rc.ElapseFromBegin("total cost");
     } catch (std::exception& ex) {

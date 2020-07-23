@@ -31,6 +31,7 @@ add_executable(test_ssdb
         ${codecs_snapshot_files}
         ${config_files}
         ${config_handler_files}
+        ${db_attr_files}
         ${db_main_files}
         ${db_attr_files}
         ${db_engine_files}

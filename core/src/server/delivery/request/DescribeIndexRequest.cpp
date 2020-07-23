@@ -17,6 +17,8 @@
 
 #include <fiu-local.h>
 #include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -46,24 +48,33 @@ DescribeIndexRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        engine::snapshot::CollectionPtr collection;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
+        fiu_do_on("DropIndexRequest.OnExecute.collection_not_exist",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
             } else {
                 return status;
             }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
+        }
+
+        // TODO(yukun): Currently field name is vector field name
+        std::string field_name;
+        for (auto field_it = fields_schema.begin(); field_it != fields_schema.end(); field_it++) {
+            auto type = field_it->first->GetFtype();
+            if (type == (int64_t)engine::meta::hybrid::DataType::VECTOR_FLOAT ||
+                type == (int64_t)engine::meta::hybrid::DataType::VECTOR_BINARY) {
+                field_name = field_it->first->GetName();
+                break;
             }
         }
 
         // step 2: check collection existence
         engine::CollectionIndex index;
-        status = DBWrapper::DB()->DescribeIndex(collection_name_, index);
+        status = DBWrapper::SSDB()->DescribeIndex(collection_name_, field_name, index);
         if (!status.ok()) {
             return status;
         }

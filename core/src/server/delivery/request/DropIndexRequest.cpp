@@ -17,6 +17,8 @@
 
 #include <fiu-local.h>
 #include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -50,12 +52,9 @@ DropIndexRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema collection_schema;
-        engine::meta::hybrid::FieldsSchema fields_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
-
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        engine::snapshot::CollectionPtr collection;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
         fiu_do_on("DropIndexRequest.OnExecute.collection_not_exist",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -64,16 +63,12 @@ DropIndexRequest::OnExecute() {
             } else {
                 return status;
             }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-            }
         }
 
         rc.RecordSection("check validation");
 
         // step 2: drop index
-        status = DBWrapper::DB()->DropIndex(collection_name_);
+        status = DBWrapper::SSDB()->DropIndex(collection_name_, field_name_);
         fiu_do_on("DropIndexRequest.OnExecute.drop_index_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;

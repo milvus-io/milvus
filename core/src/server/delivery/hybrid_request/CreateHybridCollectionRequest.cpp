@@ -19,6 +19,7 @@
 #include "utils/TimeRecorder.h"
 
 #include <fiu-local.h>
+#include <src/db/snapshot/Context.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -123,8 +124,20 @@ CreateHybridCollectionRequest::OnExecute() {
             collection_info.metric_type_ = metric_type;
         }
 
-        // step 3: create collection
-        status = DBWrapper::DB()->CreateHybridCollection(collection_info, fields_schema);
+        // step 3: create snapshot collection
+        engine::snapshot::CreateCollectionContext create_collection_context;
+        auto ss_collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_);
+        create_collection_context.collection = ss_collection_schema;
+        for (const auto& schema : fields_schema.fields_schema_) {
+            auto field = std::make_shared<engine::snapshot::Field>(
+                schema.field_name_, 0, (engine::FieldType)schema.field_type_, json::parse(schema.field_params_));
+
+            auto field_element = std::make_shared<engine::snapshot::FieldElement>(
+                0, 0, schema.index_name_, engine::FieldElementType::FET_INDEX, json::parse(schema.index_param_));
+            create_collection_context.fields_schema[field] = {field_element};
+        }
+
+        status = DBWrapper::SSDB()->CreateCollection(create_collection_context);
         fiu_do_on("CreateHybridCollectionRequest.OnExecute.invalid_db_execute",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {

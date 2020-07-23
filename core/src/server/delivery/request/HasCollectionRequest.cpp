@@ -47,7 +47,7 @@ HasCollectionRequest::OnExecute() {
         }
 
         // step 2: check collection existence
-        status = DBWrapper::DB()->HasNativeCollection(collection_name_, has_collection_);
+        status = DBWrapper::SSDB()->HasCollection(collection_name_, has_collection_);
         fiu_do_on("HasCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
 
         return status;
