@@ -33,9 +33,7 @@ SetSnapshotIndex(const std::string& collection_name, const std::string& field_na
     }
 
     snapshot::OperationContext ss_context;
-    auto ftype = field->GetFtype();
-    if (ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR_FLOAT ||
-        ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
+    if (IsVectorField(field)) {
         std::string index_name = knowhere::OldIndexTypeToStr(index_info.engine_type_);
         auto new_element = std::make_shared<snapshot::FieldElement>(ss->GetCollectionId(), field->GetID(), index_name,
                                                                     milvus::engine::FieldElementType::FET_INDEX);
@@ -74,9 +72,7 @@ GetSnapshotIndex(const std::string& collection_name, const std::string& field_na
     }
 
     auto field_elements = ss->GetFieldElementsByField(field_name);
-    auto ftype = field->GetFtype();
-    if (ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR_FLOAT ||
-        ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
+    if (IsVectorField(field)) {
         for (auto& field_element : field_elements) {
             if (field_element->GetFtype() == (int64_t)milvus::engine::FieldElementType::FET_INDEX) {
                 std::string index_name = field_element->GetName();
@@ -128,7 +124,6 @@ IsVectorField(const engine::snapshot::FieldPtr& field) {
         return false;
     }
 
-    std::string name = field->GetName();
     engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
     if (ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR_FLOAT ||
         ftype == engine::FIELD_TYPE::VECTOR_BINARY) {

@@ -377,8 +377,7 @@ SSSegmentReader::LoadVectorIndice() {
 
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-        if (field->GetFtype() == engine::FIELD_TYPE::VECTOR || field->GetFtype() == engine::FIELD_TYPE::VECTOR_FLOAT ||
-            field->GetFtype() == engine::FIELD_TYPE::VECTOR_BINARY) {
+        if (engine::IsVectorField(field)) {
             knowhere::VecIndexPtr index_ptr;
             STATUS_CHECK(LoadVectorIndex(name, index_ptr));
         } else {
