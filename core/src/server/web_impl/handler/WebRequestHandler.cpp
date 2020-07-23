@@ -837,37 +837,35 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
 
         query_ptr_->root = general_query->bin;
 
-        engine::QueryResult result;
-        std::vector<std::string> field_names;
-        status = request_handler_.HybridSearch(context_ptr_, collection_name, partition_tags, general_query, query_ptr_,
-                                               extra_params, field_names, result);
+        engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
+        status = request_handler_.HybridSearch(context_ptr_, query_ptr_, extra_params, result);
 
         if (!status.ok()) {
             return status;
         }
 
         nlohmann::json result_json;
-        result_json["num"] = result.row_num_;
-        if (result.row_num_ == 0) {
+        result_json["num"] = result->row_num_;
+        if (result->row_num_ == 0) {
             result_json["result"] = std::vector<int64_t>();
             result_str = result_json.dump();
             return Status::OK();
         }
 
-        auto step = result.result_ids_.size() / result.row_num_;
+        auto step = result->result_ids_.size() / result->row_num_;
         nlohmann::json search_result_json;
-        for (int64_t i = 0; i < result.row_num_; i++) {
+        for (int64_t i = 0; i < result->row_num_; i++) {
             nlohmann::json raw_result_json;
             for (size_t j = 0; j < step; j++) {
                 nlohmann::json one_result_json;
-                one_result_json["id"] = std::to_string(result.result_ids_.at(i * step + j));
-                one_result_json["distance"] = std::to_string(result.result_distances_.at(i * step + j));
+                one_result_json["id"] = std::to_string(result->result_ids_.at(i * step + j));
+                one_result_json["distance"] = std::to_string(result->result_distances_.at(i * step + j));
                 raw_result_json.emplace_back(one_result_json);
             }
             search_result_json.emplace_back(raw_result_json);
         }
         nlohmann::json attr_json;
-        ConvertRowToColumnJson(result.attrs_, field_names, result.row_num_, attr_json);
+        ConvertRowToColumnJson(result->attrs_, query_ptr_->field_names, result->row_num_, attr_json);
         result_json["Entity"] = attr_json;
         result_json["result"] = search_result_json;
         result_str = result_json.dump();

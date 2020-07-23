@@ -312,12 +312,9 @@ RequestHandler::GetEntityByID(const std::shared_ptr<Context>& context, const std
 }
 
 Status
-RequestHandler::HybridSearch(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                             std::vector<std::string>& partition_list, query::GeneralQueryPtr& general_query,
-                             query::QueryPtr& query_ptr, milvus::json& json_params,
-                             std::vector<std::string>& field_names, engine::QueryResult& result) {
-    BaseRequestPtr request_ptr = HybridSearchRequest::Create(context, collection_name, partition_list, general_query,
-                                                             query_ptr, json_params, field_names, result);
+RequestHandler::HybridSearch(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                             const milvus::json& json_params, engine::QueryResultPtr& result) {
+    BaseRequestPtr request_ptr = HybridSearchRequest::Create(context, query_ptr, json_params, result);
 
     RequestScheduler::ExecRequest(request_ptr);
 

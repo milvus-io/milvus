@@ -113,6 +113,7 @@ struct Query {
     std::string collection_id;
     std::vector<std::string> partitions;
     std::vector<std::string> field_names;
+
 };
 using QueryPtr = std::shared_ptr<Query>;
 
