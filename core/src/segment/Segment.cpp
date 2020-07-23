@@ -178,6 +178,7 @@ Segment::GetFixedFieldData(const std::string& field_name, FIXED_FIELD_DATA& data
 
 Status
 Segment::GetVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index) {
+    index = nullptr;
     auto iter = vector_indice_.find(field_name);
     if (iter == vector_indice_.end()) {
         return Status(DB_ERROR, "invalid field name: " + field_name);
@@ -195,6 +196,7 @@ Segment::SetVectorIndex(const std::string& field_name, const knowhere::VecIndexP
 
 Status
 Segment::GetStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index) {
+    index = nullptr;
     auto iter = structured_indice_.find(field_name);
     if (iter == structured_indice_.end()) {
         return Status(DB_ERROR, "invalid field name: " + field_name);

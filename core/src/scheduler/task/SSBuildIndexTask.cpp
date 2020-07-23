@@ -14,7 +14,7 @@
 #include <utility>
 
 #include "db/Utils.h"
-#include "db/engine/SSExecutionEngineImpl.h"
+#include "db/engine/EngineFactory.h"
 #include "scheduler/job/SSBuildIndexJob.h"
 #include "scheduler/task/SSBuildIndexTask.h"
 #include "utils/Log.h"
@@ -23,29 +23,37 @@
 namespace milvus {
 namespace scheduler {
 
-XSSBuildIndexTask::XSSBuildIndexTask(const std::string& dir_root, const engine::SegmentVisitorPtr& visitor,
-                                     TaskLabelPtr label)
-    : Task(TaskType::BuildIndexTask, std::move(label)), visitor_(visitor) {
-    engine_ = std::make_shared<engine::SSExecutionEngineImpl>(dir_root, visitor);
+SSBuildIndexTask::SSBuildIndexTask(const engine::DBOptions& options, const std::string& collection_name,
+                                   engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
+    : Task(TaskType::BuildIndexTask, std::move(label)),
+      options_(options),
+      collection_name_(collection_name),
+      segment_id_(segment_id) {
+    CreateExecEngine();
 }
 
 void
-XSSBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
-    TimeRecorder rc("XSSBuildIndexTask::Load");
-    auto seg_id = visitor_->GetSegment()->GetID();
+SSBuildIndexTask::CreateExecEngine() {
+    if (execution_engine_ == nullptr) {
+        execution_engine_ = engine::EngineFactory::Build(options_.meta_.path_, collection_name_, segment_id_);
+    }
+}
+
+void
+SSBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
+    TimeRecorder rc("SSBuildIndexTask::Load");
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
 
     if (auto job = job_.lock()) {
-        auto build_index_job = std::static_pointer_cast<scheduler::SSBuildIndexJob>(job);
-        // auto options = build_index_job->options();
         try {
             if (type == LoadType::DISK2CPU) {
-                stat = engine_->Load(nullptr);
+                engine::ExecutionEngineContext context;
+                stat = execution_engine_->Load(context);
                 type_str = "DISK2CPU";
             } else if (type == LoadType::CPU2GPU) {
-                stat = engine_->CopyToGpu(device_id);
+                stat = execution_engine_->CopyToGpu(device_id);
                 type_str = "CPU2GPU:" + std::to_string(device_id);
             } else {
                 error_msg = "Wrong load type";
@@ -58,7 +66,7 @@ XSSBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
             LOG_ENGINE_ERROR_ << error_msg;
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
-        fiu_do_on("XSSBuildIndexTask.Load.out_of_memory", stat = Status(SERVER_UNEXPECTED_ERROR, "out of memory"));
+
         if (!stat.ok()) {
             Status s;
             if (stat.ToString().find("out of memory") != std::string::npos) {
@@ -71,40 +79,36 @@ XSSBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
 
             LOG_ENGINE_ERROR_ << s.message();
 
-            if (auto job = job_.lock()) {
-                auto build_index_job = std::static_pointer_cast<scheduler::SSBuildIndexJob>(job);
-                build_index_job->status() = s;
-                build_index_job->BuildIndexDone(seg_id);
-            }
-
-            return;
+            auto build_index_job = std::static_pointer_cast<scheduler::SSBuildIndexJob>(job);
+            build_index_job->status() = s;
+            build_index_job->BuildIndexDone(segment_id_);
         }
-
-        std::string info =
-            "Build index task load segment id:" + std::to_string(seg_id) + " " + type_str + " totally cost";
-        rc.ElapseFromBegin(info);
     }
 }
 
 void
-XSSBuildIndexTask::Execute() {
-    auto seg_id = visitor_->GetSegment()->GetID();
-    TimeRecorderAuto rc("XSSBuildIndexTask::Execute " + std::to_string(seg_id));
+SSBuildIndexTask::Execute() {
+    TimeRecorderAuto rc("XSSBuildIndexTask::Execute " + std::to_string(segment_id_));
 
     if (auto job = job_.lock()) {
         auto build_index_job = std::static_pointer_cast<scheduler::SSBuildIndexJob>(job);
-        if (engine_ == nullptr) {
-            build_index_job->BuildIndexDone(seg_id);
-            build_index_job->status() = Status(DB_ERROR, "source index is null");
+        if (execution_engine_ == nullptr) {
+            build_index_job->BuildIndexDone(segment_id_);
+            build_index_job->status() = Status(DB_ERROR, "execution engine is null");
             return;
         }
 
-        // SS TODO
+        auto status = execution_engine_->BuildIndex();
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << "Failed to create collection file: " << status.ToString();
+            build_index_job->BuildIndexDone(segment_id_);
+            build_index_job->status() = status;
+            execution_engine_ = nullptr;
+            return;
+        }
 
-        build_index_job->BuildIndexDone(seg_id);
+        build_index_job->BuildIndexDone(segment_id_);
     }
-
-    engine_ = nullptr;
 }
 
 }  // namespace scheduler

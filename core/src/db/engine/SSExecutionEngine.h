@@ -25,19 +25,24 @@
 namespace milvus {
 namespace engine {
 
+struct ExecutionEngineContext {
+    query::QueryPtr query_ptr_;
+    QueryResultPtr query_result_;
+};
+
 class SSExecutionEngine {
  public:
     virtual Status
-    Load(const query::QueryPtr& query_ptr) = 0;
+    Load(ExecutionEngineContext& context) = 0;
 
     virtual Status
     CopyToGpu(uint64_t device_id) = 0;
 
     virtual Status
-    Search(const query::QueryPtr& query_ptr, QueryResult& result) = 0;
+    Search(ExecutionEngineContext& context) = 0;
 
     virtual Status
-    BuildIndex(const std::string& field_name, const CollectionIndex& index) = 0;
+    BuildIndex() = 0;
 };
 
 using SSExecutionEnginePtr = std::shared_ptr<SSExecutionEngine>;

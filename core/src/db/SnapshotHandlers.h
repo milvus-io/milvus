@@ -54,12 +54,25 @@ struct LoadVectorFieldHandler : public snapshot::IterateHandler<snapshot::Field>
 struct SegmentsToSearchCollector : public snapshot::IterateHandler<snapshot::SegmentCommit> {
     using ResourceT = snapshot::SegmentCommit;
     using BaseT = snapshot::IterateHandler<ResourceT>;
-    SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, meta::FilesHolder& holder);
+    SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
-    meta::FilesHolder& holder_;
+    snapshot::IDS_TYPE& segment_ids_;
+};
+
+struct SegmentsToIndexCollector : public snapshot::IterateHandler<snapshot::SegmentCommit> {
+    using ResourceT = snapshot::SegmentCommit;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
+    SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss, const std::string& field_name,
+                             snapshot::IDS_TYPE& segment_ids);
+
+    Status
+    Handle(const typename ResourceT::Ptr&) override;
+
+    std::string field_name_;
+    snapshot::IDS_TYPE& segment_ids_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

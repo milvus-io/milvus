@@ -30,11 +30,21 @@
 namespace milvus {
 namespace codec {
 
+const char* VECTOR_INDEX_POSTFIX = ".idx";
+
+std::string
+SSVectorIndexFormat::FilePostfix() {
+    std::string str = VECTOR_INDEX_POSTFIX;
+    return str;
+}
+
 void
-SSVectorIndexFormat::read_raw(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                              knowhere::BinaryPtr& data) {
-    if (!fs_ptr->reader_ptr_->open(location.c_str())) {
-        std::string err_msg = "Failed to open file: " + location + ", error: " + std::strerror(errno);
+SSVectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                             knowhere::BinaryPtr& data) {
+    milvus::TimeRecorder recorder("SSVectorIndexFormat::ReadRaw");
+
+    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+        std::string err_msg = "Failed to open raw file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
@@ -50,23 +60,27 @@ SSVectorIndexFormat::read_raw(const storage::FSHandlerPtr& fs_ptr, const std::st
     fs_ptr->reader_ptr_->seekg(sizeof(size_t));
     fs_ptr->reader_ptr_->read(data->data.get(), num_bytes);
     fs_ptr->reader_ptr_->close();
+
+    double span = recorder.RecordSection("End");
+    double rate = num_bytes * 1000000.0 / span / 1024 / 1024;
+    LOG_ENGINE_DEBUG_ << "SSVectorIndexFormat::ReadIndex(" << file_path << ") rate " << rate << "MB/s";
 }
 
 void
-SSVectorIndexFormat::read_index(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                                knowhere::BinarySet& data) {
-    milvus::TimeRecorder recorder("read_index");
+SSVectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                               knowhere::BinarySet& data) {
+    milvus::TimeRecorder recorder("SSVectorIndexFormat::ReadIndex");
 
-    recorder.RecordSection("Start");
-    if (!fs_ptr->reader_ptr_->open(location)) {
-        std::string err_msg = "Failed to open file: " + location + ", error: " + std::strerror(errno);
+    std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
+    if (!fs_ptr->reader_ptr_->open(full_file_path)) {
+        std::string err_msg = "Failed to open vector index: " + full_file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
     int64_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
-        LOG_ENGINE_ERROR_ << "Invalid vector index length: " << location;
+        LOG_ENGINE_ERROR_ << "Invalid vector index length: " << full_file_path;
         return;
     }
 
@@ -78,7 +92,7 @@ SSVectorIndexFormat::read_index(const storage::FSHandlerPtr& fs_ptr, const std::
     rp += sizeof(current_type);
     fs_ptr->reader_ptr_->seekg(rp);
 
-    LOG_ENGINE_DEBUG_ << "Start to read_index(" << location << ") length: " << length << " bytes";
+    LOG_ENGINE_DEBUG_ << "Start to ReadIndex(" << full_file_path << ") length: " << length << " bytes";
     while (rp < length) {
         size_t meta_length;
         fs_ptr->reader_ptr_->read(&meta_length, sizeof(meta_length));
@@ -108,27 +122,27 @@ SSVectorIndexFormat::read_index(const storage::FSHandlerPtr& fs_ptr, const std::
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "read_index(" << location << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "SSVectorIndexFormat::ReadIndex(" << full_file_path << ") rate " << rate << "MB/s";
 }
 
 void
-SSVectorIndexFormat::read_compress(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                                   knowhere::BinaryPtr& data) {
+SSVectorIndexFormat::ReadCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                                  knowhere::BinaryPtr& data) {
     auto& ss_codec = codec::SSCodec::instance();
-    ss_codec.GetVectorCompressFormat()->read(fs_ptr, location, data);
+    ss_codec.GetVectorCompressFormat()->Read(fs_ptr, file_path, data);
 }
 
 void
-SSVectorIndexFormat::convert_raw(const std::vector<uint8_t>& raw, knowhere::BinaryPtr& data) {
+SSVectorIndexFormat::ConvertRaw(const std::vector<uint8_t>& raw, knowhere::BinaryPtr& data) {
     data = std::make_shared<knowhere::Binary>();
     data->size = raw.size();
     data->data = std::shared_ptr<uint8_t[]>(new uint8_t[data->size]);
 }
 
 void
-SSVectorIndexFormat::construct_index(const std::string& index_name, knowhere::BinarySet& index_data,
-                                     knowhere::BinaryPtr& raw_data, knowhere::BinaryPtr& compress_data,
-                                     knowhere::VecIndexPtr& index) {
+SSVectorIndexFormat::ConstructIndex(const std::string& index_name, knowhere::BinarySet& index_data,
+                                    knowhere::BinaryPtr& raw_data, knowhere::BinaryPtr& compress_data,
+                                    knowhere::VecIndexPtr& index) {
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
     index = vec_index_factory.CreateVecIndex(index_name, knowhere::IndexMode::MODE_CPU);
     if (index != nullptr) {
@@ -160,16 +174,16 @@ SSVectorIndexFormat::construct_index(const std::string& index_name, knowhere::Bi
 }
 
 void
-SSVectorIndexFormat::write_index(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                                 const knowhere::VecIndexPtr& index) {
-    milvus::TimeRecorder recorder("write_index");
+SSVectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                                const knowhere::VecIndexPtr& index) {
+    milvus::TimeRecorder recorder("SVectorIndexFormat::WriteIndex");
 
+    std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
     auto binaryset = index->Serialize(knowhere::Config());
     int32_t index_type = knowhere::StrToOldIndexType(index->index_type());
 
-    recorder.RecordSection("Start");
-    if (!fs_ptr->writer_ptr_->open(location)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector index: " << location;
+    if (!fs_ptr->writer_ptr_->open(full_file_path)) {
+        LOG_ENGINE_ERROR_ << "Fail to open vector index: " << full_file_path;
         return;
     }
 
@@ -190,20 +204,20 @@ SSVectorIndexFormat::write_index(const storage::FSHandlerPtr& fs_ptr, const std:
 
     double span = recorder.RecordSection("End");
     double rate = fs_ptr->writer_ptr_->length() * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "write_index(" << location << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "SSVectorIndexFormat::WriteIndex(" << full_file_path << ") rate " << rate << "MB/s";
 }
 
 void
-SSVectorIndexFormat::write_compress(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                                    const knowhere::VecIndexPtr& index) {
-    milvus::TimeRecorder recorder("write_index");
+SSVectorIndexFormat::WriteCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                                   const knowhere::VecIndexPtr& index) {
+    milvus::TimeRecorder recorder("SSVectorIndexFormat::WriteCompress");
 
     auto binaryset = index->Serialize(knowhere::Config());
 
     auto sq8_data = binaryset.Erase(SQ8_DATA);
     if (sq8_data != nullptr) {
         auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetVectorCompressFormat()->write(fs_ptr, location, sq8_data);
+        ss_codec.GetVectorCompressFormat()->Write(fs_ptr, file_path, sq8_data);
     }
 }
 

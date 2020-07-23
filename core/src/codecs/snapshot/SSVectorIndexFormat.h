@@ -31,28 +31,31 @@ class SSVectorIndexFormat {
  public:
     SSVectorIndexFormat() = default;
 
-    void
-    read_raw(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr& data);
+    std::string
+    FilePostfix();
 
     void
-    read_index(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinarySet& data);
+    ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinaryPtr& data);
 
     void
-    read_compress(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr& data);
+    ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinarySet& data);
 
     void
-    convert_raw(const std::vector<uint8_t>& raw, knowhere::BinaryPtr& data);
+    ReadCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinaryPtr& data);
 
     void
-    construct_index(const std::string& index_name, knowhere::BinarySet& index_data, knowhere::BinaryPtr& raw_data,
-                    knowhere::BinaryPtr& compress_data, knowhere::VecIndexPtr& index);
+    ConvertRaw(const std::vector<uint8_t>& raw, knowhere::BinaryPtr& data);
 
     void
-    write_index(const storage::FSHandlerPtr& fs_ptr, const std::string& location, const knowhere::VecIndexPtr& index);
+    ConstructIndex(const std::string& index_name, knowhere::BinarySet& index_data, knowhere::BinaryPtr& raw_data,
+                   knowhere::BinaryPtr& compress_data, knowhere::VecIndexPtr& index);
 
     void
-    write_compress(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-                   const knowhere::VecIndexPtr& index);
+    WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const knowhere::VecIndexPtr& index);
+
+    void
+    WriteCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                  const knowhere::VecIndexPtr& index);
 
     // No copy and move
     SSVectorIndexFormat(const SSVectorIndexFormat&) = delete;

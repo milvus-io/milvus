@@ -18,10 +18,10 @@
 namespace milvus {
 namespace scheduler {
 
-class SSTestTask : public XSSSearchTask {
+class SSTestTask : public SSSearchTask {
  public:
-    explicit SSTestTask(const server::ContextPtr& context, const engine::SegmentVisitorPtr& visitor,
-                        TaskLabelPtr label);
+    explicit SSTestTask(const server::ContextPtr& context, const engine::DBOptions& options,
+                        const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
 
  public:
     void

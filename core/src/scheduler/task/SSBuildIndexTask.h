@@ -13,8 +13,8 @@
 
 #include <string>
 
-#include "db/SnapshotVisitor.h"
 #include "db/engine/SSExecutionEngine.h"
+#include "db/snapshot/ResourceTypes.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/SSBuildIndexJob.h"
 #include "scheduler/task/Task.h"
@@ -22,10 +22,10 @@
 namespace milvus {
 namespace scheduler {
 
-class XSSBuildIndexTask : public Task {
+class SSBuildIndexTask : public Task {
  public:
-    explicit XSSBuildIndexTask(const std::string& dir_root, const engine::SegmentVisitorPtr& visitor,
-                               TaskLabelPtr label);
+    explicit SSBuildIndexTask(const engine::DBOptions& options, const std::string& collection_name,
+                              engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -33,9 +33,16 @@ class XSSBuildIndexTask : public Task {
     void
     Execute() override;
 
+ private:
+    void
+    CreateExecEngine();
+
  public:
-    engine::SegmentVisitorPtr visitor_;
-    engine::SSExecutionEnginePtr engine_ = nullptr;
+    const engine::DBOptions& options_;
+    std::string collection_name_;
+    engine::snapshot::ID_TYPE segment_id_;
+
+    engine::SSExecutionEnginePtr execution_engine_;
 };
 
 }  // namespace scheduler

@@ -101,13 +101,19 @@ Status
 SSSegmentReader::LoadField(const std::string& field_name, std::vector<uint8_t>& raw) {
     try {
         engine::FIXEDX_FIELD_MAP& field_map = segment_ptr_->GetFixedFields();
+        auto pair = field_map.find(field_name);
+        if (pair != field_map.end()) {
+            raw = pair->second;
+            return Status::OK();  // alread exist
+        }
+
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, raw_visitor->GetFile());
 
         auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetBlockFormat()->read(fs_ptr_, file_path, raw);
+        ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, raw);
 
         field_map.insert(std::make_pair(field_name, raw));
     } catch (std::exception& e) {
@@ -158,7 +164,7 @@ SSSegmentReader::LoadEntities(const std::string& field_name, const std::vector<i
             ranges.push_back(codec::ReadRange(offset, field_width));
         }
         auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetBlockFormat()->read(fs_ptr_, file_path, ranges, raw);
+        ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, ranges, raw);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -211,37 +217,53 @@ SSSegmentReader::LoadUids(std::vector<int64_t>& uids) {
 Status
 SSSegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr) {
     try {
+        segment_ptr_->GetVectorIndex(field_name, index_ptr);
+        if (index_ptr != nullptr) {
+            return Status::OK();  // already exist
+        }
+
         auto& ss_codec = codec::SSCodec::instance();
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
         knowhere::BinarySet index_data;
         knowhere::BinaryPtr raw_data, compress_data;
 
+        // if index file doesn't exist, return null
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (index_visitor) {
-            std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, index_visitor->GetFile());
-            ss_codec.GetVectorIndexFormat()->read_index(fs_ptr_, file_path, index_data);
+        if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
+            return Status(DB_ERROR, "index not available");
         }
 
-        engine::FIXED_FIELD_DATA fixed_data;
-        auto status = segment_ptr_->GetFixedFieldData(field_name, fixed_data);
-        if (status.ok()) {
-            ss_codec.GetVectorIndexFormat()->convert_raw(fixed_data, raw_data);
-        } else if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW)) {
-            std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+        // read index file
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, index_visitor->GetFile());
+        ss_codec.GetVectorIndexFormat()->ReadIndex(fs_ptr_, file_path, index_data);
 
-            ss_codec.GetVectorIndexFormat()->read_raw(fs_ptr_, file_path, raw_data);
+        auto index_type = knowhere::StrToOldIndexType(index_visitor->GetElement()->GetName());
+
+        // for some kinds index(IVF), read raw file
+        if (index_type == (int32_t)engine::EngineType::FAISS_IVFFLAT ||
+            index_type == (int32_t)engine::EngineType::NSG_MIX || index_type == (int32_t)engine::EngineType::HNSW) {
+            engine::FIXED_FIELD_DATA fixed_data;
+            auto status = segment_ptr_->GetFixedFieldData(field_name, fixed_data);
+            if (status.ok()) {
+                ss_codec.GetVectorIndexFormat()->ConvertRaw(fixed_data, raw_data);
+            } else if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW)) {
+                file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+                ss_codec.GetVectorIndexFormat()->ReadRaw(fs_ptr_, file_path, raw_data);
+            }
         }
 
-        if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8)) {
-            std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
-            ss_codec.GetVectorIndexFormat()->read_compress(fs_ptr_, file_path, compress_data);
+        // for some kinds index(SQ8), read compress file
+        if (index_type == (int32_t)engine::EngineType::FAISS_IVFSQ8NR ||
+            index_type == (int32_t)engine::EngineType::HNSW_SQ8NM) {
+            if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8)) {
+                file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+                ss_codec.GetVectorIndexFormat()->ReadCompress(fs_ptr_, file_path, compress_data);
+            }
         }
 
         std::string index_name = index_visitor->GetElement()->GetName();
-        ss_codec.GetVectorIndexFormat()->construct_index(index_name, index_data, raw_data, compress_data, index_ptr);
+        ss_codec.GetVectorIndexFormat()->ConstructIndex(index_name, index_data, raw_data, compress_data, index_ptr);
 
         segment_ptr_->SetVectorIndex(field_name, index_ptr);
     } catch (std::exception& e) {
@@ -256,6 +278,11 @@ SSSegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecInd
 Status
 SSSegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr) {
     try {
+        segment_ptr_->GetStructuredIndex(field_name, index_ptr);
+        if (index_ptr != nullptr) {
+            return Status::OK();  // already exist
+        }
+
         auto& ss_codec = codec::SSCodec::instance();
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
 
@@ -263,7 +290,7 @@ SSSegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::In
         if (index_visitor) {
             std::string file_path =
                 engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, index_visitor->GetFile());
-            ss_codec.GetStructuredIndexFormat()->read(fs_ptr_, file_path, index_ptr);
+            ss_codec.GetStructuredIndexFormat()->Read(fs_ptr_, file_path, index_ptr);
 
             segment_ptr_->SetStructuredIndex(field_name, index_ptr);
         }
@@ -306,13 +333,18 @@ SSSegmentReader::LoadVectorIndice() {
 Status
 SSSegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     try {
+        id_bloom_filter_ptr = segment_ptr_->GetBloomFilter();
+        if (id_bloom_filter_ptr != nullptr) {
+            return Status::OK();  // already exist
+        }
+
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
 
         auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetIdBloomFilterFormat()->read(fs_ptr_, file_path, id_bloom_filter_ptr);
+        ss_codec.GetIdBloomFilterFormat()->Read(fs_ptr_, file_path, id_bloom_filter_ptr);
 
         if (id_bloom_filter_ptr) {
             segment_ptr_->SetBloomFilter(id_bloom_filter_ptr);
@@ -328,6 +360,11 @@ SSSegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr)
 Status
 SSSegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
     try {
+        deleted_docs_ptr = segment_ptr_->GetDeletedDocs();
+        if (deleted_docs_ptr != nullptr) {
+            return Status::OK();  // already exist
+        }
+
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
@@ -337,7 +374,7 @@ SSSegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         }
 
         auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetDeletedDocsFormat()->read(fs_ptr_, file_path, deleted_docs_ptr);
+        ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, file_path, deleted_docs_ptr);
 
         if (deleted_docs_ptr) {
             segment_ptr_->SetDeletedDocs(deleted_docs_ptr);
@@ -353,8 +390,23 @@ SSSegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
 Status
 SSSegmentReader::ReadDeletedDocsSize(size_t& size) {
     try {
+        size = 0;
+        auto deleted_docs_ptr = segment_ptr_->GetDeletedDocs();
+        if (deleted_docs_ptr != nullptr) {
+            size = deleted_docs_ptr->GetSize();
+            return Status::OK();  // already exist
+        }
+
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+        if (!boost::filesystem::exists(file_path)) {
+            return Status::OK();  // file doesn't exist
+        }
+
         auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetDeletedDocsFormat()->readSize(fs_ptr_, size);
+        ss_codec.GetDeletedDocsFormat()->ReadSize(fs_ptr_, file_path, size);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to read deleted docs size: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;

@@ -112,7 +112,7 @@ Status
 SSSegmentWriter::WriteField(const std::string& file_path, const engine::FIXED_FIELD_DATA& raw) {
     try {
         auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetBlockFormat()->write(fs_ptr_, file_path, raw);
+        ss_codec.GetBlockFormat()->Write(fs_ptr_, file_path, raw);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write field: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -160,7 +160,7 @@ SSSegmentWriter::WriteBloomFilter() {
 
         auto& ss_codec = codec::SSCodec::instance();
         segment::IdBloomFilterPtr bloom_filter_ptr;
-        ss_codec.GetIdBloomFilterFormat()->create(fs_ptr_, uid_blf_path, bloom_filter_ptr);
+        ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, uid_blf_path, bloom_filter_ptr);
 
         int64_t* uids = (int64_t*)(uid_data.data());
         int64_t row_count = segment_ptr_->GetRowCount();
@@ -191,7 +191,7 @@ SSSegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFil
         TimeRecorder recorder("SSSegmentWriter::WriteBloomFilter");
 
         auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetIdBloomFilterFormat()->write(fs_ptr_, file_path, id_bloom_filter_ptr);
+        ss_codec.GetIdBloomFilterFormat()->Write(fs_ptr_, file_path, id_bloom_filter_ptr);
 
         recorder.RecordSection("Write bloom filter file");
     } catch (std::exception& e) {
@@ -225,7 +225,7 @@ SSSegmentWriter::WriteDeletedDocs(const std::string& file_path, const DeletedDoc
         TimeRecorderAuto recorder("SSSegmentWriter::WriteDeletedDocs");
 
         auto& ss_codec = codec::SSCodec::instance();
-        ss_codec.GetDeletedDocsFormat()->write(fs_ptr_, file_path, deleted_docs);
+        ss_codec.GetDeletedDocsFormat()->Write(fs_ptr_, file_path, deleted_docs);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -343,13 +343,13 @@ SSSegmentWriter::WriteVectorIndex(const std::string& field_name) {
 
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-        ss_codec.GetVectorIndexFormat()->write_index(fs_ptr_, file_path, index);
+        ss_codec.GetVectorIndexFormat()->WriteIndex(fs_ptr_, file_path, index);
 
         element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
         if (element_visitor != nullptr) {
             file_path =
                 engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-            ss_codec.GetVectorIndexFormat()->write_compress(fs_ptr_, file_path, index);
+            ss_codec.GetVectorIndexFormat()->WriteCompress(fs_ptr_, file_path, index);
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
@@ -395,7 +395,7 @@ SSSegmentWriter::WriteStructuredIndex(const std::string& field_name) {
 
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-        ss_codec.GetStructuredIndexFormat()->write(fs_ptr_, file_path, field_type, index);
+        ss_codec.GetStructuredIndexFormat()->Write(fs_ptr_, file_path, field_type, index);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;

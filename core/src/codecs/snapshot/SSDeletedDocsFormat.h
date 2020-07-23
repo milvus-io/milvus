@@ -30,15 +30,18 @@ class SSDeletedDocsFormat {
  public:
     SSDeletedDocsFormat() = default;
 
-    void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, segment::DeletedDocsPtr& deleted_docs);
+    std::string
+    FilePostfix();
 
     void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, segment::DeletedDocsPtr& deleted_docs);
+
+    void
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
           const segment::DeletedDocsPtr& deleted_docs);
 
     void
-    readSize(const storage::FSHandlerPtr& fs_ptr, size_t& size);
+    ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, size_t& size);
 
     // No copy and move
     SSDeletedDocsFormat(const SSDeletedDocsFormat&) = delete;
@@ -48,9 +51,6 @@ class SSDeletedDocsFormat {
     operator=(const SSDeletedDocsFormat&) = delete;
     SSDeletedDocsFormat&
     operator=(SSDeletedDocsFormat&&) = delete;
-
- private:
-    const std::string deleted_docs_filename_ = "deleted_docs";
 };
 
 using SSDeletedDocsFormatPtr = std::shared_ptr<SSDeletedDocsFormat>;

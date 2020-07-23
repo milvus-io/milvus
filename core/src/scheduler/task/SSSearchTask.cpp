@@ -31,43 +31,56 @@
 namespace milvus {
 namespace scheduler {
 
-XSSSearchTask::XSSSearchTask(const server::ContextPtr& context, const std::string& dir_root,
-                             const engine::SegmentVisitorPtr& visitor, TaskLabelPtr label)
-    : Task(TaskType::SearchTask, std::move(label)), context_(context), visitor_(visitor) {
-    engine_ = std::make_shared<engine::SSExecutionEngineImpl>(dir_root, visitor);
+SSSearchTask::SSSearchTask(const server::ContextPtr& context, const engine::DBOptions& options,
+                           const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
+    : Task(TaskType::SearchTask, std::move(label)),
+      context_(context),
+      options_(options),
+      query_ptr_(query_ptr),
+      segment_id_(segment_id) {
+    CreateExecEngine();
 }
 
 void
-XSSSearchTask::Load(LoadType type, uint8_t device_id) {
-    auto seg_id = visitor_->GetSegment()->GetID();
-    TimeRecorder rc(LogOut("[%s][%ld]", "search", seg_id));
+SSSearchTask::CreateExecEngine() {
+    if (execution_engine_ == nullptr && query_ptr_ != nullptr) {
+        execution_engine_ = engine::EngineFactory::Build(options_.meta_.path_, query_ptr_->collection_id, segment_id_);
+    }
+}
+
+void
+SSSearchTask::Load(LoadType type, uint8_t device_id) {
+    TimeRecorder rc(LogOut("[%s][%ld]", "search", segment_id_));
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
 
-    try {
-        fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
-        if (type == LoadType::DISK2CPU) {
-            stat = engine_->Load(nullptr);
-            // stat = engine_->LoadAttr();
-            type_str = "DISK2CPU";
-        } else if (type == LoadType::CPU2GPU) {
-            stat = engine_->CopyToGpu(device_id);
-            type_str = "CPU2GPU" + std::to_string(device_id);
-        } else if (type == LoadType::GPU2CPU) {
-            // stat = engine_->CopyToCpu();
-            type_str = "GPU2CPU";
-        } else {
-            error_msg = "Wrong load type";
+    if (auto job = job_.lock()) {
+        try {
+            fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
+            if (type == LoadType::DISK2CPU) {
+                engine::ExecutionEngineContext context;
+                context.query_ptr_ = query_ptr_;
+                stat = execution_engine_->Load(context);
+                type_str = "DISK2CPU";
+            } else if (type == LoadType::CPU2GPU) {
+                stat = execution_engine_->CopyToGpu(device_id);
+                type_str = "CPU2GPU" + std::to_string(device_id);
+            } else if (type == LoadType::GPU2CPU) {
+                // stat = engine_->CopyToCpu();
+                type_str = "GPU2CPU";
+            } else {
+                error_msg = "Wrong load type";
+                stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
+            }
+        } catch (std::exception& ex) {
+            // typical error: out of disk space or permition denied
+            error_msg = "Failed to load index file: " + std::string(ex.what());
+            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Encounter exception: %s", "search", 0, error_msg.c_str());
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
-    } catch (std::exception& ex) {
-        // typical error: out of disk space or permition denied
-        error_msg = "Failed to load index file: " + std::string(ex.what());
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Encounter exception: %s", "search", 0, error_msg.c_str());
-        stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
+        fiu_do_on("XSearchTask.Load.out_of_memory", stat = Status(SERVER_UNEXPECTED_ERROR, "out of memory"));
     }
-    fiu_do_on("XSearchTask.Load.out_of_memory", stat = Status(SERVER_UNEXPECTED_ERROR, "out of memory"));
 
     if (!stat.ok()) {
         Status s;
@@ -81,31 +94,28 @@ XSSSearchTask::Load(LoadType type, uint8_t device_id) {
 
         if (auto job = job_.lock()) {
             auto search_job = std::static_pointer_cast<scheduler::SSSearchJob>(job);
-            search_job->SearchDone(seg_id);
+            search_job->SearchDone(segment_id_);
             search_job->status() = s;
         }
 
         return;
     }
 
-    std::string info = "Search task load segment id: " + std::to_string(seg_id) + " " + type_str + " totally cost";
+    std::string info = "Search task load segment id: " + std::to_string(segment_id_) + " " + type_str + " totally cost";
     rc.ElapseFromBegin(info);
 }
 
 void
-XSSSearchTask::Execute() {
-    auto seg_id = visitor_->GetSegment()->GetID();
-    milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(seg_id));
-    TimeRecorder rc(LogOut("[%s][%ld] DoSearch file id:%ld", "search", 0, seg_id));
-
-    engine::QueryResult result;
-    double span;
+SSSearchTask::Execute() {
+    milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(segment_id_));
+    TimeRecorder rc(LogOut("[%s][%ld] DoSearch file id:%ld", "search", 0, segment_id_));
 
     if (auto job = job_.lock()) {
         auto search_job = std::static_pointer_cast<scheduler::SSSearchJob>(job);
 
-        if (engine_ == nullptr) {
-            search_job->SearchDone(seg_id);
+        if (execution_engine_ == nullptr) {
+            search_job->SearchDone(segment_id_);
+            search_job->status() = Status(DB_ERROR, "execution engine is null");
             return;
         }
 
@@ -113,16 +123,19 @@ XSSSearchTask::Execute() {
 
         try {
             /* step 2: search */
-            Status s = engine_->Search(search_job->query_ptr(), result);
+            engine::ExecutionEngineContext context;
+            context.query_ptr_ = query_ptr_;
+            context.query_result_ = std::make_shared<engine::QueryResult>();
+            auto status = execution_engine_->Search(context);
 
-            fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
-            if (!s.ok()) {
-                search_job->SearchDone(seg_id);
-                search_job->status() = s;
+            fiu_do_on("XSearchTask.Execute.search_fail", status = Status(SERVER_UNEXPECTED_ERROR, ""));
+            if (!status.ok()) {
+                search_job->SearchDone(segment_id_);
+                search_job->status() = status;
                 return;
             }
 
-            span = rc.RecordSection("search done");
+            rc.RecordSection("search done");
 
             /* step 3: pick up topk result */
             // auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
@@ -135,91 +148,17 @@ XSSSearchTask::Execute() {
             //   XSearchTask::MergeTopkToResultSet(result, spec_k, nq, topk, ascending_, search_job->GetQueryResult());
             // }
 
-            span = rc.RecordSection("reduce topk done");
+            rc.RecordSection("reduce topk done");
         } catch (std::exception& ex) {
             LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
             search_job->status() = Status(SERVER_UNEXPECTED_ERROR, ex.what());
         }
 
         /* step 4: notify to send result to client */
-        search_job->SearchDone(seg_id);
+        search_job->SearchDone(segment_id_);
     }
 
     rc.ElapseFromBegin("totally cost");
-
-    // release engine resource
-    engine_ = nullptr;
-}
-
-void
-XSSSearchTask::MergeTopkToResultSet(const engine::QueryResult& src_result, size_t src_k, size_t nq, size_t topk,
-                                    bool ascending, engine::QueryResult& tar_result) {
-    const engine::ResultIds& src_ids = src_result.result_ids_;
-    const engine::ResultDistances& src_distances = src_result.result_distances_;
-    engine::ResultIds& tar_ids = tar_result.result_ids_;
-    engine::ResultDistances& tar_distances = tar_result.result_distances_;
-
-    if (src_ids.empty()) {
-        LOG_ENGINE_DEBUG_ << LogOut("[%s][%d] Search result is empty.", "search", 0);
-        return;
-    }
-
-    size_t tar_k = tar_ids.size() / nq;
-    size_t buf_k = std::min(topk, src_k + tar_k);
-
-    scheduler::ResultIds buf_ids(nq * buf_k, -1);
-    scheduler::ResultDistances buf_distances(nq * buf_k, 0.0);
-    for (uint64_t i = 0; i < nq; i++) {
-        size_t buf_k_j = 0, src_k_j = 0, tar_k_j = 0;
-        size_t buf_idx, src_idx, tar_idx;
-
-        size_t buf_k_multi_i = buf_k * i;
-        size_t src_k_multi_i = topk * i;
-        size_t tar_k_multi_i = tar_k * i;
-
-        while (buf_k_j < buf_k && src_k_j < src_k && tar_k_j < tar_k) {
-            src_idx = src_k_multi_i + src_k_j;
-            tar_idx = tar_k_multi_i + tar_k_j;
-            buf_idx = buf_k_multi_i + buf_k_j;
-
-            if ((tar_ids[tar_idx] == -1) ||  // initialized value
-                (ascending && src_distances[src_idx] < tar_distances[tar_idx]) ||
-                (!ascending && src_distances[src_idx] > tar_distances[tar_idx])) {
-                buf_ids[buf_idx] = src_ids[src_idx];
-                buf_distances[buf_idx] = src_distances[src_idx];
-                src_k_j++;
-            } else {
-                buf_ids[buf_idx] = tar_ids[tar_idx];
-                buf_distances[buf_idx] = tar_distances[tar_idx];
-                tar_k_j++;
-            }
-            buf_k_j++;
-        }
-
-        if (buf_k_j < buf_k) {
-            if (src_k_j < src_k) {
-                while (buf_k_j < buf_k && src_k_j < src_k) {
-                    buf_idx = buf_k_multi_i + buf_k_j;
-                    src_idx = src_k_multi_i + src_k_j;
-                    buf_ids[buf_idx] = src_ids[src_idx];
-                    buf_distances[buf_idx] = src_distances[src_idx];
-                    src_k_j++;
-                    buf_k_j++;
-                }
-            } else {
-                while (buf_k_j < buf_k && tar_k_j < tar_k) {
-                    buf_idx = buf_k_multi_i + buf_k_j;
-                    tar_idx = tar_k_multi_i + tar_k_j;
-                    buf_ids[buf_idx] = tar_ids[tar_idx];
-                    buf_distances[buf_idx] = tar_distances[tar_idx];
-                    tar_k_j++;
-                    buf_k_j++;
-                }
-            }
-        }
-    }
-    tar_ids.swap(buf_ids);
-    tar_distances.swap(buf_distances);
 }
 
 }  // namespace scheduler

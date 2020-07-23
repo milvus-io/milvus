@@ -87,24 +87,24 @@ TEST_F(SSSchedulerTest, SSJobTest) {
     ASSERT_EQ(segment_visitors.size(), 2);
 
     /* create BuildIndexJob */
-    milvus::scheduler::SSBuildIndexJobPtr build_index_job =
-        std::make_shared<milvus::scheduler::SSBuildIndexJob>("");
-    for (auto& sv : segment_visitors) {
-        build_index_job->AddSegmentVisitor(sv);
-    }
+//    milvus::scheduler::SSBuildIndexJobPtr build_index_job =
+//        std::make_shared<milvus::scheduler::SSBuildIndexJob>("");
+//    for (auto& sv : segment_visitors) {
+//        build_index_job->AddSegmentVisitor(sv);
+//    }
 
     /* put search job to scheduler and wait result */
-    milvus::scheduler::JobMgrInst::GetInstance()->Put(build_index_job);
-    build_index_job->WaitFinish();
+//    milvus::scheduler::JobMgrInst::GetInstance()->Put(build_index_job);
+//    build_index_job->WaitFinish();
 
-    /* create SearchJob */
-    milvus::scheduler::SSSearchJobPtr search_job =
-        std::make_shared<milvus::scheduler::SSSearchJob>(nullptr, "", nullptr);
-    for (auto& sv : segment_visitors) {
-        search_job->AddSegmentVisitor(sv);
-    }
-
-    /* put search job to scheduler and wait result */
-    milvus::scheduler::JobMgrInst::GetInstance()->Put(search_job);
-    search_job->WaitFinish();
+//    /* create SearchJob */
+//    milvus::scheduler::SSSearchJobPtr search_job =
+//        std::make_shared<milvus::scheduler::SSSearchJob>(nullptr, "", nullptr);
+//    for (auto& sv : segment_visitors) {
+//        search_job->AddSegmentVisitor(sv);
+//    }
+//
+//    /* put search job to scheduler and wait result */
+//    milvus::scheduler::JobMgrInst::GetInstance()->Put(search_job);
+//    search_job->WaitFinish();
 }

@@ -22,24 +22,21 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/handler/CacheConfigHandler.h"
-//#include "db/meta/Meta.h"
+#include "db/snapshot/ResourceTypes.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/Job.h"
 
 namespace milvus {
 namespace scheduler {
 
-class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
+class SSBuildIndexJob : public Job {
  public:
-    explicit SSBuildIndexJob(const std::string& dir_root);
+    explicit SSBuildIndexJob(engine::DBOptions options, const std::string& collection_name,
+                             const engine::snapshot::IDS_TYPE& segment_ids);
 
     ~SSBuildIndexJob() = default;
 
  public:
-    void
-    AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor);
-
     void
     WaitFinish();
 
@@ -50,14 +47,19 @@ class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
     Dump() const override;
 
  public:
-    const std::string&
-    dir_root() const {
-        return dir_root_;
+    engine::DBOptions
+    options() const {
+        return options_;
     }
 
-    const SegmentVisitorMap&
-    segment_visitor_map() const {
-        return segment_visitor_map_;
+    const std::string&
+    collection_name() {
+        return collection_name_;
+    }
+
+    const engine::snapshot::IDS_TYPE&
+    segment_ids() {
+        return segment_ids_;
     }
 
     Status&
@@ -65,19 +67,10 @@ class SSBuildIndexJob : public Job, public server::CacheConfigHandler {
         return status_;
     }
 
-    // engine::DBOptions
-    // options() const {
-    //     return options_;
-    // }
-
-    // protected:
-    // void
-    // OnCacheInsertDataChanged(bool value) override;
-
  private:
-    // engine::DBOptions options_;
-    std::string dir_root_;
-    SegmentVisitorMap segment_visitor_map_;
+    engine::DBOptions options_;
+    std::string collection_name_;
+    engine::snapshot::IDS_TYPE segment_ids_;
 
     Status status_;
     std::mutex mutex_;

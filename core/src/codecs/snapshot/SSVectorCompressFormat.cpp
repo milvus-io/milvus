@@ -27,22 +27,28 @@
 namespace milvus {
 namespace codec {
 
+const char* VECTOR_COMPRESS_POSTFIX = ".cmp";
+
+std::string
+SSVectorCompressFormat::FilePostfix() {
+    std::string str = VECTOR_COMPRESS_POSTFIX;
+    return str;
+}
+
 void
-SSVectorCompressFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+SSVectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                              knowhere::BinaryPtr& compress) {
-    const std::string compress_file_path = location + sq8_vector_extension_;
+    milvus::TimeRecorder recorder("SSVectorCompressFormat::Read");
 
-    milvus::TimeRecorder recorder("read_index");
-
-    recorder.RecordSection("Start");
-    if (!fs_ptr->reader_ptr_->open(compress_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector index: " << compress_file_path;
+    const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
+    if (!fs_ptr->reader_ptr_->open(full_file_path)) {
+        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
         return;
     }
 
     int64_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
-        LOG_ENGINE_ERROR_ << "Invalid vector index length: " << compress_file_path;
+        LOG_ENGINE_ERROR_ << "Invalid vector compress length: " << full_file_path;
         return;
     }
 
@@ -55,19 +61,17 @@ SSVectorCompressFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::str
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "read_compress(" << compress_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "SSVectorCompressFormat::Read(" << full_file_path << ") rate " << rate << "MB/s";
 }
 
 void
-SSVectorCompressFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
+SSVectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                               const knowhere::BinaryPtr& compress) {
-    const std::string compress_file_path = location + sq8_vector_extension_;
+    milvus::TimeRecorder recorder("SSVectorCompressFormat::Write");
 
-    milvus::TimeRecorder recorder("write_index");
-
-    recorder.RecordSection("Start");
-    if (!fs_ptr->writer_ptr_->open(compress_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << compress_file_path;
+    const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
+    if (!fs_ptr->writer_ptr_->open(full_file_path)) {
+        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
         return;
     }
 
@@ -76,7 +80,7 @@ SSVectorCompressFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::st
 
     double span = recorder.RecordSection("End");
     double rate = compress->size * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "write_compress(" << compress_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "SSVectorCompressFormat::Write(" << full_file_path << ") rate " << rate << "MB/s";
 }
 
 }  // namespace codec

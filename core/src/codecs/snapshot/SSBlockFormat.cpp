@@ -32,7 +32,7 @@ namespace milvus {
 namespace codec {
 
 void
-SSBlockFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, std::vector<uint8_t>& raw) {
+SSBlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, std::vector<uint8_t>& raw) {
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
@@ -49,7 +49,7 @@ SSBlockFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& file
 }
 
 void
-SSBlockFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset,
+SSBlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset,
                     int64_t num_bytes, std::vector<uint8_t>& raw) {
     if (offset < 0 || num_bytes <= 0) {
         std::string err_msg = "Invalid input to read: " + file_path;
@@ -80,7 +80,7 @@ SSBlockFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& file
 }
 
 void
-SSBlockFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
+SSBlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
                     std::vector<uint8_t>& raw) {
     if (read_ranges.empty()) {
         return;
@@ -121,7 +121,7 @@ SSBlockFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& file
 }
 
 void
-SSBlockFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+SSBlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                      const std::vector<uint8_t>& raw) {
     if (!fs_ptr->writer_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
