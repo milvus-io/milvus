@@ -195,8 +195,9 @@ class DB {
     // DropCollection(const std::string& name);
 
     virtual Status
-    DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                       std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) = 0;
+    DescribeCollection(
+        const std::string& collection_name, snapshot::CollectionPtr& collection,
+        std::unordered_map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) = 0;
 
     // Status
     // HasCollection(const std::string& collection_name, bool& has_or_not);

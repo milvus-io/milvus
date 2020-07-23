@@ -13,7 +13,6 @@
 
 #include <atomic>
 #include <list>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -321,8 +320,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     // DropCollection(const std::string& name);
 
     Status
-    DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                       std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) override {
+    DescribeCollection(
+        const std::string& collection_name, snapshot::CollectionPtr& collection,
+        std::unordered_map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) override {
         assert(false);
         return Status::OK();
     }

@@ -13,7 +13,6 @@
 
 #include <atomic>
 #include <list>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -58,7 +57,7 @@ class SSDBImpl : public DB {
 
     Status
     DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                       std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema);
+                       std::unordered_map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema);
 
     Status
     HasCollection(const std::string& collection_name, bool& has_or_not);
