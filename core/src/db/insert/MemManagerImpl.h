@@ -20,8 +20,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/Config.h"
-#include "config/handler/CacheConfigHandler.h"
+#include "config/ConfigMgr.h"
 #include "db/insert/MemManager.h"
 #include "db/insert/MemTable.h"
 #include "db/meta/Meta.h"
@@ -30,15 +29,18 @@
 namespace milvus {
 namespace engine {
 
-class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
+class MemManagerImpl : public MemManager, public ConfigObserver {
  public:
     using Ptr = std::shared_ptr<MemManagerImpl>;
     using MemIdMap = std::map<std::string, MemTablePtr>;
     using MemList = std::vector<MemTablePtr>;
 
     MemManagerImpl(const meta::MetaPtr& meta, const DBOptions& options) : meta_(meta), options_(options) {
-        SetIdentity("MemManagerImpl");
-        AddInsertBufferSizeListener();
+        ConfigMgr::GetInstance().Attach("cache.insert_buffer_size", this);
+    }
+
+    ~MemManagerImpl() {
+        ConfigMgr::GetInstance().Detach("cache.insert_buffer_size", this);
     }
 
     Status
@@ -52,6 +54,12 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
     Status
     InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                    const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                   const std::unordered_map<std::string, uint64_t>& attr_size,
+                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) override;
+
+    Status
+    InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                   const Vectors vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                    const std::unordered_map<std::string, uint64_t>& attr_size,
                    const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) override;
 
@@ -82,9 +90,9 @@ class MemManagerImpl : public MemManager, public server::CacheConfigHandler {
     size_t
     GetCurrentMem() override;
 
- protected:
+ public:
     void
-    OnInsertBufferSizeChanged(int64_t value) override;
+    ConfigUpdate(const std::string& name) override;
 
  private:
     MemTablePtr

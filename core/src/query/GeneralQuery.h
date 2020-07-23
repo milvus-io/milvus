@@ -46,9 +46,10 @@ struct QueryColumn {
 };
 
 struct TermQuery {
-    std::string field_name;
-    std::vector<uint8_t> field_value;
-    float boost;
+    milvus::json json_obj;
+    //    std::string field_name;
+    //    std::vector<uint8_t> field_value;
+    //    float boost;
 };
 using TermQueryPtr = std::shared_ptr<TermQuery>;
 
@@ -58,9 +59,10 @@ struct CompareExpr {
 };
 
 struct RangeQuery {
-    std::string field_name;
-    std::vector<CompareExpr> compare_expr;
-    float boost;
+    milvus::json json_obj;
+    //    std::string field_name;
+    //    std::vector<CompareExpr> compare_expr;
+    //    float boost;
 };
 using RangeQueryPtr = std::shared_ptr<RangeQuery>;
 
@@ -71,7 +73,7 @@ struct VectorRecord {
 
 struct VectorQuery {
     std::string field_name;
-    milvus::json extra_params;
+    milvus::json extra_params = {};
     int64_t topk;
     float boost;
     VectorRecord query_vector;

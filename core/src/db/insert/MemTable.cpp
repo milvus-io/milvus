@@ -16,7 +16,9 @@
 #include <unordered_map>
 
 #include "cache/CpuCacheMgr.h"
+#include "config/ServerConfig.h"
 #include "db/Utils.h"
+#include "db/attr/InstanceStructuredIndex.h"
 #include "db/insert/MemTable.h"
 #include "db/meta/FilesHolder.h"
 #include "knowhere/index/vector_index/VecIndex.h"
@@ -29,8 +31,11 @@ namespace engine {
 
 MemTable::MemTable(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options)
     : collection_id_(collection_id), meta_(meta), options_(options) {
-    SetIdentity("MemTable");
-    AddCacheInsertDataListener();
+    ConfigMgr::GetInstance().Attach("cache.cache_insert_data", this);
+}
+
+MemTable::~MemTable() {
+    ConfigMgr::GetInstance().Detach("cache.cache_insert_data", this);
 }
 
 Status
@@ -163,6 +168,13 @@ MemTable::Serialize(uint64_t wal_lsn, bool apply_delete) {
         std::string err_msg = "Failed to write flush lsn to meta: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
+    }
+
+    {
+        status = Attr::InstanceStructuredIndex::CreateStructuredIndex(collection_id_, meta_);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << status.ToString();
+        }
     }
 
     recorder.RecordSection("Finished flushing");
@@ -408,8 +420,8 @@ MemTable::SetLSN(uint64_t lsn) {
 }
 
 void
-MemTable::OnCacheInsertDataChanged(bool value) {
-    options_.insert_cache_immediately_ = value;
+MemTable::ConfigUpdate(const std::string& name) {
+    options_.insert_cache_immediately_ = config.cache.cache_insert_data();
 }
 
 }  // namespace engine

@@ -41,7 +41,7 @@ class SSExecutionEngineImpl : public SSExecutionEngine {
 
  private:
     knowhere::VecIndexPtr
-    CreatetVecIndex(EngineType type);
+    CreatetVecIndex(const std::string& index_name);
 
     Status
     LoadForSearch(const query::QueryPtr& query_ptr);
@@ -53,8 +53,11 @@ class SSExecutionEngineImpl : public SSExecutionEngine {
     Load(const std::vector<std::string>& field_names);
 
  private:
+    std::string root_path_;
     SegmentVisitorPtr segment_visitor_;
     segment::SSSegmentReaderPtr segment_reader_;
+
+    int64_t gpu_num_ = 0;
 };
 
 }  // namespace engine

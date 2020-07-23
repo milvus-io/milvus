@@ -16,6 +16,7 @@
 #include <unordered_map>
 
 #include "cache/CpuCacheMgr.h"
+#include "config/ServerConfig.h"
 #include "db/Utils.h"
 #include "db/insert/SSMemCollection.h"
 #include "knowhere/index/vector_index/VecIndex.h"
@@ -28,8 +29,11 @@ namespace engine {
 
 SSMemCollection::SSMemCollection(int64_t collection_id, int64_t partition_id, const DBOptions& options)
     : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
-    SetIdentity("SSMemCollection");
-    AddCacheInsertDataListener();
+    ConfigMgr::GetInstance().Attach("cache.cache_insert_data", this);
+}
+
+SSMemCollection::~SSMemCollection() {
+    ConfigMgr::GetInstance().Attach("cache.cache_insert_data", this);
 }
 
 Status
@@ -371,8 +375,8 @@ SSMemCollection::SetLSN(uint64_t lsn) {
 }
 
 void
-SSMemCollection::OnCacheInsertDataChanged(bool value) {
-    options_.insert_cache_immediately_ = value;
+SSMemCollection::ConfigUpdate(const std::string& name) {
+    options_.insert_cache_immediately_ = config.cache.cache_insert_data();
 }
 
 }  // namespace engine

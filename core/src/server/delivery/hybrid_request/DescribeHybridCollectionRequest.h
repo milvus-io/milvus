@@ -26,19 +26,18 @@ class DescribeHybridCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types);
+           HybridCollectionSchema& collection_schema);
 
  protected:
     DescribeHybridCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                    const std::string& collection_name,
-                                    std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types);
+                                    const std::string& collection_name, HybridCollectionSchema& collection_schema);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
-    std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types_;
+    HybridCollectionSchema& collection_schema_;
 };
 
 }  // namespace server

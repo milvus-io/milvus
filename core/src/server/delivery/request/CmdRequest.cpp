@@ -10,13 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CmdRequest.h"
-#include "config/Config.h"
+#include "config/ConfigMgr.h"
 #include "metrics/SystemInfo.h"
 #include "scheduler/SchedInst.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
 #include <memory>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -55,9 +56,38 @@ CmdRequest::OnExecute() {
         sys_info_inst.GetSysInfoJsonStr(result_);
     } else if (cmd_ == "build_commit_id") {
         result_ = LAST_COMMIT_ID;
-    } else if (cmd_.substr(0, 10) == "set_config" || cmd_.substr(0, 10) == "get_config") {
-        server::Config& config = server::Config::GetInstance();
-        stat = config.ProcessConfigCli(result_, cmd_);
+    } else if (cmd_.substr(0, 3) == "GET") {
+        try {
+            std::stringstream ss(cmd_);
+            std::vector<std::string> words;
+            std::string word;
+            while (std::getline(ss, word, ' ')) {
+                words.push_back(word);
+            }
+            if (words.size() == 2) {
+                result_ = ConfigMgr::GetInstance().Get(words[1]);
+            }
+        } catch (ConfigStatus& cs) {
+            stat = Status(SERVER_UNEXPECTED_ERROR, cs.message);
+        } catch (...) {
+            stat = Status(SERVER_UNEXPECTED_ERROR, "Unknown exception happened on GET command.");
+        }
+    } else if (cmd_.substr(0, 3) == "SET") {
+        try {
+            std::stringstream ss(cmd_);
+            std::vector<std::string> words;
+            std::string word;
+            while (std::getline(ss, word, ' ')) {
+                words.push_back(word);
+            }
+            if (words.size() == 3) {
+                ConfigMgr::GetInstance().Set(words[1], words[2]);
+            }
+        } catch (ConfigStatus& cs) {
+            stat = Status(SERVER_UNEXPECTED_ERROR, cs.message);
+        } catch (...) {
+            stat = Status(SERVER_UNEXPECTED_ERROR, "Unknown exception happened on SET command.");
+        }
     } else {
         result_ = "Unknown command";
     }
