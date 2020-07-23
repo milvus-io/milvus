@@ -15,6 +15,7 @@
 #include <cstring>
 #include <string>
 
+#include "config/ConfigMgr.h"
 #include "easyloggingpp/easylogging++.h"
 #include "server/Server.h"
 #include "src/version.h"
@@ -127,6 +128,14 @@ main(int argc, char* argv[]) {
     signal(SIGSEGV, milvus::HandleSignal);
     signal(SIGUSR2, milvus::HandleSignal);
     signal(SIGTERM, milvus::HandleSignal);
+
+    try {
+        milvus::ConfigMgr::GetInstance().Init();
+        milvus::ConfigMgr::GetInstance().Load(config_filename);
+    } catch (milvus::ConfigStatus& cs) {
+        std::cerr << "Load config(" << config_filename << ") failed: " << cs.message << std::endl;
+        goto FAIL;
+    }
 
     server.Init(start_daemonized, pid_filename, config_filename);
 

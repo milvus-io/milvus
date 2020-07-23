@@ -136,6 +136,7 @@ set(entry_file
 
 set(common_files
         ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
+        ${MILVUS_ENGINE_SRC}/utils/ConfigUtils.cpp
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp

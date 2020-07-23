@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/snapshot/CompoundOperations.h"
@@ -101,10 +101,7 @@ SSExecutionEngineImpl::CreatetVecIndex(const std::string& index_name) {
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
     knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
 #ifdef MILVUS_GPU_VERSION
-    server::Config& config = server::Config::GetInstance();
-    bool gpu_resource_enable = true;
-    config.GetGpuResourceConfigEnable(gpu_resource_enable);
-    if (gpu_resource_enable) {
+    if (config.gpu.enable()) {
         mode = knowhere::IndexMode::MODE_GPU;
     }
 #endif

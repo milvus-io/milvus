@@ -115,8 +115,7 @@ class SSDB {
     DropIndex(const std::string& collection_id) = 0;
 
     virtual Status
-    Query(const server::ContextPtr& context, const std::string& collection_name, const query::QueryPtr& query_ptr,
-          engine::QueryResultPtr& result) = 0;
+    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) = 0;
 };  // SSDB
 
 using SSDBPtr = std::shared_ptr<SSDB>;

@@ -111,8 +111,7 @@ class SSDBImpl : public SSDB {
     DropIndex(const std::string& collection_name) override;
 
     Status
-    Query(const server::ContextPtr& context, const std::string& collection_name, const query::QueryPtr& query_ptr,
-          engine::QueryResultPtr& result) override;
+    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) override;
 
  private:
     void
