@@ -32,6 +32,7 @@ add_executable(test_ssdb
         ${config_files}
         ${config_handler_files}
         ${db_main_files}
+        ${db_attr_files}
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}

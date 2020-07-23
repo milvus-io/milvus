@@ -24,6 +24,7 @@
 
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "config/ServerConfig.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
 #include "db/snapshot/EventExecutor.h"
@@ -140,11 +141,11 @@ BaseTest::InitLog() {
 void
 BaseTest::SnapshotStart(bool mock_store) {
     /* auto uri = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
-    auto uri = "mock://:@:/";
-    auto& config = milvus::server::Config::GetInstance();
-    config.SetGeneralConfigMetaURI(uri);
-    std::string path = "/tmp/milvus_ss/db";
-    config.SetStorageConfigPath(path);
+//    auto uri = "mock://:@:/";
+    auto uri = milvus::config.general.meta_uri();
+//    std::string path = "/tmp/milvus_ss/db";
+//    config.SetStorageConfigPath(path);
+    auto path = milvus::config.storage.path();
     auto store = Store::Build(uri, path);
 
     milvus::engine::snapshot::OperationExecutor::Init(store);

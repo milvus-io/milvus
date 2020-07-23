@@ -724,7 +724,7 @@ SSDBImpl::DropIndex(const std::string& collection_name) {
 }
 
 Status
-SSDBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResult& result) {
+SSDBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) {
     CHECK_INITIALIZED;
 
     TimeRecorder rc("SSDBImpl::Query");
@@ -1065,7 +1065,7 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         return max_lsn;
     };
 
-    auto force_flush_if_mem_full = [&]() -> uint64_t {
+    auto force_flush_if_mem_full = [&]() -> void {
         if (mem_mgr_->GetCurrentMem() > options_.insert_buffer_size_) {
             LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force flush";
             InternalFlush();
