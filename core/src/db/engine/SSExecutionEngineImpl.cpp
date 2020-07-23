@@ -238,21 +238,39 @@ SSExecutionEngineImpl::BuildIndex() {
         auto& element = element_visitor->GetElement();
 
         if (!IsVectorField(field)) {
-            continue;  // not vector field
+            continue;  // not vector field?
         }
 
-        // add segment file
-        snapshot::SegmentFileContext sf_context;
-        sf_context.field_name = field->GetName();
-        sf_context.field_element_name = element->GetName();
-        sf_context.collection_id = segment->GetCollectionId();
-        sf_context.partition_id = segment->GetPartitionId();
-
+        // add segment files
         snapshot::OperationContext context;
-        context.prev_partition = snapshot->GetResource<snapshot::Partition>(sf_context.partition_id);
+        context.prev_partition = snapshot->GetResource<snapshot::Partition>(segment->GetPartitionId());
         auto build_op = std::make_shared<snapshot::AddSegmentFileOperation>(context, snapshot);
-        snapshot::SegmentFilePtr seg_file;
-        auto status = build_op->CommitNewSegmentFile(sf_context, seg_file);
+
+        auto add_segment_file = [&](const std::string& element_name, snapshot::SegmentFilePtr& seg_file) -> Status {
+            snapshot::SegmentFileContext sf_context;
+            sf_context.field_name = field->GetName();
+            sf_context.field_element_name = element->GetName();
+            sf_context.collection_id = segment->GetCollectionId();
+            sf_context.partition_id = segment->GetPartitionId();
+
+            return build_op->CommitNewSegmentFile(sf_context, seg_file);
+        };
+
+        // create snapshot index file
+        snapshot::SegmentFilePtr index_file;
+        add_segment_file(element->GetName(), index_file);
+
+        // create snapshot compress file
+        std::string index_name = element->GetName();
+        if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
+            index_name == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+            auto compress_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+            if (compress_visitor) {
+                std::string compress_name = compress_visitor->GetElement()->GetName();
+                snapshot::SegmentFilePtr compress_file;
+                add_segment_file(compress_name, compress_file);
+            }
+        }
 
         knowhere::VecIndexPtr index_raw;
         segment_ptr->GetVectorIndex(field->GetName(), index_raw);
@@ -264,8 +282,7 @@ SSExecutionEngineImpl::BuildIndex() {
             return Status(DB_ERROR, "Field to build index");
         }
 
-        // build index
-        std::string index_name = element->GetName();
+        // build index by knowhere
         auto to_index = CreatetVecIndex(index_name);
         if (!to_index) {
             throw Exception(DB_ERROR, "Unsupported index type");
