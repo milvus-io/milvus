@@ -10,11 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/DBFactory.h"
-#ifdef MILVUS_USE_SNAPSHOT
-#include "SSDBImpl.h"
-#else
 #include "DBImpl.h"
-#endif
+#include "SSDBImpl.h"
 #include "meta/MetaFactory.h"
 #include "meta/MySQLMetaImpl.h"
 #include "meta/SqliteMetaImpl.h"
@@ -39,11 +36,12 @@ DBFactory::BuildOption() {
 
 DBPtr
 DBFactory::Build(const DBOptions& options) {
-#ifdef MILVUS_USE_SNAPSHOT
-    return std::make_shared<SSDBImpl>(options);
-#else
     return std::make_shared<DBImpl>(options);
-#endif
+}
+
+SSDBPtr
+DBFactory::BuildSSDB(const DBOptions& options) {
+    return std::make_shared<SSDBImpl>(options);
 }
 
 }  // namespace engine

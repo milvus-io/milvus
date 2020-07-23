@@ -23,9 +23,12 @@
 
 #include "Vectors.h"
 #include "codecs/snapshot/SSCodec.h"
+#include "db/SnapshotUtils.h"
 #include "db/Types.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/vector_index/VecIndexFactory.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
@@ -42,6 +45,8 @@ SSSegmentReader::SSSegmentReader(const std::string& dir_root, const engine::Segm
 
 Status
 SSSegmentReader::Initialize() {
+    dir_root_ += engine::COLLECTIONS_FOLDER;
+
     std::string directory =
         engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
 
@@ -57,8 +62,7 @@ SSSegmentReader::Initialize() {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
         engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
-        if (ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR_FLOAT ||
-            ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
+        if (engine::IsVectorField(field)) {
             json params = field->GetParams();
             if (params.find(knowhere::meta::DIM) == params.end()) {
                 std::string msg = "Vector field params must contain: dimension";
@@ -222,15 +226,71 @@ SSSegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecInd
             return Status::OK();  // already exist
         }
 
+        // check field type
         auto& ss_codec = codec::SSCodec::instance();
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        const engine::snapshot::FieldPtr& field = field_visitor->GetField();
+        if (!engine::IsVectorField(field)) {
+            return Status(DB_ERROR, "Field is not vector type");
+        }
+
+        // load deleted doc
+        auto& segment = segment_visitor_->GetSegment();
+        auto& snapshot = segment_visitor_->GetSnapshot();
+        auto segment_commit = snapshot->GetSegmentCommitBySegmentId(segment->GetID());
+        segment::DeletedDocsPtr deleted_docs_ptr;
+        auto status = LoadDeletedDocs(deleted_docs_ptr);
+        if (!status.ok()) {
+            return status;
+        }
+        auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+            std::make_shared<faiss::ConcurrentBitset>(segment_commit->GetRowCount());
+        for (auto& offset : deleted_docs) {
+            concurrent_bitset_ptr->set(offset);
+        }
+
+        // load uids
+        std::vector<int64_t> uids;
+        status = LoadUids(uids);
+        if (!status.ok()) {
+            return status;
+        }
+
         knowhere::BinarySet index_data;
         knowhere::BinaryPtr raw_data, compress_data;
 
-        // if index file doesn't exist, return null
+        auto read_raw = [&]() -> void {
+            engine::FIXED_FIELD_DATA fixed_data;
+            auto status = segment_ptr_->GetFixedFieldData(field_name, fixed_data);
+            if (status.ok()) {
+                ss_codec.GetVectorIndexFormat()->ConvertRaw(fixed_data, raw_data);
+            } else if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW)) {
+                auto file_path =
+                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+                ss_codec.GetVectorIndexFormat()->ReadRaw(fs_ptr_, file_path, raw_data);
+            }
+        };
+
+        // if index not specified, or index file not created, return IDMAP
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
-            return Status(DB_ERROR, "index not available");
+            auto& snapshot = segment_visitor_->GetSnapshot();
+            auto& json = snapshot->GetCollection()->GetParams();
+            int64_t dimension = json[knowhere::meta::DIM];
+            std::vector<uint8_t> raw;
+            LoadField(field_name, raw);
+            auto dataset = knowhere::GenDataset(segment_commit->GetRowCount(), dimension, raw.data());
+
+            knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
+            index_ptr =
+                vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP, knowhere::IndexMode::MODE_CPU);
+            milvus::json conf{{knowhere::meta::DIM, dimension}};
+            index_ptr->AddWithoutIds(dataset, conf);
+            index_ptr->SetUids(uids);
+            index_ptr->SetBlacklist(concurrent_bitset_ptr);
+            segment_ptr_->SetVectorIndex(field_name, index_ptr);
+            return Status::OK();
         }
 
         // read index file
@@ -238,33 +298,27 @@ SSSegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecInd
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, index_visitor->GetFile());
         ss_codec.GetVectorIndexFormat()->ReadIndex(fs_ptr_, file_path, index_data);
 
-        auto index_type = knowhere::StrToOldIndexType(index_visitor->GetElement()->GetName());
+        auto index_name = index_visitor->GetElement()->GetName();
 
         // for some kinds index(IVF), read raw file
-        if (index_type == (int32_t)engine::EngineType::FAISS_IVFFLAT ||
-            index_type == (int32_t)engine::EngineType::NSG_MIX || index_type == (int32_t)engine::EngineType::HNSW) {
-            engine::FIXED_FIELD_DATA fixed_data;
-            auto status = segment_ptr_->GetFixedFieldData(field_name, fixed_data);
-            if (status.ok()) {
-                ss_codec.GetVectorIndexFormat()->ConvertRaw(fixed_data, raw_data);
-            } else if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW)) {
-                file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
-                ss_codec.GetVectorIndexFormat()->ReadRaw(fs_ptr_, file_path, raw_data);
-            }
+        if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_name == knowhere::IndexEnum::INDEX_NSG ||
+            index_name == knowhere::IndexEnum::INDEX_HNSW) {
+            read_raw();
         }
 
         // for some kinds index(SQ8), read compress file
-        if (index_type == (int32_t)engine::EngineType::FAISS_IVFSQ8NR ||
-            index_type == (int32_t)engine::EngineType::HNSW_SQ8NM) {
+        if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
+            index_name == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
             if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8)) {
                 file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
                 ss_codec.GetVectorIndexFormat()->ReadCompress(fs_ptr_, file_path, compress_data);
             }
         }
 
-        std::string index_name = index_visitor->GetElement()->GetName();
         ss_codec.GetVectorIndexFormat()->ConstructIndex(index_name, index_data, raw_data, compress_data, index_ptr);
 
+        index_ptr->SetUids(uids);
+        index_ptr->SetBlacklist(concurrent_bitset_ptr);
         segment_ptr_->SetVectorIndex(field_name, index_ptr);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
@@ -283,9 +337,15 @@ SSSegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::In
             return Status::OK();  // already exist
         }
 
+        // check field type
         auto& ss_codec = codec::SSCodec::instance();
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        const engine::snapshot::FieldPtr& field = field_visitor->GetField();
+        if (engine::IsVectorField(field)) {
+            return Status(DB_ERROR, "Field is not structured type");
+        }
 
+        // read field index
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (index_visitor) {
             std::string file_path =
@@ -317,8 +377,7 @@ SSSegmentReader::LoadVectorIndice() {
 
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-        if (field->GetFtype() == engine::FIELD_TYPE::VECTOR || field->GetFtype() == engine::FIELD_TYPE::VECTOR_FLOAT ||
-            field->GetFtype() == engine::FIELD_TYPE::VECTOR_BINARY) {
+        if (engine::IsVectorField(field)) {
             knowhere::VecIndexPtr index_ptr;
             STATUS_CHECK(LoadVectorIndex(name, index_ptr));
         } else {

@@ -49,7 +49,7 @@ ShowPartitionsRequest::OnExecute() {
     }
 
     /* get partitions */
-    status = DBWrapper::DB()->ShowPartitions(collection_name_, partition_list_);
+    status = DBWrapper::SSDB()->ShowPartitions(collection_name_, partition_list_);
     fiu_do_on("ShowPartitionsRequest.OnExecute.show_partition_fail",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     return status;

@@ -20,8 +20,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/Config.h"
-#include "config/handler/CacheConfigHandler.h"
+#include "config/ConfigMgr.h"
 #include "db/insert/SSMemCollection.h"
 #include "db/insert/SSMemManager.h"
 #include "utils/Status.h"
@@ -29,7 +28,7 @@
 namespace milvus {
 namespace engine {
 
-class SSMemManagerImpl : public SSMemManager, public server::CacheConfigHandler {
+class SSMemManagerImpl : public SSMemManager, public ConfigObserver {
  public:
     using Ptr = std::shared_ptr<SSMemManagerImpl>;
     using MemPartitionMap = std::map<int64_t, SSMemCollectionPtr>;
@@ -37,8 +36,11 @@ class SSMemManagerImpl : public SSMemManager, public server::CacheConfigHandler 
     using MemList = std::vector<SSMemCollectionPtr>;
 
     explicit SSMemManagerImpl(const DBOptions& options) : options_(options) {
-        SetIdentity("SSMemManagerImpl");
-        AddInsertBufferSizeListener();
+        ConfigMgr::GetInstance().Attach("cache.insert_buffer_size", this);
+    }
+
+    ~SSMemManagerImpl() {
+        ConfigMgr::GetInstance().Detach("cache.insert_buffer_size", this);
     }
 
     Status
@@ -73,7 +75,7 @@ class SSMemManagerImpl : public SSMemManager, public server::CacheConfigHandler 
 
  protected:
     void
-    OnInsertBufferSizeChanged(int64_t value) override;
+    ConfigUpdate(const std::string& name) override;
 
  private:
     SSMemCollectionPtr

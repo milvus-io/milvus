@@ -55,7 +55,7 @@ DropPartitionRequest::OnExecute() {
     rc.RecordSection("check validation");
 
     /* drop partition */
-    return DBWrapper::DB()->DropPartition(collection_name_, tag_);
+    return DBWrapper::SSDB()->DropPartition(collection_name_, tag_);
 }
 
 }  // namespace server

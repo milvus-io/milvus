@@ -19,7 +19,7 @@
 #include <yaml-cpp/yaml.h>
 #include <boost/filesystem.hpp>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "utils/Log.h"
 
 namespace milvus {
@@ -33,6 +33,12 @@ static int error_idx = 0;
 static int fatal_idx = 0;
 static int64_t logs_delete_exceeds = 1;
 static bool enable_log_delete = false;
+
+/* module constant */
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN = 536870912;  /* 512 MB */
+const int64_t CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX = 4294967296; /* 4 GB */
+const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MIN = 0;
+const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MAX = 1024;
 }  // namespace
 
 // TODO(yzb) : change the easylogging library to get the log level from parameter rather than filename
@@ -190,13 +196,13 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
     }
 
     fiu_do_on("LogUtil.InitLog.set_max_log_size_small_than_min",
-              max_log_file_size = server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN - 1);
-    if (max_log_file_size < server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN ||
-        max_log_file_size > server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
+              max_log_file_size = CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN - 1);
+    if (max_log_file_size < CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN ||
+        max_log_file_size > CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) {
         return Status(SERVER_UNEXPECTED_ERROR, "max_log_file_size must in range[" +
-                                                   std::to_string(server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) + ", " +
-                                                   std::to_string(server::CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) +
-                                                   "], now is " + std::to_string(max_log_file_size));
+                                                   std::to_string(CONFIG_LOGS_MAX_LOG_FILE_SIZE_MIN) + ", " +
+                                                   std::to_string(CONFIG_LOGS_MAX_LOG_FILE_SIZE_MAX) + "], now is " +
+                                                   std::to_string(max_log_file_size));
     }
     defaultConf.setGlobally(el::ConfigurationType::MaxLogFileSize, std::to_string(max_log_file_size));
     el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
@@ -205,14 +211,12 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
 
     // set delete_exceeds = 0 means disable throw away log file even they reach certain limit.
     if (delete_exceeds != 0) {
-        fiu_do_on("LogUtil.InitLog.delete_exceeds_small_than_min",
-                  delete_exceeds = server::CONFIG_LOGS_LOG_ROTATE_NUM_MIN - 1);
-        if (delete_exceeds < server::CONFIG_LOGS_LOG_ROTATE_NUM_MIN ||
-            delete_exceeds > server::CONFIG_LOGS_LOG_ROTATE_NUM_MAX) {
+        fiu_do_on("LogUtil.InitLog.delete_exceeds_small_than_min", delete_exceeds = CONFIG_LOGS_LOG_ROTATE_NUM_MIN - 1);
+        if (delete_exceeds < CONFIG_LOGS_LOG_ROTATE_NUM_MIN || delete_exceeds > CONFIG_LOGS_LOG_ROTATE_NUM_MAX) {
             return Status(SERVER_UNEXPECTED_ERROR, "delete_exceeds must in range[" +
-                                                       std::to_string(server::CONFIG_LOGS_LOG_ROTATE_NUM_MIN) + ", " +
-                                                       std::to_string(server::CONFIG_LOGS_LOG_ROTATE_NUM_MAX) +
-                                                       "], now is " + std::to_string(delete_exceeds));
+                                                       std::to_string(CONFIG_LOGS_LOG_ROTATE_NUM_MIN) + ", " +
+                                                       std::to_string(CONFIG_LOGS_LOG_ROTATE_NUM_MAX) + "], now is " +
+                                                       std::to_string(delete_exceeds));
         }
         enable_log_delete = true;
         logs_delete_exceeds = delete_exceeds;
@@ -232,16 +236,6 @@ LogConfigInFile(const std::string& path) {
     LOG_SERVER_INFO_ << "\n\n"
                      << std::string(15, '*') << "Config in file" << std::string(15, '*') << "\n\n"
                      << out.c_str();
-}
-
-void
-LogConfigInMem() {
-    auto& config = server::Config::GetInstance();
-    std::string config_str;
-    config.GetConfigJsonStr(config_str, 3);
-    LOG_SERVER_INFO_ << "\n\n"
-                     << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
-                     << config_str;
 }
 
 void

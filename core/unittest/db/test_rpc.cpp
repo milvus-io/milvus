@@ -15,7 +15,7 @@
 #include <boost/filesystem.hpp>
 #include <thread>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "server/Server.h"
 #include "server/delivery/RequestHandler.h"
 #include "server/delivery/RequestScheduler.h"
@@ -147,14 +147,14 @@ class RpcHandlerTest : public testing::Test {
 
         milvus::engine::DBOptions opt;
 
-        milvus::server::Config::GetInstance().SetGeneralConfigMetaURI("sqlite://:@:/");
-        milvus::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
-        milvus::server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
-        milvus::server::Config::GetInstance().SetStorageConfigPath("/tmp/milvus_test");
-        milvus::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
-        milvus::server::Config::GetInstance().SetCacheConfigInsertBufferSize("1GB");
-        milvus::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
-        milvus::server::Config::GetInstance().SetNetworkConfigBindPort("19531");
+        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "sqlite://:@:/");
+        milvus::ConfigMgr::GetInstance().Set("db.archive_disk_threshold", "");
+        milvus::ConfigMgr::GetInstance().Set("db.archive_days_threshold", "");
+        milvus::ConfigMgr::GetInstance().Set("storage.path", "/tmp/milvus_test");
+        milvus::ConfigMgr::GetInstance().Set("cache.cache_insert_data", "");
+        milvus::ConfigMgr::GetInstance().Set("cache.insert_buffer_size", "1GB");
+        milvus::ConfigMgr::GetInstance().Set("engine.omp_thread_num", "");
+        milvus::ConfigMgr::GetInstance().Set("network.bind.port", "19531");
 
         milvus::server::DBWrapper::GetInstance().StartService();
 

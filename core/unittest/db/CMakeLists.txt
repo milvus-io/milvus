@@ -68,6 +68,7 @@ add_executable(test_db
 target_link_libraries(test_db
         knowhere
         metrics
+        config
         stdc++
         ${unittest_libs}
         oatpp)

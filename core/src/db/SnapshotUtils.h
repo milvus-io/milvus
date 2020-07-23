@@ -12,6 +12,7 @@
 #pragma once
 
 #include "db/Types.h"
+#include "db/snapshot/Resources.h"
 
 #include <string>
 
@@ -28,6 +29,9 @@ GetSnapshotIndex(const std::string& collection_name, const std::string& field_na
 
 Status
 DeleteSnapshotIndex(const std::string& collection_name, const std::string& field_name);
+
+bool
+IsVectorField(const engine::snapshot::FieldPtr& field);
 
 }  // namespace engine
 }  // namespace milvus

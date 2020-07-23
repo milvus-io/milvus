@@ -18,6 +18,8 @@ include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
+add_subdirectory(config)
+
 set(FOUND_OPENBLAS "unknown")
 add_subdirectory(index)
 if (FAISS_WITH_MKL)
@@ -30,8 +32,6 @@ foreach (dir ${INDEX_INCLUDE_DIRS})
 endforeach ()
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/config/handler config_handler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
@@ -309,14 +309,13 @@ target_link_libraries(tracing ${tracing_lib})
 
 set(server_libs
         milvus_engine
+        config
         metrics
         tracing
         oatpp
         )
 
 add_executable(milvus_server
-        ${config_files}
-        ${config_handler_files}
         ${metrics_files}
         ${query_files}
         ${search_files}
