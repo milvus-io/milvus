@@ -30,11 +30,12 @@ namespace server {
 constexpr uint64_t MAX_COUNT_RETURNED = 1000;
 
 GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, const std::vector<int64_t>& ids,
-                                           std::vector<engine::AttrsData>& attrs,
+                                           const std::string& collection_name, std::vector<std::string>& field_names,
+                                           const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
                                            std::vector<engine::VectorsData>& vectors)
     : BaseRequest(context, BaseRequest::kGetVectorByID),
       collection_name_(collection_name),
+      field_names_(field_names),
       ids_(ids),
       attrs_(attrs),
       vectors_(vectors) {
@@ -42,9 +43,11 @@ GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server:
 
 BaseRequestPtr
 GetEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, const std::vector<int64_t>& ids,
-                             std::vector<engine::AttrsData>& attrs, std::vector<engine::VectorsData>& vectors) {
-    return std::shared_ptr<BaseRequest>(new GetEntityByIDRequest(context, collection_name, ids, attrs, vectors));
+                             const std::string& collection_name, std::vector<std::string>& field_names,
+                             const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
+                             std::vector<engine::VectorsData>& vectors) {
+    return std::shared_ptr<BaseRequest>(
+        new GetEntityByIDRequest(context, collection_name, field_names, ids, attrs, vectors));
 }
 
 Status
@@ -68,10 +71,13 @@ GetEntityByIDRequest::OnExecute() {
             return status;
         }
 
+        // TODO(yukun) ValidateFieldNames
+
         // only process root collection, ignore partition collection
         engine::meta::CollectionSchema collection_schema;
+        engine::meta::hybrid::FieldsSchema fields_schema;
         collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
@@ -84,8 +90,27 @@ GetEntityByIDRequest::OnExecute() {
             }
         }
 
+        if (field_names_.empty()) {
+            for (const auto& schema : fields_schema.fields_schema_) {
+                field_names_.emplace_back(schema.field_name_);
+            }
+        } else {
+            for (const auto& name : field_names_) {
+                bool find_field_name = false;
+                for (const auto& schema : fields_schema.fields_schema_) {
+                    if (name == schema.field_name_) {
+                        find_field_name = true;
+                        break;
+                    }
+                }
+                if (not find_field_name) {
+                    return Status{SERVER_INVALID_FIELD_NAME, "Field name: " + name + " is wrong"};
+                }
+            }
+        }
+
         // step 2: get vector data, now only support get one id
-        return DBWrapper::DB()->GetEntitiesByID(collection_name_, ids_, vectors_, attrs_);
+        return DBWrapper::DB()->GetEntitiesByID(collection_name_, ids_, field_names_, vectors_, attrs_);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

@@ -19,15 +19,35 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2649 Search parameter of annoy has conflict with document
 -   \#2690 Remove body parser in show-partitions endpoints
 -   \#2692 Milvus hangs during multi-thread concurrent search
+-   \#2693 Collection create success if no dimension value provided
+-   \#2694 Collection create success if an invalid field name provided
+-   \#2695 The number of fields should be limited
+-   \#2696 Check the validity of the parameters of creating collection: segment_size
+-   \#2697 Index can not be created
+-   \#2698 Count entities got wrong result with binary vectors
+-   \#2728 Index type name should returned if index type is not supported
+-   \#2731 No entity returned with `get_entity_by_id`
+-   \#2732 Server destroyed after `delete by id`
+-   \#2733 The max value of top-k should be limited
 -   \#2739 Fix mishards start failed
 -   \#2752 Milvus formats vectors data to double-precision and return to http client
+-   \#2763 Unexpected error when insert binary entities
+-   \#2765 Server crashed when calling `get_entity_by_id`
 -   \#2767 Fix a bug of getting wrong nprobe limitation in knowhere on GPU version
 -   \#2768 After building the index, the number of vectors increases
 -   \#2776 Fix too many data copies during creating IVF index
+-   \#2783 Wrong result returned if searching with tags
+-   \#2790 Distances returned by calling `search` is inaccurate
 -   \#2813 To implemente RNSG IP
+-   \#2818 Wrong result returned by `get_entity_by_id`
+-   \#2823 Server crashed during inserting, and can not restart
+-   \#2845 Server crashed after calling `delete_entity_by_id`
 -   \#2852 Fix Prometheus rebuild problem.
+-   \#2869 Create index failed with binary vectors
 -   \#2890 Fix wrong index size
+-   \#2893 Insert binary data failed
 -   \#2952 Fix the result merging of IVF_PQ IP
+-   \#2957 There is no exisitence check of annoy search parameter
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC

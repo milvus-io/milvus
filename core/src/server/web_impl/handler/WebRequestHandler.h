@@ -142,7 +142,8 @@ class WebRequestHandler {
     GetVectorsByIDs(const std::string& collection_name, const std::vector<int64_t>& ids, nlohmann::json& json_out);
 
     Status
-    GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids, nlohmann::json& json_out);
+    GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
+                   std::vector<std::string>& field_names, nlohmann::json& json_out);
 
  public:
     WebRequestHandler() {
