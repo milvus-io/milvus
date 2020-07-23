@@ -18,6 +18,7 @@
 #include "server/delivery/request/FlushRequest.h"
 
 #include <memory>
+#include <unordered_map>
 
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
@@ -58,22 +59,18 @@ FlushRequest::OnExecute() {
     // flush specified collections
     for (auto& name : collection_names_) {
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = name;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        engine::snapshot::CollectionPtr collection;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        status = DBWrapper::SSDB()->DescribeCollection(name, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(name));
             } else {
                 return status;
             }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(name));
-            }
         }
 
-        status = DBWrapper::DB()->Flush(name);
+        status = DBWrapper::SSDB()->Flush(name);
         if (!status.ok()) {
             return status;
         }
