@@ -25,6 +25,8 @@ ReLoadSegmentsRequest::ReLoadSegmentsRequest(const std::shared_ptr<milvus::serve
                                              const std::string& collection_name,
                                              const std::vector<std::string>& segment_ids)
     : BaseRequest(context, BaseRequest::kReloadSegments), collection_name_(collection_name), segment_ids_(segment_ids) {
+    cluster_enable_ = config.cluster.enable();
+    cluster_role_ = (ClusterRole)config.cluster.role();
 }
 
 BaseRequestPtr
@@ -35,10 +37,7 @@ ReLoadSegmentsRequest::Create(const std::shared_ptr<milvus::server::Context>& co
 
 Status
 ReLoadSegmentsRequest::OnExecute() {
-    bool cluster_enable = config.cluster.enable();
-    auto cluster_role = config.cluster.role();
-
-    if ((not cluster_enable) || cluster_role == ClusterRole::RW) {
+    if ((not cluster_enable_) || cluster_role_ == ClusterRole::RW) {
         // TODO: No need to reload segment files
         return Status(SERVER_SUCCESS, "");
     }
