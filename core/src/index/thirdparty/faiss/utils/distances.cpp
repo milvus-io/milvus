@@ -132,16 +132,11 @@ void fvec_renorm_L2 (size_t d, size_t nx, float * __restrict x)
 
 
 
-
-
-
-
-
 /***************************************************************************
  * KNN functions
  ***************************************************************************/
 
-
+int parallel_policy_threshold = 65535;
 
 /* Find the nearest neighbors for nx queries in a set of ny vectors */
 static void knn_inner_product_sse (const float * x,
@@ -150,11 +145,10 @@ static void knn_inner_product_sse (const float * x,
                         float_minheap_array_t * res,
                         ConcurrentBitsetPtr bitset = nullptr)
 {
-    const int64_t Policy_Threshold = 65536;
     size_t k = res->k;
     size_t thread_max_num = omp_get_max_threads();
 
-    if (ny > Policy_Threshold) {
+    if (ny > parallel_policy_threshold) {
         size_t block_x = std::min(
                 get_L3_Size() / (d * sizeof(float) + thread_max_num * k * (sizeof(float) + sizeof(int64_t))),
                 nx);
@@ -258,11 +252,10 @@ static void knn_L2sqr_sse (
                 float_maxheap_array_t * res,
                 ConcurrentBitsetPtr bitset = nullptr)
 {
-    const int64_t Policy_Threshold = 65536;
     size_t k = res->k;
     size_t thread_max_num = omp_get_max_threads();
 
-    if (ny > Policy_Threshold) {
+    if (ny > parallel_policy_threshold) {
         size_t block_x = std::min(
                 get_L3_Size() / (d * sizeof(float) + thread_max_num * k * (sizeof(float) + sizeof(int64_t))),
                 nx);
