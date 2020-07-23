@@ -13,7 +13,7 @@
 
 #include "server/delivery/request/BaseRequest.h"
 
-#include <src/context/HybridSearchContext.h>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
