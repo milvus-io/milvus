@@ -22,7 +22,7 @@
 #include <memory>
 #include <utility>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "storage/s3/S3ClientMock.h"
 #include "storage/s3/S3ClientWrapper.h"
 #include "utils/Error.h"

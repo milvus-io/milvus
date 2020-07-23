@@ -21,7 +21,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/handler/CacheConfigHandler.h"
 #include "db/meta/Meta.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/Job.h"
@@ -34,7 +33,7 @@ using engine::meta::SegmentSchemaPtr;
 using Id2ToIndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
 using Id2ToTableFileMap = std::unordered_map<size_t, SegmentSchema>;
 
-class BuildIndexJob : public Job, public server::CacheConfigHandler {
+class BuildIndexJob : public Job {
  public:
     explicit BuildIndexJob(engine::meta::MetaPtr meta_ptr, engine::DBOptions options);
 
@@ -73,10 +72,6 @@ class BuildIndexJob : public Job, public server::CacheConfigHandler {
     options() const {
         return options_;
     }
-
- protected:
-    void
-    OnCacheInsertDataChanged(bool value) override;
 
  private:
     Id2ToIndexMap to_index_files_;

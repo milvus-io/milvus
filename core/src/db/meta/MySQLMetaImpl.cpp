@@ -208,6 +208,8 @@ static const MetaSchema FIELDS_SCHEMA(META_FIELDS, {
                                                        MetaField("collection_id", "VARCHAR(255)", "NOT NULL"),
                                                        MetaField("field_name", "VARCHAR(255)", "NOT NULL"),
                                                        MetaField("field_type", "INT", "DEFAULT 0 NOT NULL"),
+                                                       MetaField("index_name", "VARCHAR(255)", "NOT NULL"),
+                                                       MetaField("index_param", "VARCHAR(255)", "NOT NULL"),
                                                        MetaField("field_params", "VARCHAR(255)", "NOT NULL"),
                                                    });
 
@@ -3097,16 +3099,18 @@ MySQLMetaImpl::CreateHybridCollection(CollectionSchema& collection_schema, hybri
                 return HandleException("Failed to create collection", statement.error());
             }
 
-            for (auto schema : fields_schema.fields_schema_) {
-                std::string id = "NULL";
-                std::string collection_id = schema.collection_id_;
+            for (const auto& schema : fields_schema.fields_schema_) {
+                std::string field_id = "NULL";
+                std::string field_collection_id = schema.collection_id_;
                 std::string field_name = schema.field_name_;
                 std::string field_type = std::to_string(schema.field_type_);
+                std::string index_name = schema.index_name_;
+                std::string index_param = schema.index_param_;
                 std::string field_params = schema.field_params_;
 
-                statement << "INSERT INTO " << META_FIELDS << " VALUES(" << mysqlpp::quote << collection_id << ", "
-                          << mysqlpp::quote << field_name << ", " << field_type << ", " << mysqlpp::quote << ", "
-                          << field_params << ");";
+                statement << "INSERT INTO " << META_FIELDS << " VALUES(" << mysqlpp::quote << field_collection_id
+                          << ", " << mysqlpp::quote << field_name << ", " << field_type << ", " << mysqlpp::quote
+                          << ", " << field_params << ");";
 
                 LOG_ENGINE_DEBUG_ << "Create field: " << statement.str();
 
@@ -3154,7 +3158,7 @@ MySQLMetaImpl::DescribeHybridCollection(CollectionSchema& collection_schema, hyb
             res = statement.store();
 
             mysqlpp::Query field_statement = connectionPtr->query();
-            field_statement << "SELECT collection_id, field_name, field_type, field_params"
+            field_statement << "SELECT collection_id, field_name, field_type, index_name, index_param, field_params"
                             << " FROM " << META_FIELDS << " WHERE collection_id = " << mysqlpp::quote
                             << collection_schema.collection_id_ << ";";
 
@@ -3190,6 +3194,8 @@ MySQLMetaImpl::DescribeHybridCollection(CollectionSchema& collection_schema, hyb
                 resRow["collection_id"].to_string(fields_schema.fields_schema_[i].collection_id_);
                 resRow["field_name"].to_string(fields_schema.fields_schema_[i].field_name_);
                 fields_schema.fields_schema_[i].field_type_ = resRow["field_type"];
+                resRow["index_name"].to_string(fields_schema.fields_schema_[i].index_name_);
+                resRow["index_param"].to_string(fields_schema.fields_schema_[i].index_param_);
                 resRow["field_params"].to_string(fields_schema.fields_schema_[i].field_params_);
             }
         } else {

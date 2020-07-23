@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-#include "config/handler/CacheConfigHandler.h"
+#include "config/ConfigMgr.h"
 #include "db/engine/ExecutionEngine.h"
 #include "db/insert/SSVectorSource.h"
 #include "db/snapshot/CompoundOperations.h"
@@ -26,7 +26,7 @@
 namespace milvus {
 namespace engine {
 
-class SSMemSegment : public server::CacheConfigHandler {
+class SSMemSegment {
  public:
     SSMemSegment(int64_t collection_id, int64_t partition_id, const DBOptions& options);
 
@@ -56,10 +56,6 @@ class SSMemSegment : public server::CacheConfigHandler {
 
     int64_t
     GetSegmentId() const;
-
- protected:
-    void
-    OnCacheInsertDataChanged(bool value) override;
 
  private:
     Status

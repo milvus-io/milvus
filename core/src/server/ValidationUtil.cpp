@@ -25,7 +25,7 @@ namespace server {
 
 namespace {
 
-constexpr size_t COLLECTION_NAME_SIZE_LIMIT = 255;
+constexpr size_t NAME_SIZE_LIMIT = 255;
 constexpr int64_t COLLECTION_DIMENSION_LIMIT = 32768;
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
 constexpr int64_t M_BYTE = 1024 * 1024;
@@ -101,7 +101,7 @@ ValidateCollectionName(const std::string& collection_name) {
 
     std::string invalid_msg = "Invalid collection name: " + collection_name + ". ";
     // Collection name size shouldn't exceed 255.
-    if (collection_name.size() > COLLECTION_NAME_SIZE_LIMIT) {
+    if (collection_name.size() > NAME_SIZE_LIMIT) {
         std::string msg = invalid_msg + "The length of a collection name must be less than 255 characters.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
@@ -122,6 +122,82 @@ ValidateCollectionName(const std::string& collection_name) {
             std::string msg = invalid_msg + "Collection name can only contain numbers, letters, and underscores.";
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_COLLECTION_NAME, msg);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidateFieldName(const std::string& field_name) {
+    // Field name shouldn't be empty.
+    if (field_name.empty()) {
+        std::string msg = "Field name should not be empty.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    std::string invalid_msg = "Invalid field name: " + field_name + ". ";
+    // Field name size shouldn't exceed 255.
+    if (field_name.size() > NAME_SIZE_LIMIT) {
+        std::string msg = invalid_msg + "The length of a field name must be less than 255 characters.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    // Field name first character should be underscore or character.
+    char first_char = field_name[0];
+    if (first_char != '_' && std::isalpha(first_char) == 0) {
+        std::string msg = invalid_msg + "The first character of a field name must be an underscore or letter.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    int64_t field_name_size = field_name.size();
+    for (int64_t i = 1; i < field_name_size; ++i) {
+        char name_char = field_name[i];
+        if (name_char != '_' && std::isalnum(name_char) == 0) {
+            std::string msg = invalid_msg + "Field name cannot only contain numbers, letters, and underscores.";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_FIELD_NAME, msg);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidateIndexName(const std::string& index_name) {
+    // Index name shouldn't be empty.
+    if (index_name.empty()) {
+        std::string msg = "Index name should not be empty.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    std::string invalid_msg = "Invalid index name: " + index_name + ". ";
+    // Index name size shouldn't exceed 255.
+    if (index_name.size() > NAME_SIZE_LIMIT) {
+        std::string msg = invalid_msg + "The length of a field name must be less than 255 characters.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    // Field name first character should be underscore or character.
+    char first_char = index_name[0];
+    if (first_char != '_' && std::isalpha(first_char) == 0) {
+        std::string msg = invalid_msg + "The first character of a field name must be an underscore or letter.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    int64_t field_name_size = index_name.size();
+    for (int64_t i = 1; i < field_name_size; ++i) {
+        char name_char = index_name[i];
+        if (name_char != '_' && std::isalnum(name_char) == 0) {
+            std::string msg = invalid_msg + "Field name cannot only contain numbers, letters, and underscores.";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_FIELD_NAME, msg);
         }
     }
 
@@ -154,8 +230,14 @@ Status
 ValidateCollectionIndexType(int32_t index_type) {
     int engine_type = static_cast<int>(engine::EngineType(index_type));
     if (engine_type <= 0 || engine_type > static_cast<int>(engine::EngineType::MAX_VALUE)) {
-        std::string msg = "Invalid index type: " + std::to_string(index_type) + ". " +
-                          "Make sure the index type is in IndexType list.";
+        std::string index_type_str;
+        for (auto it = engine::s_map_engine_type.begin(); it != engine::s_map_engine_type.end(); it++) {
+            if (it->second == (engine::EngineType)index_type) {
+                index_type_str = it->first;
+            }
+        }
+        std::string msg =
+            "Invalid index type: " + index_type_str + ". " + "Make sure the index type is in IndexType list.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
     }
@@ -417,7 +499,7 @@ ValidatePartitionName(const std::string& partition_name) {
 
     std::string invalid_msg = "Invalid partition name: " + partition_name + ". ";
     // Collection name size shouldn't exceed 255.
-    if (partition_name.size() > COLLECTION_NAME_SIZE_LIMIT) {
+    if (partition_name.size() > NAME_SIZE_LIMIT) {
         std::string msg = invalid_msg + "The length of a partition name must be less than 255 characters.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);

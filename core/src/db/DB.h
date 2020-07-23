@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -19,8 +20,10 @@
 #include "Options.h"
 #include "Types.h"
 #include "context/HybridSearchContext.h"
+#include "db/snapshot/Context.h"
 #include "meta/Meta.h"
 #include "query/GeneralQuery.h"
+#include "segment/Segment.h"
 #include "server/context/Context.h"
 #include "utils/Status.h"
 
@@ -98,10 +101,7 @@ class DB {
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) = 0;
 
     virtual Status
-    DeleteVector(const std::string& collection_id, IDNumber vector_id) = 0;
-
-    virtual Status
-    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) = 0;
+    DeleteEntities(const std::string& collection_id, IDNumbers entity_ids) = 0;
 
     virtual Status
     Flush(const std::string& collection_id) = 0;
@@ -119,7 +119,8 @@ class DB {
 
     virtual Status
     GetEntitiesByID(const std::string& collection_id, const IDNumbers& id_array,
-                    std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs) = 0;
+                    const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vectors,
+                    std::vector<engine::AttrsData>& attrs) = 0;
 
     virtual Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;

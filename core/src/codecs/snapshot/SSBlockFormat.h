@@ -41,18 +41,18 @@ class SSBlockFormat {
     SSBlockFormat() = default;
 
     void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, std::vector<uint8_t>& raw);
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, std::vector<uint8_t>& raw);
 
     void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset, int64_t num_bytes,
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset, int64_t num_bytes,
          std::vector<uint8_t>& raw);
 
     void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
          std::vector<uint8_t>& raw);
 
     void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const std::vector<uint8_t>& raw);
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const std::vector<uint8_t>& raw);
 
     // No copy and move
     SSBlockFormat(const SSBlockFormat&) = delete;

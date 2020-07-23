@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include "config/handler/CacheConfigHandler.h"
+#include "config/ConfigMgr.h"
 #include "db/insert/MemTableFile.h"
 #include "db/insert/VectorSource.h"
 #include "utils/Status.h"
@@ -26,11 +26,13 @@
 namespace milvus {
 namespace engine {
 
-class MemTable : public server::CacheConfigHandler {
+class MemTable {
  public:
     using MemTableFileList = std::vector<MemTableFilePtr>;
 
     MemTable(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options);
+
+    ~MemTable() = default;
 
     Status
     Add(const VectorSourcePtr& source);
@@ -67,10 +69,6 @@ class MemTable : public server::CacheConfigHandler {
 
     void
     SetLSN(uint64_t lsn);
-
- protected:
-    void
-    OnCacheInsertDataChanged(bool value) override;
 
  private:
     Status

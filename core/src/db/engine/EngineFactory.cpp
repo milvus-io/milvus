@@ -11,6 +11,8 @@
 
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngineImpl.h"
+#include "db/engine/SSExecutionEngineImpl.h"
+#include "db/snapshot/Snapshots.h"
 #include "utils/Log.h"
 
 #include <memory>
@@ -34,26 +36,16 @@ EngineFactory::Build(uint16_t dimension, const std::string& location, EngineType
     return execution_engine_ptr;
 }
 
-// ExecutionEnginePtr
-// EngineFactory::Build(uint16_t dimension,
-//                     const std::string& location,
-//                     EngineType index_type,
-//                     MetricType metric_type,
-//                     std::unordered_map<std::string, DataType>& attr_type,
-//                     const milvus::json& index_params) {
-//
-//    if (index_type == EngineType::INVALID) {
-//        ENGINE_LOG_ERROR << "Unsupported engine type";
-//        return nullptr;
-//    }
-//
-//    ENGINE_LOG_DEBUG << "EngineFactory index type: " << (int)index_type;
-//    ExecutionEnginePtr execution_engine_ptr =
-//        std::make_shared<ExecutionEngineImpl>(dimension, location, index_type, metric_type, attr_type, index_params);
-//
-//    execution_engine_ptr->Init();
-//    return execution_engine_ptr;
-//}
+SSExecutionEnginePtr
+EngineFactory::Build(const std::string& dir_root, const std::string& collection_name, int64_t segment_id) {
+    snapshot::ScopedSnapshotT ss;
+    snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    auto seg_visitor = engine::SegmentVisitor::Build(ss, segment_id);
+
+    SSExecutionEnginePtr execution_engine_ptr = std::make_shared<SSExecutionEngineImpl>(dir_root, seg_visitor);
+
+    return execution_engine_ptr;
+}
 
 }  // namespace engine
 }  // namespace milvus

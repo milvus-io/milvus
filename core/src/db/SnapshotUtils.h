@@ -11,29 +11,27 @@
 
 #pragma once
 
+#include "db/Types.h"
+#include "db/snapshot/Resources.h"
+
 #include <string>
 
-#include "config/Config.h"
-#include "utils/Log.h"
-
 namespace milvus {
-namespace server {
+namespace engine {
 
-class ConfigHandler {
- public:
-    ConfigHandler() = default;
-    virtual ~ConfigHandler() = default;
+Status
+SetSnapshotIndex(const std::string& collection_name, const std::string& field_name,
+                 engine::CollectionIndex& index_info);
 
- protected:
-    void
-    SetIdentity(const std::string& identity) {
-        auto& config = server::Config::GetInstance();
-        config.GenUniqueIdentityID(identity, identity_);
-    }
+Status
+GetSnapshotIndex(const std::string& collection_name, const std::string& field_name,
+                 engine::CollectionIndex& index_info);
 
- protected:
-    std::string identity_;
-};
+Status
+DeleteSnapshotIndex(const std::string& collection_name, const std::string& field_name);
 
-}  // namespace server
+bool
+IsVectorField(const engine::snapshot::FieldPtr& field);
+
+}  // namespace engine
 }  // namespace milvus

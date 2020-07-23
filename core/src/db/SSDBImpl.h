@@ -13,7 +13,6 @@
 
 #include <atomic>
 #include <list>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -22,22 +21,15 @@
 #include <unordered_map>
 #include <vector>
 
-#include "db/Options.h"
-#include "db/SimpleWaitNotify.h"
-#include "db/SnapshotHandlers.h"
-#include "db/insert/SSMemManager.h"
-#include "db/merge/MergeManager.h"
-#include "db/snapshot/Context.h"
-#include "db/snapshot/ResourceTypes.h"
-#include "db/snapshot/Resources.h"
-#include "utils/Status.h"
+#include "db/SSDB.h"
+
 #include "utils/ThreadPool.h"
 #include "wal/WalManager.h"
 
 namespace milvus {
 namespace engine {
 
-class SSDBImpl {
+class SSDBImpl : public SSDB {
  public:
     explicit SSDBImpl(const DBOptions& options);
 
@@ -50,75 +42,75 @@ class SSDBImpl {
     Stop();
 
     Status
-    CreateCollection(const snapshot::CreateCollectionContext& context);
+    CreateCollection(const snapshot::CreateCollectionContext& context) override;
 
     Status
-    DropCollection(const std::string& name);
+    DropCollection(const std::string& name) override;
 
     Status
     DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                       std::map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema);
+                       std::unordered_map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema);
 
     Status
-    HasCollection(const std::string& collection_name, bool& has_or_not);
+    HasCollection(const std::string& collection_name, bool& has_or_not) override;
 
     Status
-    AllCollections(std::vector<std::string>& names);
+    AllCollections(std::vector<std::string>& names) override;
 
     Status
-    GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count);
+    GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count) override;
 
     Status
     LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
-                   const std::vector<std::string>& field_names, bool force = false);
+                   const std::vector<std::string>& field_names, bool force = false) override;
 
     Status
-    CreatePartition(const std::string& collection_name, const std::string& partition_name);
+    CreatePartition(const std::string& collection_name, const std::string& partition_name) override;
 
     Status
-    DropPartition(const std::string& collection_name, const std::string& partition_name);
+    DropPartition(const std::string& collection_name, const std::string& partition_name) override;
 
     Status
-    ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names);
+    ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) override;
 
     Status
-    InsertEntities(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk);
+    InsertEntities(const std::string& collection_name, const std::string& partition_name,
+                   DataChunkPtr& data_chunk) override;
 
     Status
-    DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids);
+    DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids) override;
 
     Status
-    Flush(const std::string& collection_name);
+    Flush(const std::string& collection_name) override;
 
     Status
-    Flush();
+    Flush() override;
 
     Status
-    Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold = 0.0);
+    Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold = 0.0) override;
 
     Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                  const std::vector<std::string>& field_names, DataChunkPtr& data_chunk);
+                  const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) override;
 
     Status
-    GetEntityIDs(const std::string& collection_id, int64_t segment_id, IDNumbers& entity_ids);
+    GetEntityIDs(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) override;
 
     Status
-    CreateIndex(const server::ContextPtr& context, const std::string& collection_id, const std::string& field_name,
-                const CollectionIndex& index);
+    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
+                const std::string& field_name, const CollectionIndex& index) override;
 
     Status
-    DescribeIndex(const std::string& collection_id, const std::string& field_name, CollectionIndex& index);
+    DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) override;
 
     Status
-    DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& element_name);
+    DropIndex(const std::string& collection_name, const std::string& field_name) override;
 
     Status
-    DropIndex(const std::string& collection_id);
+    DropIndex(const std::string& collection_name) override;
 
     Status
-    Query(const server::ContextPtr& context, const std::string& collection_name, const query::QueryPtr& query_ptr,
-          engine::QueryResultPtr& result);
+    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) override;
 
  private:
     void
@@ -134,10 +126,10 @@ class SSDBImpl {
     TimingMetricThread();
 
     void
-    StartBuildIndexTask();
+    StartBuildIndexTask(const std::vector<std::string>& collection_names);
 
     void
-    BackgroundBuildIndexTask();
+    BackgroundBuildIndexTask(std::vector<std::string> collection_names);
 
     void
     TimingIndexThread();
@@ -152,7 +144,7 @@ class SSDBImpl {
     ExecWalRecord(const wal::MXLogRecord& record);
 
     void
-    StartMergeTask(const std::set<std::string>& merge_collection_names, bool force_merge_all = false);
+    StartMergeTask(const std::set<std::string>& collection_names, bool force_merge_all = false);
 
     void
     BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all);

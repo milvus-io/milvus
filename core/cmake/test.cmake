@@ -11,17 +11,20 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(src src_files)
+set(gtest_libraries
+    gtest
+    gmock
+    gtest_main
+    gmock_main
+    )
 
-add_executable(sdk_hybrid
-        main.cpp
-        ${src_files}
-        ${util_files}
-        )
+macro(ADD_TEST)
+    cmake_parse_arguments(UT "" "TARGET" "SOURCES;LIBS" ${ARGN})
+    #    message("UT_TARGET = ${UT_TARGET}")
+    #    message("UT_SOURCES = ${UT_SOURCES}")
+    #    message("UT_LIBS = ${UT_LIBS}")
+    #    message("ARGN = ${ARGN}")
 
-target_link_libraries(sdk_hybrid
-        milvus_sdk
-        pthread
-        )
-
-install(TARGETS sdk_hybrid DESTINATION bin)
+    add_executable(${UT_TARGET} ${UT_SOURCES})
+    target_link_libraries(${UT_TARGET} ${UT_LIBS})
+endmacro()

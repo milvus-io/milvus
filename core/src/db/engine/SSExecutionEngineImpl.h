@@ -28,20 +28,37 @@ class SSExecutionEngineImpl : public SSExecutionEngine {
     SSExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor);
 
     Status
-    Load(const query::QueryPtr& query_ptr) override;
+    Load(ExecutionEngineContext& context) override;
 
     Status
     CopyToGpu(uint64_t device_id) override;
 
     Status
-    Search(const query::QueryPtr& query_ptr, QueryResult& result) override;
+    Search(ExecutionEngineContext& context) override;
 
     Status
-    BuildIndex(const std::string& field_name, const CollectionIndex& index) override;
+    BuildIndex() override;
 
  private:
+    knowhere::VecIndexPtr
+    CreatetVecIndex(const std::string& index_name);
+
+    Status
+    LoadForSearch(const query::QueryPtr& query_ptr);
+
+    Status
+    LoadForIndex();
+
+    Status
+    Load(const std::vector<std::string>& field_names);
+
+ private:
+    std::string root_path_;
     SegmentVisitorPtr segment_visitor_;
     segment::SSSegmentReaderPtr segment_reader_;
+
+    int64_t gpu_num_ = 0;
+    bool gpu_enable_ = false;
 };
 
 }  // namespace engine

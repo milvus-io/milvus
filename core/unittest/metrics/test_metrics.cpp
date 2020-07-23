@@ -18,7 +18,7 @@
 #include <fiu-local.h>
 #include <fiu-control.h>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "metrics/utils.h"
 #include "metrics/Metrics.h"
 

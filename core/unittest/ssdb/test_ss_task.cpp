@@ -36,14 +36,6 @@ TEST(SSTaskTest, INVALID_INDEX) {
     auto mock_span = mock_tracer->StartSpan("mock_span");
     auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
     dummy_context->SetTraceContext(trace_context);
-
-//    auto search_task = std::make_shared<XSSSearchTask>(dummy_context, nullptr, nullptr);
-//    search_task->Load(LoadType::TEST, 10);
-//
-//    auto build_task = std::make_shared<XSSBuildIndexTask>(nullptr, nullptr);
-//    build_task->Load(LoadType::TEST, 10);
-
-//    build_task->Execute();
 }
 
 TEST(SSTaskTest, TEST_TASK) {
@@ -52,8 +44,8 @@ TEST(SSTaskTest, TEST_TASK) {
 //    auto file = std::make_shared<SegmentSchema>();
 //    file->index_params_ = "{ \"nlist\": 16384 }";
 //    file->dimension_ = 64;
-    auto label = std::make_shared<BroadcastLabel>();
-
+//    auto label = std::make_shared<BroadcastLabel>();
+//
 //    SSTestTask task(dummy_context, nullptr, label);
 //    task.Load(LoadType::CPU2GPU, 0);
 //    auto th = std::thread([&]() {

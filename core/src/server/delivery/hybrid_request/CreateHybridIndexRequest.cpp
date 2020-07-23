@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/hybrid_request/CreateHybridIndexRequest.h"
-#include "config/Config.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"

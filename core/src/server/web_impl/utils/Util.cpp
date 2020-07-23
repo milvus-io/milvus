@@ -11,8 +11,7 @@
 
 #include "server/web_impl/utils/Util.h"
 #include <fiu-local.h>
-
-#include "config/Utils.h"
+#include "utils/ConfigUtils.h"
 
 namespace milvus {
 namespace server {
