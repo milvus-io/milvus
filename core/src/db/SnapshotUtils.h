@@ -9,21 +9,25 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#pragma once
+
 #include "db/Types.h"
+
+#include <string>
 
 namespace milvus {
 namespace engine {
 
-const char* DEFAULT_UID_NAME = "_uid";
+Status
+SetSnapshotIndex(const std::string& collection_name, const std::string& field_name,
+                 engine::CollectionIndex& index_info);
 
-const char* DEFAULT_RAW_DATA_NAME = "_raw";
-const char* DEFAULT_BLOOM_FILTER_NAME = "_blf";
-const char* DEFAULT_DELETED_DOCS_NAME = "_del";
-const char* DEFAULT_INDEX_NAME = "_idx";
+Status
+GetSnapshotIndex(const std::string& collection_name, const std::string& field_name,
+                 engine::CollectionIndex& index_info);
 
-const char* PARAM_COLLECTION_DIMENSION = "dimension";
-const char* PARAM_INDEX_METRIC_TYPE = "metric_type";
-const char* PARAM_INDEX_EXTRA_PARAMS = "extra_params";
+Status
+DeleteSnapshotIndex(const std::string& collection_name, const std::string& field_name);
 
 }  // namespace engine
 }  // namespace milvus

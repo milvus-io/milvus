@@ -14,8 +14,6 @@
 #include <chrono>
 #include <sstream>
 
-#include "config/Config.h"
-#include "db/Utils.h"
 #include "db/snapshot/Event.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
@@ -249,15 +247,9 @@ Operations::PostExecute(StorePtr store) {
 template <typename ResourceT>
 void
 ApplyRollBack(std::set<std::shared_ptr<ResourceContext<ResourceT>>>& step_context_set) {
-    auto& config = server::Config::GetInstance();
-    std::string path;
-    config.GetStorageConfigPath(path);
-    auto root_path = utils::ConstructCollectionRootPath(path);
-
     for (auto& step_context : step_context_set) {
         auto res = step_context->Resource();
-
-        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(root_path, res);
+        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(res);
         EventExecutor::GetInstance().Submit(evt_ptr);
         std::cout << "Rollback " << typeid(ResourceT).name() << ": " << res->GetID() << std::endl;
     }

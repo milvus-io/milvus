@@ -27,19 +27,26 @@
 namespace milvus {
 namespace codec {
 
-constexpr unsigned int bloom_filter_capacity = 500000;
-constexpr double bloom_filter_error_rate = 0.01;
+const char* BLOOM_FILTER_POSTFIX = ".bf";
+
+constexpr unsigned int BLOOM_FILTER_CAPACITY = 500000;
+constexpr double BLOOM_FILTER_ERROR_RATE = 0.01;
+
+std::string
+SSIdBloomFilterFormat::FilePostfix() {
+    std::string str = BLOOM_FILTER_POSTFIX;
+    return str;
+}
 
 void
-SSIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+SSIdBloomFilterFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                             segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    const std::string bloom_filter_file_path = file_path;
+    const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
     scaling_bloom_t* bloom_filter =
-        new_scaling_bloom_from_file(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
+        new_scaling_bloom_from_file(BLOOM_FILTER_CAPACITY, BLOOM_FILTER_ERROR_RATE, full_file_path.c_str());
     fiu_do_on("bloom_filter_nullptr", bloom_filter = nullptr);
     if (bloom_filter == nullptr) {
-        std::string err_msg =
-            "Failed to read bloom filter from file: " + bloom_filter_file_path + ". " + std::strerror(errno);
+        std::string err_msg = "Failed to read bloom filter from file: " + full_file_path + ". " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
@@ -47,26 +54,24 @@ SSIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::stri
 }
 
 void
-SSIdBloomFilterFormat::write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+SSIdBloomFilterFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                              const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    const std::string bloom_filter_file_path = file_path;
+    const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
     if (scaling_bloom_flush(id_bloom_filter_ptr->GetBloomFilter()) == -1) {
-        std::string err_msg =
-            "Failed to write bloom filter to file: " + bloom_filter_file_path + ". " + std::strerror(errno);
+        std::string err_msg = "Failed to write bloom filter to file: " + full_file_path + ". " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 }
 
 void
-SSIdBloomFilterFormat::create(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+SSIdBloomFilterFormat::Create(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                               segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    const std::string bloom_filter_file_path = file_path;
+    const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
     scaling_bloom_t* bloom_filter =
-        new_scaling_bloom(bloom_filter_capacity, bloom_filter_error_rate, bloom_filter_file_path.c_str());
+        new_scaling_bloom(BLOOM_FILTER_CAPACITY, BLOOM_FILTER_ERROR_RATE, full_file_path.c_str());
     if (bloom_filter == nullptr) {
-        std::string err_msg =
-            "Failed to read bloom filter from file: " + bloom_filter_file_path + ". " + std::strerror(errno);
+        std::string err_msg = "Failed to read bloom filter from file: " + full_file_path + ". " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
