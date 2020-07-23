@@ -18,11 +18,9 @@
 #include "server/delivery/request/CmdRequest.h"
 #include "server/delivery/request/CompactRequest.h"
 #include "server/delivery/request/CountCollectionRequest.h"
-#include "server/delivery/request/CreateCollectionRequest.h"
 #include "server/delivery/request/CreateIndexRequest.h"
 #include "server/delivery/request/CreatePartitionRequest.h"
 #include "server/delivery/request/DeleteByIDRequest.h"
-#include "server/delivery/request/DescribeCollectionRequest.h"
 #include "server/delivery/request/DescribeIndexRequest.h"
 #include "server/delivery/request/DropCollectionRequest.h"
 #include "server/delivery/request/DropIndexRequest.h"
@@ -50,16 +48,6 @@
 
 namespace milvus {
 namespace server {
-
-Status
-RequestHandler::CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                                 int64_t dimension, int64_t index_file_size, int64_t metric_type) {
-    BaseRequestPtr request_ptr =
-        CreateCollectionRequest::Create(context, collection_name, dimension, index_file_size, metric_type);
-    RequestScheduler::ExecRequest(request_ptr);
-
-    return request_ptr->status();
-}
 
 Status
 RequestHandler::HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
@@ -151,15 +139,6 @@ RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::s
                            const std::vector<std::string>& partition_list, TopKQueryResult& result) {
     BaseRequestPtr request_ptr =
         SearchByIDRequest::Create(context, collection_name, id_array, topk, extra_params, partition_list, result);
-    RequestScheduler::ExecRequest(request_ptr);
-
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                                   CollectionSchema& collection_schema) {
-    BaseRequestPtr request_ptr = DescribeCollectionRequest::Create(context, collection_name, collection_schema);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

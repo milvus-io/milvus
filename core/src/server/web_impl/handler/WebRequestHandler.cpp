@@ -90,7 +90,8 @@ WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std
 Status
 WebRequestHandler::IsBinaryCollection(const std::string& collection_name, bool& bin) {
     CollectionSchema schema;
-    auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
+    auto status = Status::OK();
+    // status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
     if (status.ok()) {
         auto metric = engine::MetricType(schema.metric_type_);
         bin = engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
@@ -136,7 +137,8 @@ WebRequestHandler::CopyRecordsFromJson(const nlohmann::json& json, engine::Vecto
 Status
 WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlohmann::json& json_out) {
     CollectionSchema schema;
-    auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
+    auto status = Status::OK();
+    // status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
     if (!status.ok()) {
         return status;
     }
@@ -1261,10 +1263,11 @@ WebRequestHandler::CreateCollection(const CollectionRequestDto::ObjectWrapper& c
         RETURN_STATUS_DTO(ILLEGAL_METRIC_TYPE, "metric_type is illegal")
     }
 
-    auto status = request_handler_.CreateCollection(
-        context_ptr_, collection_schema->collection_name->std_str(), collection_schema->dimension,
-        collection_schema->index_file_size,
-        static_cast<int64_t>(MetricNameMap.at(collection_schema->metric_type->std_str())));
+    auto status = Status::OK();
+    //    auto status = request_handler_.CreateCollection(
+    //        context_ptr_, collection_schema->collection_name->std_str(), collection_schema->dimension,
+    //        collection_schema->index_file_size,
+    //        static_cast<int64_t>(MetricNameMap.at(collection_schema->metric_type->std_str())));
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
