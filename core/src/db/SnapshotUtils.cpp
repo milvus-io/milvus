@@ -125,12 +125,8 @@ IsVectorField(const engine::snapshot::FieldPtr& field) {
     }
 
     engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
-    if (ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR_FLOAT ||
-        ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
-        return true;
-    }
-
-    return false;
+    return ftype == engine::FIELD_TYPE::VECTOR || ftype == engine::FIELD_TYPE::VECTOR_FLOAT ||
+           ftype == engine::FIELD_TYPE::VECTOR_BINARY;
 }
 
 }  // namespace engine
