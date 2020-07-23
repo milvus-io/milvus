@@ -136,6 +136,7 @@ set(entry_file
 
 set(common_files
         ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
+        ${MILVUS_ENGINE_SRC}/utils/ConfigUtils.cpp
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
@@ -217,4 +218,4 @@ add_subdirectory(metrics)
 add_subdirectory(scheduler)
 add_subdirectory(server)
 add_subdirectory(thirdparty)
-add_subdirectory(storage)
+# add_subdirectory(storage)

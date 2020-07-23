@@ -37,9 +37,6 @@ void
 LogConfigInFile(const std::string& path);
 
 void
-LogConfigInMem();
-
-void
 LogCpuInfo();
 
 }  // namespace milvus

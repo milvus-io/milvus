@@ -12,7 +12,7 @@
 #include <fstream>
 #include <string>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "storage/utils.h"
 #include "utils/CommonUtil.h"
 

@@ -27,8 +27,7 @@
 #ifdef MILVUS_GPU_VERSION
 #include "cache/GpuCacheMgr.h"
 #endif
-
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -297,9 +296,7 @@ EraseFromCache(const std::string& item_key) {
     cache::CpuCacheMgr::GetInstance()->EraseItem(item_key);
 
 #ifdef MILVUS_GPU_VERSION
-    server::Config& config = server::Config::GetInstance();
-    std::vector<int64_t> gpus;
-    config.GetGpuResourceConfigSearchResources(gpus);
+    std::vector<int64_t> gpus = ParseGPUDevices(config.gpu.search_devices());
     for (auto& gpu : gpus) {
         cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(item_key);
     }
