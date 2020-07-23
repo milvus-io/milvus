@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "db/DB.h"
 #include "db/Options.h"
 #include "db/SimpleWaitNotify.h"
 #include "db/SnapshotHandlers.h"
@@ -37,7 +38,7 @@
 namespace milvus {
 namespace engine {
 
-class SSDBImpl {
+class SSDBImpl : public DB {
  public:
     explicit SSDBImpl(const DBOptions& options);
 
@@ -165,6 +166,236 @@ class SSDBImpl {
 
     void
     ResumeIfLast();
+
+    ///////////////////////////////////////////////////////////////////////////////
+    /* Mocked DBImpl interfaces, will be removed */
+    Status
+    DropAll() override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    CreateCollection(meta::CollectionSchema& collection_schema) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    // Status
+    // DropCollection(const std::string& collection_id) override;
+
+    Status
+    DescribeCollection(meta::CollectionSchema& collection_schema) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    // Status
+    // HasCollection(const std::string& collection_id, bool& has_or_not) override;
+
+    Status
+    HasNativeCollection(const std::string& collection_id, bool& has_or_not_) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    // Status
+    // AllCollections(std::vector<std::string>& names) override;
+
+    Status
+    GetCollectionInfo(const std::string& collection_id, std::string& collection_info) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                      bool force = false) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    UpdateCollectionFlag(const std::string& collection_id, int64_t flag) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    // Status
+    // GetCollectionRowCount(const std::string& collection_id, uint64_t& row_count) override;
+
+    Status
+    CreatePartition(const std::string& collection_id, const std::string& partition_name,
+                    const std::string& partition_tag) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    HasPartition(const std::string& collection_id, const std::string& tag, bool& has_or_not) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    DropPartition(const std::string& partition_name) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    DropPartitionByTag(const std::string& collection_id, const std::string& partition_tag) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    ShowPartitions(const std::string& collection_id,
+                   std::vector<meta::CollectionSchema>& partition_schema_array) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    // Status
+    // Flush(const std::string& collection_id) override;
+
+    // Status
+    // Flush() override;
+
+    // Status
+    // Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+    //         double threshold = 0.0) override;
+
+    Status
+    GetVectorsByID(const engine::meta::CollectionSchema& collection, const IDNumbers& id_array,
+                   std::vector<engine::VectorsData>& vectors) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    GetEntitiesByID(const std::string& collection_id, const IDNumbers& id_array,
+                    const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vectors,
+                    std::vector<engine::AttrsData>& attrs) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    //    Status
+    //    Merge(const std::set<std::string>& collection_ids) override;
+
+    Status
+    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                const CollectionIndex& index) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    CreateStructuredIndex(const std::string& collection_id, const std::vector<std::string>& field_names,
+                          const std::unordered_map<std::string, meta::hybrid::DataType>& attr_types,
+                          const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
+                          std::unordered_map<std::string, int64_t>& attr_size,
+                          std::unordered_map<std::string, knowhere::IndexPtr>& attr_indexes) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    DescribeIndex(const std::string& collection_id, CollectionIndex& index) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    // Status
+    // DropIndex(const std::string& collection_id) override;
+
+    Status
+    CreateHybridCollection(meta::CollectionSchema& collection_schema,
+                           meta::hybrid::FieldsSchema& fields_schema) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    DescribeHybridCollection(meta::CollectionSchema& collection_schema,
+                             meta::hybrid::FieldsSchema& fields_schema) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    InsertEntities(const std::string& collection_name, const std::string& partition_tag,
+                   const std::vector<std::string>& field_names, engine::Entity& entity,
+                   std::unordered_map<std::string, meta::hybrid::DataType>& field_types) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    HybridQuery(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                const std::vector<std::string>& partition_tags, query::GeneralQueryPtr general_query,
+                query::QueryPtr query_ptr, std::vector<std::string>& field_names,
+                std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
+                engine::QueryResult& result) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    QueryByIDs(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+               const IDNumbers& id_array, ResultIds& result_ids, ResultDistances& result_distances) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    Query(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+          const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+          VectorsData& vectors, ResultIds& result_ids, ResultDistances& result_distances) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    QueryByFileID(const std::shared_ptr<server::Context>& context, const std::vector<std::string>& file_ids, uint64_t k,
+                  const milvus::json& extra_params, VectorsData& vectors, ResultIds& result_ids,
+                  ResultDistances& result_distances) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    Size(uint64_t& result) override {
+        assert(false);
+        return Status::OK();
+    }
+
+    Status
+    FlushAttrsIndex(const std::string& collection_id) override {
+        assert(false);
+        return Status::OK();
+    }
+    ///////////////////////////////////////////////////////////////////////////////
 
  private:
     DBOptions options_;
