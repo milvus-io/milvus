@@ -368,11 +368,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
         return Status::OK();
     }
 
-    Status
-    DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids) override {
-        assert(false);
-        return Status::OK();
-    }
+    // Status
+    // DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids);
 
     // Status
     // Flush(const std::string& collection_name);
@@ -410,8 +407,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     }
 
     Status
-    DropIndex(const std::string& collection_name, const std::string& field_name,
-              const std::string& element_name) override {
+    DropIndex(const std::string& collection_name, const std::string& field_name) override {
         assert(false);
         return Status::OK();
     }

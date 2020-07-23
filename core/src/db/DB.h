@@ -223,8 +223,8 @@ class DB {
     virtual Status
     InsertEntities(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) = 0;
 
-    virtual Status
-    DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids) = 0;
+    // Status
+    // DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids);
 
     // Status
     // Flush(const std::string& collection_name);
@@ -250,7 +250,7 @@ class DB {
     DescribeIndex(const std::string& collection_id, const std::string& field_name, CollectionIndex& index) = 0;
 
     virtual Status
-    DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& element_name) = 0;
+    DropIndex(const std::string& collection_name, const std::string& field_name) = 0;
 
     // Status
     // DropIndex(const std::string& collection_id);

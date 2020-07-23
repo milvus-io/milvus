@@ -268,18 +268,6 @@ class SSDBImpl : public DB {
         return Status::OK();
     }
 
-    Status
-    DeleteVector(const std::string& collection_id, IDNumber vector_id) override {
-        assert(false);
-        return Status::OK();
-    }
-
-    Status
-    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) override {
-        assert(false);
-        return Status::OK();
-    }
-
     // Status
     // Flush(const std::string& collection_id) override;
 
@@ -299,7 +287,8 @@ class SSDBImpl : public DB {
 
     Status
     GetEntitiesByID(const std::string& collection_id, const IDNumbers& id_array,
-                    std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs) override {
+                    const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vectors,
+                    std::vector<engine::AttrsData>& attrs) override {
         assert(false);
         return Status::OK();
     }
