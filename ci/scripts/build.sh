@@ -22,6 +22,7 @@ Usage:
                               Install directory used by install.
     -t [BUILD_TYPE] or --build_type=[BUILD_TYPE]
                               Build type (default: Release)
+    -s [CUDA_ARCH]            Building for the cuda architecture
     -j[N] or --jobs=[N]       Allow N jobs at once; infinite jobs with no arg.
     -l                        Run cpplint & check clang-format
     -n                        No make and make install step
@@ -38,7 +39,7 @@ Usage:
 Use \"$0  --help\" for more information about a given command.
 "
 
-ARGS=`getopt -o "i:t:j::lngcupvh" -l "install_prefix::,build_type::,jobs::,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
+ARGS=`getopt -o "i:t:s:j::lngcupvh" -l "install_prefix::,build_type::,jobs::,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
 
 eval set -- "${ARGS}"
 
@@ -72,6 +73,11 @@ while true ; do
                 -p|--privileges) PRIVILEGES="ON" ; shift ;;
                 -v|--verbose) VERBOSE="1" ; shift ;;
                 -h|--help) echo -e "${HELP}" ; exit 0 ;;
+                -s)
+                        case "$2" in
+                                "") CUDA_ARCH="DEFAULT"; shift 2 ;;
+                                *) CUDA_ARCH=$2 ; shift 2 ;;
+                        esac ;;
                 --) shift ; break ;;
                 *) echo "Internal error!" ; exit 1 ;;
         esac
@@ -86,6 +92,7 @@ BUILD_UNITTEST=${BUILD_UNITTEST:="OFF"}
 BUILD_COVERAGE=${BUILD_COVERAGE:="OFF"}
 COMPILE_BUILD=${COMPILE_BUILD:="ON"}
 GPU_VERSION=${GPU_VERSION:="OFF"}
+CUDA_ARCH=${CUDA_ARCH:="DEFAULT"}
 RUN_CPPLINT=${RUN_CPPLINT:="OFF"}
 WITH_MKL=${WITH_MKL:="OFF"}
 FIU_ENABLE=${FIU_ENABLE:="OFF"}
@@ -125,6 +132,7 @@ CMAKE_CMD="cmake \
 -DFAISS_SOURCE=AUTO \
 -DOpenBLAS_SOURCE=AUTO \
 -DMILVUS_WITH_FIU=${FIU_ENABLE} \
+-DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
 ${MILVUS_CORE_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}

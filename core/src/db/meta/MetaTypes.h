@@ -73,6 +73,16 @@ enum class MetricType {
     MAX_VALUE = SUPERSTRUCTURE
 };
 
+static std::map<std::string, MetricType> s_map_metric_type = {
+    {"L2", MetricType::L2},
+    {"IP", MetricType::IP},
+    {"HAMMING", MetricType::HAMMING},
+    {"JACCARD", MetricType::JACCARD},
+    {"TANIMOTO", MetricType::TANIMOTO},
+    {"SUBSTRUCTURE", MetricType::SUBSTRUCTURE},
+    {"SUPERSTRUCTURE", MetricType::SUPERSTRUCTURE},
+};
+
 enum class StructuredIndexType {
     INVALID = 0,
     SORTED = 1,
@@ -82,7 +92,7 @@ namespace meta {
 
 constexpr int32_t DEFAULT_ENGINE_TYPE = (int)EngineType::FAISS_IDMAP;
 constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
-constexpr int32_t DEFAULT_INDEX_FILE_SIZE = GB;
+constexpr int32_t DEFAULT_INDEX_FILE_SIZE = 1024;
 constexpr char CURRENT_VERSION[] = MILVUS_VERSION;
 
 constexpr int64_t FLAG_MASK_NO_USERID = 0x1;
@@ -195,8 +205,10 @@ struct FieldSchema {
     // TODO(yukun): need field_id?
     std::string collection_id_;
     std::string field_name_;
-    int32_t field_type_;
-    std::string field_params_;
+    int32_t field_type_ = (int)INT8;
+    std::string index_name_;
+    std::string index_param_ = "{}";
+    std::string field_params_ = "{}";
 };
 
 struct FieldsSchema {

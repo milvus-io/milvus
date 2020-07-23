@@ -41,6 +41,8 @@ typedef std::vector<faiss::Index::idx_t> ResultIds;
 typedef std::vector<faiss::Index::distance_t> ResultDistances;
 
 struct CollectionIndex {
+    std::string field_name_;
+    std::string index_name_;
     int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
     int32_t metric_type_ = (int)MetricType::L2;
     milvus::json extra_params_ = {{"nlist", 2048}};
@@ -54,7 +56,7 @@ struct VectorsData {
 };
 
 struct Entity {
-    uint64_t entity_count_ = 0;
+    int64_t entity_count_ = 0;
     std::vector<uint8_t> attr_value_;
     std::unordered_map<std::string, VectorsData> vector_data_;
     IDNumbers id_array_;

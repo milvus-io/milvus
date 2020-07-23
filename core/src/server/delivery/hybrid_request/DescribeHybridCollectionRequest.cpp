@@ -29,17 +29,17 @@ namespace server {
 
 DescribeHybridCollectionRequest::DescribeHybridCollectionRequest(
     const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-    std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types)
+    HybridCollectionSchema& collection_schema)
     : BaseRequest(context, BaseRequest::kDescribeHybridCollection),
       collection_name_(collection_name),
-      field_types_(field_types) {
+      collection_schema_(collection_schema) {
 }
 
 BaseRequestPtr
 DescribeHybridCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                                        const std::string& collection_name,
-                                        std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types) {
-    return std::shared_ptr<BaseRequest>(new DescribeHybridCollectionRequest(context, collection_name, field_types));
+                                        const std::string& collection_name, HybridCollectionSchema& collection_schema) {
+    return std::shared_ptr<BaseRequest>(
+        new DescribeHybridCollectionRequest(context, collection_name, collection_schema));
 }
 
 Status
@@ -58,9 +58,16 @@ DescribeHybridCollectionRequest::OnExecute() {
             return status;
         }
 
-        for (auto schema : fields_schema.fields_schema_) {
-            field_types_.insert(std::make_pair(schema.field_name_, (engine::meta::hybrid::DataType)schema.field_type_));
+        for (const auto& schema : fields_schema.fields_schema_) {
+            auto field_name = schema.field_name_;
+            collection_schema_.field_types_.insert(
+                std::make_pair(field_name, (engine::meta::hybrid::DataType)schema.field_type_));
+            milvus::json json_index_param = milvus::json::parse(schema.index_param_);
+            collection_schema_.index_params_.insert(std::make_pair(field_name, json_index_param));
+            milvus::json json_extra_param = milvus::json::parse(schema.field_params_);
+            collection_schema_.field_params_.insert(std::make_pair(field_name, json_extra_param));
         }
+        collection_schema_.extra_params_["segment_size"] = collection_schema.index_file_size_ / engine::MB;
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
