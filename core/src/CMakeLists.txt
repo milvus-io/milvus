@@ -315,8 +315,6 @@ set(server_libs
         )
 
 add_executable(milvus_server
-        ${config_files}
-        ${config_handler_files}
         ${context_files}
         ${scheduler_files}
         ${server_files}
