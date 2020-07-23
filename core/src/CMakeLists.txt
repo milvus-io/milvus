@@ -19,6 +19,7 @@ include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 add_subdirectory(config)
+add_subdirectory(tracing)
 
 set(FOUND_OPENBLAS "unknown")
 
@@ -138,8 +139,6 @@ set(storage_files
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/index/archive wrapper_files)
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
@@ -284,25 +283,12 @@ target_link_libraries(metrics ${metrics_lib})
 
 
 add_library(milvus_engine STATIC ${engine_files})
-add_dependencies(milvus_engine fiu)
 target_link_libraries(milvus_engine
         knowhere
         ${third_party_libs}
         ${engine_libs}
         metrics
         )
-
-
-add_library(tracing STATIC ${tracing_files} ${thirdparty_files})
-add_dependencies(tracing fiu)
-set(tracing_lib
-        opentracing
-        opentracing_mocktracer
-        ${grpc_lib}
-        pthread
-        z
-        )
-target_link_libraries(tracing ${tracing_lib})
 
 set(server_libs
         milvus_engine
@@ -323,7 +309,6 @@ add_executable(milvus_server
         ${web_server_files}
         ${server_context_files}
         ${utils_files}
-        ${tracing_files}
         )
 
 target_link_libraries(milvus_server
