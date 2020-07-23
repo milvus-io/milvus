@@ -16,8 +16,8 @@
 #include "utils/TimeRecorder.h"
 
 #include <fiu-local.h>
-#include <map>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace milvus {
@@ -48,7 +48,7 @@ PreloadCollectionRequest::OnExecute() {
 
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
-        std::map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
         status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {

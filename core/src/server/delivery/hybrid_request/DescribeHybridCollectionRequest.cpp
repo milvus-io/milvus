@@ -18,7 +18,6 @@
 #include "utils/TimeRecorder.h"
 
 #include <fiu-local.h>
-#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -50,7 +49,7 @@ DescribeHybridCollectionRequest::OnExecute() {
 
     try {
         engine::snapshot::CollectionPtr collection;
-        std::map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
         auto status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             return status;
