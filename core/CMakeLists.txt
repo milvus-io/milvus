@@ -52,6 +52,7 @@ import_mysql_inc()
 include(ExternalProject)
 include(DefineOptions)
 include(ThirdPartyPackages)
+include(cmake/test.cmake)
 
 using_ccache_if_defined(MILVUS_USE_CCACHE)
 

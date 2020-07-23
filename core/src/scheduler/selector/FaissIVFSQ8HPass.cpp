@@ -12,7 +12,7 @@
 #ifdef MILVUS_GPU_VERSION
 #include "scheduler/selector/FaissIVFSQ8HPass.h"
 #include "cache/GpuCacheMgr.h"
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
@@ -22,22 +22,19 @@
 namespace milvus {
 namespace scheduler {
 
+FaissIVFSQ8HPass::FaissIVFSQ8HPass() {
+    ConfigMgr::GetInstance().Attach("gpu.gpu_search_threshold", this);
+}
+
+FaissIVFSQ8HPass::~FaissIVFSQ8HPass() {
+    ConfigMgr::GetInstance().Detach("gpu.gpu_search_threshold", this);
+}
+
 void
 FaissIVFSQ8HPass::Init() {
-    server::Config& config = server::Config::GetInstance();
-    Status s = config.GetGpuResourceConfigGpuSearchThreshold(threshold_);
-    if (!s.ok()) {
-        threshold_ = std::numeric_limits<int64_t>::max();
-    }
-    s = config.GetGpuResourceConfigSearchResources(search_gpus_);
-    if (!s.ok()) {
-        throw std::exception();
-    }
-
-    SetIdentity("FaissIVFSQ8HPass");
-    AddGpuEnableListener();
-    AddGpuSearchThresholdListener();
-    AddGpuSearchResourcesListener();
+    gpu_enable_ = config.gpu.enable();
+    threshold_ = config.gpu.gpu_search_threshold();
+    search_gpus_ = ParseGPUDevices(config.gpu.search_devices());
 }
 
 bool
@@ -70,6 +67,11 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
     auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;
     return true;
+}
+
+void
+FaissIVFSQ8HPass::ConfigUpdate(const std::string& name) {
+    threshold_ = config.gpu.gpu_search_threshold();
 }
 
 }  // namespace scheduler

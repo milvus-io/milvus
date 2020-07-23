@@ -140,7 +140,7 @@ class SegmentVisitor {
     Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& segment,
           const snapshot::SegmentFile::VecT& segment_files);
 
-    SegmentVisitor() = default;
+    explicit SegmentVisitor(snapshot::ScopedSnapshotT ss);
 
     const IdMapT&
     GetFieldVisitors() const {
@@ -164,6 +164,10 @@ class SegmentVisitor {
         }
         return it->second;
     }
+    const snapshot::ScopedSnapshotT&
+    GetSnapshot() const {
+        return snapshot_;
+    }
 
     const snapshot::SegmentPtr&
     GetSegment() const {
@@ -184,6 +188,7 @@ class SegmentVisitor {
     ToString() const;
 
  protected:
+    snapshot::ScopedSnapshotT snapshot_;
     snapshot::SegmentPtr segment_;
     IdMapT id_map_;
     NameMapT name_map_;

@@ -31,6 +31,8 @@
 namespace milvus {
 namespace engine {
 
+extern const char* COLLECTIONS_FOLDER;
+
 using FIELD_TYPE = engine::meta::hybrid::DataType;
 using FIELD_TYPE_MAP = std::unordered_map<std::string, engine::meta::hybrid::DataType>;
 using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;

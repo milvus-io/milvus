@@ -14,6 +14,7 @@
 #include "SSDBImpl.h"
 #else
 #include "DBImpl.h"
+#include "SSDBImpl.h"
 #endif
 #include "meta/MetaFactory.h"
 #include "meta/MySQLMetaImpl.h"
@@ -39,11 +40,12 @@ DBFactory::BuildOption() {
 
 DBPtr
 DBFactory::Build(const DBOptions& options) {
-#ifdef MILVUS_USE_SNAPSHOT
-    return std::make_shared<SSDBImpl>(options);
-#else
     return std::make_shared<DBImpl>(options);
-#endif
+}
+
+SSDBPtr
+DBFactory::BuildSSDB(const DBOptions& options) {
+    return std::make_shared<SSDBImpl>(options);
 }
 
 }  // namespace engine
