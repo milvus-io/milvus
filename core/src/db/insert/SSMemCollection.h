@@ -26,13 +26,13 @@
 namespace milvus {
 namespace engine {
 
-class SSMemCollection : public ConfigObserver {
+class SSMemCollection {
  public:
     using SSMemCollectionFileList = std::vector<SSMemSegmentPtr>;
 
     SSMemCollection(int64_t collection_id, int64_t partition_id, const DBOptions& options);
 
-    ~SSMemCollection();
+    ~SSMemCollection() = default;
 
     Status
     Add(const SSVectorSourcePtr& source);
@@ -69,10 +69,6 @@ class SSMemCollection : public ConfigObserver {
 
     void
     SetLSN(uint64_t lsn);
-
- protected:
-    void
-    ConfigUpdate(const std::string& name) override;
 
  private:
     Status

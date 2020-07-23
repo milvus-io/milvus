@@ -21,11 +21,6 @@ namespace scheduler {
 
 BuildIndexJob::BuildIndexJob(engine::meta::MetaPtr meta_ptr, engine::DBOptions options)
     : Job(JobType::BUILD), meta_ptr_(std::move(meta_ptr)), options_(std::move(options)) {
-    ConfigMgr::GetInstance().Attach("cache.cache_insert_data", this);
-}
-
-BuildIndexJob::~BuildIndexJob() {
-    ConfigMgr::GetInstance().Detach("cache.cache_insert_data", this);
 }
 
 bool
@@ -65,11 +60,6 @@ BuildIndexJob::Dump() const {
     auto base = Job::Dump();
     ret.insert(base.begin(), base.end());
     return ret;
-}
-
-void
-BuildIndexJob::ConfigUpdate(const std::string& name) {
-    options_.insert_cache_immediately_ = config.cache.cache_insert_data();
 }
 
 }  // namespace scheduler

@@ -88,13 +88,8 @@ SSDBImpl::Start() {
         return Status::OK();
     }
 
-    // TODO(yhz): Get storage url
-    std::string path = config.storage.path();
-
-    std::string url = config.general.meta_uri();
-
     // snapshot
-    auto store = snapshot::Store::Build(url, path);
+    auto store = snapshot::Store::Build(config.storage.path(), config.general.meta_uri());
     snapshot::OperationExecutor::Init(store);
     snapshot::OperationExecutor::GetInstance().Start();
     snapshot::EventExecutor::Init(store);

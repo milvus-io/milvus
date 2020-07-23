@@ -31,11 +31,6 @@ namespace engine {
 
 MemTable::MemTable(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options)
     : collection_id_(collection_id), meta_(meta), options_(options) {
-    ConfigMgr::GetInstance().Attach("cache.cache_insert_data", this);
-}
-
-MemTable::~MemTable() {
-    ConfigMgr::GetInstance().Detach("cache.cache_insert_data", this);
 }
 
 Status
@@ -417,11 +412,6 @@ MemTable::GetLSN() {
 void
 MemTable::SetLSN(uint64_t lsn) {
     lsn_ = lsn;
-}
-
-void
-MemTable::ConfigUpdate(const std::string& name) {
-    options_.insert_cache_immediately_ = config.cache.cache_insert_data();
 }
 
 }  // namespace engine

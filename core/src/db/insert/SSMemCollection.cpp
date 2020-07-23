@@ -29,11 +29,6 @@ namespace engine {
 
 SSMemCollection::SSMemCollection(int64_t collection_id, int64_t partition_id, const DBOptions& options)
     : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
-    ConfigMgr::GetInstance().Attach("cache.cache_insert_data", this);
-}
-
-SSMemCollection::~SSMemCollection() {
-    ConfigMgr::GetInstance().Attach("cache.cache_insert_data", this);
 }
 
 Status
@@ -372,11 +367,6 @@ SSMemCollection::GetLSN() {
 void
 SSMemCollection::SetLSN(uint64_t lsn) {
     lsn_ = lsn;
-}
-
-void
-SSMemCollection::ConfigUpdate(const std::string& name) {
-    options_.insert_cache_immediately_ = config.cache.cache_insert_data();
 }
 
 }  // namespace engine

@@ -58,6 +58,7 @@ class SSExecutionEngineImpl : public SSExecutionEngine {
     segment::SSSegmentReaderPtr segment_reader_;
 
     int64_t gpu_num_ = 0;
+    bool gpu_enable_ = false;
 };
 
 }  // namespace engine

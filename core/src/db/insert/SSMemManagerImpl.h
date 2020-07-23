@@ -20,7 +20,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/ConfigMgr.h"
 #include "db/insert/SSMemCollection.h"
 #include "db/insert/SSMemManager.h"
 #include "utils/Status.h"
@@ -28,7 +27,7 @@
 namespace milvus {
 namespace engine {
 
-class SSMemManagerImpl : public SSMemManager, public ConfigObserver {
+class SSMemManagerImpl : public SSMemManager {
  public:
     using Ptr = std::shared_ptr<SSMemManagerImpl>;
     using MemPartitionMap = std::map<int64_t, SSMemCollectionPtr>;
@@ -36,12 +35,9 @@ class SSMemManagerImpl : public SSMemManager, public ConfigObserver {
     using MemList = std::vector<SSMemCollectionPtr>;
 
     explicit SSMemManagerImpl(const DBOptions& options) : options_(options) {
-        ConfigMgr::GetInstance().Attach("cache.insert_buffer_size", this);
     }
 
-    ~SSMemManagerImpl() {
-        ConfigMgr::GetInstance().Detach("cache.insert_buffer_size", this);
-    }
+    ~SSMemManagerImpl() = default;
 
     Status
     InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) override;
@@ -72,10 +68,6 @@ class SSMemManagerImpl : public SSMemManager, public ConfigObserver {
 
     size_t
     GetCurrentMem() override;
-
- protected:
-    void
-    ConfigUpdate(const std::string& name) override;
 
  private:
     SSMemCollectionPtr

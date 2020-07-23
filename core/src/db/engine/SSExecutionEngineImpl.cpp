@@ -92,7 +92,7 @@ MappingMetricType(MetricType metric_type, milvus::json& conf) {
 }  // namespace
 
 SSExecutionEngineImpl::SSExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
-    : root_path_(dir_root), segment_visitor_(segment_visitor) {
+    : root_path_(dir_root), segment_visitor_(segment_visitor), gpu_enable_(config.gpu.enable()) {
     segment_reader_ = std::make_shared<segment::SSSegmentReader>(dir_root, segment_visitor);
 }
 
@@ -101,7 +101,7 @@ SSExecutionEngineImpl::CreatetVecIndex(const std::string& index_name) {
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
     knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
 #ifdef MILVUS_GPU_VERSION
-    if (config.gpu.enable()) {
+    if (gpu_enable_) {
         mode = knowhere::IndexMode::MODE_GPU;
     }
 #endif

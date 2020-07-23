@@ -36,11 +36,6 @@ SSMemSegment::SSMemSegment(int64_t collection_id, int64_t partition_id, const DB
     : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
     current_mem_ = 0;
     CreateSegment();
-    ConfigMgr::GetInstance().Attach("cache.cache_insert_data", this);
-}
-
-SSMemSegment::~SSMemSegment() {
-    ConfigMgr::GetInstance().Detach("cache.cache_insert_data", this);
 }
 
 Status
@@ -299,11 +294,6 @@ SSMemSegment::Serialize(uint64_t wal_lsn) {
 int64_t
 SSMemSegment::GetSegmentId() const {
     return segment_->GetID();
-}
-
-void
-SSMemSegment::ConfigUpdate(const std::string& name) {
-    options_.insert_cache_immediately_ = config.cache.cache_insert_data();
 }
 
 }  // namespace engine

@@ -25,11 +25,11 @@
 namespace milvus {
 namespace engine {
 
-class MemTableFile : public ConfigObserver {
+class MemTableFile {
  public:
     MemTableFile(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options);
 
-    ~MemTableFile();
+    ~MemTableFile() = default;
 
  public:
     Status
@@ -61,10 +61,6 @@ class MemTableFile : public ConfigObserver {
 
     meta::SegmentSchema
     GetSegmentSchema() const;
-
- protected:
-    void
-    ConfigUpdate(const std::string& name) override;
 
  private:
     Status
