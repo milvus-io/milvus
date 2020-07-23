@@ -9,7 +9,6 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2890 Fix the index size caculation in cache
 -   \#2952 Fix the result merging of IVF_PQ IP
 -   \#2975 Fix config ut failed
--   \#2653 Fix the IndexFlat search function for
 
 ## Feature
 

@@ -145,10 +145,10 @@ void fvec_renorm_L2 (size_t d, size_t nx, float * __restrict x)
 
 /* Find the nearest neighbors for nx queries in a set of ny vectors */
 static void knn_inner_product_sse (const float * x,
-                                   const float * y,
-                                   size_t d, size_t nx, size_t ny,
-                                   float_minheap_array_t * res,
-                                   ConcurrentBitsetPtr bitset = nullptr)
+                        const float * y,
+                        size_t d, size_t nx, size_t ny,
+                        float_minheap_array_t * res,
+                        ConcurrentBitsetPtr bitset = nullptr)
 {
     const int64_t Policy_Threshold = 65536;
     size_t k = res->k;
@@ -252,11 +252,11 @@ static void knn_inner_product_sse (const float * x,
 }
 
 static void knn_L2sqr_sse (
-        const float * x,
-        const float * y,
-        size_t d, size_t nx, size_t ny,
-        float_maxheap_array_t * res,
-        ConcurrentBitsetPtr bitset = nullptr)
+                const float * x,
+                const float * y,
+                size_t d, size_t nx, size_t ny,
+                float_maxheap_array_t * res,
+                ConcurrentBitsetPtr bitset = nullptr)
 {
     const int64_t Policy_Threshold = 65536;
     size_t k = res->k;
