@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/job/SSSearchJob.h"
-
 #include "utils/Log.h"
 
 namespace milvus {
@@ -22,7 +21,7 @@ SSSearchJob::SSSearchJob(const server::ContextPtr& context, engine::DBOptions op
 }
 
 void
-SSSearchJob::WaitResult() {
+SSSearchJob::WaitFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return segment_ids_.empty(); });
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld all done", "search", 0, id());
@@ -41,21 +40,6 @@ SSSearchJob::SearchDone(const engine::snapshot::ID_TYPE seg_id) {
         cv_.notify_all();
     }
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld finish segment: %ld", "search", 0, id(), seg_id);
-}
-
-ResultIds&
-SSSearchJob::GetResultIds() {
-    return result_ids_;
-}
-
-ResultDistances&
-SSSearchJob::GetResultDistances() {
-    return result_distances_;
-}
-
-Status&
-SSSearchJob::GetStatus() {
-    return status_;
 }
 
 json

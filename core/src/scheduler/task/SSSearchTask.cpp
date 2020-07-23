@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "scheduler/task/SearchTask.h"
+#include "scheduler/task/SSSearchTask.h"
 
 #include <fiu-local.h>
 
@@ -21,13 +21,10 @@
 #include <utility>
 
 #include "db/Utils.h"
-#include "db/engine/EngineFactory.h"
-#include "metrics/Metrics.h"
+#include "db/engine/SSExecutionEngineImpl.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SSSearchJob.h"
-#include "scheduler/task/SSSearchTask.h"
 #include "segment/SegmentReader.h"
-#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -122,8 +119,7 @@ SSSearchTask::Execute() {
             return;
         }
 
-        /* step 1: allocate memory */
-        query::GeneralQueryPtr general_query = search_job->general_query();
+        fiu_do_on("XSearchTask.Execute.throw_std_exception", throw std::exception());
 
         try {
             /* step 2: search */
@@ -164,16 +160,6 @@ SSSearchTask::Execute() {
 
     rc.ElapseFromBegin("totally cost");
 }
-
-// const std::string&
-// XSSSearchTask::GetLocation() const {
-//    return file_->location_;
-//}
-
-// size_t
-// XSSSearchTask::GetIndexId() const {
-//    return file_->id_;
-//}
 
 }  // namespace scheduler
 }  // namespace milvus

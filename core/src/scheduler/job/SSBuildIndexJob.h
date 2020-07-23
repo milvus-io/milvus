@@ -22,8 +22,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/ConfigMgr.h"
-//#include "db/meta/Meta.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/Job.h"
@@ -31,17 +29,14 @@
 namespace milvus {
 namespace scheduler {
 
-class SSBuildIndexJob : public Job, public ConfigObserver {
+class SSBuildIndexJob : public Job {
  public:
     explicit SSBuildIndexJob(engine::DBOptions options, const std::string& collection_name,
                              const engine::snapshot::IDS_TYPE& segment_ids);
 
-    ~SSBuildIndexJob();
+    ~SSBuildIndexJob() = default;
 
  public:
-    //    bool
-    //    AddToIndexFiles(const SegmentSchemaPtr& to_index_file);
-
     void
     WaitFinish();
 
@@ -67,14 +62,10 @@ class SSBuildIndexJob : public Job, public ConfigObserver {
         return segment_ids_;
     }
 
-    engine::DBOptions
-    options() const {
-        return options_;
+    Status&
+    status() {
+        return status_;
     }
-
- public:
-    void
-    ConfigUpdate(const std::string& name) override;
 
  private:
     engine::DBOptions options_;

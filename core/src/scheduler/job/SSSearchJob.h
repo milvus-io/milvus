@@ -25,20 +25,12 @@
 #include "Job.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
-#include "db/meta/MetaTypes.h"
-#include "query/GeneralQuery.h"
+//#include "db/meta/MetaTypes.h"
 
 #include "server/context/Context.h"
 
 namespace milvus {
 namespace scheduler {
-
-using engine::meta::SegmentSchemaPtr;
-
-using Id2IndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
-
-using ResultIds = engine::ResultIds;
-using ResultDistances = engine::ResultDistances;
 
 // struct SearchTimeStat {
 //    double query_time = 0.0;
@@ -55,40 +47,18 @@ class SSSearchJob : public Job {
     AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor);
 
     void
-    WaitResult();
+    WaitFinish();
 
     void
     SearchDone(const engine::snapshot::ID_TYPE seg_id);
-
-    ResultIds&
-    GetResultIds();
-
-    ResultDistances&
-    GetResultDistances();
-
-    void
-    SetVectors(engine::VectorsData& vectors) {
-        vectors_ = vectors;
-    }
-
-    Status&
-    GetStatus();
 
     json
     Dump() const override;
 
  public:
     const server::ContextPtr&
-    GetContext() const;
-
-    int64_t
-    topk() {
-        return topk_;
-    }
-
-    int64_t
-    nq() const {
-        return vectors_.vector_count_;
+    GetContext() const {
+        return context_;
     }
 
     engine::DBOptions
@@ -96,14 +66,14 @@ class SSSearchJob : public Job {
         return options_;
     }
 
-    std::mutex&
-    mutex() {
-        return mutex_;
+    const query::QueryPtr
+    query_ptr() const {
+        return query_ptr_;
     }
 
-    query::GeneralQueryPtr
-    general_query() {
-        return general_query_;
+    engine::QueryResultPtr&
+    query_result() {
+        return query_result_;
     }
 
     const engine::snapshot::IDS_TYPE&
@@ -116,14 +86,9 @@ class SSSearchJob : public Job {
         return status_;
     }
 
-    std::unordered_map<std::string, engine::meta::hybrid::DataType>&
-    attr_type() {
-        return attr_type_;
-    }
-
-    int64_t
-    vector_count() {
-        return vector_count_;
+    std::mutex&
+    mutex() {
+        return mutex_;
     }
 
  private:

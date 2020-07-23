@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "db/SnapshotVisitor.h"
+#include "db/engine/SSExecutionEngine.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/SSSearchJob.h"
 #include "scheduler/task/Task.h"

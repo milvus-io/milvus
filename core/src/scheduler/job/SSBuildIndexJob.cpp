@@ -27,7 +27,7 @@ SSBuildIndexJob::SSBuildIndexJob(engine::DBOptions options, const std::string& c
 }
 
 void
-SSBuildIndexJob::WaitBuildIndexFinish() {
+SSBuildIndexJob::WaitFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return segment_ids_.empty(); });
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] BuildIndexJob %ld all done", "build index", 0, id());
@@ -56,11 +56,6 @@ SSBuildIndexJob::Dump() const {
     auto base = Job::Dump();
     ret.insert(base.begin(), base.end());
     return ret;
-}
-
-void
-SSBuildIndexJob::ConfigUpdate(const std::string& name) {
-    options_.insert_cache_immediately_ = config.cache.cache_insert_data();
 }
 
 }  // namespace scheduler

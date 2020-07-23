@@ -9,21 +9,14 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "scheduler/task/SSBuildIndexTask.h"
-
 #include <fiu-local.h>
-
 #include <memory>
-#include <string>
-#include <thread>
 #include <utility>
 
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
-#include "metrics/Metrics.h"
 #include "scheduler/job/SSBuildIndexJob.h"
-#include "utils/CommonUtil.h"
-#include "utils/Exception.h"
+#include "scheduler/task/SSBuildIndexTask.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 

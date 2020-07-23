@@ -11,7 +11,7 @@
 
 #include "db/SSDBImpl.h"
 #include "cache/CpuCacheMgr.h"
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "db/IDGenerator.h"
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
@@ -89,12 +89,9 @@ SSDBImpl::Start() {
     }
 
     // TODO(yhz): Get storage url
-    auto& config = server::Config::GetInstance();
-    std::string path;
-    STATUS_CHECK(config.GetStorageConfigPath(path));
+    std::string path = config.storage.path();
 
-    std::string url;
-    STATUS_CHECK(config.GetGeneralConfigMetaURI(url));
+    std::string url = config.general.meta_uri();
 
     // snapshot
     auto store = snapshot::Store::Build(url, path);
