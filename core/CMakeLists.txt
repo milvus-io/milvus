@@ -70,6 +70,7 @@ endif ()
 set_milvus_definition(MILVUS_WITH_PROMETHEUS "MILVUS_WITH_PROMETHEUS")
 set_milvus_definition(ENABLE_CPU_PROFILING "ENABLE_CPU_PROFILING")
 set_milvus_definition(MILVUS_WITH_FIU "FIU_ENABLE")
+set_milvus_definition(MILVUS_USE_SNAPSHOT "MILVUS_USE_SNAPSHOT")
 
 config_summary()
 
