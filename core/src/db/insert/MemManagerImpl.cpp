@@ -15,6 +15,7 @@
 #include <thread>
 
 #include "VectorSource.h"
+#include "config/ServerConfig.h"
 #include "db/Constants.h"
 #include "utils/Log.h"
 
@@ -314,8 +315,8 @@ MemManagerImpl::GetMaxLSN(const MemList& tables) {
 }
 
 void
-MemManagerImpl::OnInsertBufferSizeChanged(int64_t value) {
-    options_.insert_buffer_size_ = value * GB;
+MemManagerImpl::ConfigUpdate(const std::string& name) {
+    options_.insert_buffer_size_ = config.cache.insert_buffer_size();
 }
 
 }  // namespace engine

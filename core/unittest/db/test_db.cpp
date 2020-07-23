@@ -18,7 +18,7 @@
 #include <thread>
 
 #include "cache/CpuCacheMgr.h"
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "db/Constants.h"
 #include "db/DB.h"
 #include "db/DBFactory.h"
@@ -264,8 +264,8 @@ TEST_F(DBTest, SEARCH_TEST) {
     milvus::scheduler::OptimizerInst::GetInstance()->Init();
     std::string config_path(CONFIG_PATH);
     config_path += CONFIG_FILE;
-    milvus::server::Config& config = milvus::server::Config::GetInstance();
-    milvus::Status s = config.LoadConfigFile(config_path);
+    milvus::ConfigMgr::GetInstance().Init();
+    milvus::ConfigMgr::GetInstance().Load(CONFIG_PATH);
 
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);

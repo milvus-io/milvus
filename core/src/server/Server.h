@@ -12,6 +12,7 @@
 #pragma once
 
 #include <string>
+#include "config/ConfigMgr.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -50,6 +51,7 @@ class Server {
     int pid_fd_ = -1;
     std::string pid_filename_;
     std::string config_filename_;
+    // ConfigMgrPtr config_mgr_;
 };  // Server
 
 }  // namespace server
