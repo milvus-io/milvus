@@ -51,7 +51,7 @@ static const char* CONFIG_STR =
     "\n"
     "general:\n"
     "  timezone: UTC+8\n"
-    "  meta_uri: sqlite://:@:/\n"
+    "  meta_uri: mock://:@:/\n"
     "\n"
     "network:\n"
     "  bind.address: 0.0.0.0\n"
@@ -141,7 +141,11 @@ void
 BaseTest::SnapshotStart(bool mock_store) {
     /* auto uri = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
     auto uri = "mock://:@:/";
-    auto store = Store::Build(uri, "/tmp/milvus_ss/db");
+    auto& config = milvus::server::Config::GetInstance();
+    config.SetGeneralConfigMetaURI(uri);
+    std::string path = "/tmp/milvus_ss/db";
+    config.SetStorageConfigPath(path);
+    auto store = Store::Build(uri, path);
 
     milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
@@ -249,6 +253,9 @@ SSSegmentTest::TearDown() {
 void
 SSMetaTest::SetUp() {
     auto engine = std::make_shared<milvus::engine::meta::MockMetaEngine>();
+//    milvus::engine::DBMetaOptions options;
+//    options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";
+//    auto engine = std::make_shared<milvus::engine::meta::MySqlEngine>(options);
     meta_ = std::make_shared<milvus::engine::meta::MetaAdapter>(engine);
     meta_->TruncateAll();
 }
@@ -295,6 +302,17 @@ SSSchedulerTest::TearDown() {
     db_ = nullptr;
     BaseTest::SnapshotStop();
     BaseTest::TearDown();
+}
+
+void
+SSEventTest::SetUp() {
+    auto uri = "mock://:@:/";
+    store_ = Store::Build(uri, "/tmp/milvus_ss/db");
+    store_->DoReset();
+}
+
+void
+SSEventTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

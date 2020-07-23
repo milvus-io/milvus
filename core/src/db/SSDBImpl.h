@@ -102,20 +102,20 @@ class SSDBImpl : public DB {
                   const std::vector<std::string>& field_names, DataChunkPtr& data_chunk);
 
     Status
-    GetEntityIDs(const std::string& collection_id, int64_t segment_id, IDNumbers& entity_ids);
+    GetEntityIDs(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids);
 
     Status
-    CreateIndex(const server::ContextPtr& context, const std::string& collection_id, const std::string& field_name,
-                const CollectionIndex& index);
+    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
+                const std::string& field_name, const CollectionIndex& index);
 
     Status
-    DescribeIndex(const std::string& collection_id, const std::string& field_name, CollectionIndex& index);
+    DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index);
 
     Status
-    DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& element_name);
+    DropIndex(const std::string& collection_name, const std::string& field_name);
 
     Status
-    DropIndex(const std::string& collection_id);
+    DropIndex(const std::string& collection_name);
 
     Status
     Query(const server::ContextPtr& context, const std::string& collection_name, const query::QueryPtr& query_ptr,
@@ -135,10 +135,10 @@ class SSDBImpl : public DB {
     TimingMetricThread();
 
     void
-    StartBuildIndexTask();
+    StartBuildIndexTask(const std::vector<std::string>& collection_names);
 
     void
-    BackgroundBuildIndexTask();
+    BackgroundBuildIndexTask(std::vector<std::string> collection_names);
 
     void
     TimingIndexThread();
@@ -153,7 +153,7 @@ class SSDBImpl : public DB {
     ExecWalRecord(const wal::MXLogRecord& record);
 
     void
-    StartMergeTask(const std::set<std::string>& merge_collection_names, bool force_merge_all = false);
+    StartMergeTask(const std::set<std::string>& collection_names, bool force_merge_all = false);
 
     void
     BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all);

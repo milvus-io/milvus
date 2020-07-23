@@ -9,9 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <gtest/gtest.h>
 #include <fiu-control.h>
 #include <fiu-local.h>
+#include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
 #include <random>
 #include <thread>
@@ -399,7 +399,7 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
 
     fiu_init(0);
     {
-        //create partition with dummy name
+        // create partition with dummy name
         stat = db_->CreatePartition(collection_name, "", "6");
         ASSERT_TRUE(stat.ok());
 
@@ -409,11 +409,11 @@ TEST_F(MySqlDBTest, PARTITION_TEST) {
         ASSERT_FALSE(stat.ok());
         fiu_disable("MySQLMetaImpl.DescribeCollection.throw_exception");
 
-        //Drop partition will failed,since it firstly drop partition meta collection.
+        // Drop partition will failed,since it firstly drop partition meta collection.
         FIU_ENABLE_FIU("MySQLMetaImpl.DropCollection.null_connection");
         stat = db_->DropPartition(collection_name + "_5");
-        //TODO(sjh): add assert expr, since DropPartion always return Status::OK() for now.
-        //ASSERT_TRUE(stat.ok());
+        // TODO(sjh): add assert expr, since DropPartion always return Status::OK() for now.
+        // ASSERT_TRUE(stat.ok());
         fiu_disable("MySQLMetaImpl.DropCollection.null_connection");
 
         std::vector<milvus::engine::meta::CollectionSchema> partition_schema_array;

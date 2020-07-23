@@ -32,11 +32,14 @@ class SSStructuredIndexFormat {
  public:
     SSStructuredIndexFormat() = default;
 
-    void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::IndexPtr& index);
+    std::string
+    FilePostfix();
 
     void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location, engine::meta::hybrid::DataType data_type,
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::IndexPtr& index);
+
+    void
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::meta::hybrid::DataType data_type,
           const knowhere::IndexPtr& index);
 
     // No copy and move
@@ -50,10 +53,7 @@ class SSStructuredIndexFormat {
 
  private:
     knowhere::IndexPtr
-    create_structured_index(const engine::meta::hybrid::DataType data_type);
-
- private:
-    const std::string attr_index_extension_ = ".idx";
+    CreateStructuredIndex(const engine::meta::hybrid::DataType data_type);
 };
 
 using SSStructuredIndexFormatPtr = std::shared_ptr<SSStructuredIndexFormat>;

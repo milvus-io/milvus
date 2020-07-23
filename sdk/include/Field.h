@@ -20,19 +20,21 @@
 namespace milvus {
 
 enum class DataType {
-    INT8 = 1,
-    INT16 = 2,
-    INT32 = 3,
-    INT64 = 4,
+    NONE = 0,
+    BOOL = 1,
+    INT8 = 2,
+    INT16 = 3,
+    INT32 = 4,
+    INT64 = 5,
+
+    FLOAT = 10,
+    DOUBLE = 11,
 
     STRING = 20,
 
-    BOOL = 30,
-
-    FLOAT = 40,
-    DOUBLE = 41,
-
-    VECTOR = 100,
+    VECTOR_BINARY = 100,
+    VECTOR_FLOAT = 101,
+    VECTOR = 200,
     UNKNOWN = 9999,
 };
 
@@ -41,8 +43,8 @@ struct Field {
     uint64_t field_id;              ///< read-only
     std::string field_name;
     DataType field_type;
-    float boost;
-    std::string extram_params;
+    std::string index_params;
+    std::string extra_params;
 };
 using FieldPtr = std::shared_ptr<Field>;
 

@@ -197,7 +197,7 @@ class TestConnectPortInvalid(object):
 
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_ports()
+        params=gen_invalid_ints()
     )
     def get_invalid_port(self, request):
         yield request.param
