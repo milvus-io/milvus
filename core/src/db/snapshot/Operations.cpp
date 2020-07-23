@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Operations.h"
+
 #include <chrono>
 #include <sstream>
+
 #include "db/snapshot/Event.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"

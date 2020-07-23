@@ -11,10 +11,16 @@
 
 #include "db/SSDBImpl.h"
 #include "cache/CpuCacheMgr.h"
+#include "config/Config.h"
 #include "db/IDGenerator.h"
+#include "db/SnapshotUtils.h"
+#include "db/SnapshotVisitor.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "db/merge/SSMergeTask.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/EventExecutor.h"
+#include "db/snapshot/IterateHandler.h"
+#include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
@@ -24,6 +30,7 @@
 #include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/job/SSSearchJob.h"
 #include "segment/SSSegmentReader.h"
 #include "segment/SSSegmentWriter.h"
 #include "utils/Exception.h"
@@ -32,6 +39,7 @@
 #include "wal/WalDefinations.h"
 
 #include <fiu-local.h>
+#include <src/scheduler/job/SSBuildIndexJob.h>
 #include <limits>
 #include <utility>
 
@@ -79,6 +87,22 @@ SSDBImpl::Start() {
     if (initialized_.load(std::memory_order_acquire)) {
         return Status::OK();
     }
+
+    // TODO(yhz): Get storage url
+    auto& config = server::Config::GetInstance();
+    std::string path;
+    STATUS_CHECK(config.GetStorageConfigPath(path));
+
+    std::string url;
+    STATUS_CHECK(config.GetGeneralConfigMetaURI(url));
+
+    // snapshot
+    auto store = snapshot::Store::Build(url, path);
+    snapshot::OperationExecutor::Init(store);
+    snapshot::OperationExecutor::GetInstance().Start();
+    snapshot::EventExecutor::Init(store);
+    snapshot::EventExecutor::GetInstance().Start();
+    snapshot::Snapshots::GetInstance().Init(store);
 
     // LOG_ENGINE_TRACE_ << "DB service start";
     initialized_.store(true, std::memory_order_release);
@@ -172,6 +196,9 @@ SSDBImpl::Stop() {
         swn_metric_.Notify();
         bg_metric_thread_.join();
     }
+
+    snapshot::EventExecutor::GetInstance().Stop();
+    snapshot::OperationExecutor::GetInstance().Stop();
 
     // LOG_ENGINE_TRACE_ << "DB service stop";
     return Status::OK();
@@ -299,7 +326,7 @@ SSDBImpl::CreatePartition(const std::string& collection_name, const std::string&
     snapshot::LSN_TYPE lsn = 0;
     if (options_.wal_enable_) {
         // SS TODO
-        /* lsn = wal_mgr_->CreatePartition(collection_id, partition_tag); */
+        /* lsn = wal_mgr_->CreatePartition(collection_name, partition_tag); */
     }
 
     snapshot::OperationContext context;
@@ -447,8 +474,8 @@ SSDBImpl::Flush(const std::string& collection_name) {
         //            flush_req_swn_.Wait();
         //        } else {
         //            // no collection flushed, call merge task to cleanup files
-        //            std::set<std::string> merge_collection_ids;
-        //            StartMergeTask(merge_collection_ids);
+        //            std::set<std::string> merge_collection_names;
+        //            StartMergeTask(merge_collection_names);
         //        }
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
@@ -479,8 +506,8 @@ SSDBImpl::Flush() {
         //            flush_req_swn_.Wait();
         //        } else {
         //            // no collection flushed, call merge task to cleanup files
-        //            std::set<std::string> merge_collection_ids;
-        //            StartMergeTask(merge_collection_ids);
+        //            std::set<std::string> merge_collection_names;
+        //            StartMergeTask(merge_collection_names);
         //        }
     } else {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
@@ -493,8 +520,7 @@ SSDBImpl::Flush() {
 }
 
 Status
-SSDBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                  double threshold) {
+SSDBImpl::Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -581,120 +607,156 @@ SSDBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_
 }
 
 Status
-SSDBImpl::GetEntityIDs(const std::string& collection_id, int64_t segment_id, IDNumbers& entity_ids) {
-    return Status::OK();
-}
-
-Status
-SSDBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                      const std::string& field_name, const CollectionIndex& index) {
-    return Status::OK();
-}
-
-Status
-SSDBImpl::DescribeIndex(const std::string& collection_id, const std::string& field_name, CollectionIndex& index) {
-    return Status::OK();
-}
-
-Status
-SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field_name,
-                    const std::string& element_name) {
+SSDBImpl::GetEntityIDs(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    // SS TODO: Check Index Type
+    auto read_visitor = engine::SegmentVisitor::Build(ss, segment_id);
+    segment::SSSegmentReaderPtr segment_reader =
+        std::make_shared<segment::SSSegmentReader>(options_.meta_.path_, read_visitor);
 
-    snapshot::OperationContext context;
-    STATUS_CHECK(ss->GetFieldElement(field_name, element_name, context.stale_field_element));
-    auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
-    STATUS_CHECK(op->Push());
+    STATUS_CHECK(segment_reader->LoadUids(entity_ids));
 
-    // SS TODO: Start merge task needed?
-    /* std::set<std::string> merge_collection_ids = {collection_id}; */
-    /* StartMergeTask(merge_collection_ids, true); */
     return Status::OK();
 }
 
 Status
-SSDBImpl::DropIndex(const std::string& collection_id) {
-    return Status::OK();
-}
-
-Status
-SSDBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResult& result) {
+SSDBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
+                      const std::string& field_name, const CollectionIndex& index) {
     CHECK_INITIALIZED;
 
-    auto query_ctx = context->Child("Query");
+    // step 1: wait merge file thread finished to avoid duplicate data bug
+    auto status = Flush();
+    WaitMergeFileFinish();  // let merge file thread finish
+
+    // step 2: compare old index and new index
+    CollectionIndex new_index = index;
+    CollectionIndex old_index;
+    status = DescribeIndex(collection_name, field_name, old_index);
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (old_index.metric_type_ != (int32_t)MetricType::INVALID) {
+        new_index.metric_type_ = old_index.metric_type_;  // dont change metric type, it was defined by CreateCollection
+    }
+    if (utils::IsSameIndex(old_index, new_index)) {
+        return Status::OK();  // same index
+    }
+
+    // step 3: drop old index
+    DropIndex(collection_name);
+    WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
+
+    // step 4: create field element for index
+    status = SetSnapshotIndex(collection_name, field_name, new_index);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // step 5: start background build index thread
+    std::vector<std::string> collection_names = {collection_name};
+    WaitBuildIndexFinish();
+    StartBuildIndexTask(collection_names);
+
+    // step 6: iterate segments need to be build index, wait until all segments are built
+    while (true) {
+        SnapshotVisitor ss_visitor(collection_name);
+        snapshot::IDS_TYPE segment_ids;
+        ss_visitor.SegmentsToIndex(field_name, segment_ids);
+        if (segment_ids.empty()) {
+            break;
+        }
+
+        index_req_swn_.Wait_For(std::chrono::seconds(1));
+
+        // client break the connection, no need to block, check every 1 second
+        if (context && context->IsConnectionBroken()) {
+            LOG_ENGINE_DEBUG_ << "Client connection broken, build index in background";
+            break;  // just break, not return, continue to update partitions files to to_index
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+SSDBImpl::DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) {
+    CHECK_INITIALIZED;
+
+    return GetSnapshotIndex(collection_name, field_name, index);
+}
+
+Status
+SSDBImpl::DropIndex(const std::string& collection_name, const std::string& field_name) {
+    CHECK_INITIALIZED;
+
+    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
+
+    STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
+
+    std::set<std::string> merge_collection_names = {collection_name};
+    StartMergeTask(merge_collection_names, true);
+    return Status::OK();
+}
+
+Status
+SSDBImpl::DropIndex(const std::string& collection_name) {
+    CHECK_INITIALIZED;
+
+    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
+
+    std::vector<std::string> field_names;
+    {
+        snapshot::ScopedSnapshotT ss;
+        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+        field_names = ss->GetFieldNames();
+    }
+
+    snapshot::OperationContext context;
+    for (auto& field_name : field_names) {
+        STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
+    }
+
+    std::set<std::string> merge_collection_names = {collection_name};
+    StartMergeTask(merge_collection_names, true);
+    return Status::OK();
+}
+
+Status
+SSDBImpl::Query(const server::ContextPtr& context, const std::string& collection_name, const query::QueryPtr& query_ptr,
+                engine::QueryResultPtr& result) {
+    CHECK_INITIALIZED;
 
     TimeRecorder rc("SSDBImpl::Query");
 
-    //    snapshot::ScopedSnapshotT ss;
-    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+    scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SSSearchJob>(nullptr, options_, query_ptr);
 
-    //    auto handler = std::make_shared<HybridQueryHelperSegmentHandler>(nullptr, ss, partition_patterns);
-    //    handler->Iterate();
-    //    STATUS_CHECK(handler->GetStatus());
-    //
-    //    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", handler->segments_.size());
-    //
-    //    VectorsData vectors;
-    //    scheduler::SearchJobPtr job =
-    //        std::make_shared<scheduler::SearchJob>(query_ctx, general_query, query_ptr, attr_type, vectors);
-    //    for (auto& segment : handler->segments_) {
-    //        // job->AddSegment(segment);
-    //    }
-    //
-    //    // step 2: put search job to scheduler and wait result
-    //    scheduler::JobMgrInst::GetInstance()->Put(job);
-    //    job->WaitResult();
-    //
-    //    if (!job->GetStatus().ok()) {
-    //        return job->GetStatus();
-    //    }
-    //
-    //    // step 3: construct results
-    //    result.row_num_ = job->vector_count();
-    //    result.result_ids_ = job->GetResultIds();
-    //    result.result_distances_ = job->GetResultDistances();
-    //
-    //    // step 4: get entities by result ids
-    //    STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));
-    //
-    //    // step 5: filter entities by field names
-    //    //    std::vector<engine::AttrsData> filter_attrs;
-    //    //    for (auto attr : result.attrs_) {
-    //    //        AttrsData attrs_data;
-    //    //        attrs_data.attr_type_ = attr.attr_type_;
-    //    //        attrs_data.attr_count_ = attr.attr_count_;
-    //    //        attrs_data.id_array_ = attr.id_array_;
-    //    //        for (auto& name : field_names) {
-    //    //            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
-    //    //                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
-    //    //            }
-    //    //        }
-    //    //        filter_attrs.emplace_back(attrs_data);
-    //    //    }
-    //    //
-    //    //    result.attrs_ = filter_attrs;
+    /* put search job to scheduler and wait job finish */
+    scheduler::JobMgrInst::GetInstance()->Put(job);
+    job->WaitFinish();
+
+    if (!job->status().ok()) {
+        return job->status();
+    }
+
+    result = job->query_result();
 
     rc.ElapseFromBegin("Engine query totally cost");
 
-    query_ctx->GetTraceContext()->GetSpan()->Finish();
-
-    return Status::OK();
+    return job->status();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Internal APIs
 ////////////////////////////////////////////////////////////////////////////////
 void
-SSDBImpl::InternalFlush(const std::string& collection_id) {
+SSDBImpl::InternalFlush(const std::string& collection_name) {
     wal::MXLogRecord record;
     record.type = wal::MXLogType::Flush;
-    record.collection_id = collection_id;
+    record.collection_id = collection_name;
     ExecWalRecord(record);
 }
 
@@ -765,7 +827,7 @@ SSDBImpl::TimingMetricThread() {
 }
 
 void
-SSDBImpl::StartBuildIndexTask() {
+SSDBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names) {
     // build index has been finished?
     {
         std::lock_guard<std::mutex> lck(index_result_mutex_);
@@ -781,14 +843,33 @@ SSDBImpl::StartBuildIndexTask() {
     {
         std::lock_guard<std::mutex> lck(index_result_mutex_);
         if (index_thread_results_.empty()) {
-            index_thread_results_.push_back(index_thread_pool_.enqueue(&SSDBImpl::BackgroundBuildIndexTask, this));
+            index_thread_results_.push_back(
+                index_thread_pool_.enqueue(&SSDBImpl::BackgroundBuildIndexTask, this, collection_names));
         }
     }
 }
 
 void
-SSDBImpl::BackgroundBuildIndexTask() {
+SSDBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
     std::unique_lock<std::mutex> lock(build_index_mutex_);
+
+    for (auto collection_name : collection_names) {
+        SnapshotVisitor ss_visitor(collection_name);
+
+        snapshot::IDS_TYPE segment_ids;
+        ss_visitor.SegmentsToIndex("", segment_ids);
+
+        scheduler::SSBuildIndexJobPtr job =
+            std::make_shared<scheduler::SSBuildIndexJob>(options_, collection_name, segment_ids);
+
+        scheduler::JobMgrInst::GetInstance()->Put(job);
+        job->WaitFinish();
+
+        if (!job->status().ok()) {
+            LOG_ENGINE_ERROR_ << job->status().message();
+            break;
+        }
+    }
 }
 
 void
@@ -806,8 +887,10 @@ SSDBImpl::TimingIndexThread() {
 
         swn_index_.Wait_For(std::chrono::seconds(BACKGROUND_INDEX_INTERVAL));
 
+        std::vector<std::string> collection_names;
+        snapshot::Snapshots::GetInstance().GetCollectionNames(collection_names);
         WaitMergeFileFinish();
-        StartBuildIndexTask();
+        StartBuildIndexTask(collection_names);
     }
 }
 
@@ -884,7 +967,7 @@ SSDBImpl::TimingWalThread() {
 
 Status
 SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
-    auto collections_flushed = [&](const std::string collection_id,
+    auto collections_flushed = [&](const std::string& collection_name,
                                    const std::set<std::string>& target_collection_names) -> uint64_t {
         uint64_t max_lsn = 0;
         if (options_.wal_enable_ && !target_collection_names.empty()) {
@@ -897,14 +980,14 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             //                    max_lsn = lsn;
             //                }
             //            }
-            //            wal_mgr_->CollectionFlushed(collection_id, lsn);
+            //            wal_mgr_->CollectionFlushed(collection_name, lsn);
         }
 
-        std::set<std::string> merge_collection_ids;
+        std::set<std::string> merge_collection_names;
         for (auto& collection : target_collection_names) {
-            merge_collection_ids.insert(collection);
+            merge_collection_names.insert(collection);
         }
-        StartMergeTask(merge_collection_ids);
+        StartMergeTask(merge_collection_names);
         return max_lsn;
     };
 
@@ -938,14 +1021,14 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 
     switch (record.type) {
         case wal::MXLogType::Entity: {
-            int64_t collection_id = 0, partition_id = 0;
-            auto status = get_collection_partition_id(record, collection_id, partition_id);
+            int64_t collection_name = 0, partition_id = 0;
+            auto status = get_collection_partition_id(record, collection_name, partition_id);
             if (!status.ok()) {
                 LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << status.message();
                 return status;
             }
 
-            status = mem_mgr_->InsertEntities(collection_id, partition_id, record.data_chunk, record.lsn);
+            status = mem_mgr_->InsertEntities(collection_name, partition_id, record.data_chunk, record.lsn);
             force_flush_if_mem_full();
 
             // metrics
@@ -986,8 +1069,8 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 }
 
                 const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-                int64_t collection_id = ss->GetCollectionId();
-                status = mem_mgr_->Flush(collection_id);
+                int64_t collection_name = ss->GetCollectionId();
+                status = mem_mgr_->Flush(collection_name);
                 if (!status.ok()) {
                     return status;
                 }
@@ -997,14 +1080,14 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 
             } else {
                 // flush all collections
-                std::set<int64_t> collection_ids;
+                std::set<int64_t> collection_names;
                 {
                     const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-                    status = mem_mgr_->Flush(collection_ids);
+                    status = mem_mgr_->Flush(collection_names);
                 }
 
                 std::set<std::string> flushed_collections;
-                for (auto id : collection_ids) {
+                for (auto id : collection_names) {
                     snapshot::ScopedSnapshotT ss;
                     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, id);
                     if (!status.ok()) {
@@ -1031,7 +1114,7 @@ SSDBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 }
 
 void
-SSDBImpl::StartMergeTask(const std::set<std::string>& merge_collection_ids, bool force_merge_all) {
+SSDBImpl::StartMergeTask(const std::set<std::string>& collection_names, bool force_merge_all) {
     // LOG_ENGINE_DEBUG_ << "Begin StartMergeTask";
     // merge task has been finished?
     {
@@ -1050,7 +1133,7 @@ SSDBImpl::StartMergeTask(const std::set<std::string>& merge_collection_ids, bool
         if (merge_thread_results_.empty()) {
             // start merge file thread
             merge_thread_results_.push_back(
-                merge_thread_pool_.enqueue(&SSDBImpl::BackgroundMerge, this, merge_collection_ids, force_merge_all));
+                merge_thread_pool_.enqueue(&SSDBImpl::BackgroundMerge, this, collection_names, force_merge_all));
         }
     }
 

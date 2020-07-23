@@ -30,16 +30,19 @@ class SSIdBloomFilterFormat {
  public:
     SSIdBloomFilterFormat() = default;
 
+    std::string
+    FilePostfix();
+
     void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
          segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
           const segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     void
-    create(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+    Create(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
            segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     // No copy and move
@@ -50,9 +53,6 @@ class SSIdBloomFilterFormat {
     operator=(const SSIdBloomFilterFormat&) = delete;
     SSIdBloomFilterFormat&
     operator=(SSIdBloomFilterFormat&&) = delete;
-
- private:
-    const std::string bloom_filter_filename_ = "bloom_filter";
 };
 
 using SSIdBloomFilterFormatPtr = std::shared_ptr<SSIdBloomFilterFormat>;

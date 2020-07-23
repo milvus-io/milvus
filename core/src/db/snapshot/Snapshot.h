@@ -27,6 +27,7 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
 #include "db/snapshot/Store.h"
 #include "db/snapshot/Utils.h"
 #include "db/snapshot/WrappedTypes.h"
@@ -44,7 +45,7 @@ using ScopedResourcesT =
 class Snapshot : public ReferenceProxy {
  public:
     using Ptr = std::shared_ptr<Snapshot>;
-    explicit Snapshot(StorePtr, ID_TYPE);
+    Snapshot(StorePtr, ID_TYPE);
 
     ID_TYPE
     GetID() const {

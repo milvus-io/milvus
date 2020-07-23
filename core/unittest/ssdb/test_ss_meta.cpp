@@ -143,25 +143,26 @@ TEST_F(SSMetaTest, SelectTest) {
     ASSERT_GT(collection2->GetID(), collection->GetID());
 
     std::vector<Collection::Ptr> return_collections;
-    status = meta_->SelectBy<Collection, ID_TYPE>(milvus::engine::meta::F_ID, collection2->GetID(), return_collections);
+    status = meta_->SelectBy<Collection, ID_TYPE>(milvus::engine::meta::F_ID,
+        {collection2->GetID()}, return_collections);
     ASSERT_TRUE(status.ok()) << status.ToString();
     ASSERT_EQ(return_collections.size(), 1);
     ASSERT_EQ(return_collections.at(0)->GetID(), collection2->GetID());
     ASSERT_EQ(return_collections.at(0)->GetName(), collection2->GetName());
     return_collections.clear();
 
-    status = meta_->SelectBy<Collection, State>(milvus::engine::meta::F_STATE, State::ACTIVE, return_collections);
+    status = meta_->SelectBy<Collection, State>(milvus::engine::meta::F_STATE, {State::ACTIVE}, return_collections);
     ASSERT_TRUE(status.ok()) << status.ToString();
     ASSERT_EQ(return_collections.size(), 2);
 
     std::vector<ID_TYPE> ids;
-    status = meta_->SelectResourceIDs<Collection, std::string>(ids, "", "");
+    status = meta_->SelectResourceIDs<Collection, std::string>(ids, "", {""});
     ASSERT_TRUE(status.ok()) << status.ToString();
     ASSERT_EQ(ids.size(), 2);
 
     ids.clear();
     status = meta_->SelectResourceIDs<Collection, std::string>(ids, milvus::engine::meta::F_NAME,
-            collection->GetName());
+                                                               {collection->GetName()});
     ASSERT_TRUE(status.ok()) << status.ToString();
     ASSERT_EQ(ids.size(), 1);
     ASSERT_EQ(ids.at(0), collection->GetID());

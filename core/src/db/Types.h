@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -73,6 +74,7 @@ struct QueryResult {
     std::vector<engine::VectorsData> vectors_;
     std::vector<engine::AttrsData> attrs_;
 };
+using QueryResultPtr = std::shared_ptr<QueryResult>;
 
 using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;
@@ -83,6 +85,10 @@ extern const char* DEFAULT_RAW_DATA_NAME;
 extern const char* DEFAULT_BLOOM_FILTER_NAME;
 extern const char* DEFAULT_DELETED_DOCS_NAME;
 extern const char* DEFAULT_INDEX_NAME;
+
+extern const char* PARAM_COLLECTION_DIMENSION;
+extern const char* PARAM_INDEX_METRIC_TYPE;
+extern const char* PARAM_INDEX_EXTRA_PARAMS;
 
 using FieldType = meta::hybrid::DataType;
 

@@ -16,15 +16,18 @@
 #include <unistd.h>
 #include <boost/filesystem.hpp>
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <regex>
 #include <vector>
 
 #include "cache/CpuCacheMgr.h"
-#include "db/snapshot/Resources.h"
+#include "db/Types.h"
+
 #ifdef MILVUS_GPU_VERSION
 #include "cache/GpuCacheMgr.h"
 #endif
+
 #include "config/Config.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include "utils/CommonUtil.h"
@@ -260,7 +263,7 @@ GetIndexName(int32_t index_type) {
 #endif
         {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, "IDMAP"},
         {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "IVFFLAT"},
-        {(int32_t)engine::EngineType::HNSW_SQ8NR, "HNSW_SQ8NR"},
+        {(int32_t)engine::EngineType::HNSW_SQ8NM, "HNSW_SQ8NM"},
         {(int32_t)engine::EngineType::HNSW, "HNSW"},
         {(int32_t)engine::EngineType::NSG_MIX, "NSG"},
         {(int32_t)engine::EngineType::ANNOY, "ANNOY"}};

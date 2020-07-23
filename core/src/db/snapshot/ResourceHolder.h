@@ -17,6 +17,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+
 #include "db/snapshot/Event.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/Operations.h"

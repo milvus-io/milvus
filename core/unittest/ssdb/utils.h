@@ -82,6 +82,7 @@ using SSDBImpl = milvus::engine::SSDBImpl;
 using Status = milvus::Status;
 using Store = milvus::engine::snapshot::Store;
 
+using StorePtr = milvus::engine::snapshot::Store::Ptr;
 using MetaAdapterPtr = milvus::engine::meta::MetaAdapterPtr;
 
 inline int
@@ -286,6 +287,10 @@ class BaseTest : public ::testing::Test {
  protected:
     void
     InitLog();
+    void
+    SnapshotStart(bool mock_store);
+    void
+    SnapshotStop();
 
     void
     SetUp() override;
@@ -331,6 +336,28 @@ class SSSegmentTest : public BaseTest {
 class SSMetaTest : public BaseTest {
  protected:
     MetaAdapterPtr meta_;
+
+ protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+class SSSchedulerTest : public BaseTest {
+ protected:
+    std::shared_ptr<SSDBImpl> db_;
+
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+class SSEventTest : public BaseTest {
+ protected:
+    StorePtr store_;
 
  protected:
     void

@@ -41,8 +41,8 @@ enum class EngineType {
     HNSW = 11,
     ANNOY = 12,
     FAISS_IVFSQ8NR = 13,
-    HNSW_SQ8NR = 14,
-    MAX_VALUE = HNSW_SQ8NR,
+    HNSW_SQ8NM = 14,
+    MAX_VALUE = HNSW_SQ8NM,
 };
 
 static std::map<std::string, EngineType> s_map_engine_type = {
@@ -58,10 +58,11 @@ static std::map<std::string, EngineType> s_map_engine_type = {
     {knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, EngineType::SPTAG_BKT},
 #endif
     {knowhere::IndexEnum::INDEX_HNSW, EngineType::HNSW},
-    {knowhere::IndexEnum::INDEX_HNSW_SQ8NR, EngineType::HNSW_SQ8NR},
+    {knowhere::IndexEnum::INDEX_HNSW_SQ8NM, EngineType::HNSW_SQ8NM},
     {knowhere::IndexEnum::INDEX_ANNOY, EngineType::ANNOY}};
 
 enum class MetricType {
+    INVALID = 0,
     L2 = 1,              // Euclidean Distance
     IP = 2,              // Cosine Similarity
     HAMMING = 3,         // Hamming Distance
@@ -70,6 +71,11 @@ enum class MetricType {
     SUBSTRUCTURE = 6,    // Substructure Distance
     SUPERSTRUCTURE = 7,  // Superstructure Distance
     MAX_VALUE = SUPERSTRUCTURE
+};
+
+enum class StructuredIndexType {
+    INVALID = 0,
+    SORTED = 1,
 };
 
 namespace meta {
