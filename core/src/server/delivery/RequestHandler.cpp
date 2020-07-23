@@ -40,7 +40,6 @@
 #include "server/delivery/request/ShowPartitionsRequest.h"
 
 #include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
-#include "server/delivery/hybrid_request/CreateHybridIndexRequest.h"
 #include "server/delivery/hybrid_request/DescribeHybridCollectionRequest.h"
 #include "server/delivery/hybrid_request/GetEntityByIDRequest.h"
 #include "server/delivery/hybrid_request/HybridSearchRequest.h"
@@ -318,15 +317,6 @@ RequestHandler::HybridSearch(const std::shared_ptr<milvus::server::Context>& con
 
     RequestScheduler::ExecRequest(request_ptr);
 
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::CreateHybridIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                                  const std::vector<std::string>& field_names, const milvus::json& json_params) {
-    BaseRequestPtr request_ptr = CreateHybridIndexRequest::Create(context, collection_name, field_names, json_params);
-
-    RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }
 

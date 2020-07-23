@@ -144,10 +144,6 @@ class RequestHandler {
     Status
     HybridSearch(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
                  const milvus::json& json_params, engine::QueryResultPtr& result);
-
-    Status
-    CreateHybridIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                      const std::vector<std::string>& field_names, const milvus::json& json_params);
 };
 
 }  // namespace server

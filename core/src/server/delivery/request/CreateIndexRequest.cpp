@@ -19,6 +19,8 @@
 #include <fiu-local.h>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -64,10 +66,9 @@ CreateIndexRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema collection_schema;
-        engine::meta::hybrid::FieldsSchema fields_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeHybridCollection(collection_schema, fields_schema);
+        engine::snapshot::CollectionPtr collection;
+        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
         fiu_do_on("CreateIndexRequest.OnExecute.not_has_collection",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreateIndexRequest.OnExecute.throw_std.exception", throw std::exception());
@@ -77,9 +78,16 @@ CreateIndexRequest::OnExecute() {
             } else {
                 return status;
             }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
+        }
+
+        int64_t dimension;
+        for (auto field_it = fields_schema.begin(); field_it != fields_schema.end(); field_it++) {
+            auto type = field_it->first->GetFtype();
+            if (type == (int64_t)engine::meta::hybrid::DataType::VECTOR_FLOAT ||
+                type == (int64_t)engine::meta::hybrid::DataType::VECTOR_BINARY) {
+                auto params = field_it->first->GetParams();
+                dimension = params[engine::DIMENSION].get<int64_t>();
+                break;
             }
         }
 
@@ -97,7 +105,7 @@ CreateIndexRequest::OnExecute() {
             return status;
         }
 
-        status = ValidateIndexParams(json_params_, collection_schema, index_type);
+        status = ValidateIndexParams(json_params_, dimension, index_type);
         if (!status.ok()) {
             return status;
         }
@@ -114,9 +122,6 @@ CreateIndexRequest::OnExecute() {
             } else if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
                 adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
             }
-            //            else {
-            //                return Status(SERVER_INVALID_INDEX_TYPE, "Invalid index type for collection metric type");
-            //            }
         }
 
         rc.RecordSection("check validation");
@@ -128,8 +133,9 @@ CreateIndexRequest::OnExecute() {
         }
 
         index.engine_type_ = adapter_index_type;
+        index.index_name_ = index_name_;
         index.extra_params_ = json_params_;
-        status = DBWrapper::DB()->CreateIndex(context_, collection_name_, index);
+        status = DBWrapper::SSDB()->CreateIndex(context_, collection_name_, field_name_, index);
         fiu_do_on("CreateIndexRequest.OnExecute.create_index_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
