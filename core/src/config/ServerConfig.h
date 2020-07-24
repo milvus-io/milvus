@@ -64,89 +64,94 @@ const configEnum SimdMap{
 };
 
 struct ServerConfig {
-    ConfigValue<std::string> version{"unknown"};
+    using String = ConfigValue<std::string>;
+    using Bool = ConfigValue<bool>;
+    using Integer = ConfigValue<int64_t>;
+    using Floating = ConfigValue<double>;
+
+    String version{"unknown"};
 
     struct Cluster {
-        ConfigValue<bool> enable{false};
-        ConfigValue<int64_t> role{0};
+        Bool enable{false};
+        Integer role{0};
     } cluster;
 
     struct General {
-        ConfigValue<std::string> timezone{"unknown"};
-        ConfigValue<std::string> meta_uri{"unknown"};
+        String timezone{"unknown"};
+        String meta_uri{"unknown"};
     } general;
 
     struct Network {
         struct Bind {
-            ConfigValue<std::string> address{"unknown"};
-            ConfigValue<int64_t> port{0};
+            String address{"unknown"};
+            Integer port{0};
         } bind;
         struct Http {
-            ConfigValue<bool> enable{false};
-            ConfigValue<int64_t> port{0};
+            Bool enable{false};
+            Integer port{0};
         } http;
     } network;
 
     struct DB {
-        ConfigValue<double> archive_disk_threshold{0.0};
-        ConfigValue<int64_t> archive_days_threshold{0};
+        Floating archive_disk_threshold{0.0};
+        Integer archive_days_threshold{0};
     } db;
 
     struct Storage {
-        ConfigValue<std::string> path{"unknown"};
-        ConfigValue<int64_t> auto_flush_interval{0};
-        ConfigValue<int64_t> file_cleanup_timeout{0};
+        String path{"unknown"};
+        Integer auto_flush_interval{0};
+        Integer file_cleanup_timeout{0};
     } storage;
 
     struct Cache {
-        ConfigValue<int64_t> cache_size{0};
-        ConfigValue<double> cpu_cache_threshold{0.0};
-        ConfigValue<int64_t> insert_buffer_size{0};
-        ConfigValue<bool> cache_insert_data{false};
-        ConfigValue<std::string> preload_collection{"unknown"};
+        Integer cache_size{0};
+        Floating cpu_cache_threshold{0.0};
+        Integer insert_buffer_size{0};
+        Bool cache_insert_data{false};
+        String preload_collection{"unknown"};
     } cache;
 
     struct Metric {
-        ConfigValue<bool> enable{false};
-        ConfigValue<std::string> address{"unknown"};
-        ConfigValue<int64_t> port{0};
+        Bool enable{false};
+        String address{"unknown"};
+        Integer port{0};
     } metric;
 
     struct Engine {
-        ConfigValue<int64_t> search_combine_nq{0};
-        ConfigValue<int64_t> use_blas_threshold{0};
-        ConfigValue<int64_t> omp_thread_num{0};
-        ConfigValue<int64_t> simd_type{0};
+        Integer search_combine_nq{0};
+        Integer use_blas_threshold{0};
+        Integer omp_thread_num{0};
+        Integer simd_type{0};
     } engine;
 
     struct GPU {
-        ConfigValue<bool> enable{false};
-        ConfigValue<int64_t> cache_size{0};
-        ConfigValue<double> cache_threshold{0.0};
-        ConfigValue<int64_t> gpu_search_threshold{0};
-        ConfigValue<std::string> search_devices{"unknown"};
-        ConfigValue<std::string> build_index_devices{"unknown"};
+        Bool enable{false};
+        Integer cache_size{0};
+        Floating cache_threshold{0.0};
+        Integer gpu_search_threshold{0};
+        String search_devices{"unknown"};
+        String build_index_devices{"unknown"};
     } gpu;
 
     struct Tracing {
-        ConfigValue<std::string> json_config_path{"unknown"};
+        String json_config_path{"unknown"};
     } tracing;
 
     struct WAL {
-        ConfigValue<bool> enable{false};
-        ConfigValue<bool> recovery_error_ignore{false};
-        ConfigValue<int64_t> buffer_size{0};
-        ConfigValue<std::string> path{"unknown"};
+        Bool enable{false};
+        Bool recovery_error_ignore{false};
+        Integer buffer_size{0};
+        String path{"unknown"};
     } wal;
 
     struct Logs {
-        ConfigValue<std::string> level{"unknown"};
+        String level{"unknown"};
         struct Trace {
-            ConfigValue<bool> enable{false};
+            Bool enable{false};
         } trace;
-        ConfigValue<std::string> path{"unknown"};
-        ConfigValue<int64_t> max_log_file_size{0};
-        ConfigValue<int64_t> log_rotate_num{0};
+        String path{"unknown"};
+        Integer max_log_file_size{0};
+        Integer log_rotate_num{0};
     } logs;
 };
 
