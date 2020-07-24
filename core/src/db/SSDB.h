@@ -63,6 +63,9 @@ class SSDB {
     AllCollections(std::vector<std::string>& names) = 0;
 
     virtual Status
+    GetCollectionInfo(const std::string& collection_name, std::string& collection_info) = 0;
+
+    virtual Status
     GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count) = 0;
 
     virtual Status
