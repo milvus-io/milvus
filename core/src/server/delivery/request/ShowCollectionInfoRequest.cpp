@@ -66,8 +66,7 @@ ShowCollectionInfoRequest::OnExecute() {
     }
 
     // step 3: get partitions
-    // TODO(yukun): SSDBImpl::GetCollectionInfo has not implemented yet
-    status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection_info_);
+    status = DBWrapper::SSDB()->GetCollectionInfo(collection_name_, collection_info_);
     if (!status.ok()) {
         return status;
     }

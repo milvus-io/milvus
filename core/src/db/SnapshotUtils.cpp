@@ -10,17 +10,32 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/SnapshotUtils.h"
+#include "db/SnapshotHandlers.h"
+#include "db/SnapshotVisitor.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshots.h"
 #include "segment/Segment.h"
 
 #include <memory>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace milvus {
 namespace engine {
+
+namespace {
+constexpr const char* JSON_ROW_COUNT = "row_count";
+constexpr const char* JSON_ID = "id";
+constexpr const char* JSON_PARTITIONS = "partitions";
+constexpr const char* JSON_PARTITION_TAG = "tag";
+constexpr const char* JSON_SEGMENTS = "segments";
+constexpr const char* JSON_NAME = "name";
+constexpr const char* JSON_FIELDS = "fields";
+constexpr const char* JSON_INDEX_NAME = "index_name";
+constexpr const char* JSON_DATA_SIZE = "data_size";
+}  // namespace
 
 Status
 SetSnapshotIndex(const std::string& collection_name, const std::string& field_name,
@@ -126,6 +141,104 @@ IsVectorField(const engine::snapshot::FieldPtr& field) {
 
     engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
     return ftype == engine::FIELD_TYPE::VECTOR_FLOAT || ftype == engine::FIELD_TYPE::VECTOR_BINARY;
+}
+
+Status
+GetSnapshotInfo(const std::string& collection_name, nlohmann::json& json_info) {
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    size_t total_row_count = 0;
+
+    std::unordered_map<snapshot::ID_TYPE, milvus::json> partitions;
+    auto partition_names = ss->GetPartitionNames();
+    for (auto& name : partition_names) {
+        auto partition = ss->GetPartition(name);
+
+        milvus::json json_partition;
+        json_partition[JSON_PARTITION_TAG] = name;
+        json_partition[JSON_ID] = partition->GetID();
+
+        auto partition_commit = ss->GetPartitionCommitByPartitionId(partition->GetID());
+        json_partition[JSON_ROW_COUNT] = partition_commit->GetRowCount();
+        total_row_count += partition_commit->GetRowCount();
+
+        partitions.insert(std::make_pair(partition->GetID(), json_partition));
+    }
+
+    snapshot::IDS_TYPE segment_ids;
+    auto handler = std::make_shared<SegmentsToSearchCollector>(ss, segment_ids);
+    handler->Iterate();
+
+    std::unordered_map<snapshot::ID_TYPE, std::vector<milvus::json>> segments;
+    for (auto id : segment_ids) {
+        auto segment_commit = ss->GetSegmentCommitBySegmentId(id);
+        if (segment_commit == nullptr) {
+            continue;
+        }
+
+        milvus::json json_fields;
+        auto seg_visitor = engine::SegmentVisitor::Build(ss, id);
+        auto& field_visitors = seg_visitor->GetFieldVisitors();
+        for (auto& iter : field_visitors) {
+            milvus::json json_field;
+            const engine::snapshot::FieldPtr& field = iter.second->GetField();
+            json_field[JSON_NAME] = field->GetName();
+
+            std::string index_name;
+            uint64_t total_size = 0;
+            auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
+            if (element_visitor) {
+                if (element_visitor->GetFile()) {
+                    total_size += element_visitor->GetFile()->GetSize();
+                }
+                if (element_visitor->GetElement()) {
+                    index_name = element_visitor->GetElement()->GetName();
+                }
+            }
+
+            auto index_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+            if (index_visitor && index_visitor->GetFile()) {
+                if (index_visitor->GetFile()) {
+                    total_size += index_visitor->GetFile()->GetSize();
+                }
+                if (index_visitor->GetElement()) {
+                    index_name = index_visitor->GetElement()->GetName();
+                }
+            }
+
+            auto compress_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+            if (compress_visitor && compress_visitor->GetFile()) {
+                total_size += compress_visitor->GetFile()->GetSize();
+            }
+
+            json_field[JSON_INDEX_NAME] = index_name;
+            json_field[JSON_DATA_SIZE] = total_size;
+        }
+
+        milvus::json json_segment;
+        json_segment[JSON_ID] = id;
+        json_segment[JSON_ROW_COUNT] = segment_commit->GetRowCount();
+        json_segment[JSON_DATA_SIZE] = segment_commit->GetSize();
+        json_segment[JSON_FIELDS] = json_fields;
+        segments[segment_commit->GetPartitionId()].push_back(json_segment);
+    }
+
+    milvus::json json_partitions;
+    for (auto pair : partitions) {
+        milvus::json json_segments;
+        auto seg_array = segments[pair.first];
+        for (auto& json : seg_array) {
+            json_segments.push_back(json);
+        }
+        pair.second[JSON_SEGMENTS] = json_segments;
+        json_partitions.push_back(pair.second);
+    }
+
+    json_info[JSON_ROW_COUNT] = total_row_count;
+    json_info[JSON_PARTITIONS] = json_partitions;
+
+    return Status::OK();
 }
 
 }  // namespace engine
