@@ -55,7 +55,7 @@ ShowCollectionInfoRequest::OnExecute() {
     // step 2: check collection existence
     // only process root collection, ignore partition collection
     engine::snapshot::CollectionPtr collection;
-    std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+    engine::snapshot::CollectionMappings fields_schema;
     status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
     if (!status.ok()) {
         if (status.code() == DB_NOT_FOUND) {
@@ -66,8 +66,7 @@ ShowCollectionInfoRequest::OnExecute() {
     }
 
     // step 3: get partitions
-    // TODO(yukun): SSDBImpl::GetCollectionInfo has not implemented yet
-    status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection_info_);
+    status = DBWrapper::SSDB()->GetCollectionInfo(collection_name_, collection_info_);
     if (!status.ok()) {
         return status;
     }
