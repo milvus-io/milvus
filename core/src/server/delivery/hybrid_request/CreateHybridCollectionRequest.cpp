@@ -97,8 +97,8 @@ CreateHybridCollectionRequest::OnExecute() {
                 if (field_type.second == engine::meta::hybrid::DataType::VECTOR_FLOAT ||
                     field_type.second == engine::meta::hybrid::DataType::VECTOR_BINARY) {
                     vector_param = milvus::json::parse(field_param);
-                    if (vector_param.contains("dimension")) {
-                        dimension = vector_param["dimension"].get<uint16_t>();
+                    if (vector_param.contains("dim")) {
+                        dimension = vector_param["dim"].get<uint16_t>();
                     } else {
                         return Status{milvus::SERVER_INVALID_VECTOR_DIMENSION,
                                       "Dimension should be defined in vector field extra_params"};

@@ -35,7 +35,10 @@ constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value,
 constexpr int64_t ADD_ENTITY_LOOP = 1;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
 constexpr int32_t NLIST = 16384;
-constexpr char* PARTITION_TAG = "part";
+const char* PARTITION_TAG = "part";
+const char* DIMENSION = "dim";
+const char* METRICTYPE = "metric_type";
+const char* INDEXTYPE = "index_type";
 
 void
 PrintEntity(const std::string& tag, const milvus::VectorData& entity) {
@@ -118,7 +121,8 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     index_param_4["name"] = "index_vec";
     field_ptr4->index_params = index_param_4.dump();
     JSON extra_params_4;
-    extra_params_4["dimension"] = COLLECTION_DIMENSION;
+    extra_params_4[METRICTYPE] = "L2";
+    extra_params_4[DIMENSION] = COLLECTION_DIMENSION;
     field_ptr4->extra_params = extra_params_4.dump();
 
     JSON extra_params;
@@ -343,23 +347,23 @@ ClientTest::Test() {
     CreateCollection(collection_name);
     GetCollectionInfo(collection_name);
 
-    InsertEntities(collection_name);
-    Flush(collection_name);
-    GetCollectionStats(collection_name);
-
-    BuildVectors(NQ, COLLECTION_DIMENSION);
-    GetEntityByID(collection_name, search_id_array_);
-    SearchEntities(collection_name, TOP_K, NPROBE);
-    GetCollectionStats(collection_name);
-
-    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
-    DeleteByIds(collection_name, delete_ids);
-    GetEntityByID(collection_name, search_id_array_);
-    CompactCollection(collection_name);
-
-    LoadCollection(collection_name);
-    SearchEntities(collection_name, TOP_K, NPROBE);  // this line get two search error since we delete two entities
-
-    DropIndex(collection_name, "field_vec", "index_3");
-    DropCollection(collection_name);
+//    InsertEntities(collection_name);
+//    Flush(collection_name);
+//    GetCollectionStats(collection_name);
+//
+//    BuildVectors(NQ, COLLECTION_DIMENSION);
+//    GetEntityByID(collection_name, search_id_array_);
+//    SearchEntities(collection_name, TOP_K, NPROBE);
+//    GetCollectionStats(collection_name);
+//
+//    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
+//    DeleteByIds(collection_name, delete_ids);
+//    GetEntityByID(collection_name, search_id_array_);
+//    CompactCollection(collection_name);
+//
+//    LoadCollection(collection_name);
+//    SearchEntities(collection_name, TOP_K, NPROBE);  // this line get two search error since we delete two entities
+//
+//    DropIndex(collection_name, "field_vec", "index_3");
+//    DropCollection(collection_name);
 }
