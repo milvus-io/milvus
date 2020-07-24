@@ -160,6 +160,9 @@ uint64_t hash_bytes (const uint8_t *bytes, int64_t n);
 /** Whether OpenMP annotations were respected. */
 bool check_openmp();
 
+/** get the size of L3 cache  */
+int64_t get_L3_Size();
+
 } // namspace faiss
 
 
