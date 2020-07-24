@@ -154,6 +154,7 @@ ClientTest::InsertEntities(const std::string& collection_name) {
             milvus_sdk::Utils::BuildEntities(begin_index, begin_index + BATCH_ENTITY_COUNT, field_value, entity_ids,
                                              COLLECTION_DIMENSION);
         }
+        entity_ids.clear();
         milvus::Status status = conn_->Insert(collection_name, "", field_value, entity_ids);
         search_id_array_.emplace_back(entity_ids[10]);
         std::cout << "InsertEntities function call status: " << status.message() << std::endl;
@@ -347,8 +348,9 @@ ClientTest::Test() {
     CreateCollection(collection_name);
     GetCollectionInfo(collection_name);
 
-//    InsertEntities(collection_name);
-//    Flush(collection_name);
+    InsertEntities(collection_name);
+    Flush(collection_name);
+    CountEntities(collection_name);
 //    GetCollectionStats(collection_name);
 //
 //    BuildVectors(NQ, COLLECTION_DIMENSION);

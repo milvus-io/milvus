@@ -34,18 +34,21 @@ namespace server {
 
 InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<milvus::server::Context>& context,
                                          const std::string& collection_name, const std::string& partition_name,
+                                         const int32_t& row_count,
                                          std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data)
     : BaseRequest(context, BaseRequest::kInsertEntity),
       collection_name_(collection_name),
       partition_name_(partition_name),
+      row_count_(row_count),
       chunk_data_(chunk_data) {
 }
 
 BaseRequestPtr
 InsertEntityRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                            const std::string& partition_name,
+                            const std::string& partition_name, const int32_t& row_count,
                             std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
-    return std::shared_ptr<BaseRequest>(new InsertEntityRequest(context, collection_name, partition_name, chunk_data));
+    return std::shared_ptr<BaseRequest>(
+        new InsertEntityRequest(context, collection_name, partition_name, row_count, chunk_data));
 }
 
 Status
@@ -79,6 +82,7 @@ InsertEntityRequest::OnExecute() {
         }
 
         engine::DataChunkPtr data_chunk = std::make_shared<engine::DataChunk>();
+        data_chunk->count_ = row_count_;
         data_chunk->fixed_fields_.swap(chunk_data_);
         status = DBWrapper::SSDB()->InsertEntities(collection_name_, partition_name_, data_chunk);
         if (!status.ok()) {

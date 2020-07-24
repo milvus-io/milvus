@@ -1291,6 +1291,9 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
             temp_data.resize(grpc_double_size * sizeof(double));
             memcpy(temp_data.data(), field.attr_record().double_value().data(), grpc_double_size * sizeof(double));
         } else {
+            if (!valid_row_count(row_num, field.vector_record().records_size())) {
+                return ::grpc::Status::OK;
+            }
             CopyVectorData(field.vector_record().records(), temp_data);
         }
 
@@ -1307,7 +1310,8 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     std::string collection_name = request->collection_name();
     std::string partition_name = request->partition_tag();
-    Status status = request_handler_.InsertEntity(GetContext(context), collection_name, partition_name, chunk_data);
+    Status status =
+        request_handler_.InsertEntity(GetContext(context), collection_name, partition_name, row_num, chunk_data);
     if (!status.ok()) {
         SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
@@ -1316,7 +1320,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     // return generated ids
     auto pair = chunk_data.find(engine::DEFAULT_UID_NAME);
     if (pair != chunk_data.end()) {
-        response->mutable_entity_id_array()->Resize(static_cast<int>(pair->second.size()), 0);
+        response->mutable_entity_id_array()->Resize(static_cast<int>(pair->second.size() / sizeof(int64_t)), 0);
         memcpy(response->mutable_entity_id_array()->mutable_data(), pair->second.data(), pair->second.size());
     }
 
