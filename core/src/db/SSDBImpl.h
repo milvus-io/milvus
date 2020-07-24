@@ -77,6 +77,9 @@ class SSDBImpl : public SSDB {
     ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) override;
 
     Status
+    HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) override;
+
+    Status
     InsertEntities(const std::string& collection_name, const std::string& partition_name,
                    DataChunkPtr& data_chunk) override;
 

@@ -51,26 +51,13 @@ HasPartitionRequest::OnExecute() {
             return status;
         }
 
-        // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-            } else {
-                return status;
-            }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-            }
+        bool exists = false;
+        STATUS_CHECK(DBWrapper::SSDB()->HasCollection(collection_name_, exists));
+        if (!exists) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
 
-        status = DBWrapper::DB()->HasPartition(collection_name_, partition_tag_, has_partition_);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(DBWrapper::SSDB()->HasPartition(collection_name_, partition_tag_, has_partition_));
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
