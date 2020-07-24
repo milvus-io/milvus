@@ -284,6 +284,20 @@ SSDBImpl::AllCollections(std::vector<std::string>& names) {
 }
 
 Status
+SSDBImpl::GetCollectionInfo(const std::string& collection_name, std::string& collection_info) {
+    CHECK_INITIALIZED;
+
+    nlohmann::json json;
+    auto status = GetSnapshotInfo(collection_name, json);
+    if (!status.ok()) {
+        return status;
+    }
+
+    collection_info = json.dump();
+    return Status::OK();
+}
+
+Status
 SSDBImpl::GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count) {
     CHECK_INITIALIZED;
 
@@ -356,6 +370,25 @@ SSDBImpl::ShowPartitions(const std::string& collection_name, std::vector<std::st
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     partition_names = std::move(ss->GetPartitionNames());
+    return Status::OK();
+}
+
+Status
+SSDBImpl::HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    auto partition_tags = std::move(ss->GetPartitionNames());
+    for (auto& tag : partition_tags) {
+        if (tag == partition_tag) {
+            exist = true;
+            return Status::OK();
+        }
+    }
+
+    exist = false;
     return Status::OK();
 }
 

@@ -13,6 +13,7 @@
 
 #include "db/Types.h"
 #include "db/snapshot/Resources.h"
+#include "thirdparty/nlohmann/json.hpp"
 
 #include <string>
 
@@ -32,6 +33,9 @@ DeleteSnapshotIndex(const std::string& collection_name, const std::string& field
 
 bool
 IsVectorField(const engine::snapshot::FieldPtr& field);
+
+Status
+GetSnapshotInfo(const std::string& collection_name, nlohmann::json& json_info);
 
 }  // namespace engine
 }  // namespace milvus
