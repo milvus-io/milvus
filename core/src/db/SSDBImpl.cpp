@@ -89,7 +89,7 @@ SSDBImpl::Start() {
     }
 
     // snapshot
-    auto store = snapshot::Store::Build(config.storage.path(), config.general.meta_uri());
+    auto store = snapshot::Store::Build(config.general.meta_uri(), config.storage.path());
     snapshot::OperationExecutor::Init(store);
     snapshot::OperationExecutor::GetInstance().Start();
     snapshot::EventExecutor::Init(store);
