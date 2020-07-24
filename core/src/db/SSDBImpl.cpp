@@ -374,6 +374,25 @@ SSDBImpl::ShowPartitions(const std::string& collection_name, std::vector<std::st
 }
 
 Status
+SSDBImpl::HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    auto partition_tags = std::move(ss->GetPartitionNames());
+    for (auto& tag : partition_tags) {
+        if (tag == partition_tag) {
+            exist = true;
+            return Status::OK();
+        }
+    }
+
+    exist = false;
+    return Status::OK();
+}
+
+Status
 SSDBImpl::InsertEntities(const std::string& collection_name, const std::string& partition_name,
                          DataChunkPtr& data_chunk) {
     CHECK_INITIALIZED;
