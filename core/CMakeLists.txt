@@ -63,6 +63,7 @@ if (MILVUS_GPU_VERSION)
     add_compile_definitions("MILVUS_GPU_VERSION")
     enable_language(CUDA)
     find_package(CUDA 10 REQUIRED)
+    include_directories(${CUDA_INCLUDE_DIRS})
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES --expt-extended-lambda")
 else ()
     message(STATUS "Building Milvus CPU version")
@@ -85,6 +86,7 @@ else ()
 endif ()
 
 # **************************** Source files ****************************
+
 add_subdirectory(src)
 
 if (BUILD_UNIT_TEST STREQUAL "ON")
