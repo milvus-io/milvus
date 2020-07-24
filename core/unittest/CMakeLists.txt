@@ -28,6 +28,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config/handler config_handler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/attr db_attr_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/merge db_merge_files)
@@ -135,6 +136,7 @@ set(entry_file
 
 set(common_files
         ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
+        ${MILVUS_ENGINE_SRC}/utils/ConfigUtils.cpp
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
@@ -210,10 +212,10 @@ if (MILVUS_GPU_VERSION)
             )
 endif ()
 
-add_subdirectory(db)
+#add_subdirectory(db)
 add_subdirectory(ssdb)
-add_subdirectory(metrics)
-add_subdirectory(scheduler)
-add_subdirectory(server)
-add_subdirectory(thirdparty)
-add_subdirectory(storage)
+#add_subdirectory(metrics)
+#add_subdirectory(scheduler)
+#add_subdirectory(server)
+#add_subdirectory(thirdparty)
+#add_subdirectory(storage)

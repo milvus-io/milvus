@@ -27,6 +27,7 @@ class VisitedList {
         }
     };
 
+
     ~VisitedList() { delete[] mass; }
 };
 
@@ -75,6 +76,12 @@ class VisitedListPool {
             delete rez;
         }
     };
+
+    int64_t GetSize() {
+        auto visit_list_size = sizeof(VisitedList) + numelements * sizeof(vl_type);
+        auto pool_size = pool.size() * (sizeof(VisitedList *) + visit_list_size);
+        return pool_size + sizeof(*this);
+    }
 };
 }
 

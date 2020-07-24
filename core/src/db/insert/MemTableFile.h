@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-#include "config/handler/CacheConfigHandler.h"
+#include "config/ConfigMgr.h"
 #include "db/engine/ExecutionEngine.h"
 #include "db/insert/VectorSource.h"
 #include "db/meta/Meta.h"
@@ -25,7 +25,7 @@
 namespace milvus {
 namespace engine {
 
-class MemTableFile : public server::CacheConfigHandler {
+class MemTableFile {
  public:
     MemTableFile(const std::string& collection_id, const meta::MetaPtr& meta, const DBOptions& options);
 
@@ -61,10 +61,6 @@ class MemTableFile : public server::CacheConfigHandler {
 
     meta::SegmentSchema
     GetSegmentSchema() const;
-
- protected:
-    void
-    OnCacheInsertDataChanged(bool value) override;
 
  private:
     Status

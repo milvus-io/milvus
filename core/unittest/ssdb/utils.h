@@ -44,8 +44,9 @@ using SegmentFileContext = milvus::engine::snapshot::SegmentFileContext;
 using OperationContext = milvus::engine::snapshot::OperationContext;
 using PartitionContext = milvus::engine::snapshot::PartitionContext;
 using DropIndexOperation = milvus::engine::snapshot::DropIndexOperation;
+using AddFieldElementOperation = milvus::engine::snapshot::AddFieldElementOperation;
 using DropAllIndexOperation = milvus::engine::snapshot::DropAllIndexOperation;
-using BuildOperation = milvus::engine::snapshot::BuildOperation;
+using AddSegmentFileOperation = milvus::engine::snapshot::AddSegmentFileOperation;
 using MergeOperation = milvus::engine::snapshot::MergeOperation;
 using CreateCollectionOperation = milvus::engine::snapshot::CreateCollectionOperation;
 using NewSegmentOperation = milvus::engine::snapshot::NewSegmentOperation;
@@ -65,6 +66,7 @@ using SegmentFile = milvus::engine::snapshot::SegmentFile;
 using SegmentFilePtr = milvus::engine::snapshot::SegmentFilePtr;
 using Field = milvus::engine::snapshot::Field;
 using FieldElement = milvus::engine::snapshot::FieldElement;
+using FieldElementPtr = milvus::engine::snapshot::FieldElementPtr;
 using Snapshots = milvus::engine::snapshot::Snapshots;
 using ScopedSnapshotT = milvus::engine::snapshot::ScopedSnapshotT;
 using ReferenceProxy = milvus::engine::snapshot::ReferenceProxy;
@@ -78,8 +80,10 @@ using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
 using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
 using SSDBImpl = milvus::engine::SSDBImpl;
 using Status = milvus::Status;
+using Store = milvus::engine::snapshot::Store;
 
-using MetaAdapter = milvus::engine::meta::MetaAdapter;
+using StorePtr = milvus::engine::snapshot::Store::Ptr;
+using MetaAdapterPtr = milvus::engine::meta::MetaAdapterPtr;
 
 inline int
 RandomInt(int start, int end) {
@@ -283,6 +287,10 @@ class BaseTest : public ::testing::Test {
  protected:
     void
     InitLog();
+    void
+    SnapshotStart(bool mock_store, milvus::engine::DBOptions);
+    void
+    SnapshotStop();
 
     void
     SetUp() override;
@@ -327,7 +335,29 @@ class SSSegmentTest : public BaseTest {
 ///////////////////////////////////////////////////////////////////////////////
 class SSMetaTest : public BaseTest {
  protected:
-    MetaAdapter meta_ = MetaAdapter::GetInstance();
+    MetaAdapterPtr meta_;
+
+ protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+class SSSchedulerTest : public BaseTest {
+ protected:
+    std::shared_ptr<SSDBImpl> db_;
+
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+class SSEventTest : public BaseTest {
+ protected:
+    StorePtr store_;
 
  protected:
     void

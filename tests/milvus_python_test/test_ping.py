@@ -11,7 +11,7 @@ class TestPing:
         method: call the server_version method after connected
         expected: version should be the milvus version
         '''
-        status, res = connect.server_version()
+        res = connect.server_version()
         assert res == __version__
 
     def test_server_status(self, connect):
@@ -20,8 +20,8 @@ class TestPing:
         method: call the server_status method after connected
         expected: status returned should be ok
         '''
-        status, msg = connect.server_status()
-        assert status.OK()
+        msg = connect.server_status()
+        assert msg == "OK"
 
     def test_server_cmd_with_params_version(self, connect):
         '''
@@ -30,10 +30,8 @@ class TestPing:
         expected: when cmd = 'version', return version of server;
         '''
         cmd = "version"
-        status, msg = connect._cmd(cmd)
-        logging.getLogger().info(status)
+        msg = connect._cmd(cmd)
         logging.getLogger().info(msg)
-        assert status.OK()
         assert msg == __version__
 
     def test_server_cmd_with_params_others(self, connect):
@@ -43,11 +41,7 @@ class TestPing:
         expected: when cmd = 'version', return version of server;
         '''
         cmd = "rm -rf test"
-        status, msg = connect._cmd(cmd)
-        logging.getLogger().info(status)
-        logging.getLogger().info(msg)
-        assert status.OK()
-        # assert msg == __version__
+        msg = connect._cmd(cmd)
 
     def test_connected(self, connect):
         # assert connect.connected()
@@ -61,7 +55,7 @@ class TestPingWithTimeout:
         method: call the server_version method after connected with altering timeout
         expected: version should be the milvus version
         '''
-        status, res = connect.server_version(20)
+        res = connect.server_version(20)
         assert res == __version__
 
     def test_server_version_negative_timeout(self, connect):
@@ -70,8 +64,8 @@ class TestPingWithTimeout:
         method: call the server_version method after connected with altering timeout
         expected: when timeout is illegal raises an error;
         '''
-        status, res = connect.server_version(-1)
-        assert not status.OK()
+        with pytest.raises(Exception) as e:
+            res = connect.server_version(-1)
 
     def test_server_cmd_with_params_version_with_legal_timeout(self, connect):
         '''
@@ -80,10 +74,8 @@ class TestPingWithTimeout:
         expected: when cmd = 'version', return version of server;
         '''
         cmd = "version"
-        status, msg = connect._cmd(cmd, 10)
-        logging.getLogger().info(status)
+        msg = connect._cmd(cmd, 10)
         logging.getLogger().info(msg)
-        assert status.OK()
         assert msg == __version__
 
     def test_server_cmd_with_params_version_with_illegal_timeout(self, connect):
@@ -92,8 +84,8 @@ class TestPingWithTimeout:
         method: cmd = "version" , timeout=-1
         expected: when timeout is illegal raises an error; 
         '''
-        status, res = connect.server_version(-1)
-        assert not status.OK()
+        with pytest.raises(Exception) as e:
+            res = connect.server_version(-1)
 
     def test_server_cmd_with_params_others_with_illegal_timeout(self, connect):
         '''
@@ -102,8 +94,8 @@ class TestPingWithTimeout:
         expected: when timeout is illegal raises an error;
         '''
         cmd = "rm -rf test"
-        status, res = connect.server_version(-1)
-        assert not status.OK()
+        with pytest.raises(Exception) as e:
+            res = connect.server_version(-1)
 
 
 class TestPingDisconnect:
@@ -113,10 +105,8 @@ class TestPingDisconnect:
         method: call the server_version method after connected
         expected: version should not be the pymilvus version
         '''
-        res = None
         with pytest.raises(Exception) as e:
-            status, res = connect.server_version()
-        assert res is None
+            res = dis_connect.server_version()
 
     def test_server_status(self, dis_connect):
         '''
@@ -124,12 +114,10 @@ class TestPingDisconnect:
         method: call the server_status method after connected
         expected: status returned should be not ok
         '''
-        status = None
         with pytest.raises(Exception) as e:
-            status, msg = connect.server_status()
-        assert status is None
+            res = dis_connect.server_status()
 
-    def test_server_version_with_timeout(self, dis_connect):
+    def test_server_version_with_timeout(self, connect):
         '''
         target: test get the server status with timeout settings after disconnect
         method: call the server_status method after connected
@@ -137,5 +125,4 @@ class TestPingDisconnect:
         '''
         status = None
         with pytest.raises(Exception) as e:
-            status, msg = connect.server_status(100)
-        assert status is None
+            res = connect.server_status(100)

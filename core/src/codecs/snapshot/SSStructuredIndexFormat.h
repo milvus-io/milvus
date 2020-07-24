@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "db/meta/MetaTypes.h"
-#include "segment/AttrsIndex.h"
+#include "knowhere/index/Index.h"
 #include "storage/FSHandler.h"
 
 namespace milvus {
@@ -32,11 +32,15 @@ class SSStructuredIndexFormat {
  public:
     SSStructuredIndexFormat() = default;
 
-    void
-    read(const storage::FSHandlerPtr& fs_ptr, segment::AttrsIndexPtr& attr_index);
+    std::string
+    FilePostfix();
 
     void
-    write(const storage::FSHandlerPtr& fs_ptr, const segment::AttrsIndexPtr& attr_index);
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::IndexPtr& index);
+
+    void
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::meta::hybrid::DataType data_type,
+          const knowhere::IndexPtr& index);
 
     // No copy and move
     SSStructuredIndexFormat(const SSStructuredIndexFormat&) = delete;
@@ -48,15 +52,8 @@ class SSStructuredIndexFormat {
     operator=(SSStructuredIndexFormat&&) = delete;
 
  private:
-    void
-    read_internal(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& path, knowhere::IndexPtr& index,
-                  engine::meta::hybrid::DataType& attr_type);
-
     knowhere::IndexPtr
-    create_structured_index(const engine::meta::hybrid::DataType data_type);
-
- private:
-    const std::string attr_index_extension_ = ".idx";
+    CreateStructuredIndex(const engine::meta::hybrid::DataType data_type);
 };
 
 using SSStructuredIndexFormatPtr = std::shared_ptr<SSStructuredIndexFormat>;

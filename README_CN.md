@@ -23,7 +23,7 @@ Milvus 的架构如下：
 
 ![arch](https://github.com/milvus-io/docs/blob/v0.9.1/assets/milvus_arch.png)
 
-若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/docs/overview.md)。您可以通过 [版本发布说明](https://www.milvus.io/docs/release_notes.md) 获取最新版本的功能和更新。
+若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/docs/overview.md)。你可以通过 [版本发布说明](https://www.milvus.io/docs/release_notes.md) 获取最新版本的功能和更新。
 
 Milvus是一个[LF AI基金会](https://lfai.foundation/)的孵化项目。获取更多，请访问[lfai.foundation](https://lfai.foundation/)。
 
@@ -35,7 +35,7 @@ Milvus是一个[LF AI基金会](https://lfai.foundation/)的孵化项目。获�
 
 ### 尝试示例代码
 
-您可以尝试用 [Python](https://www.milvus.io/docs/example_code.md)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
+你可以尝试用 [Python](https://www.milvus.io/docs/example_code.md)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
 
 ## 支持的客户端
 
@@ -48,7 +48,7 @@ Milvus是一个[LF AI基金会](https://lfai.foundation/)的孵化项目。获�
 
 ## 应用场景
 
-Milvus 可以应用于多种 AI 场景。您可以访问 [Milvus 应用场景](https://milvus.io/scenarios) 体验在线场景展示。您也可以访问 [Milvus 训练营](https://github.com/milvus-io/bootcamp) 了解更详细的应用场景和解决方案。
+Milvus 可以应用于多种 AI 场景。你可以访问 [Milvus 应用场景](https://milvus.io/scenarios) 体验在线场景展示。你也可以访问 [Milvus 训练营](https://github.com/milvus-io/bootcamp) 了解更详细的应用场景和解决方案。
 
 ## 性能基准测试
 
@@ -56,15 +56,15 @@ Milvus 可以应用于多种 AI 场景。您可以访问 [Milvus 应用场景](h
 
 ## 路线图
 
-您可以参考我们的[路线图](https://github.com/milvus-io/milvus/milestones)，了解 Milvus 即将实现的新特性。
+你可以参考我们的[路线图](https://github.com/milvus-io/milvus/milestones)，了解 Milvus 即将实现的新特性。
 
 路线图尚未完成，并且可能会存在合理改动。我们欢迎各种针对路线图的意见、需求和建议。
 
 ## 贡献者指南
 
-我们由衷欢迎您推送贡献。关于贡献流程的详细信息，请参阅[贡献者指南](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md)。本项目遵循 Milvus [行为准则](https://github.com/milvus-io/milvus/blob/master/CODE_OF_CONDUCT.md)。如果您希望参与本项目，请遵守该准则的内容。
+我们由衷欢迎你推送贡献。关于贡献流程的详细信息，请参阅[贡献者指南](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md)。本项目遵循 Milvus [行为准则](https://github.com/milvus-io/milvus/blob/master/CODE_OF_CONDUCT.md)。如果你希望参与本项目，请遵守该准则的内容。
 
-我们使用 [GitHub issues](https://github.com/milvus-io/milvus/issues) 追踪问题和补丁。若您希望提出问题或进行讨论，请加入我们的社区。
+我们使用 [GitHub issues](https://github.com/milvus-io/milvus/issues) 追踪问题和补丁。若你希望提出问题或进行讨论，请加入我们的社区。
 
 ## 加入 Milvus 社区
 

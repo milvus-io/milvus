@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "config/ServerConfig.h"
 #include "db/Constants.h"
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
@@ -35,9 +36,6 @@ SSMemSegment::SSMemSegment(int64_t collection_id, int64_t partition_id, const DB
     : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
     current_mem_ = 0;
     CreateSegment();
-
-    SetIdentity("SSMemSegment");
-    AddCacheInsertDataListener();
 }
 
 Status
@@ -153,7 +151,6 @@ SSMemSegment::GetSingleEntitySize(int64_t& single_size) {
             case meta::hybrid::DataType::INT64:
                 single_size += sizeof(uint64_t);
                 break;
-            case meta::hybrid::DataType::VECTOR:
             case meta::hybrid::DataType::VECTOR_FLOAT:
             case meta::hybrid::DataType::VECTOR_BINARY: {
                 json params = field->GetParams();
@@ -296,11 +293,6 @@ SSMemSegment::Serialize(uint64_t wal_lsn) {
 int64_t
 SSMemSegment::GetSegmentId() const {
     return segment_->GetID();
-}
-
-void
-SSMemSegment::OnCacheInsertDataChanged(bool value) {
-    options_.insert_cache_immediately_ = value;
 }
 
 }  // namespace engine

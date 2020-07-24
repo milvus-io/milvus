@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "config/ServerConfig.h"
 #include "server/delivery/request/BaseRequest.h"
 
 namespace milvus {
@@ -36,6 +37,8 @@ class ReLoadSegmentsRequest : public BaseRequest {
  private:
     const std::string collection_name_;
     const std::vector<std::string> segment_ids_;
+    bool cluster_enable_ = false;
+    ClusterRole cluster_role_ = ClusterRole::RW;
 };
 
 }  // namespace server

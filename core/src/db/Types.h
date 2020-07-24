@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -40,6 +41,8 @@ typedef std::vector<faiss::Index::idx_t> ResultIds;
 typedef std::vector<faiss::Index::distance_t> ResultDistances;
 
 struct CollectionIndex {
+    std::string field_name_;
+    std::string index_name_;
     int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
     int32_t metric_type_ = (int)MetricType::L2;
     milvus::json extra_params_ = {{"nlist", 2048}};
@@ -53,7 +56,7 @@ struct VectorsData {
 };
 
 struct Entity {
-    uint64_t entity_count_ = 0;
+    int64_t entity_count_ = 0;
     std::vector<uint8_t> attr_value_;
     std::unordered_map<std::string, VectorsData> vector_data_;
     IDNumbers id_array_;
@@ -73,6 +76,7 @@ struct QueryResult {
     std::vector<engine::VectorsData> vectors_;
     std::vector<engine::AttrsData> attrs_;
 };
+using QueryResultPtr = std::shared_ptr<QueryResult>;
 
 using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;
@@ -83,6 +87,11 @@ extern const char* DEFAULT_RAW_DATA_NAME;
 extern const char* DEFAULT_BLOOM_FILTER_NAME;
 extern const char* DEFAULT_DELETED_DOCS_NAME;
 extern const char* DEFAULT_INDEX_NAME;
+
+extern const char* PARAM_COLLECTION_DIMENSION;
+extern const char* PARAM_INDEX_METRIC_TYPE;
+extern const char* PARAM_INDEX_EXTRA_PARAMS;
+extern const char* PARAM_SEGMENT_SIZE;
 
 using FieldType = meta::hybrid::DataType;
 

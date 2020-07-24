@@ -46,10 +46,6 @@ class RequestHandler {
            const std::string& partition_tag);
 
     Status
-    GetVectorsByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                   const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors);
-
-    Status
     GetVectorIDs(const std::shared_ptr<Context>& context, const std::string& collection_name,
                  const std::string& segment_name, std::vector<int64_t>& vector_ids);
 
@@ -135,7 +131,8 @@ class RequestHandler {
 
     Status
     InsertEntity(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                 const std::string& partition_name, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
+                 const std::string& partition_name, const int32_t& row_count,
+                 std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
 
     Status
     GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,

@@ -67,6 +67,12 @@ class SSSegmentWriter {
     WriteVectorIndex(const std::string& field_name);
 
     Status
+    SetStructuredIndex(const std::string& field_name, const knowhere::IndexPtr& index);
+
+    Status
+    WriteStructuredIndex(const std::string& field_name);
+
+    Status
     GetSegment(engine::SegmentPtr& segment_ptr);
 
     Status

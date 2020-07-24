@@ -12,8 +12,6 @@
 #include "server/grpc_impl/GrpcRequestHandler.h"
 
 #include <fiu-local.h>
-#include <src/db/snapshot/Context.h>
-#include <src/segment/Segment.h>
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -23,7 +21,6 @@
 
 #include "context/HybridSearchContext.h"
 #include "query/BinaryQuery.h"
-#include "server/ValidationUtil.h"
 #include "server/context/ConnectionContext.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
@@ -36,7 +33,6 @@ namespace server {
 namespace grpc {
 
 const char* EXTRA_PARAM_KEY = "params";
-const size_t MAXIMUM_FIELD_NUM = 64;
 
 ::milvus::grpc::ErrorCode
 ErrorMap(ErrorCode code) {
@@ -55,8 +51,6 @@ ErrorMap(ErrorCode code) {
         {SERVER_INVALID_COLLECTION_NAME, ::milvus::grpc::ErrorCode::ILLEGAL_COLLECTION_NAME},
         {SERVER_INVALID_COLLECTION_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
         {SERVER_INVALID_VECTOR_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
-        {SERVER_INVALID_FIELD_NAME, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
-        {SERVER_INVALID_FIELD_NUM, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
 
         {SERVER_INVALID_INDEX_TYPE, ::milvus::grpc::ErrorCode::ILLEGAL_INDEX_TYPE},
         {SERVER_INVALID_ROWRECORD, ::milvus::grpc::ErrorCode::ILLEGAL_ROWRECORD},
@@ -132,7 +126,6 @@ CopyVectorData(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRo
             offset += single_size;
         }
     }
-    vectors_data = binary_array;
 }
 
 void
@@ -1323,6 +1316,9 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
             temp_data.resize(grpc_double_size * sizeof(double));
             memcpy(temp_data.data(), field.attr_record().double_value().data(), grpc_double_size * sizeof(double));
         } else {
+            if (!valid_row_count(row_num, field.vector_record().records_size())) {
+                return ::grpc::Status::OK;
+            }
             CopyVectorData(field.vector_record().records(), temp_data);
         }
 
@@ -1339,7 +1335,8 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     std::string collection_name = request->collection_name();
     std::string partition_name = request->partition_tag();
-    Status status = request_handler_.InsertEntity(GetContext(context), collection_name, partition_name, chunk_data);
+    Status status =
+        request_handler_.InsertEntity(GetContext(context), collection_name, partition_name, row_num, chunk_data);
     if (!status.ok()) {
         SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
@@ -1348,7 +1345,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     // return generated ids
     auto pair = chunk_data.find(engine::DEFAULT_UID_NAME);
     if (pair != chunk_data.end()) {
-        response->mutable_entity_id_array()->Resize(static_cast<int>(pair->second.size()), 0);
+        response->mutable_entity_id_array()->Resize(static_cast<int>(pair->second.size() / sizeof(int64_t)), 0);
         memcpy(response->mutable_entity_id_array()->mutable_data(), pair->second.data(), pair->second.size());
     }
 
@@ -1528,7 +1525,6 @@ ParseRangeQuery(const nlohmann::json& range_json, query::RangeQueryPtr& range_qu
     }
     return Status::OK();
 }
-#endif
 
 Status
 GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query) {
@@ -1709,8 +1705,6 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();
     query::QueryPtr query_ptr = std::make_shared<query::Query>();
-    query_ptr->collection_id = request->collection_name();
-
     std::unordered_map<std::string, query::VectorQueryPtr> vectors;
 
     status = DeserializeJsonToBoolQuery(request->vector_param(), request->dsl(), boolean_query, vectors);

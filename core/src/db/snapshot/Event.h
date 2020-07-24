@@ -18,20 +18,20 @@
 
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "db/snapshot/Store.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
 
-class Event {
+class MetaEvent {
  public:
-    virtual Status
-    Process() = 0;
+    virtual Status Process(StorePtr) = 0;
 };
 
 template <class ResourceT>
-class ResourceGCEvent : public Event {
+class ResourceGCEvent : public MetaEvent {
  public:
     using Ptr = std::shared_ptr<ResourceGCEvent>;
 
@@ -41,22 +41,27 @@ class ResourceGCEvent : public Event {
     ~ResourceGCEvent() = default;
 
     Status
-    Process() override {
-        auto& store = Store::GetInstance();
-
+    Process(StorePtr store) override {
         /* mark resource as 'deleted' in meta */
         auto sd_op = std::make_shared<SoftDeleteOperation<ResourceT>>(res_->GetID());
         STATUS_CHECK((*sd_op)(store));
 
         /* TODO: physically clean resource */
-        std::string res_path = GetResPath<ResourceT>(dir_root_, res_);
+        auto res_prefix = store->GetRootPath();
+        std::string res_path = GetResPath<ResourceT>(res_prefix, res_);
         /* if (!boost::filesystem::exists(res_path)) { */
         /*     return Status::OK(); */
         /* } */
-        if (boost::filesystem::is_directory(res_path)) {
-            boost::filesystem::remove_all(res_path);
+        if (res_path.empty()) {
+            /* std::cout << "[GC] No remove action for " << res_->ToString() << std::endl; */
+        } else if (boost::filesystem::is_directory(res_path)) {
+            auto ok = boost::filesystem::remove_all(res_path);
+            std::cout << "[GC] Remove DIR " << res_->ToString() << " " << res_path << " " << ok << std::endl;
+        } else if (boost::filesystem::is_regular_file(res_path)) {
+            auto ok = boost::filesystem::remove(res_path);
+            std::cout << "[GC] Remove FILE " << res_->ToString() << " " << res_path << " " << ok << std::endl;
         } else {
-            boost::filesystem::remove(res_path);
+            std::cout << "[GC] Remove STALE OBJECT " << res_path << " for " << res_->ToString() << std::endl;
         }
 
         /* remove resource from meta */
@@ -68,7 +73,6 @@ class ResourceGCEvent : public Event {
 
  private:
     class ResourceT::Ptr res_;
-    std::string dir_root_;
 };
 
 }  // namespace snapshot

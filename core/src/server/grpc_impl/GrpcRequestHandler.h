@@ -87,7 +87,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return Status
     ::grpc::Status
-    CreateCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionSchema* request,
+    CreateCollection(::grpc::ServerContext* context, const ::milvus::grpc::Mapping* request,
                      ::milvus::grpc::Status* response) override;
     // *
     // @brief This method is used to test collection existence.
@@ -106,7 +106,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // @return CollectionSchema
     ::grpc::Status
     DescribeCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
-                       ::milvus::grpc::CollectionSchema* response) override;
+                       ::milvus::grpc::Mapping* response) override;
     // *
     // @brief This method is used to get collection schema.
     //
@@ -169,7 +169,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return Status
     ::grpc::Status
-    DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+    DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
               ::milvus::grpc::Status* response) override;
     // *
     // @brief This method is used to create partition
@@ -217,7 +217,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // @return VectorIds
     ::grpc::Status
     Insert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request,
-           ::milvus::grpc::VectorIds* response) override;
+           ::milvus::grpc::EntityIds* response) override;
     // *
     // @brief This method is used to get vectors data by id array.
     //
@@ -225,8 +225,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return VectorsData
     ::grpc::Status
-    GetVectorsByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorsIdentity* request,
-                   ::milvus::grpc::VectorsData* response);
+    GetEntityByID(::grpc::ServerContext* context, const ::milvus::grpc::EntityIdentity* request,
+                  ::milvus::grpc::Entities* response) override;
 
     // *
     // @brief This method is used to get vector ids from a segment
@@ -235,8 +235,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return VectorIds
     ::grpc::Status
-    GetVectorIDs(::grpc::ServerContext* context, const ::milvus::grpc::GetVectorIDsParam* request,
-                 ::milvus::grpc::VectorIds* response);
+    GetEntityIDs(::grpc::ServerContext* context, const ::milvus::grpc::GetEntityIDsParam* request,
+                 ::milvus::grpc::EntityIds* response) override;
     // *
     // @brief This method is used to query vector in collection.
     //
@@ -245,7 +245,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // @return TopKQueryResultList
     ::grpc::Status
     Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
-           ::milvus::grpc::TopKQueryResult* response) override;
+           ::milvus::grpc::QueryResult* response) override;
 
     // *
     // @brief This method is used to query vector by id.
@@ -255,7 +255,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // @return TopKQueryResult
     ::grpc::Status
     SearchByID(::grpc::ServerContext* context, const ::milvus::grpc::SearchByIDParam* request,
-               ::milvus::grpc::TopKQueryResult* response);
+               ::milvus::grpc::QueryResult* response);
 
     // *
     // @brief This method is used to query vector in specified files.
@@ -265,7 +265,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // @return TopKQueryResultList
     ::grpc::Status
     SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request,
-                  ::milvus::grpc::TopKQueryResult* response) override;
+                  ::milvus::grpc::QueryResult* response) override;
 
     // *
     // @brief This method is used to give the server status.
@@ -285,7 +285,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // @return status
     ::grpc::Status
     DeleteByID(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByIDParam* request,
-               ::milvus::grpc::Status* response);
+               ::milvus::grpc::Status* response) override;
 
     // *
     // @brief This method is used to preload collection
@@ -309,7 +309,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return Status
     ::grpc::Status
-    Flush(::grpc::ServerContext* context, const ::milvus::grpc::FlushParam* request, ::milvus::grpc::Status* response);
+    Flush(::grpc::ServerContext* context, const ::milvus::grpc::FlushParam* request,
+          ::milvus::grpc::Status* response) override;
 
     // *
     // @brief This method is used to compact collection
@@ -324,81 +325,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     /*******************************************New Interface*********************************************/
 
     ::grpc::Status
-    CreateHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::Mapping* request,
-                           ::milvus::grpc::Status* response) override;
-
-    //    ::grpc::Status
-    //    HasCollection(::grpc::ServerContext* context,
-    //                  const ::milvus::grpc::CollectionName* request,
-    //                  ::milvus::grpc::BoolReply* response) override;
-    //
-    //    ::grpc::Status
-    //    DropCollection(::grpc::ServerContext* context,
-    //                   const ::milvus::grpc::CollectionName* request,
-    //                   ::milvus::grpc::Status* response) override;
-    //
-    ::grpc::Status
-    DescribeHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
-                             ::milvus::grpc::Mapping* response) override;
-    //
-    //    ::grpc::Status
-    //    CountCollection(::grpc::ServerContext* context,
-    //                    const ::milvus::grpc::CollectionName* request,
-    //                    ::milvus::grpc::CollectionRowCount* response) override;
-    //
-    //    ::grpc::Status
-    //    ShowCollections(::grpc::ServerContext* context,
-    //                    const ::milvus::grpc::Command* request,
-    //                    ::milvus::grpc::MappingList* response) override;
-    //
-    //    ::grpc::Status
-    //    ShowCollectionInfo(::grpc::ServerContext* context,
-    //                       const ::milvus::grpc::CollectionName* request,
-    //                       ::milvus::grpc::CollectionInfo* response) override;
-    //
-    //    ::grpc::Status
-    //    PreloadCollection(::grpc::ServerContext* context,
-    //                      const ::milvus::grpc::CollectionName* request,
-    //                      ::milvus::grpc::Status* response) override;
-    //
-    ::grpc::Status
-    InsertEntity(::grpc::ServerContext* context, const ::milvus::grpc::HInsertParam* request,
-                 ::milvus::grpc::HEntityIDs* response) override;
-
-    ::grpc::Status
-    HybridSearchPB(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParamPB* request,
-                   ::milvus::grpc::HQueryResult* response) override;
-
-    ::grpc::Status
-    HybridSearch(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParam* request,
-                 ::milvus::grpc::HQueryResult* response) override;
-
-    ::grpc::Status
-    GetEntityByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorsIdentity* request,
-                  ::milvus::grpc::HEntity* response) override;
-
-    ::grpc::Status
-    CreateHybridIndex(::grpc::ServerContext* context, const ::milvus::grpc::HIndexParam* request,
-                      ::milvus::grpc::Status* response) override;
-
-    //
-    //    ::grpc::Status
-    //    HybridSearchInSegments(::grpc::ServerContext* context,
-    //                           const ::milvus::
-    //                           grpc::HSearchInSegmentsParam* request,
-    //                           ::milvus::grpc::HQueryResult* response) override;
-    //
-
-    //
-    //    ::grpc::Status
-    //    GetEntityIDs(::grpc::ServerContext* context,
-    //                 const ::milvus::grpc::HGetEntityIDsParam* request,
-    //                 ::milvus::grpc::HEntityIDs* response) override;
-    //
-    //    ::grpc::Status
-    //    DeleteEntitiesByID(::grpc::ServerContext* context,
-    //                       const ::milvus::grpc::HDeleteByIDParam* request,
-    //                       ::milvus::grpc::Status* response) override;
+    SearchPB(::grpc::ServerContext* context, const ::milvus::grpc::SearchParamPB* request,
+             ::milvus::grpc::QueryResult* response) override;
 
     void
     RegisterRequestHandler(const RequestHandler& handler) {

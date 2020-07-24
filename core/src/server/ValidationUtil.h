@@ -28,14 +28,19 @@ extern Status
 ValidateCollectionName(const std::string& collection_name);
 
 extern Status
+ValidateFieldName(const std::string& field_name);
+
+extern Status
+ValidateIndexName(const std::string& index_name);
+
+extern Status
 ValidateTableDimension(int64_t dimension, int64_t metric_type);
 
 extern Status
 ValidateCollectionIndexType(int32_t index_type);
 
 extern Status
-ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& collection_schema,
-                    int32_t index_type);
+ValidateIndexParams(const milvus::json& index_params, int64_t dimension, int32_t index_type);
 
 extern Status
 ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& collection_schema,

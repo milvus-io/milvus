@@ -12,13 +12,13 @@
 #include "db/SnapshotHandlers.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
+#include "db/meta/MetaConsts.h"
 #include "db/meta/MetaTypes.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshot.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/SSSegmentReader.h"
-#include "utils/StringHelpFunctions.h"
 
 #include <unordered_map>
 #include <utility>
@@ -75,35 +75,47 @@ LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, meta::FilesHolder& holder)
-    : BaseT(ss), holder_(holder) {
+SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids)
+    : BaseT(ss), segment_ids_(segment_ids) {
 }
 
 Status
 SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
-    // SS TODO
-    meta::SegmentSchema schema;
-    /* schema.id_ = segment_commit->GetSegmentId(); */
-    /* schema.file_type_ = resRow["file_type"]; */
-    /* schema.file_size_ = resRow["file_size"]; */
-    /* schema.row_count_ = resRow["row_count"]; */
-    /* schema.date_ = resRow["date"]; */
-    /* schema.engine_type_ = resRow["engine_type"]; */
-    /* schema.created_on_ = resRow["created_on"]; */
-    /* schema.updated_time_ = resRow["updated_time"]; */
+    segment_ids_.push_back(segment_commit->GetSegmentId());
+}
 
-    /* schema.dimension_ = collection_schema.dimension_; */
-    /* schema.index_file_size_ = collection_schema.index_file_size_; */
-    /* schema.index_params_ = collection_schema.index_params_; */
-    /* schema.metric_type_ = collection_schema.metric_type_; */
+///////////////////////////////////////////////////////////////////////////////
+SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss, const std::string& field_name,
+                                                   snapshot::IDS_TYPE& segment_ids)
+    : BaseT(ss), field_name_(field_name), segment_ids_(segment_ids) {
+}
 
-    /* auto status = utils::GetCollectionFilePath(options_, schema); */
-    /* if (!status.ok()) { */
-    /*     ret = status; */
-    /*     continue; */
-    /* } */
+Status
+SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
+    if (segment_commit->GetRowCount() < meta::BUILD_INDEX_THRESHOLD) {
+        return Status::OK();
+    }
 
-    holder_.MarkFile(schema);
+    auto segment_visitor = engine::SegmentVisitor::Build(ss_, segment_commit->GetSegmentId());
+    if (field_name_.empty()) {
+        auto field_visitors = segment_visitor->GetFieldVisitors();
+        for (auto& pair : field_visitors) {
+            auto& field_visitor = pair.second;
+            auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+            if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
+                segment_ids_.push_back(segment_commit->GetSegmentId());
+                break;
+            }
+        }
+    } else {
+        auto field_visitor = segment_visitor->GetFieldVisitor(field_name_);
+        auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
+            segment_ids_.push_back(segment_commit->GetSegmentId());
+        }
+    }
+
+    return Status::OK();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -126,20 +138,12 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
 
     auto uid_field_visitor = segment_visitor->GetFieldVisitor(DEFAULT_UID_NAME);
 
-    /* load UID's bloom filter file */
+    // load UID's bloom filter file
     segment::IdBloomFilterPtr id_bloom_filter_ptr;
     STATUS_CHECK(segment_reader.LoadBloomFilter(id_bloom_filter_ptr));
 
-    /* load UID's raw data */
     std::vector<int64_t> uids;
-    STATUS_CHECK(segment_reader.LoadUids(uids));
-
-    /* load UID's deleted docs */
     segment::DeletedDocsPtr deleted_docs_ptr;
-    STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
-
-    auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
-
     std::vector<int64_t> offsets;
     for (auto id : ids_) {
         // fast check using bloom filter
@@ -148,6 +152,9 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
         }
 
         // check if id really exists in uids
+        if (uids.empty()) {
+            STATUS_CHECK(segment_reader.LoadUids(uids));  // lazy load
+        }
         auto found = std::find(uids.begin(), uids.end(), id);
         if (found == uids.end()) {
             continue;
@@ -155,11 +162,16 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
 
         // check if this id is deleted
         auto offset = std::distance(uids.begin(), found);
-        auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
-        if (deleted != deleted_docs.end()) {
-            continue;
+        if (deleted_docs_ptr == nullptr) {
+            STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));  // lazy load
         }
-
+        if (deleted_docs_ptr) {
+            auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+            auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
+            if (deleted != deleted_docs.end()) {
+                continue;
+            }
+        }
         offsets.push_back(offset);
     }
 
@@ -169,28 +181,6 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-HybridQueryHelperSegmentHandler::HybridQueryHelperSegmentHandler(const server::ContextPtr& context,
-                                                                 engine::snapshot::ScopedSnapshotT ss,
-                                                                 const std::vector<std::string>& partition_patterns)
-    : BaseT(ss), context_(context), partition_patterns_(partition_patterns), segments_() {
-}
 
-Status
-HybridQueryHelperSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
-    if (partition_patterns_.empty()) {
-        segments_.push_back(segment);
-    } else {
-        auto p_id = segment->GetPartitionId();
-        auto p_ptr = ss_->GetResource<snapshot::Partition>(p_id);
-        auto& p_name = p_ptr->GetName();
-        for (auto& pattern : partition_patterns_) {
-            if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
-                segments_.push_back(segment);
-                break;
-            }
-        }
-    }
-    return Status::OK();
-}
 }  // namespace engine
 }  // namespace milvus

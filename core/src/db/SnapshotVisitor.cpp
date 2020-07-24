@@ -30,10 +30,20 @@ SnapshotVisitor::SnapshotVisitor(snapshot::ID_TYPE collection_id) {
 }
 
 Status
-SnapshotVisitor::SegmentsToSearch(meta::FilesHolder& files_holder) {
+SnapshotVisitor::SegmentsToSearch(snapshot::IDS_TYPE& segment_ids) {
     STATUS_CHECK(status_);
 
-    auto handler = std::make_shared<SegmentsToSearchCollector>(ss_, files_holder);
+    auto handler = std::make_shared<SegmentsToSearchCollector>(ss_, segment_ids);
+    handler->Iterate();
+
+    return handler->GetStatus();
+}
+
+Status
+SnapshotVisitor::SegmentsToIndex(const std::string& field_name, snapshot::IDS_TYPE& segment_ids) {
+    STATUS_CHECK(status_);
+
+    auto handler = std::make_shared<SegmentsToIndexCollector>(ss_, field_name, segment_ids);
     handler->Iterate();
 
     return handler->GetStatus();
@@ -180,7 +190,7 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& 
         return nullptr;
     }
 
-    auto visitor = std::make_shared<SegmentVisitor>();
+    SegmentVisitorPtr visitor = std::make_shared<SegmentVisitor>(ss);
     visitor->SetSegment(segment);
 
     auto executor = [&](const snapshot::Field::Ptr& field, snapshot::FieldIterator* itr) -> Status {
@@ -209,7 +219,7 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id
         return nullptr;
     }
 
-    auto visitor = std::make_shared<SegmentVisitor>();
+    auto visitor = std::make_shared<SegmentVisitor>(ss);
     visitor->SetSegment(segment);
 
     auto executor = [&](const snapshot::Field::Ptr& field, snapshot::FieldIterator* itr) -> Status {
@@ -226,6 +236,9 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id
     iterator->Iterate();
 
     return visitor;
+}
+
+SegmentVisitor::SegmentVisitor(snapshot::ScopedSnapshotT ss) : snapshot_(ss) {
 }
 
 std::string

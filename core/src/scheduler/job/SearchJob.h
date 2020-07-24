@@ -23,9 +23,9 @@
 #include <vector>
 
 #include "Job.h"
+#include "db/SnapshotVisitor.h"
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
-
 #include "query/GeneralQuery.h"
 
 #include "server/context/Context.h"
@@ -134,6 +134,11 @@ class SearchJob : public Job {
     uint64_t&
     vector_count() {
         return vector_count_;
+    }
+
+    milvus::json&
+    vector_params() {
+        return extra_params_;
     }
 
     SearchTimeStat&

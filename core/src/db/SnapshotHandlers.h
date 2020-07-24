@@ -54,12 +54,25 @@ struct LoadVectorFieldHandler : public snapshot::IterateHandler<snapshot::Field>
 struct SegmentsToSearchCollector : public snapshot::IterateHandler<snapshot::SegmentCommit> {
     using ResourceT = snapshot::SegmentCommit;
     using BaseT = snapshot::IterateHandler<ResourceT>;
-    SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, meta::FilesHolder& holder);
+    SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
-    meta::FilesHolder& holder_;
+    snapshot::IDS_TYPE& segment_ids_;
+};
+
+struct SegmentsToIndexCollector : public snapshot::IterateHandler<snapshot::SegmentCommit> {
+    using ResourceT = snapshot::SegmentCommit;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
+    SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss, const std::string& field_name,
+                             snapshot::IDS_TYPE& segment_ids);
+
+    Status
+    Handle(const typename ResourceT::Ptr&) override;
+
+    std::string field_name_;
+    snapshot::IDS_TYPE& segment_ids_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -81,19 +94,6 @@ struct GetEntityByIdSegmentHandler : public snapshot::IterateHandler<snapshot::S
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-struct HybridQueryHelperSegmentHandler : public snapshot::IterateHandler<snapshot::Segment> {
-    using ResourceT = snapshot::Segment;
-    using BaseT = snapshot::IterateHandler<ResourceT>;
-    HybridQueryHelperSegmentHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
-                                    const std::vector<std::string>& partition_patterns);
-
-    Status
-    Handle(const typename ResourceT::Ptr&) override;
-
-    const server::ContextPtr context_;
-    const std::vector<std::string> partition_patterns_;
-    std::vector<snapshot::SegmentPtr> segments_;
-};
 
 }  // namespace engine
 }  // namespace milvus

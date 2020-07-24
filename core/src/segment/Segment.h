@@ -24,12 +24,14 @@
 
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
-#include "segment/VectorIndex.h"
 
 namespace milvus {
 namespace engine {
+
+extern const char* COLLECTIONS_FOLDER;
 
 using FIELD_TYPE = engine::meta::hybrid::DataType;
 using FIELD_TYPE_MAP = std::unordered_map<std::string, engine::meta::hybrid::DataType>;
@@ -39,6 +41,7 @@ using FIXEDX_FIELD_MAP = std::unordered_map<std::string, FIXED_FIELD_DATA>;
 using VARIABLE_FIELD_DATA = std::vector<std::string>;
 using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VARIABLE_FIELD_DATA>;
 using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;
+using STRUCTURED_INDEX_MAP = std::unordered_map<std::string, knowhere::IndexPtr>;
 
 struct DataChunk {
     int64_t count_ = 0;
@@ -77,6 +80,12 @@ class Segment {
     Status
     SetVectorIndex(const std::string& field_name, const knowhere::VecIndexPtr& index);
 
+    Status
+    GetStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index);
+
+    Status
+    SetStructuredIndex(const std::string& field_name, const knowhere::IndexPtr& index);
+
     FIELD_TYPE_MAP&
     GetFieldTypes() {
         return field_types_;
@@ -92,6 +101,11 @@ class Segment {
     VECTOR_INDEX_MAP&
     GetVectorIndice() {
         return vector_indice_;
+    }
+
+    STRUCTURED_INDEX_MAP&
+    GetStructuredIndice() {
+        return structured_indice_;
     }
 
     int64_t
@@ -125,6 +139,7 @@ class Segment {
     FIXEDX_FIELD_MAP fixed_fields_;
     VARIABLE_FIELD_MAP variable_fields_;
     VECTOR_INDEX_MAP vector_indice_;
+    STRUCTURED_INDEX_MAP structured_indice_;
 
     int64_t row_count_ = 0;
 

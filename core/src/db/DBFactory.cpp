@@ -11,6 +11,7 @@
 
 #include "db/DBFactory.h"
 #include "DBImpl.h"
+#include "SSDBImpl.h"
 #include "meta/MetaFactory.h"
 #include "meta/MySQLMetaImpl.h"
 #include "meta/SqliteMetaImpl.h"
@@ -36,6 +37,11 @@ DBFactory::BuildOption() {
 DBPtr
 DBFactory::Build(const DBOptions& options) {
     return std::make_shared<DBImpl>(options);
+}
+
+SSDBPtr
+DBFactory::BuildSSDB(const DBOptions& options) {
+    return std::make_shared<SSDBImpl>(options);
 }
 
 }  // namespace engine

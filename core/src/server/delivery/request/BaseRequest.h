@@ -25,6 +25,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -50,6 +51,14 @@ struct CollectionSchema {
         index_file_size_ = index_file_size;
         metric_type_ = metric_type;
     }
+};
+
+struct HybridCollectionSchema {
+    std::string collection_name_;
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types_;
+    std::unordered_map<std::string, milvus::json> index_params_;
+    std::unordered_map<std::string, milvus::json> field_params_;
+    milvus::json extra_params_;
 };
 
 struct TopKQueryResult {
@@ -80,6 +89,7 @@ struct HybridQueryResult {
 struct IndexParam {
     std::string collection_name_;
     int64_t index_type_;
+    std::string index_name_;
     std::string extra_params_;
 
     IndexParam() {
@@ -89,18 +99,6 @@ struct IndexParam {
     IndexParam(const std::string& collection_name, int64_t index_type) {
         collection_name_ = collection_name;
         index_type_ = index_type;
-    }
-};
-
-struct PartitionParam {
-    std::string collection_name_;
-    std::string tag_;
-
-    PartitionParam() = default;
-
-    PartitionParam(const std::string& collection_name, const std::string& tag) {
-        collection_name_ = collection_name;
-        tag_ = tag;
     }
 };
 

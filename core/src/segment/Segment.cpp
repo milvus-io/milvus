@@ -23,6 +23,8 @@
 namespace milvus {
 namespace engine {
 
+const char* COLLECTIONS_FOLDER = "/collections";
+
 Status
 Segment::AddField(const std::string& field_name, FIELD_TYPE field_type, int64_t field_width) {
     if (field_types_.find(field_name) != field_types_.end()) {
@@ -53,7 +55,6 @@ Segment::AddField(const std::string& field_name, FIELD_TYPE field_type, int64_t 
         case FIELD_TYPE::INT64:
             real_field_width = sizeof(uint64_t);
             break;
-        case FIELD_TYPE::VECTOR:
         case FIELD_TYPE::VECTOR_FLOAT:
         case FIELD_TYPE::VECTOR_BINARY: {
             if (field_width <= 0) {
@@ -178,6 +179,7 @@ Segment::GetFixedFieldData(const std::string& field_name, FIXED_FIELD_DATA& data
 
 Status
 Segment::GetVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index) {
+    index = nullptr;
     auto iter = vector_indice_.find(field_name);
     if (iter == vector_indice_.end()) {
         return Status(DB_ERROR, "invalid field name: " + field_name);
@@ -190,6 +192,24 @@ Segment::GetVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& in
 Status
 Segment::SetVectorIndex(const std::string& field_name, const knowhere::VecIndexPtr& index) {
     vector_indice_[field_name] = index;
+    return Status::OK();
+}
+
+Status
+Segment::GetStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index) {
+    index = nullptr;
+    auto iter = structured_indice_.find(field_name);
+    if (iter == structured_indice_.end()) {
+        return Status(DB_ERROR, "invalid field name: " + field_name);
+    }
+
+    index = iter->second;
+    return Status::OK();
+}
+
+Status
+Segment::SetStructuredIndex(const std::string& field_name, const knowhere::IndexPtr& index) {
+    structured_indice_[field_name] = index;
     return Status::OK();
 }
 

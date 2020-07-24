@@ -17,18 +17,25 @@
 
 #include <fiu-local.h>
 #include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace milvus {
 namespace server {
 
 DropIndexRequest::DropIndexRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                   const std::string& collection_name)
-    : BaseRequest(context, BaseRequest::kDropIndex), collection_name_(collection_name) {
+                                   const std::string& collection_name, const std::string& field_name,
+                                   const std::string& index_name)
+    : BaseRequest(context, BaseRequest::kDropIndex),
+      collection_name_(collection_name),
+      field_name_(field_name),
+      index_name_(index_name) {
 }
 
 BaseRequestPtr
-DropIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
-    return std::shared_ptr<BaseRequest>(new DropIndexRequest(context, collection_name));
+DropIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         const std::string& field_name, const std::string& index_name) {
+    return std::shared_ptr<BaseRequest>(new DropIndexRequest(context, collection_name, field_name, index_name));
 }
 
 Status
@@ -45,9 +52,9 @@ DropIndexRequest::OnExecute() {
         }
 
         // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
+        engine::snapshot::CollectionPtr collection;
+        engine::snapshot::CollectionMappings fields_schema;
+        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
         fiu_do_on("DropIndexRequest.OnExecute.collection_not_exist",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -56,16 +63,12 @@ DropIndexRequest::OnExecute() {
             } else {
                 return status;
             }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-            }
         }
 
         rc.RecordSection("check validation");
 
         // step 2: drop index
-        status = DBWrapper::DB()->DropIndex(collection_name_);
+        status = DBWrapper::SSDB()->DropIndex(collection_name_, field_name_);
         fiu_do_on("DropIndexRequest.OnExecute.drop_index_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;

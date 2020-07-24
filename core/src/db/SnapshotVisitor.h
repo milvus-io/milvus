@@ -29,7 +29,10 @@ class SnapshotVisitor {
     explicit SnapshotVisitor(snapshot::ID_TYPE collection_id);
 
     Status
-    SegmentsToSearch(meta::FilesHolder& files_holder);
+    SegmentsToSearch(snapshot::IDS_TYPE& segment_ids);
+
+    Status
+    SegmentsToIndex(const std::string& field_name, snapshot::IDS_TYPE& segment_ids);
 
  protected:
     snapshot::ScopedSnapshotT ss_;
@@ -137,7 +140,7 @@ class SegmentVisitor {
     Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& segment,
           const snapshot::SegmentFile::VecT& segment_files);
 
-    SegmentVisitor() = default;
+    explicit SegmentVisitor(snapshot::ScopedSnapshotT ss);
 
     const IdMapT&
     GetFieldVisitors() const {
@@ -161,6 +164,10 @@ class SegmentVisitor {
         }
         return it->second;
     }
+    const snapshot::ScopedSnapshotT&
+    GetSnapshot() const {
+        return snapshot_;
+    }
 
     const snapshot::SegmentPtr&
     GetSegment() const {
@@ -181,6 +188,7 @@ class SegmentVisitor {
     ToString() const;
 
  protected:
+    snapshot::ScopedSnapshotT snapshot_;
     snapshot::SegmentPtr segment_;
     IdMapT id_map_;
     NameMapT name_map_;
