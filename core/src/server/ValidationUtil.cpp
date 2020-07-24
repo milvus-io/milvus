@@ -227,128 +227,97 @@ ValidateTableDimension(int64_t dimension, int64_t metric_type) {
 }
 
 Status
-ValidateCollectionIndexType(int32_t index_type) {
-    int engine_type = static_cast<int>(engine::EngineType(index_type));
-    if (engine_type <= 0 || engine_type > static_cast<int>(engine::EngineType::MAX_VALUE)) {
-        std::string index_type_str;
-        for (auto it = engine::s_map_engine_type.begin(); it != engine::s_map_engine_type.end(); it++) {
-            if (it->second == (engine::EngineType)index_type) {
-                index_type_str = it->first;
-            }
-        }
-        std::string msg =
-            "Invalid index type: " + index_type_str + ". " + "Make sure the index type is in IndexType list.";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_INDEX_TYPE, msg);
-    }
-
-#ifndef MILVUS_GPU_VERSION
-    // special case, hybird index only available in customize faiss library
-    if (engine_type == static_cast<int>(engine::EngineType::FAISS_IVFSQ8H)) {
-        std::string msg = "Unsupported index type: " + std::to_string(index_type);
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_INDEX_TYPE, msg);
-    }
-#endif
-
+ValidateIndexType(const std::string& index_type) {
     return Status::OK();
 }
 
 Status
-ValidateIndexParams(const milvus::json& index_params, int64_t dimension, int32_t index_type) {
-    switch (index_type) {
-        case (int32_t)engine::EngineType::FAISS_IDMAP:
-        case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
-            break;
+ValidateMetricType(const std::string& metric_type) {
+    return Status::OK();
+}
+
+Status
+ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type) {
+    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
+        index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+        return Status::OK();
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
+               index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
+               index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
+               index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H ||
+               index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+        if (!status.ok()) {
+            return status;
         }
-        case (int32_t)engine::EngineType::FAISS_IVFFLAT:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8NR:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
-        case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
-            if (!status.ok()) {
-                return status;
-            }
-            break;
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+        if (!status.ok()) {
+            return status;
         }
-        case (int32_t)engine::EngineType::FAISS_PQ: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
-            if (!status.ok()) {
-                return status;
-            }
 
-            status = CheckParameterExistence(index_params, knowhere::IndexParams::m);
-            if (!status.ok()) {
-                return status;
-            }
+        status = CheckParameterExistence(index_params, knowhere::IndexParams::m);
+        if (!status.ok()) {
+            return status;
+        }
 
-            // special check for 'm' parameter
-            std::vector<int64_t> resset;
-            milvus::knowhere::IVFPQConfAdapter::GetValidMList(dimension, resset);
-            int64_t m_value = index_params[knowhere::IndexParams::m];
-            if (resset.empty()) {
-                std::string msg = "Invalid collection dimension, unable to get reasonable values for 'm'";
-                LOG_SERVER_ERROR_ << msg;
-                return Status(SERVER_INVALID_COLLECTION_DIMENSION, msg);
-            }
+        // special check for 'm' parameter
+        std::vector<int64_t> resset;
+        milvus::knowhere::IVFPQConfAdapter::GetValidMList(dimension, resset);
+        int64_t m_value = index_params[knowhere::IndexParams::m];
+        if (resset.empty()) {
+            std::string msg = "Invalid collection dimension, unable to get reasonable values for 'm'";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_COLLECTION_DIMENSION, msg);
+        }
 
-            auto iter = std::find(std::begin(resset), std::end(resset), m_value);
-            if (iter == std::end(resset)) {
-                std::string msg =
-                    "Invalid " + std::string(knowhere::IndexParams::m) + ", must be one of the following values: ";
-                for (size_t i = 0; i < resset.size(); i++) {
-                    if (i != 0) {
-                        msg += ",";
-                    }
-                    msg += std::to_string(resset[i]);
+        auto iter = std::find(std::begin(resset), std::end(resset), m_value);
+        if (iter == std::end(resset)) {
+            std::string msg =
+                "Invalid " + std::string(knowhere::IndexParams::m) + ", must be one of the following values: ";
+            for (size_t i = 0; i < resset.size(); i++) {
+                if (i != 0) {
+                    msg += ",";
                 }
-
-                LOG_SERVER_ERROR_ << msg;
-                return Status(SERVER_INVALID_ARGUMENT, msg);
+                msg += std::to_string(resset[i]);
             }
 
-            break;
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
         }
-        case (int32_t)engine::EngineType::NSG_MIX: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::search_length, 10, 300);
-            if (!status.ok()) {
-                return status;
-            }
-            status = CheckParameterRange(index_params, knowhere::IndexParams::out_degree, 5, 300);
-            if (!status.ok()) {
-                return status;
-            }
-            status = CheckParameterRange(index_params, knowhere::IndexParams::candidate, 50, 1000);
-            if (!status.ok()) {
-                return status;
-            }
-            status = CheckParameterRange(index_params, knowhere::IndexParams::knng, 5, 300);
-            if (!status.ok()) {
-                return status;
-            }
-            break;
+    } else if (index_type == knowhere::IndexEnum::INDEX_NSG) {
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::search_length, 10, 300);
+        if (!status.ok()) {
+            return status;
         }
-        case (int32_t)engine::EngineType::HNSW_SQ8NM:
-        case (int32_t)engine::EngineType::HNSW: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
-            if (!status.ok()) {
-                return status;
-            }
-            status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 8, 512);
-            if (!status.ok()) {
-                return status;
-            }
-            break;
+        status = CheckParameterRange(index_params, knowhere::IndexParams::out_degree, 5, 300);
+        if (!status.ok()) {
+            return status;
         }
-        case (int32_t)engine::EngineType::ANNOY: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
-            if (!status.ok()) {
-                return status;
-            }
-            break;
+        status = CheckParameterRange(index_params, knowhere::IndexParams::candidate, 50, 1000);
+        if (!status.ok()) {
+            return status;
+        }
+        status = CheckParameterRange(index_params, knowhere::IndexParams::knng, 5, 300);
+        if (!status.ok()) {
+            return status;
+        }
+    } else if (index_type == knowhere::IndexEnum::INDEX_HNSW || index_type == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
+        if (!status.ok()) {
+            return status;
+        }
+        status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 8, 512);
+        if (!status.ok()) {
+            return status;
+        }
+    } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
+        if (!status.ok()) {
+            return status;
         }
     }
+
     return Status::OK();
 }
 

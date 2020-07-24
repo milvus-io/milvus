@@ -1010,8 +1010,8 @@ MySQLMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Col
 
                 statement << "UPDATE " << META_TABLES << " SET id = " << id << " ,state = " << state
                           << " ,dimension = " << dimension << " ,created_on = " << created_on
-                          << " ,engine_type = " << index.engine_type_ << " ,index_params = " << mysqlpp::quote
-                          << index.extra_params_.dump() << " ,metric_type = " << index.metric_type_
+                          << " ,engine_type = " << index.index_name_ << " ,index_params = " << mysqlpp::quote
+                          << index.extra_params_.dump() << " ,metric_type = " << index.metric_name_
                           << " WHERE table_id = " << mysqlpp::quote << collection_id << ";";
 
                 LOG_ENGINE_DEBUG_ << "UpdateCollectionIndex: " << statement.str();
@@ -1386,11 +1386,11 @@ MySQLMetaImpl::DescribeCollectionIndex(const std::string& collection_id, Collect
             if (res.num_rows() == 1) {
                 const mysqlpp::Row& resRow = res[0];
 
-                index.engine_type_ = resRow["engine_type"];
+                //                index.index_name_ = resRow["engine_type"];
                 std::string str_index_params;
                 resRow["index_params"].to_string(str_index_params);
                 index.extra_params_ = milvus::json::parse(str_index_params);
-                index.metric_type_ = resRow["metric_type"];
+                //                index.metric_name_ = resRow["metric_type"];
             } else {
                 return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
             }

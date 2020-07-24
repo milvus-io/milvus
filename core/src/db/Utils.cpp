@@ -168,8 +168,8 @@ GetParentPath(const std::string& path, std::string& parent_path) {
 
 bool
 IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2) {
-    return index1.engine_type_ == index2.engine_type_ && index1.extra_params_ == index2.extra_params_ &&
-           index1.metric_type_ == index2.metric_type_;
+    return index1.index_name_ == index2.index_name_ && index1.extra_params_ == index2.extra_params_ &&
+           index1.metric_name_ == index2.metric_name_;
 }
 
 bool
@@ -302,6 +302,27 @@ EraseFromCache(const std::string& item_key) {
     }
 #endif
 }
+
+std::string
+IndexTypeToStr(const int32_t type) {
+    auto pair = s_index_type2name.find(type);
+    if (pair == s_index_type2name.end()) {
+        return "";
+    }
+
+    return pair->second;
+}
+
+int32_t
+StrToIndexType(const std::string& str) {
+    auto pair = s_index_name2type.find(str);
+    if (pair == s_index_name2type.end()) {
+        return 0;
+    }
+
+    return pair->second;
+}
+
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

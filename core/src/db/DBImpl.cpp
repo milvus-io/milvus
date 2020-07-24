@@ -1780,7 +1780,6 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 
         // step 2: check index difference
         CollectionIndex old_index;
-        old_index.field_name_ = index.field_name_;
         status = DescribeIndex(collection_id, old_index);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to get collection index info for collection: " << collection_id;
@@ -1790,7 +1789,8 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
         // step 3: update index info
         CollectionIndex new_index = index;
         json new_index_json = new_index.extra_params_;
-        new_index.metric_type_ = old_index.metric_type_;  // dont change metric type, it was defined by CreateCollection
+        //        new_index.metric_type_ = old_index.metric_type_;
+        // dont change metric type, it was defined by CreateCollection
         if (!utils::IsSameIndex(old_index, new_index)) {
             status = UpdateCollectionIndexRecursively(collection_id, new_index);
             if (!status.ok()) {
@@ -2926,18 +2926,19 @@ DBImpl::WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& c
     // for IDMAP type, only wait all NEW file converted to RAW file
     // for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
     std::vector<int> file_types;
-    if (utils::IsRawIndexType(index.engine_type_)) {
-        file_types = {
-            static_cast<int32_t>(meta::SegmentSchema::NEW),
-            static_cast<int32_t>(meta::SegmentSchema::NEW_MERGE),
-        };
-    } else {
-        file_types = {
-            static_cast<int32_t>(meta::SegmentSchema::RAW),       static_cast<int32_t>(meta::SegmentSchema::NEW),
-            static_cast<int32_t>(meta::SegmentSchema::NEW_MERGE), static_cast<int32_t>(meta::SegmentSchema::NEW_INDEX),
-            static_cast<int32_t>(meta::SegmentSchema::TO_INDEX),
-        };
-    }
+    //    if (utils::IsRawIndexType(index.engine_type_)) {
+    //        file_types = {
+    //            static_cast<int32_t>(meta::SegmentSchema::NEW),
+    //            static_cast<int32_t>(meta::SegmentSchema::NEW_MERGE),
+    //        };
+    //    } else {
+    //        file_types = {
+    //            static_cast<int32_t>(meta::SegmentSchema::RAW),       static_cast<int32_t>(meta::SegmentSchema::NEW),
+    //            static_cast<int32_t>(meta::SegmentSchema::NEW_MERGE),
+    //            static_cast<int32_t>(meta::SegmentSchema::NEW_INDEX),
+    //            static_cast<int32_t>(meta::SegmentSchema::TO_INDEX),
+    //        };
+    //    }
 
     // get files to build index
     {
@@ -2949,9 +2950,9 @@ DBImpl::WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& c
             if (repeat % WAIT_BUILD_INDEX_INTERVAL == 0) {
                 LOG_ENGINE_DEBUG_ << files_holder.HoldFiles().size() << " non-index files detected! Will build index "
                                   << times;
-                if (!utils::IsRawIndexType(index.engine_type_)) {
-                    status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
-                }
+                //                if (!utils::IsRawIndexType(index.engine_type_)) {
+                //                    status = meta_ptr_->UpdateCollectionFilesToIndex(collection_id);
+                //                }
             }
 
             index_req_swn_.Wait_For(std::chrono::seconds(1));

@@ -61,35 +61,47 @@ DescribeIndexRequest::OnExecute() {
             }
         }
 
-        // TODO(yukun): Currently field name is vector field name
-        std::string field_name;
-        for (auto field_it = fields_schema.begin(); field_it != fields_schema.end(); field_it++) {
-            auto type = field_it->first->GetFtype();
-            if (type == (int64_t)engine::meta::hybrid::DataType::VECTOR_FLOAT ||
-                type == (int64_t)engine::meta::hybrid::DataType::VECTOR_BINARY) {
-                field_name = field_it->first->GetName();
-                break;
-            }
-        }
-
-        // step 2: check collection existence
-        engine::CollectionIndex index;
-        status = DBWrapper::SSDB()->DescribeIndex(collection_name_, field_name, index);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // for binary vector, IDMAP and IVFLAT will be treated as BIN_IDMAP and BIN_IVFLAT internally
-        // return IDMAP and IVFLAT for outside caller
-        if (index.engine_type_ == (int32_t)engine::EngineType::FAISS_BIN_IDMAP) {
-            index.engine_type_ = (int32_t)engine::EngineType::FAISS_IDMAP;
-        } else if (index.engine_type_ == (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT) {
-            index.engine_type_ = (int32_t)engine::EngineType::FAISS_IVFFLAT;
-        }
-
-        index_param_.collection_name_ = collection_name_;
-        index_param_.index_type_ = index.engine_type_;
-        index_param_.extra_params_ = index.extra_params_.dump();
+        //        // pick up field
+        //        engine::snapshot::FieldPtr field;
+        //        for (auto field_it = fields_schema.begin(); field_it != fields_schema.end(); field_it++) {
+        //            if (field_it->first->GetName() == field_name_) {
+        //                field = field_it->first;
+        //                break;
+        //            }
+        //        }
+        //        if (field == nullptr) {
+        //            return Status(SERVER_INVALID_FIELD_NAME, "Invalid field name");
+        //        }
+        //
+        //        // TODO(yukun): Currently field name is vector field name
+        //        std::string field_name;
+        //        for (auto field_it = fields_schema.begin(); field_it != fields_schema.end(); field_it++) {
+        //            auto type = field_it->first->GetFtype();
+        //            if (type == (int64_t)engine::meta::hybrid::DataType::VECTOR_FLOAT ||
+        //                type == (int64_t)engine::meta::hybrid::DataType::VECTOR_BINARY) {
+        //                field_name = field_it->first->GetName();
+        //                break;
+        //            }
+        //        }
+        //
+        //        // step 2: check collection existence
+        //        engine::CollectionIndex index;
+        //        status = DBWrapper::SSDB()->DescribeIndex(collection_name_, field_name, index);
+        //        if (!status.ok()) {
+        //            return status;
+        //        }
+        //
+        //        // for binary vector, IDMAP and IVFLAT will be treated as BIN_IDMAP and BIN_IVFLAT internally
+        //        // return IDMAP and IVFLAT for outside caller
+        //        if (index.engine_type_ == (int32_t)engine::EngineType::FAISS_BIN_IDMAP) {
+        //            index.engine_type_ = (int32_t)engine::EngineType::FAISS_IDMAP;
+        //        } else if (index.engine_type_ == (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT) {
+        //            index.engine_type_ = (int32_t)engine::EngineType::FAISS_IVFFLAT;
+        //        }
+        //
+        //        index_param_.collection_name_ = collection_name_;
+        //        index_param_.index_type_ = index.engine_type_;
+        //        index_param_.extra_params_ = index.extra_params_.dump();
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

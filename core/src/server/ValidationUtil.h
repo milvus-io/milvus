@@ -37,10 +37,13 @@ extern Status
 ValidateTableDimension(int64_t dimension, int64_t metric_type);
 
 extern Status
-ValidateCollectionIndexType(int32_t index_type);
+ValidateIndexType(const std::string& index_type);
 
 extern Status
-ValidateIndexParams(const milvus::json& index_params, int64_t dimension, int32_t index_type);
+ValidateMetricType(const std::string& metric_type);
+
+extern Status
+ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type);
 
 extern Status
 ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& collection_schema,
@@ -54,9 +57,6 @@ ValidateVectorDataSize(const engine::VectorsData& vectors, const engine::meta::C
 
 extern Status
 ValidateCollectionIndexFileSize(int64_t index_file_size);
-
-extern Status
-ValidateCollectionIndexMetricType(int32_t metric_type);
 
 extern Status
 ValidateSearchTopk(int64_t top_k);
