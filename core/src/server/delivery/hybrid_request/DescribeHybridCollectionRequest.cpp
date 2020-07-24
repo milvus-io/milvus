@@ -49,17 +49,20 @@ DescribeHybridCollectionRequest::OnExecute() {
 
     try {
         engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings fields_schema;
-        auto status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
+        engine::snapshot::CollectionMappings collection_mappings;
+        auto status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, collection_mappings);
         if (!status.ok()) {
             return status;
         }
         collection_schema_.collection_name_ = collection_name_;
         collection_schema_.extra_params_ = collection->GetParams();
-        engine::meta::hybrid::FieldsSchema fields_info;
-        for (auto field_it = fields_schema.begin(); field_it != fields_schema.end(); field_it++) {
+        engine::meta::hybrid::FieldsSchema fields_schema;
+        for (auto field_it = collection_mappings.begin(); field_it != collection_mappings.end(); field_it++) {
             engine::meta::hybrid::FieldSchema schema;
             auto field = field_it->first;
+            if (field->GetFtype() == (int)engine::meta::hybrid::DataType::UID) {
+                continue;
+            }
             schema.field_name_ = field->GetName();
             schema.field_type_ = (int)field->GetFtype();
             schema.field_params_ = field->GetParams().dump();
@@ -71,9 +74,10 @@ DescribeHybridCollectionRequest::OnExecute() {
                     break;
                 }
             }
+            fields_schema.fields_schema_.emplace_back(schema);
         }
 
-        for (const auto& schema : fields_info.fields_schema_) {
+        for (const auto& schema : fields_schema.fields_schema_) {
             auto field_name = schema.field_name_;
             collection_schema_.field_types_.insert(
                 std::make_pair(field_name, (engine::meta::hybrid::DataType)schema.field_type_));

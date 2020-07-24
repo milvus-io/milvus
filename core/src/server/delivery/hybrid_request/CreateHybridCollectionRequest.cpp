@@ -97,8 +97,8 @@ CreateHybridCollectionRequest::OnExecute() {
                 if (field_type.second == engine::meta::hybrid::DataType::VECTOR_FLOAT ||
                     field_type.second == engine::meta::hybrid::DataType::VECTOR_BINARY) {
                     vector_param = milvus::json::parse(field_param);
-                    if (vector_param.contains("dimension")) {
-                        dimension = vector_param["dimension"].get<uint16_t>();
+                    if (vector_param.contains(engine::PARAM_COLLECTION_DIMENSION)) {
+                        dimension = vector_param[engine::PARAM_COLLECTION_DIMENSION].get<uint16_t>();
                     } else {
                         return Status{milvus::SERVER_INVALID_VECTOR_DIMENSION,
                                       "Dimension should be defined in vector field extra_params"};
@@ -110,8 +110,8 @@ CreateHybridCollectionRequest::OnExecute() {
 
         collection_info.collection_id_ = collection_name_;
         collection_info.dimension_ = dimension;
-        if (extra_params_.contains("segment_size")) {
-            auto segment_size = extra_params_["segment_size"].get<int64_t>();
+        if (extra_params_.contains(engine::PARAM_SEGMENT_SIZE)) {
+            auto segment_size = extra_params_[engine::PARAM_SEGMENT_SIZE].get<int64_t>();
             collection_info.index_file_size_ = segment_size;
             status = ValidateCollectionIndexFileSize(segment_size);
             if (!status.ok()) {
@@ -119,14 +119,15 @@ CreateHybridCollectionRequest::OnExecute() {
             }
         }
 
-        if (vector_param.contains("metric_type")) {
-            int32_t metric_type = (int32_t)milvus::engine::s_map_metric_type.at(vector_param["metric_type"]);
+        if (vector_param.contains(engine::PARAM_INDEX_METRIC_TYPE)) {
+            int32_t metric_type =
+                (int32_t)milvus::engine::s_map_metric_type.at(vector_param[engine::PARAM_INDEX_METRIC_TYPE]);
             collection_info.metric_type_ = metric_type;
         }
 
         // step 3: create snapshot collection
         engine::snapshot::CreateCollectionContext create_collection_context;
-        auto ss_collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_);
+        auto ss_collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_, extra_params_);
         create_collection_context.collection = ss_collection_schema;
         for (const auto& schema : fields_schema.fields_schema_) {
             auto field = std::make_shared<engine::snapshot::Field>(

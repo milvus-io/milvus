@@ -82,6 +82,9 @@ class SSDB {
     ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) = 0;
 
     virtual Status
+    HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) = 0;
+
+    virtual Status
     InsertEntities(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) = 0;
 
     virtual Status

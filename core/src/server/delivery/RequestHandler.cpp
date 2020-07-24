@@ -279,9 +279,10 @@ RequestHandler::HasHybridCollection(const std::shared_ptr<Context>& context, std
 
 Status
 RequestHandler::InsertEntity(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                             const std::string& partition_name,
+                             const std::string& partition_name, const int32_t& row_count,
                              std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
-    BaseRequestPtr request_ptr = InsertEntityRequest::Create(context, collection_name, partition_name, chunk_data);
+    BaseRequestPtr request_ptr =
+        InsertEntityRequest::Create(context, collection_name, partition_name, row_count, chunk_data);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
