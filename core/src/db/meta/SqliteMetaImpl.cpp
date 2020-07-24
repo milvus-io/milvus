@@ -784,9 +784,9 @@ SqliteMetaImpl::UpdateCollectionIndex(const std::string& collection_id, const Co
             collection_schema.partition_tag_ = std::get<7>(collections[0]);
             collection_schema.version_ = std::get<8>(collections[0]);
             collection_schema.flush_lsn_ = std::get<9>(collections[0]);
-            collection_schema.engine_type_ = index.engine_type_;
+//            collection_schema.engine_type_ = index.engine_type_;
             collection_schema.index_params_ = index.extra_params_.dump();
-            collection_schema.metric_type_ = index.metric_type_;
+//            collection_schema.metric_type_ = index.metric_type_;
 
             ConnectorPtr->update(collection_schema);
         } else {
@@ -842,9 +842,9 @@ SqliteMetaImpl::DescribeCollectionIndex(const std::string& collection_id, Collec
                   c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
 
         if (groups.size() == 1) {
-            index.engine_type_ = std::get<0>(groups[0]);
+//            index.engine_type_ = std::get<0>(groups[0]);
             index.extra_params_ = milvus::json::parse(std::get<1>(groups[0]));
-            index.metric_type_ = std::get<2>(groups[0]);
+//            index.metric_type_ = std::get<2>(groups[0]);
         } else {
             return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
         }

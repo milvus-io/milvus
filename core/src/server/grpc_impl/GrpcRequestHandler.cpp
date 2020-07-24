@@ -828,48 +828,8 @@ GrpcRequestHandler::GetEntityIDs(::grpc::ServerContext* context, const ::milvus:
 //}
 
 ::grpc::Status
-GrpcRequestHandler::SearchByID(::grpc::ServerContext* context, const ::milvus::grpc::SearchByIDParam* request,
-                               ::milvus::grpc::QueryResult* response) {
-    //    CHECK_NULLPTR_RETURN(request);
-    //    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
-    //
-    //    // step 1: partition tags
-    //    std::vector<std::string> partitions;
-    //    std::copy(request->partition_tag_array().begin(), request->partition_tag_array().end(),
-    //              std::back_inserter(partitions));
-    //
-    //    // step 2: partition tags
-    //    std::vector<int64_t> id_array;
-    //    for (int i = 0; i < request->id_array_size(); i++) {
-    //        id_array.push_back(request->id_array(i));
-    //    }
-    //
-    //    // step 3: parse extra parameters
-    //    milvus::json json_params;
-    //    for (int i = 0; i < request->extra_params_size(); i++) {
-    //        const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
-    //        if (extra.key() == EXTRA_PARAM_KEY) {
-    //            json_params = json::parse(extra.value());
-    //        }
-    //    }
-    //
-    //    // step 4: search vectors
-    //    TopKQueryResult result;
-    //    Status status = request_handler_.SearchByID(GetContext(context), request->collection_name(), id_array,
-    //                                                request->topk(), json_params, partitions, result);
-    //
-    //    // step 5: construct and return result
-    //    ConstructResults(result, response);
-    //
-    //    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
-    //    SET_RESPONSE(response->mutable_status(), status, context);
-    //
-    //    return ::grpc::Status::OK;
-}
-
-::grpc::Status
-GrpcRequestHandler::SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request,
-                                  ::milvus::grpc::QueryResult* response) {
+GrpcRequestHandler::SearchInSegment(::grpc::ServerContext* context, const ::milvus::grpc::SearchInSegmentParam* request,
+                                    ::milvus::grpc::QueryResult* response) {
     //    CHECK_NULLPTR_RETURN(request);
     //    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
     //
@@ -1098,7 +1058,7 @@ GrpcRequestHandler::ReloadSegments(::grpc::ServerContext* context, const ::milvu
 }
 
 ::grpc::Status
-GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
                                   ::milvus::grpc::IndexParam* response) {
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
