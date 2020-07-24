@@ -78,6 +78,21 @@ WebErrorMap(ErrorCode code) {
     }
 }
 
+template <typename T>
+void
+CopyStructuredData(const nlohmann::json& json, std::vector<uint8_t>& raw) {
+    std::vector<T> values;
+    auto size = json.size();
+    values.resize(size);
+    raw.resize(size * sizeof(T));
+    size_t offset = 0;
+    for (auto data : json) {
+        values[offset] = data.get<T>();
+        ++offset;
+    }
+    memcpy(raw.data(), values.data(), size * sizeof(T));
+}
+
 using FloatJson = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t, float>;
 
 /////////////////////////////////// Private methods ///////////////////////////////////////
@@ -1738,8 +1753,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     }
 
     auto body_json = nlohmann::json::parse(body->c_str());
-    std::string partition_tag = body_json["partition_tag"];
-
+    std::string partition_name = body_json["partition_tag"];
     uint64_t row_num = body_json["row_num"];
 
     std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
@@ -1751,49 +1765,32 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
         RETURN_STATUS_DTO(ILLEGAL_BODY, "An entity must be an array");
     }
 
-    std::vector<std::string> field_names;
-    std::vector<std::vector<uint8_t>> attr_values;
-    size_t attr_size = 0;
-    std::unordered_map<std::string, engine::VectorsData> vector_datas;
+    std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
+
     for (auto& entity : entities) {
         std::string field_name = entity["field_name"];
-        field_names.emplace_back(field_name);
         auto field_value = entity["field_value"];
-        std::vector<uint8_t> attr_value;
+        auto size = field_value.size();
+        if (size != row_num) {
+            RETURN_STATUS_DTO(ILLEGAL_ROWRECORD, "Field row count inconsist");
+        }
+
+        std::vector<uint8_t> temp_data;
         switch (field_types.at(field_name)) {
-            case engine::meta::hybrid::DataType::INT8:
-            case engine::meta::hybrid::DataType::INT16:
-            case engine::meta::hybrid::DataType::INT32:
-            case engine::meta::hybrid::DataType::INT64: {
-                std::vector<int64_t> value;
-                auto size = field_value.size();
-                value.resize(size);
-                attr_value.resize(size * sizeof(int64_t));
-                size_t offset = 0;
-                for (auto data : field_value) {
-                    value[offset] = data.get<int64_t>();
-                    ++offset;
-                }
-                memcpy(attr_value.data(), value.data(), size * sizeof(int64_t));
-                attr_size += size * sizeof(int64_t);
-                attr_values.emplace_back(attr_value);
+            case engine::meta::hybrid::DataType::INT32: {
+                CopyStructuredData<int32_t>(field_value, temp_data);
                 break;
             }
-            case engine::meta::hybrid::DataType::FLOAT:
+            case engine::meta::hybrid::DataType::INT64: {
+                CopyStructuredData<int64_t>(field_value, temp_data);
+                break;
+            }
+            case engine::meta::hybrid::DataType::FLOAT: {
+                CopyStructuredData<float>(field_value, temp_data);
+                break;
+            }
             case engine::meta::hybrid::DataType::DOUBLE: {
-                std::vector<double> value;
-                auto size = field_value.size();
-                value.resize(size);
-                attr_value.resize(size * sizeof(double));
-                size_t offset = 0;
-                for (auto data : field_value) {
-                    value[offset] = data.get<double>();
-                    ++offset;
-                }
-                memcpy(attr_value.data(), value.data(), size * sizeof(double));
-                attr_size += size * sizeof(double);
-
-                attr_values.emplace_back(attr_value);
+                CopyStructuredData<double>(field_value, temp_data);
                 break;
             }
             case engine::meta::hybrid::DataType::VECTOR_FLOAT: {
@@ -1803,28 +1800,28 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
                     ASSIGN_RETURN_STATUS_DTO(status)
                 }
 
-                engine::VectorsData vectors;
-                CopyRecordsFromJson(field_value, vectors, bin_flag);
-                vector_datas.insert(std::make_pair(field_name, vectors));
+                //                engine::VectorsData vectors;
+                //                CopyRecordsFromJson(field_value, vectors, bin_flag);
+                //                vector_datas.insert(std::make_pair(field_name, vectors));
             }
             default: {}
         }
+
+        chunk_data.insert(std::make_pair(field_name, temp_data));
     }
 
-    std::vector<uint8_t> attrs(attr_size, 0);
-    size_t attr_offset = 0;
-    for (auto& data : attr_values) {
-        memcpy(attrs.data() + attr_offset, data.data(), data.size());
-        attr_offset += data.size();
+    status = request_handler_.InsertEntity(context_ptr_, collection_name->c_str(), partition_name, chunk_data);
+    if (!status.ok()) {
+        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Failed to insert data");
     }
 
-    status = request_handler_.InsertEntity(context_ptr_, collection_name->c_str(), partition_tag, row_num, field_names,
-                                           attrs, vector_datas);
-
-    if (status.ok()) {
-        ids_dto->ids = ids_dto->ids->createShared();
-        for (auto& id : vector_datas.begin()->second.id_array_) {
-            ids_dto->ids->pushBack(std::to_string(id).c_str());
+    // return generated ids
+    auto pair = chunk_data.find(engine::DEFAULT_UID_NAME);
+    if (pair != chunk_data.end()) {
+        int64_t count = pair->second.size() / 8;
+        int64_t* pdata = reinterpret_cast<int64_t*>(pair->second.data());
+        for (int64_t i = 0; i < count; ++i) {
+            ids_dto->ids->pushBack(std::to_string(pdata[i]).c_str());
         }
     }
 
