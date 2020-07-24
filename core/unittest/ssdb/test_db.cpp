@@ -32,7 +32,7 @@ CreateCollection(std::shared_ptr<SSDBImpl> db, const std::string& collection_nam
     auto collection_schema = std::make_shared<Collection>(collection_name);
     context.collection = collection_schema;
     auto vector_field = std::make_shared<Field>("vector", 0,
-                                                milvus::engine::FieldType::VECTOR);
+                                                milvus::engine::FieldType::VECTOR_FLOAT);
     auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
                                                                milvus::engine::FieldElementType::FET_INDEX);
     auto int_field = std::make_shared<Field>("int", 0,
@@ -54,7 +54,7 @@ CreateCollection2(std::shared_ptr<SSDBImpl> db, const std::string& collection_na
 
     nlohmann::json params;
     params[milvus::knowhere::meta::DIM] = COLLECTION_DIM;
-    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR, params);
+    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR_FLOAT, params);
     context.fields_schema[vector_field] = {};
 
     std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type = {

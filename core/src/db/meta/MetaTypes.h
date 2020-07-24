@@ -23,6 +23,8 @@
 namespace milvus {
 namespace engine {
 
+static const char* DIMENSION = "dim";
+
 // TODO(linxj): replace with VecIndex::IndexType
 enum class EngineType {
     INVALID = 0,
@@ -187,7 +189,6 @@ enum DataType {
 
     VECTOR_BINARY = 100,
     VECTOR_FLOAT = 101,
-    VECTOR = 200,
 };
 
 struct VectorFieldSchema {
