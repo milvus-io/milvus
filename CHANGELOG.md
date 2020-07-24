@@ -65,6 +65,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2544 Optimize unittest build
 -   \#2561 Clean util dependencies with other modules
 -   \#2612 Move all APIs in utils into namespace milvus 
+-   \#2653 Improve IVF search performance when NQ and nProbe are both large
 -   \#2675 Print out system memory size when report invalid cpu cache size 
 -   \#2828 Let Faiss not compile half float by default
 -   \#2841 Replace IndexType/EngineType/MetricType
@@ -901,3 +902,4 @@ Please mark all changes in change log and use the issue from GitHub
 -   MS-1 Add CHANGELOG.md
 -   MS-4 Refactor the vecwise_engine code structure
 -   MS-62 Search range to all if no date specified
+
