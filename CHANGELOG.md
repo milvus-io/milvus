@@ -12,6 +12,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Feature
 
 ## Improvement
+-   \#2653 Improve IVF search performance when NQ and nProbe are both large
 
 ## Task
 
