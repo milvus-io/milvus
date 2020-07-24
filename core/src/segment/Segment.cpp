@@ -55,7 +55,6 @@ Segment::AddField(const std::string& field_name, FIELD_TYPE field_type, int64_t 
         case FIELD_TYPE::INT64:
             real_field_width = sizeof(uint64_t);
             break;
-        case FIELD_TYPE::VECTOR:
         case FIELD_TYPE::VECTOR_FLOAT:
         case FIELD_TYPE::VECTOR_BINARY: {
             if (field_width <= 0) {
