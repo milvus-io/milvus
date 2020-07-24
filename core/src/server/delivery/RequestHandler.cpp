@@ -18,11 +18,9 @@
 #include "server/delivery/request/CmdRequest.h"
 #include "server/delivery/request/CompactRequest.h"
 #include "server/delivery/request/CountCollectionRequest.h"
-#include "server/delivery/request/CreateCollectionRequest.h"
 #include "server/delivery/request/CreateIndexRequest.h"
 #include "server/delivery/request/CreatePartitionRequest.h"
 #include "server/delivery/request/DeleteByIDRequest.h"
-#include "server/delivery/request/DescribeCollectionRequest.h"
 #include "server/delivery/request/DescribeIndexRequest.h"
 #include "server/delivery/request/DropCollectionRequest.h"
 #include "server/delivery/request/DropIndexRequest.h"
@@ -42,7 +40,6 @@
 #include "server/delivery/request/ShowPartitionsRequest.h"
 
 #include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
-#include "server/delivery/hybrid_request/CreateHybridIndexRequest.h"
 #include "server/delivery/hybrid_request/DescribeHybridCollectionRequest.h"
 #include "server/delivery/hybrid_request/GetEntityByIDRequest.h"
 #include "server/delivery/hybrid_request/HybridSearchRequest.h"
@@ -50,16 +47,6 @@
 
 namespace milvus {
 namespace server {
-
-Status
-RequestHandler::CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                                 int64_t dimension, int64_t index_file_size, int64_t metric_type) {
-    BaseRequestPtr request_ptr =
-        CreateCollectionRequest::Create(context, collection_name, dimension, index_file_size, metric_type);
-    RequestScheduler::ExecRequest(request_ptr);
-
-    return request_ptr->status();
-}
 
 Status
 RequestHandler::HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
@@ -80,8 +67,10 @@ RequestHandler::DropCollection(const std::shared_ptr<Context>& context, const st
 
 Status
 RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                            int64_t index_type, const milvus::json& json_params) {
-    BaseRequestPtr request_ptr = CreateIndexRequest::Create(context, collection_name, index_type, json_params);
+                            const std::string& field_name, const std::string& index_name,
+                            const milvus::json& json_params) {
+    BaseRequestPtr request_ptr =
+        CreateIndexRequest::Create(context, collection_name, field_name, index_name, json_params);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -155,15 +144,6 @@ RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::s
 }
 
 Status
-RequestHandler::DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                                   CollectionSchema& collection_schema) {
-    BaseRequestPtr request_ptr = DescribeCollectionRequest::Create(context, collection_name, collection_schema);
-    RequestScheduler::ExecRequest(request_ptr);
-
-    return request_ptr->status();
-}
-
-Status
 RequestHandler::CountCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                 int64_t& count) {
     BaseRequestPtr request_ptr = CountCollectionRequest::Create(context, collection_name, count);
@@ -216,8 +196,9 @@ RequestHandler::DescribeIndex(const std::shared_ptr<Context>& context, const std
 }
 
 Status
-RequestHandler::DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name) {
-    BaseRequestPtr request_ptr = DropIndexRequest::Create(context, collection_name);
+RequestHandler::DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                          const std::string& field_name, const std::string& index_name) {
+    BaseRequestPtr request_ptr = DropIndexRequest::Create(context, collection_name, index_name, field_name);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -243,7 +224,7 @@ RequestHandler::HasPartition(const std::shared_ptr<Context>& context, const std:
 
 Status
 RequestHandler::ShowPartitions(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                               std::vector<PartitionParam>& partitions) {
+                               std::vector<std::string>& partitions) {
     BaseRequestPtr request_ptr = ShowPartitionsRequest::Create(context, collection_name, partitions);
     RequestScheduler::ExecRequest(request_ptr);
 
@@ -280,11 +261,12 @@ RequestHandler::Compact(const std::shared_ptr<Context>& context, const std::stri
 
 Status
 RequestHandler::CreateHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                                       std::vector<std::pair<std::string, engine::meta::hybrid::DataType>>& field_types,
-                                       std::vector<std::pair<std::string, uint64_t>>& vector_dimensions,
-                                       std::vector<std::pair<std::string, std::string>>& field_extra_params) {
+                                       std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                                       std::unordered_map<std::string, milvus::json>& field_index_params,
+                                       std::unordered_map<std::string, std::string>& field_params,
+                                       milvus::json& json_param) {
     BaseRequestPtr request_ptr = CreateHybridCollectionRequest::Create(context, collection_name, field_types,
-                                                                       vector_dimensions, field_extra_params);
+                                                                       field_index_params, field_params, json_param);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
@@ -292,8 +274,8 @@ RequestHandler::CreateHybridCollection(const std::shared_ptr<Context>& context, 
 
 Status
 RequestHandler::DescribeHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types) {
-    BaseRequestPtr request_ptr = DescribeHybridCollectionRequest::Create(context, collection_name, field_types);
+                                         HybridCollectionSchema& collection_schema) {
+    BaseRequestPtr request_ptr = DescribeHybridCollectionRequest::Create(context, collection_name, collection_schema);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
@@ -307,11 +289,9 @@ RequestHandler::HasHybridCollection(const std::shared_ptr<Context>& context, std
 
 Status
 RequestHandler::InsertEntity(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                             const std::string& partition_tag, uint64_t& row_num, std::vector<std::string>& field_names,
-                             std::vector<uint8_t>& attr_values,
-                             std::unordered_map<std::string, engine::VectorsData>& vector_datas) {
-    BaseRequestPtr request_ptr = InsertEntityRequest::Create(context, collection_name, partition_tag, row_num,
-                                                             field_names, attr_values, vector_datas);
+                             const std::string& partition_name,
+                             std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
+    BaseRequestPtr request_ptr = InsertEntityRequest::Create(context, collection_name, partition_name, chunk_data);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
@@ -319,33 +299,22 @@ RequestHandler::InsertEntity(const std::shared_ptr<Context>& context, const std:
 
 Status
 RequestHandler::GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                              const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
-                              std::vector<engine::VectorsData>& vectors) {
-    BaseRequestPtr request_ptr = GetEntityByIDRequest::Create(context, collection_name, ids, attrs, vectors);
+                              const engine::IDNumbers& ids, std::vector<std::string>& field_names,
+                              engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
+    BaseRequestPtr request_ptr =
+        GetEntityByIDRequest::Create(context, collection_name, ids, field_names, field_mappings, data_chunk);
 
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }
 
 Status
-RequestHandler::HybridSearch(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                             std::vector<std::string>& partition_list, query::GeneralQueryPtr& general_query,
-                             query::QueryPtr& query_ptr, milvus::json& json_params,
-                             std::vector<std::string>& field_names, engine::QueryResult& result) {
-    BaseRequestPtr request_ptr = HybridSearchRequest::Create(context, collection_name, partition_list, general_query,
-                                                             query_ptr, json_params, field_names, result);
+RequestHandler::HybridSearch(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                             const milvus::json& json_params, engine::QueryResultPtr& result) {
+    BaseRequestPtr request_ptr = HybridSearchRequest::Create(context, query_ptr, json_params, result);
 
     RequestScheduler::ExecRequest(request_ptr);
 
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::CreateHybridIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                                  const std::vector<std::string>& field_names, const milvus::json& json_params) {
-    BaseRequestPtr request_ptr = CreateHybridIndexRequest::Create(context, collection_name, field_names, json_params);
-
-    RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }
 
