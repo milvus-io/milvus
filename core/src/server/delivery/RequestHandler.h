@@ -44,10 +44,6 @@ class RequestHandler {
            const std::string& partition_tag);
 
     Status
-    GetVectorsByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                   const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors);
-
-    Status
     GetVectorIDs(const std::shared_ptr<Context>& context, const std::string& collection_name,
                  const std::string& segment_name, std::vector<int64_t>& vector_ids);
 

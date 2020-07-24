@@ -60,7 +60,7 @@ FlushRequest::OnExecute() {
     for (auto& name : collection_names_) {
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
-        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        engine::snapshot::CollectionMappings fields_schema;
         status = DBWrapper::SSDB()->DescribeCollection(name, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {

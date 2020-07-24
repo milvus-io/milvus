@@ -49,7 +49,7 @@ DescribeIndexRequest::OnExecute() {
 
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
-        std::unordered_map<engine::snapshot::FieldPtr, std::vector<engine::snapshot::FieldElementPtr>> fields_schema;
+        engine::snapshot::CollectionMappings fields_schema;
         status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
         fiu_do_on("DropIndexRequest.OnExecute.collection_not_exist",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));

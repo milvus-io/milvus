@@ -955,7 +955,8 @@ Status
 WebRequestHandler::GetVectorsByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
                                    nlohmann::json& json_out) {
     std::vector<engine::VectorsData> vector_batch;
-    auto status = request_handler_.GetVectorsByID(context_ptr_, collection_name, ids, vector_batch);
+    auto status = Status::OK();
+    //    auto status = request_handler_.GetVectorsByID(context_ptr_, collection_name, ids, vector_batch);
     if (!status.ok()) {
         return status;
     }
