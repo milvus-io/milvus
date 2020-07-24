@@ -14,6 +14,7 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include "db/meta/MetaTypes.h"
 #include "db/snapshot/Resources.h"
@@ -89,7 +90,7 @@ struct OperationContext {
     ToString() const;
 };
 
-using CollectionMappings = std::map<FieldPtr, std::vector<FieldElementPtr>>;
+using CollectionMappings = std::unordered_map<FieldPtr, std::vector<FieldElementPtr>>;
 
 struct CreateCollectionContext {
     CollectionPtr collection = nullptr;
