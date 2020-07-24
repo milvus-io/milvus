@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CreateIndexRequest.h"
+#include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
@@ -69,9 +70,6 @@ CreateIndexRequest::OnExecute() {
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
         status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
-        fiu_do_on("CreateIndexRequest.OnExecute.not_has_collection",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        fiu_do_on("CreateIndexRequest.OnExecute.throw_std.exception", throw std::exception());
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
@@ -80,64 +78,60 @@ CreateIndexRequest::OnExecute() {
             }
         }
 
-        int64_t dimension;
+        // pick up field
+        engine::snapshot::FieldPtr field;
         for (auto field_it = fields_schema.begin(); field_it != fields_schema.end(); field_it++) {
-            auto type = field_it->first->GetFtype();
-            if (type == (int64_t)engine::meta::hybrid::DataType::VECTOR_FLOAT ||
-                type == (int64_t)engine::meta::hybrid::DataType::VECTOR_BINARY) {
-                auto params = field_it->first->GetParams();
-                dimension = params[engine::DIMENSION].get<int64_t>();
+            if (field_it->first->GetName() == field_name_) {
+                field = field_it->first;
                 break;
             }
         }
-
-        int32_t index_type = 0;
-        if (json_params_.contains("index_type")) {
-            auto index_type_str = json_params_["index_type"].get<std::string>();
-            if (engine::s_map_engine_type.find(index_type_str) == engine::s_map_engine_type.end()) {
-                return Status(SERVER_INVALID_ARGUMENT, "Set wrong index type");
-            }
-            index_type = (int32_t)engine::s_map_engine_type.at(index_type_str);
+        if (field == nullptr) {
+            return Status(SERVER_INVALID_FIELD_NAME, "Invalid field name");
         }
 
-        status = ValidateCollectionIndexType(index_type);
-        if (!status.ok()) {
-            return status;
-        }
-
-        status = ValidateIndexParams(json_params_, dimension, index_type);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // step 2: binary and float vector support different index/metric type, need to adapt here
-        engine::meta::CollectionSchema collection_info;
-        collection_info.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_info);
-
-        int32_t adapter_index_type = index_type;
-        if (engine::utils::IsBinaryMetricType(collection_info.metric_type_)) {  // binary vector not allow
-            if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IDMAP)) {
-                adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IDMAP);
-            } else if (adapter_index_type == static_cast<int32_t>(engine::EngineType::FAISS_IVFFLAT)) {
-                adapter_index_type = static_cast<int32_t>(engine::EngineType::FAISS_BIN_IVFFLAT);
-            }
-        }
-
-        rc.RecordSection("check validation");
-
-        // step 3: create index
         engine::CollectionIndex index;
-        if (json_params_.contains("metric_type")) {
-            index.metric_type_ = (int32_t)engine::s_map_metric_type.at(json_params_["metric_type"]);
+        if (engine::IsVectorField(field)) {
+            int32_t field_type = field->GetFtype();
+            auto params = field->GetParams();
+            int64_t dimension = params[engine::DIMENSION].get<int64_t>();
+
+            // validate index type
+            std::string index_type = 0;
+            if (json_params_.contains("index_type")) {
+                index_type = json_params_["index_type"].get<std::string>();
+            }
+            status = ValidateIndexType(index_type);
+            if (!status.ok()) {
+                return status;
+            }
+
+            // validate metric type
+            std::string metric_type = 0;
+            if (json_params_.contains("metric_type")) {
+                metric_type = json_params_["metric_type"].get<std::string>();
+            }
+            status = ValidateMetricType(metric_type);
+            if (!status.ok()) {
+                return status;
+            }
+
+            // validate index parameters
+            status = ValidateIndexParams(json_params_, dimension, index_type);
+            if (!status.ok()) {
+                return status;
+            }
+
+            rc.RecordSection("check validation");
+
+            index.index_name_ = index_name_;
+            index.metric_name_ = metric_type;
+            index.extra_params_ = json_params_;
+        } else {
+            index.index_name_ = index_name_;
         }
 
-        index.engine_type_ = adapter_index_type;
-        index.index_name_ = index_name_;
-        index.extra_params_ = json_params_;
         status = DBWrapper::SSDB()->CreateIndex(context_, collection_name_, field_name_, index);
-        fiu_do_on("CreateIndexRequest.OnExecute.create_index_fail",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }

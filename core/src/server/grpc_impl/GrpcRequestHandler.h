@@ -160,7 +160,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return IndexParam
     ::grpc::Status
-    DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+    DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
                   ::milvus::grpc::IndexParam* response) override;
     // *
     // @brief This method is used to drop index
@@ -248,24 +248,14 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
            ::milvus::grpc::QueryResult* response) override;
 
     // *
-    // @brief This method is used to query vector by id.
-    //
-    // @param SearchByIDParam, search parameters.
-    //
-    // @return TopKQueryResult
-    ::grpc::Status
-    SearchByID(::grpc::ServerContext* context, const ::milvus::grpc::SearchByIDParam* request,
-               ::milvus::grpc::QueryResult* response);
-
-    // *
     // @brief This method is used to query vector in specified files.
     //
     // @param SearchInFilesParam, search in files paremeters.
     //
     // @return TopKQueryResultList
     ::grpc::Status
-    SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request,
-                  ::milvus::grpc::QueryResult* response) override;
+    SearchInSegment(::grpc::ServerContext* context, const ::milvus::grpc::SearchInSegmentParam* request,
+                    ::milvus::grpc::QueryResult* response) override;
 
     // *
     // @brief This method is used to give the server status.

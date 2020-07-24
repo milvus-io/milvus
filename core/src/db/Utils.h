@@ -86,6 +86,12 @@ ExitOnWriteError(Status& status);
 
 void
 EraseFromCache(const std::string& item_key);
+
+std::string
+IndexTypeToStr(const int32_t type);
+
+int32_t
+StrToIndexType(const std::string& str);
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus
