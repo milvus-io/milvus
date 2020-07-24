@@ -25,7 +25,6 @@ set(FOUND_OPENBLAS "unknown")
 
 add_subdirectory(index)
 
-set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 foreach (dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach ()
