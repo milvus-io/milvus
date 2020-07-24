@@ -56,12 +56,12 @@ class ResourceGCEvent : public MetaEvent {
             /* std::cout << "[GC] No remove action for " << res_->ToString() << std::endl; */
         } else if (boost::filesystem::is_directory(res_path)) {
             auto ok = boost::filesystem::remove_all(res_path);
-            /* std::cout << "[GC] Remove dir " << res_->ToString() << " " << res_path << " " << ok << std::endl; */
+            std::cout << "[GC] Remove DIR " << res_->ToString() << " " << res_path << " " << ok << std::endl;
         } else if (boost::filesystem::is_regular_file(res_path)) {
             auto ok = boost::filesystem::remove(res_path);
-            /* std::cout << "[GC] Remove file " << res_->ToString() << " " << res_path << " " << ok << std::endl; */
+            std::cout << "[GC] Remove FILE " << res_->ToString() << " " << res_path << " " << ok << std::endl;
         } else {
-            std::cout << "[GC] Remove stale " << res_path << " for " << res_->ToString() << std::endl;
+            std::cout << "[GC] Remove STALE OBJECT " << res_path << " for " << res_->ToString() << std::endl;
         }
 
         /* remove resource from meta */
