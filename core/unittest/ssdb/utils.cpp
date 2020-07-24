@@ -139,14 +139,8 @@ BaseTest::InitLog() {
 }
 
 void
-BaseTest::SnapshotStart(bool mock_store) {
-    /* auto uri = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
-//    auto uri = "mock://:@:/";
-    auto uri = milvus::config.general.meta_uri();
-//    std::string path = "/tmp/milvus_ss/db";
-//    config.SetStorageConfigPath(path);
-    auto path = milvus::config.storage.path();
-    auto store = Store::Build(uri, path);
+BaseTest::SnapshotStart(bool mock_store, milvus::engine::DBOptions options) {
+    auto store = Store::Build(options.meta_.backend_uri_, options.meta_.path_);
 
     milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
@@ -196,7 +190,11 @@ BaseTest::TearDown() {
 void
 SnapshotTest::SetUp() {
     BaseTest::SetUp();
-    BaseTest::SnapshotStart(true);
+    milvus::engine::DBOptions options;
+    options.meta_.path_ = "/tmp/milvus_ss";
+    options.meta_.backend_uri_ = "mock://:@:/";
+    options.wal_enable_ = false;
+    BaseTest::SnapshotStart(true, options);
 }
 
 void
@@ -210,7 +208,7 @@ milvus::engine::DBOptions
 SSDBTest::GetOptions() {
     auto options = milvus::engine::DBOptions();
     options.meta_.path_ = "/tmp/milvus_ss";
-    options.meta_.backend_uri_ = "sqlite://:@:/";
+    options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     return options;
 }
@@ -218,7 +216,7 @@ SSDBTest::GetOptions() {
 void
 SSDBTest::SetUp() {
     BaseTest::SetUp();
-    BaseTest::SnapshotStart(false);
+    BaseTest::SnapshotStart(false, GetOptions());
     db_ = std::make_shared<milvus::engine::SSDBImpl>(GetOptions());
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
@@ -259,10 +257,12 @@ SSDBTest::TearDown() {
 void
 SSSegmentTest::SetUp() {
     BaseTest::SetUp();
-    BaseTest::SnapshotStart(false);
-
-    auto options = milvus::engine::DBOptions();
+    milvus::engine::DBOptions options;
+    options.meta_.path_ = "/tmp/milvus_ss";
+    options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
+    BaseTest::SnapshotStart(false, options);
+
     db_ = std::make_shared<milvus::engine::SSDBImpl>(options);
 }
 
@@ -292,9 +292,11 @@ SSMetaTest::TearDown() {
 void
 SSSchedulerTest::SetUp() {
     BaseTest::SetUp();
-    BaseTest::SnapshotStart(true);
-    auto options = milvus::engine::DBOptions();
+    milvus::engine::DBOptions options;
+    options.meta_.path_ = "/tmp/milvus_ss";
+    options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
+    BaseTest::SnapshotStart(true, options);
     db_ = std::make_shared<milvus::engine::SSDBImpl>(options);
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();

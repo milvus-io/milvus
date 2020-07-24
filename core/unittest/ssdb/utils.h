@@ -288,7 +288,7 @@ class BaseTest : public ::testing::Test {
     void
     InitLog();
     void
-    SnapshotStart(bool mock_store);
+    SnapshotStart(bool mock_store, milvus::engine::DBOptions);
     void
     SnapshotStop();
 
