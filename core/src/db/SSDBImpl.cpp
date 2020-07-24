@@ -284,6 +284,20 @@ SSDBImpl::AllCollections(std::vector<std::string>& names) {
 }
 
 Status
+SSDBImpl::GetCollectionInfo(const std::string& collection_name, std::string& collection_info) {
+    CHECK_INITIALIZED;
+
+    nlohmann::json json;
+    auto status = GetSnapshotInfo(collection_name, json);
+    if (!status.ok()) {
+        return status;
+    }
+
+    collection_info = json.dump();
+    return Status::OK();
+}
+
+Status
 SSDBImpl::GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count) {
     CHECK_INITIALIZED;
 

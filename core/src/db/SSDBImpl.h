@@ -58,6 +58,9 @@ class SSDBImpl : public SSDB {
     AllCollections(std::vector<std::string>& names) override;
 
     Status
+    GetCollectionInfo(const std::string& collection_name, std::string& collection_info);
+
+    Status
     GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count) override;
 
     Status
