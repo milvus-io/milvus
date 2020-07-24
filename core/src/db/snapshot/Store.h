@@ -76,6 +76,14 @@ class Store : public std::enable_shared_from_this<Store> {
             auto engine = std::make_shared<meta::MockEngine>();
             auto adapter = std::make_shared<meta::MetaAdapter>(engine);
             return std::make_shared<Store>(adapter, root_path);
+        } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
+            LOG_ENGINE_INFO_ << "Using Sqlite";
+            DBMetaOptions options;
+            /* options.backend_uri_ = "mock://:@:/"; */
+            options.backend_uri_ = uri;
+            auto engine = std::make_shared<meta::SqliteEngine>(options);
+            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
+            return std::make_shared<Store>(adapter, root_path);
         } else {
             LOG_ENGINE_ERROR_ << "Invalid dialect in URI: dialect = " << uri_info.dialect_;
             throw InvalidArgumentException("URI dialect is not mysql / sqlite / mock");
