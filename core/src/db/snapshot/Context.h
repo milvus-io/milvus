@@ -89,9 +89,11 @@ struct OperationContext {
     ToString() const;
 };
 
+using CollectionMappings = std::map<FieldPtr, std::vector<FieldElementPtr>>;
+
 struct CreateCollectionContext {
     CollectionPtr collection = nullptr;
-    std::map<FieldPtr, std::vector<FieldElementPtr>> fields_schema;
+    CollectionMappings fields_schema;
     CollectionCommitPtr collection_commit = nullptr;
     LSN_TYPE lsn = 0;
 

@@ -53,9 +53,8 @@ class SSDB {
     DropCollection(const std::string& name) = 0;
 
     virtual Status
-    DescribeCollection(
-        const std::string& collection_name, snapshot::CollectionPtr& collection,
-        std::unordered_map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) = 0;
+    DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
+                       snapshot::CollectionMappings& fields_schema) = 0;
 
     virtual Status
     HasCollection(const std::string& collection_name, bool& has_or_not) = 0;

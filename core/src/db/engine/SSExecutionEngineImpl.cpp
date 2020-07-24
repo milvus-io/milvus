@@ -162,8 +162,7 @@ SSExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
         segment_ptr->GetFieldType(name, field_type);
 
         bool index_exist = false;
-        if (field_type == FIELD_TYPE::VECTOR || field_type == FIELD_TYPE::VECTOR_FLOAT ||
-            field_type == FIELD_TYPE::VECTOR_BINARY) {
+        if (field_type == FIELD_TYPE::VECTOR_FLOAT || field_type == FIELD_TYPE::VECTOR_BINARY) {
             knowhere::VecIndexPtr index_ptr;
             segment_reader_->LoadVectorIndex(name, index_ptr);
             index_exist = (index_ptr != nullptr);

@@ -229,9 +229,8 @@ SSDBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 }
 
 Status
-SSDBImpl::DescribeCollection(
-    const std::string& collection_name, snapshot::CollectionPtr& collection,
-    std::unordered_map<snapshot::FieldPtr, std::vector<snapshot::FieldElementPtr>>& fields_schema) {
+SSDBImpl::DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
+                             snapshot::CollectionMappings& fields_schema) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
@@ -377,7 +376,7 @@ SSDBImpl::InsertEntities(const std::string& collection_name, const std::string& 
         return Status(DB_NOT_FOUND, "Fail to get partition " + partition_name);
     }
 
-    /* Generate id */
+    // Generate id
     if (data_chunk->fixed_fields_.find(engine::DEFAULT_UID_NAME) == data_chunk->fixed_fields_.end()) {
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         IDNumbers ids;
