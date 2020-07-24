@@ -29,7 +29,6 @@ endforeach ()
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
-         )
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -118,9 +117,9 @@ add_subdirectory(query)
 add_subdirectory(search)
 add_subdirectory(db) # target milvus_engine
 
-
 # **************************** Get&Print Include Directories ****************************
 get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES )
+
 foreach (dir ${dirs})
     message(STATUS "Current Include DIRS: "${dir})
 endforeach ()

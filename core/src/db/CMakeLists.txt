@@ -100,7 +100,7 @@ if (MILVUS_GPU_VERSION)
     set(third_party_libs ${third_party_libs}
             ${cuda_lib}
             )
-    link_directories(${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+
     aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
     set(engine_files ${engine_files}
             ${wrapper_gpu_files}
