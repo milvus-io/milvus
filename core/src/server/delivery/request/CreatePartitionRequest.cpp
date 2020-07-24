@@ -56,7 +56,7 @@ CreatePartitionRequest::OnExecute() {
 
         // only process root collection, ignore partition collection
         bool exist = false;
-        status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        status = DBWrapper::SSDB()->HasCollection(collection_name_, exist);
         if (!exist) {
             return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }

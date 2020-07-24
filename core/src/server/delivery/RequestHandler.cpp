@@ -27,7 +27,6 @@
 #include "server/delivery/request/DropPartitionRequest.h"
 #include "server/delivery/request/FlushRequest.h"
 #include "server/delivery/request/GetVectorIDsRequest.h"
-#include "server/delivery/request/GetVectorsByIDRequest.h"
 #include "server/delivery/request/HasCollectionRequest.h"
 #include "server/delivery/request/HasPartitionRequest.h"
 #include "server/delivery/request/InsertRequest.h"
@@ -80,15 +79,6 @@ Status
 RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::string& collection_name,
                        engine::VectorsData& vectors, const std::string& partition_tag) {
     BaseRequestPtr request_ptr = InsertRequest::Create(context, collection_name, vectors, partition_tag);
-    RequestScheduler::ExecRequest(request_ptr);
-
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::GetVectorsByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                               const std::vector<int64_t>& ids, std::vector<engine::VectorsData>& vectors) {
-    BaseRequestPtr request_ptr = GetVectorsByIDRequest::Create(context, collection_name, ids, vectors);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
