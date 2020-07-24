@@ -45,7 +45,8 @@ class ClientTest {
     void
     InsertEntities(const std::string&);
 
-    void BuildSearchEntities(int64_t, int64_t);
+    void
+    CountEntities(const std::string&);
 
     void
     Flush(const std::string&);

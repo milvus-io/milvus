@@ -91,6 +91,7 @@ extern const char* DEFAULT_INDEX_NAME;
 extern const char* PARAM_COLLECTION_DIMENSION;
 extern const char* PARAM_INDEX_METRIC_TYPE;
 extern const char* PARAM_INDEX_EXTRA_PARAMS;
+extern const char* PARAM_SEGMENT_SIZE;
 
 using FieldType = meta::hybrid::DataType;
 

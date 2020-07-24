@@ -1755,7 +1755,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 
     auto body_json = nlohmann::json::parse(body->c_str());
     std::string partition_name = body_json["partition_tag"];
-    uint64_t row_num = body_json["row_num"];
+    int32_t row_num = body_json["row_num"];
 
     std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
     auto status = Status::OK();
@@ -1811,7 +1811,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
         chunk_data.insert(std::make_pair(field_name, temp_data));
     }
 
-    status = request_handler_.InsertEntity(context_ptr_, collection_name->c_str(), partition_name, chunk_data);
+    status = request_handler_.InsertEntity(context_ptr_, collection_name->c_str(), partition_name, row_num, chunk_data);
     if (!status.ok()) {
         RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Failed to insert data");
     }
