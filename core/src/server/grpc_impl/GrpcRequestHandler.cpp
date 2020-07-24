@@ -33,6 +33,7 @@ namespace server {
 namespace grpc {
 
 const char* EXTRA_PARAM_KEY = "params";
+const size_t MAXIMUM_FIELD_NUM = 64;
 
 ::milvus::grpc::ErrorCode
 ErrorMap(ErrorCode code) {
@@ -51,6 +52,8 @@ ErrorMap(ErrorCode code) {
         {SERVER_INVALID_COLLECTION_NAME, ::milvus::grpc::ErrorCode::ILLEGAL_COLLECTION_NAME},
         {SERVER_INVALID_COLLECTION_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
         {SERVER_INVALID_VECTOR_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
+        {SERVER_INVALID_FIELD_NAME, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
+        {SERVER_INVALID_FIELD_NUM, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
 
         {SERVER_INVALID_INDEX_TYPE, ::milvus::grpc::ErrorCode::ILLEGAL_INDEX_TYPE},
         {SERVER_INVALID_ROWRECORD, ::milvus::grpc::ErrorCode::ILLEGAL_ROWRECORD},
@@ -1525,6 +1528,7 @@ ParseRangeQuery(const nlohmann::json& range_json, query::RangeQueryPtr& range_qu
     }
     return Status::OK();
 }
+#endif
 
 Status
 GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query) {
@@ -1705,6 +1709,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     query::BooleanQueryPtr boolean_query = std::make_shared<query::BooleanQuery>();
     query::QueryPtr query_ptr = std::make_shared<query::Query>();
+    query_ptr->collection_id = request->collection_name();
+
     std::unordered_map<std::string, query::VectorQueryPtr> vectors;
 
     status = DeserializeJsonToBoolQuery(request->vector_param(), request->dsl(), boolean_query, vectors);

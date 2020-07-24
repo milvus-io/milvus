@@ -78,6 +78,21 @@ WebErrorMap(ErrorCode code) {
     }
 }
 
+template <typename T>
+void
+CopyStructuredData(const nlohmann::json& json, std::vector<uint8_t>& raw) {
+    std::vector<T> values;
+    auto size = json.size();
+    values.resize(size);
+    raw.resize(size * sizeof(T));
+    size_t offset = 0;
+    for (auto data : json) {
+        values[offset] = data.get<T>();
+        ++offset;
+    }
+    memcpy(raw.data(), values.data(), size * sizeof(T));
+}
+
 using FloatJson = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t, float>;
 
 /////////////////////////////////// Private methods ///////////////////////////////////////
@@ -1443,6 +1458,7 @@ StatusDto::ObjectWrapper
 WebRequestHandler::CreateIndex(const OString& collection_name, const OString& body) {
     try {
         auto request_json = nlohmann::json::parse(body->std_str());
+        std::string field_name, index_name;
         if (!request_json.contains("index_type")) {
             RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'index_type\' is required");
         }
