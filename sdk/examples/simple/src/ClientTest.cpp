@@ -115,7 +115,7 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     field_ptr4->field_name = "field_vec";
     field_ptr4->field_type = milvus::DataType::VECTOR_FLOAT;
     JSON index_param_4;
-    index_param_4["name"] = "index_3";
+    index_param_4["name"] = "index_vec";
     field_ptr4->index_params = index_param_4.dump();
     JSON extra_params_4;
     extra_params_4["dimension"] = COLLECTION_DIMENSION;
@@ -155,6 +155,13 @@ ClientTest::InsertEntities(const std::string& collection_name) {
         std::cout << "InsertEntities function call status: " << status.message() << std::endl;
         std::cout << "Returned id array count: " << entity_ids.size() << std::endl;
     }
+}
+
+void
+ClientTest::CountEntities(const std::string& collection_name) {
+    int64_t entity_count = 0;
+    auto status = conn_->CountEntities(collection_name, entity_count);
+    std::cout << "Collection " << collection_name << " entity count: " << entity_count << std::endl;
 }
 
 void

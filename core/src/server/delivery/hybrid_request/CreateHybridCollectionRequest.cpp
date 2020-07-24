@@ -126,7 +126,7 @@ CreateHybridCollectionRequest::OnExecute() {
 
         // step 3: create snapshot collection
         engine::snapshot::CreateCollectionContext create_collection_context;
-        auto ss_collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_);
+        auto ss_collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_, extra_params_);
         create_collection_context.collection = ss_collection_schema;
         for (const auto& schema : fields_schema.fields_schema_) {
             auto field = std::make_shared<engine::snapshot::Field>(
