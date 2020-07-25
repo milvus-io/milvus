@@ -11,26 +11,5 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
-
-set(metrics_lib
-        yaml-cpp
-        )
-
-set(prometheus_lib
-        prometheus-cpp-push
-        prometheus-cpp-pull
-        prometheus-cpp-core
-        curl
-        )
-
-add_library(metrics STATIC ${metrics_files})
-
-if (MILVUS_WITH_PROMETHEUS)
-    target_sources(metrics PUBLIC ${metrics_prometheus_files})
-    list(APPEND metrics_lib ${prometheus_lib})
-endif ()
-
-
-target_link_libraries(metrics ${metrics_lib})
+aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
+add_library(utils STATIC ${utils_files})
