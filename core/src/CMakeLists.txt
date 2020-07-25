@@ -18,7 +18,6 @@ include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-
 set(FOUND_OPENBLAS "unknown")
 
 add_subdirectory(index)
@@ -100,7 +99,7 @@ set(s3_client_lib
         aws-cpp-sdk-core
         )
 
-
+add_subdirectory(utils)
 add_subdirectory(metrics)
 add_subdirectory(config)
 add_subdirectory(tracing)
@@ -124,6 +123,7 @@ set(server_libs
         oatpp
         query
         search
+        utils
         )
 
 add_executable(milvus_server
@@ -134,7 +134,6 @@ add_executable(milvus_server
         ${grpc_service_files}
         ${web_server_files}
         ${server_context_files}
-        ${utils_files}
         )
 
 target_link_libraries(milvus_server
