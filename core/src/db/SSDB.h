@@ -63,6 +63,9 @@ class SSDB {
     AllCollections(std::vector<std::string>& names) = 0;
 
     virtual Status
+    GetCollectionInfo(const std::string& collection_name, std::string& collection_info) = 0;
+
+    virtual Status
     GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count) = 0;
 
     virtual Status
@@ -77,6 +80,9 @@ class SSDB {
 
     virtual Status
     ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) = 0;
+
+    virtual Status
+    HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) = 0;
 
     virtual Status
     InsertEntities(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) = 0;

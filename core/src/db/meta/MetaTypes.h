@@ -47,23 +47,42 @@ enum class EngineType {
     MAX_VALUE = HNSW_SQ8NM,
 };
 
-static std::map<std::string, EngineType> s_map_engine_type = {
-    {knowhere::IndexEnum::INDEX_FAISS_IDMAP, EngineType::FAISS_IDMAP},
-    {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, EngineType::FAISS_IVFFLAT},
-    {knowhere::IndexEnum::INDEX_FAISS_IVFPQ, EngineType::FAISS_PQ},
-    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, EngineType::FAISS_IVFSQ8},
-    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, EngineType::FAISS_IVFSQ8NR},
-    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, EngineType::FAISS_IVFSQ8H},
-    {knowhere::IndexEnum::INDEX_NSG, EngineType::NSG_MIX},
+static std::map<std::string, int32_t> s_index_name2type = {
+    {knowhere::IndexEnum::INDEX_FAISS_IDMAP, (int32_t)EngineType::FAISS_IDMAP},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, (int32_t)EngineType::FAISS_IVFFLAT},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFPQ, (int32_t)EngineType::FAISS_PQ},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, (int32_t)EngineType::FAISS_IVFSQ8},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR, (int32_t)EngineType::FAISS_IVFSQ8NR},
+    {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, (int32_t)EngineType::FAISS_IVFSQ8H},
+    {knowhere::IndexEnum::INDEX_NSG, (int32_t)EngineType::NSG_MIX},
 #ifdef MILVUS_SUPPORT_SPTAG
-    {knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, EngineType::SPTAG_KDT},
-    {knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, EngineType::SPTAG_BKT},
+    {knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, (int32_t)EngineType::SPTAG_KDT},
+    {knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, (int32_t)EngineType::SPTAG_BKT},
 #endif
-    {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, EngineType::FAISS_BIN_IDMAP},
-    {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, EngineType::FAISS_BIN_IVFFLAT},
-    {knowhere::IndexEnum::INDEX_HNSW, EngineType::HNSW},
-    {knowhere::IndexEnum::INDEX_HNSW_SQ8NM, EngineType::HNSW_SQ8NM},
-    {knowhere::IndexEnum::INDEX_ANNOY, EngineType::ANNOY},
+    {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, (int32_t)EngineType::FAISS_BIN_IDMAP},
+    {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, (int32_t)EngineType::FAISS_BIN_IVFFLAT},
+    {knowhere::IndexEnum::INDEX_HNSW, (int32_t)EngineType::HNSW},
+    {knowhere::IndexEnum::INDEX_HNSW_SQ8NM, (int32_t)EngineType::HNSW_SQ8NM},
+    {knowhere::IndexEnum::INDEX_ANNOY, (int32_t)EngineType::ANNOY},
+};
+
+static std::map<int32_t, std::string> s_index_type2name = {
+    {(int32_t)EngineType::FAISS_IDMAP, knowhere::IndexEnum::INDEX_FAISS_IDMAP},
+    {(int32_t)EngineType::FAISS_IVFFLAT, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+    {(int32_t)EngineType::FAISS_PQ, knowhere::IndexEnum::INDEX_FAISS_IVFPQ},
+    {(int32_t)EngineType::FAISS_IVFSQ8, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8},
+    {(int32_t)EngineType::FAISS_IVFSQ8NR, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR},
+    {(int32_t)EngineType::FAISS_IVFSQ8H, knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H},
+    {(int32_t)EngineType::NSG_MIX, knowhere::IndexEnum::INDEX_NSG},
+#ifdef MILVUS_SUPPORT_SPTAG
+    {(int32_t)EngineType::SPTAG_KDT, knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT},
+    {(int32_t)EngineType::SPTAG_BKT, knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT},
+#endif
+    {(int32_t)EngineType::FAISS_BIN_IDMAP, knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP},
+    {(int32_t)EngineType::FAISS_BIN_IVFFLAT, knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT},
+    {(int32_t)EngineType::HNSW, knowhere::IndexEnum::INDEX_HNSW},
+    {(int32_t)EngineType::HNSW_SQ8NM, knowhere::IndexEnum::INDEX_HNSW_SQ8NM},
+    {(int32_t)EngineType::ANNOY, knowhere::IndexEnum::INDEX_ANNOY},
 };
 
 enum class MetricType {

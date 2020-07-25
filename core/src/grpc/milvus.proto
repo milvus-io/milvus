@@ -49,6 +49,14 @@ message CollectionNameList {
 }
 
 /**
+ * @brief Field name
+ */
+message FieldName {
+    string collection_name = 1;
+    string field_name = 2;
+}
+
+/**
  * @brief Collection mapping
  */
 message Mapping {
@@ -158,20 +166,9 @@ message SearchParam {
 /**
  * @brief Params for searching vector in files
  */
-message SearchInFilesParam {
+message SearchInSegmentParam {
     repeated string file_id_array = 1;
     SearchParam search_param = 2;
-}
-
-/**
- * @brief Params for searching vector by ID
- */
-message SearchByIDParam {
-    string collection_name = 1;
-    repeated string partition_tag_array = 2;
-    repeated int64 id_array = 3;
-    int64 topk = 4;
-    repeated KeyValuePair extra_params = 5;
 }
 
 /**
@@ -237,7 +234,18 @@ message Command {
 
 /**
  * @brief Index params
- * @index_type: 0-invalid, 1-idmap, 2-ivflat, 3-ivfsq8, 4-nsgmix
+ * @collection_name: target collection
+ * @field_name: target field
+ * @index_name: a name for index provided by user, unique within this field
+ * @extra_params: index parameters in json format
+ *    for vector field:
+ *        extra_params["index_type"] = one of the values: IDMAP, IVFLAT, IVFSQ8, NSGMIX, IVFSQ8H,
+ *                                                        PQ, HNSW, HNSW_SQ8NM, ANNOY
+ *        extra_params["metric_type"] = one of the values: L2, IP, HAMMING, JACCARD, TANIMOTO
+ *                                                         SUBSTRUCTURE, SUPERSTRUCTURE
+ *        extra_params["params"] = extra parameters for index, for example ivflat: {nlist: 2048}
+ *    for structured field:
+ *        extra_params["index_type"] = one of the values: SORTED
  */
 message IndexParam {
     Status status = 1;
@@ -440,7 +448,7 @@ service MilvusService {
      *
      * @param CollectionName, collection name is going to be deleted.
      *
-     * @return CollectionNameList
+     * @return Status
      */
     rpc DropCollection(CollectionName) returns (Status) {}
 
@@ -456,16 +464,16 @@ service MilvusService {
     /**
      * @brief This method is used to describe index
      *
-     * @param CollectionName, target collection name.
+     * @param IndexParam, target index.
      *
      * @return IndexParam
      */
-    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
+    rpc DescribeIndex(IndexParam) returns (IndexParam) {}
 
     /**
      * @brief This method is used to drop index
      *
-     * @param CollectionName, target collection name.
+     * @param IndexParam, target field. if the IndexParam.field_name is empty, will drop all index of the collection
      *
      * @return Status
      */
@@ -544,22 +552,13 @@ service MilvusService {
     rpc Search(SearchParam) returns (QueryResult) {}
 
     /**
-     * @brief This method is used to query vector by id.
-     *
-     * @param SearchByIDParam, search parameters.
-     *
-     * @return TopKQueryResult
-     */
-    rpc SearchByID(SearchByIDParam) returns (QueryResult) {}
-
-    /**
      * @brief This method is used to query vector in specified files.
      *
-     * @param SearchInFilesParam, search in files paremeters.
+     * @param SearchInSegmentParam, target segments to search.
      *
      * @return TopKQueryResult
      */
-    rpc SearchInFiles(SearchInFilesParam) returns (QueryResult) {}
+    rpc SearchInSegment(SearchInSegmentParam) returns (QueryResult) {}
 
     /**
      * @brief This method is used to give the server status.

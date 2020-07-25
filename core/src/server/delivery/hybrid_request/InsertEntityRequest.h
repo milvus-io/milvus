@@ -25,11 +25,12 @@ class InsertEntityRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const std::string& partition_name, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
+           const std::string& partition_name, const int32_t& row_count,
+           std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
 
  protected:
     InsertEntityRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                        const std::string& partition_name,
+                        const std::string& partition_name, const int32_t& row_count,
                         std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
 
     Status
@@ -38,6 +39,7 @@ class InsertEntityRequest : public BaseRequest {
  private:
     const std::string collection_name_;
     const std::string partition_name_;
+    const int32_t row_count_;
     std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data_;
 };
 

@@ -58,6 +58,9 @@ class SSDBImpl : public SSDB {
     AllCollections(std::vector<std::string>& names) override;
 
     Status
+    GetCollectionInfo(const std::string& collection_name, std::string& collection_info);
+
+    Status
     GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count) override;
 
     Status
@@ -72,6 +75,9 @@ class SSDBImpl : public SSDB {
 
     Status
     ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) override;
+
+    Status
+    HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) override;
 
     Status
     InsertEntities(const std::string& collection_name, const std::string& partition_name,

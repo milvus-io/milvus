@@ -41,10 +41,8 @@ typedef std::vector<faiss::Index::idx_t> ResultIds;
 typedef std::vector<faiss::Index::distance_t> ResultDistances;
 
 struct CollectionIndex {
-    std::string field_name_;
     std::string index_name_;
-    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
-    int32_t metric_type_ = (int)MetricType::L2;
+    std::string metric_name_;
     milvus::json extra_params_ = {{"nlist", 2048}};
 };
 
@@ -91,6 +89,7 @@ extern const char* DEFAULT_INDEX_NAME;
 extern const char* PARAM_COLLECTION_DIMENSION;
 extern const char* PARAM_INDEX_METRIC_TYPE;
 extern const char* PARAM_INDEX_EXTRA_PARAMS;
+extern const char* PARAM_SEGMENT_SIZE;
 
 using FieldType = meta::hybrid::DataType;
 
