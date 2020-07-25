@@ -19,6 +19,9 @@
 
 #include "server/delivery/request/BaseRequest.h"
 
+#include <src/db/snapshot/Context.h>
+#include <src/db/snapshot/Resources.h>
+#include <src/segment/Segment.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -29,24 +32,24 @@ namespace server {
 class GetEntityByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::vector<std::string>& field_names, const std::vector<int64_t>& ids,
-           std::vector<engine::AttrsData>& attrs, std::vector<engine::VectorsData>& vectors);
+    Create(const std::shared_ptr<milvus::server::Context>& context, std::string collection_name,
+           const engine::IDNumbers& id_array, const std::vector<std::string>& field_names_,
+           engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
  protected:
-    GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         std::vector<std::string>& field_names, const std::vector<int64_t>& ids,
-                         std::vector<engine::AttrsData>& attrs, std::vector<engine::VectorsData>& vectors);
+    GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context, std::string collection_name,
+                         const engine::IDNumbers& id_array, const std::vector<std::string>& field_names,
+                         engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
     Status
     OnExecute() override;
 
  private:
     std::string collection_name_;
-    std::vector<std::string>& field_names_;
-    std::vector<int64_t> ids_;
-    std::vector<engine::AttrsData>& attrs_;
-    std::vector<engine::VectorsData>& vectors_;
+    engine::IDNumbers id_array_;
+    std::vector<std::string> field_names_;
+    engine::snapshot::CollectionMappings field_mappings_;
+    engine::DataChunkPtr data_chunk_;
 };
 
 }  // namespace server
