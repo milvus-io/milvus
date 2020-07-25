@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <src/db/snapshot/Context.h>
+#include <src/segment/Segment.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -134,8 +136,8 @@ class RequestHandler {
 
     Status
     GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                  std::vector<std::string>& field_names, const std::vector<int64_t>& ids,
-                  std::vector<engine::AttrsData>& attrs, std::vector<engine::VectorsData>& vectors);
+                  const engine::IDNumbers& ids, std::vector<std::string>& field_names,
+                  engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
     Status
     HybridSearch(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
