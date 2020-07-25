@@ -19,24 +19,11 @@
 
 namespace milvus {
 
-Status
-InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_enable, bool error_enable,
-        bool fatal_enable, const std::string& logs_path, int64_t max_log_file_size, int64_t delete_exceeds);
-
-void
-RolloutHandler(const char* filename, std::size_t size, el::Level level);
-
-#define SHOW_LOCATION
-#ifdef SHOW_LOCATION
-#define LOCATION_INFO "[" << sql::server::GetFileName(__FILE__) << ":" << __LINE__ << "] "
-#else
-#define LOCATION_INFO ""
-#endif
-
-void
-LogConfigInFile(const std::string& path);
-
-void
-LogCpuInfo();
+class LogMgr {
+ public:
+    static Status
+    InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_enable, bool error_enable,
+            bool fatal_enable, const std::string& logs_path, int64_t max_log_file_size, int64_t delete_exceeds);
+};
 
 }  // namespace milvus

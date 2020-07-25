@@ -9,18 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "utils/LogUtil.h"
-
 #include <fiu-local.h>
 #include <libgen.h>
 #include <cctype>
 #include <string>
 
-#include <yaml-cpp/yaml.h>
 #include <boost/filesystem.hpp>
 
 #include "config/ServerConfig.h"
-#include "utils/Log.h"
+#include "log/LogMgr.h"
+#include "utils/Status.h"
 
 namespace milvus {
 
@@ -126,8 +124,8 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
 }
 
 Status
-InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_enable, bool error_enable,
-        bool fatal_enable, const std::string& logs_path, int64_t max_log_file_size, int64_t delete_exceeds) {
+LogMgr::InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_enable, bool error_enable,
+                bool fatal_enable, const std::string& logs_path, int64_t max_log_file_size, int64_t delete_exceeds) {
     el::Configurations defaultConf;
     defaultConf.setToDefault();
     defaultConf.setGlobally(el::ConfigurationType::Format, "[%datetime][%level]%msg");
@@ -225,41 +223,6 @@ InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_ena
     el::Loggers::reconfigureLogger("default", defaultConf);
 
     return Status::OK();
-}
-
-void
-LogConfigInFile(const std::string& path) {
-    // TODO(yhz): Check if file exists
-    auto node = YAML::LoadFile(path);
-    YAML::Emitter out;
-    out << node;
-    LOG_SERVER_INFO_ << "\n\n"
-                     << std::string(15, '*') << "Config in file" << std::string(15, '*') << "\n\n"
-                     << out.c_str();
-}
-
-void
-LogCpuInfo() {
-    /*CPU information*/
-    std::fstream fcpu("/proc/cpuinfo", std::ios::in);
-    if (!fcpu.is_open()) {
-        LOG_SERVER_WARNING_ << "Cannot obtain CPU information. Open file /proc/cpuinfo fail: " << strerror(errno)
-                            << "(errno: " << errno << ")";
-        return;
-    }
-    std::stringstream cpu_info_ss;
-    cpu_info_ss << fcpu.rdbuf();
-    fcpu.close();
-    std::string cpu_info = cpu_info_ss.str();
-
-    auto processor_pos = cpu_info.rfind("processor");
-    if (std::string::npos == processor_pos) {
-        LOG_SERVER_WARNING_ << "Cannot obtain CPU information. No sub string \'processor\'";
-        return;
-    }
-
-    auto sub_str = cpu_info.substr(processor_pos);
-    LOG_SERVER_INFO_ << "\n\n" << std::string(15, '*') << "CPU" << std::string(15, '*') << "\n\n" << sub_str;
 }
 
 }  // namespace milvus

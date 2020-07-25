@@ -24,7 +24,6 @@ set(test_files
 
 add_executable(test_ssdb
         ${common_files}
-        ${log_files}
         ${cache_files}
         ${codecs_files}
         ${codecs_default_files}
@@ -42,6 +41,7 @@ add_executable(test_ssdb
         ${db_snapshot_files}
         # ${grpc_server_files}
         # ${grpc_service_files}
+        ${log_files}
         ${metrics_files}
         ${query_files}
         ${segment_files}
