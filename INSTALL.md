@@ -63,7 +63,6 @@ For GPU-enabled version, you will also need:
 Download the latest Milvus source code and change directory:
 
 ```shell
-$ cd /home
 $ git clone https://github.com/milvus-io/milvus
 $ cd ./milvus/core
 ```
@@ -87,6 +86,7 @@ $ ./centos7_build_deps.sh
 ```shell
 $ ./build.sh -t Debug
 ```
+When the build completes, everything that you need to run Milvus is under `[Milvus root path]/core/milvus`.
 
 ### Launch Milvus server
 
@@ -163,7 +163,6 @@ $ docker exec -it [container_id] bash
 Download latest Milvus source code:
 
 ```shell
-$ cd /home
 $ git clone https://github.com/milvus-io/milvus
 ```
 
