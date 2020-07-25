@@ -22,10 +22,7 @@ include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 set(FOUND_OPENBLAS "unknown")
 
 add_subdirectory(index)
-
-foreach (dir ${INDEX_INCLUDE_DIRS})
-    include_directories(${dir})
-endforeach ()
+set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)

@@ -90,6 +90,12 @@ endif ()
 
 add_subdirectory(src)
 
+# Add index/knwhere include directories for globle scope
+foreach (dir ${INDEX_INCLUDE_DIRS})
+    include_directories(${dir})
+endforeach ()
+
+# Unittest lib
 if (BUILD_UNIT_TEST STREQUAL "ON")
     if (BUILD_COVERAGE STREQUAL "ON")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
@@ -97,6 +103,7 @@ if (BUILD_UNIT_TEST STREQUAL "ON")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DELPP_DISABLE_LOGS")
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
 endif ()
+
 
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 
