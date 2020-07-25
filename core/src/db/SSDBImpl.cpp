@@ -665,9 +665,6 @@ SSDBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std
         return status;
     }
 
-    if (old_index.metric_type_ != (int32_t)MetricType::INVALID) {
-        new_index.metric_type_ = old_index.metric_type_;  // dont change metric type, it was defined by CreateCollection
-    }
     if (utils::IsSameIndex(old_index, new_index)) {
         return Status::OK();  // same index
     }
