@@ -20,13 +20,12 @@
 #include <vector>
 
 #include "query/BinaryQuery.h"
-#include "server/context/ConnectionContext.h"
 #include "server/ValidationUtil.h"
+#include "server/context/ConnectionContext.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
-
 
 namespace milvus {
 namespace server {
