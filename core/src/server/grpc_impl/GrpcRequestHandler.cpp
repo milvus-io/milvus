@@ -19,7 +19,6 @@
 #include <utility>
 #include <vector>
 
-#include "context/HybridSearchContext.h"
 #include "query/BinaryQuery.h"
 #include "server/ValidationUtil.h"
 #include "server/context/ConnectionContext.h"
@@ -27,7 +26,6 @@
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
-#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace server {
@@ -115,18 +113,18 @@ CopyVectorData(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRo
     }
 
     // copy vector data
-    std::vector<uint8_t> binary_array(data_size, 0);
+    vectors_data.resize(data_size);
     int64_t offset = 0;
     if (float_data_size > 0) {
         for (auto& record : grpc_records) {
             int64_t single_size = record.float_data_size() * sizeof(float);
-            memcpy(&binary_array[offset], record.float_data().data(), single_size);
+            memcpy(&vectors_data[offset], record.float_data().data(), single_size);
             offset += single_size;
         }
     } else if (binary_data_size > 0) {
         for (auto& record : grpc_records) {
             int64_t single_size = record.binary_data().size();
-            memcpy(&binary_array[offset], record.binary_data().data(), single_size);
+            memcpy(&vectors_data[offset], record.binary_data().data(), single_size);
             offset += single_size;
         }
     }
@@ -739,7 +737,7 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
-    std::vector<int64_t> vector_ids;
+    engine::IDNumbers vector_ids;
     vector_ids.reserve(request->id_array_size());
     for (int i = 0; i < request->id_array_size(); i++) {
         vector_ids.push_back(request->id_array(i));
@@ -750,10 +748,39 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
         field_names[i] = request->field_names(i);
     }
 
+    engine::DataChunkPtr data_chunk;
+    engine::snapshot::CollectionMappings field_mappings;
+
     std::vector<engine::AttrsData> attrs;
     std::vector<engine::VectorsData> vectors;
-    Status status = request_handler_.GetEntityByID(GetContext(context), request->collection_name(), field_names,
-                                                   vector_ids, attrs, vectors);
+
+    Status status = request_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids,
+                                                   field_names, field_mappings, data_chunk);
+
+    std::vector<uint8_t> id_array = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
+
+    for (const auto& it : field_mappings) {
+        std::string name = it.first->GetName();
+        uint64_t type = it.first->GetFtype();
+        std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
+        if (type == engine::FieldType::VECTOR_BINARY) {
+            engine::VectorsData vectors_data;
+            memcpy(vectors_data.binary_data_.data(), data.data(), data.size());
+            memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
+            vectors.emplace_back(vectors_data);
+        } else if (type == engine::FieldType::VECTOR_FLOAT) {
+            engine::VectorsData vectors_data;
+            memcpy(vectors_data.float_data_.data(), data.data(), data.size());
+            memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
+            vectors.emplace_back(vectors_data);
+        } else {
+            engine::AttrsData attrs_data;
+            attrs_data.attr_type_[name] = static_cast<engine::meta::hybrid::DataType>(type);
+            attrs_data.attr_data_[name] = data;
+            memcpy(attrs_data.id_array_.data(), id_array.data(), id_array.size());
+            attrs.emplace_back(attrs_data);
+        }
+    }
 
     ConstructEntityResults(attrs, vectors, field_names, response);
 
