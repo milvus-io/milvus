@@ -30,9 +30,8 @@ foreach (dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach ()
 
+add_subdirectory(metrics)
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/attr db_attr_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
@@ -261,26 +260,6 @@ if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
             libquadmath.a
             )
 endif ()
-
-if (MILVUS_WITH_PROMETHEUS)
-    add_library(metrics STATIC ${metrics_files} ${metrics_prometheus_files})
-else ()
-    add_library(metrics STATIC ${metrics_files})
-endif ()
-add_dependencies(metrics fiu)
-
-set(metrics_lib
-        yaml-cpp
-        )
-
-if (MILVUS_WITH_PROMETHEUS)
-    set(metrics_lib ${metrics_lib}
-            ${prometheus_lib}
-            )
-endif ()
-
-target_link_libraries(metrics ${metrics_lib})
-
 
 add_library(milvus_engine STATIC ${engine_files})
 target_link_libraries(milvus_engine
