@@ -5,8 +5,8 @@ add_library(tracing STATIC ${tracing_files} ${thirdparty_files})
 set(tracing_lib
         opentracing
         opentracing_mocktracer
-        ${grpc_lib}
         pthread
         z
+        dl
         )
 target_link_libraries(tracing ${tracing_lib})
