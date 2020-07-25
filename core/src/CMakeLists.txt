@@ -114,6 +114,7 @@ add_subdirectory(tracing)
 add_subdirectory(query)
 add_subdirectory(search)
 add_subdirectory(db) # target milvus_engine
+add_subdirectory(log)
 
 # **************************** Get&Print Include Directories ****************************
 get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES )
@@ -128,6 +129,7 @@ set(server_libs
         config
         metrics
         tracing
+        log
         oatpp
         query
         search
