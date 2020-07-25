@@ -11,29 +11,5 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-# library
-set(infra_config_src
-    ServerConfig.h
-    config.cpp
-    )
-
-set(infra_src
-    ${infra_config_src}
-    )
-
-add_library(infra ${infra_src})
-
-# unittests
-if (BUILD_UNIT_TEST STREQUAL "ON")
-
-    # config_test
-    add_test(
-        TARGET config_test
-        SOURCES
-            ${infra_config_src}
-            config_invalid_test.cpp
-            config_valid_test.cpp
-        LIBS ${gtest_libraries})
-
-    # other tests
-endif()
+aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
+add_library(utils STATIC ${utils_files})
