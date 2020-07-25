@@ -27,10 +27,6 @@ foreach (dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach ()
 
-add_subdirectory(metrics)
-aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
-
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
@@ -112,6 +108,7 @@ set(s3_client_lib
         )
 
 
+add_subdirectory(metrics)
 add_subdirectory(config)
 add_subdirectory(tracing)
 add_subdirectory(query)
