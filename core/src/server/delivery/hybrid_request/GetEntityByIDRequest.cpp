@@ -20,6 +20,7 @@
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "db/meta/MetaTypes.h"
 
 #include <memory>
 #include <vector>
@@ -30,8 +31,8 @@ namespace server {
 constexpr uint64_t MAX_COUNT_RETURNED = 1000;
 
 GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string collection_name, const engine::IDNumbers& id_array,
-                                           const std::vector<std::string>& field_names,
+                                           const std::string& collection_name, const engine::IDNumbers& id_array,
+                                           std::vector<std::string>& field_names,
                                            engine::snapshot::CollectionMappings& field_mappings,
                                            engine::DataChunkPtr& data_chunk)
     : BaseRequest(context, BaseRequest::kGetVectorByID),
@@ -43,8 +44,8 @@ GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server:
 }
 
 BaseRequestPtr
-GetEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context, std::string collection_name,
-                             const engine::IDNumbers& id_array, const std::vector<std::string>& field_names_,
+GetEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,const std::string& collection_name,
+                             const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
                              engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
     return std::shared_ptr<BaseRequest>(
         new GetEntityByIDRequest(context, collection_name, id_array, field_names_, field_mappings, data_chunk));
@@ -81,19 +82,17 @@ GetEntityByIDRequest::OnExecute() {
         }
 
         if (field_names_.empty()) {
-            for (const auto& schema : field_mappings_)
-                for (const auto& it : schema.second) {
-                    field_names_.emplace_back(it->GetName());
+            for (const auto& schema : field_mappings_) {
+              if (schema.first->GetFtype() != engine::meta::hybrid::DataType::UID)
+                    field_names_.emplace_back(schema.first->GetName());
                 }
         } else {
             for (const auto& name : field_names_) {
                 bool find_field_name = false;
                 for (const auto& schema : field_mappings_) {
-                    for (const auto& it : schema.second) {
-                        if (name == it->GetName()) {
+                        if (name == schema.first->GetName()) {
                             find_field_name = true;
                             break;
-                        }
                     }
                 }
                 if (not find_field_name) {
@@ -107,6 +106,7 @@ GetEntityByIDRequest::OnExecute() {
         if (!status.ok()) {
             return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
         }
+        return Status::OK();
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
