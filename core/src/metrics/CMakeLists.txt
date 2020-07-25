@@ -18,6 +18,13 @@ set(metrics_lib
         yaml-cpp
         )
 
+set(prometheus_lib
+        prometheus-cpp-push
+        prometheus-cpp-pull
+        prometheus-cpp-core
+        curl
+        )
+
 add_library(metrics STATIC ${metrics_files})
 
 if (MILVUS_WITH_PROMETHEUS)

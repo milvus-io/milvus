@@ -95,13 +95,6 @@ set(web_server_files
         ${web_impl_files}
         )
 
-set(prometheus_lib
-        prometheus-cpp-push
-        prometheus-cpp-pull
-        prometheus-cpp-core
-        curl
-        )
-
 set(s3_client_lib
         aws-cpp-sdk-s3
         aws-cpp-sdk-core
