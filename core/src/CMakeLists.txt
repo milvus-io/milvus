@@ -18,35 +18,17 @@ include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-add_subdirectory(config)
-add_subdirectory(tracing)
 
 set(FOUND_OPENBLAS "unknown")
 
 add_subdirectory(index)
-
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 foreach (dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach ()
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/attr db_attr_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/merge db_merge_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/snapshot db_snapshot_files)
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta/backend db_meta_backend_files)
-set(db_meta_files
-        ${db_meta_main_files}
-        ${db_meta_backend_files}
-        )
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -55,8 +37,6 @@ set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
         )
 
-add_subdirectory(query)
-add_subdirectory(search)
 
 # Now no use of context
 aux_source_directory(${MILVUS_ENGINE_SRC}/context context_files)
@@ -76,15 +56,6 @@ set(scheduler_files
         ${scheduler_selector_files}
         ${scheduler_resource_files}
         ${scheduler_task_files}
-        )
-
-aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
-aux_source_directory(${MILVUS_THIRDPARTY_SRC}/nlohmann thirdparty_nlohmann_files)
-aux_source_directory(${MILVUS_THIRDPARTY_SRC}/dablooms thirdparty_dablooms_files)
-set(thirdparty_files
-        ${thirdparty_easyloggingpp_files}
-        ${thirdparty_nlohmann_files}
-        ${thirdparty_dablooms_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_service_files)
@@ -127,54 +98,6 @@ set(web_server_files
         ${web_impl_files}
         )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage/disk storage_disk_files)
-#aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
-set(storage_files
-        ${storage_main_files}
-        ${storage_disk_files}
-#        ${storage_s3_files}
-        )
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/index/archive wrapper_files)
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/snapshot codecs_snapshot_files)
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
-
-set(engine_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
-        ${cache_files}
-        ${db_main_files}
-        ${db_attr_files}
-        ${db_engine_files}
-        ${db_insert_files}
-        ${db_meta_files}
-        ${db_merge_files}
-        ${db_wal_files}
-        ${db_snapshot_files}
-        ${storage_files}
-        ${thirdparty_files}
-        ${utils_files}
-        ${wrapper_files}
-        ${codecs_files}
-        ${codecs_default_files}
-        ${codecs_snapshot_files}
-        ${segment_files}
-        )
-
-set(grpc_lib
-        grpcpp_channelz
-        grpc++
-        grpc
-        grpc_protobuf
-        grpc_protoc
-        )
-
 set(prometheus_lib
         prometheus-cpp-push
         prometheus-cpp-pull
@@ -182,85 +105,24 @@ set(prometheus_lib
         curl
         )
 
-set(boost_lib
-        libboost_system.a
-        libboost_filesystem.a
-        libboost_serialization.a
-        )
-
 set(s3_client_lib
         aws-cpp-sdk-s3
         aws-cpp-sdk-core
         )
 
-set(third_party_libs
-        sqlite
-        ${grpc_lib}
-        yaml-cpp
-        mysqlpp
-        zlib
-        fiu
-        ${boost_lib}
-        )
 
-if (MILVUS_GPU_VERSION)
-    include_directories(${CUDA_INCLUDE_DIRS})
-    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
-    set(cuda_lib
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-            cudart
-            cublas
-            )
-    set(third_party_libs ${third_party_libs}
-            ${cuda_lib}
-            )
-    aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
-    set(engine_files ${engine_files}
-            ${wrapper_gpu_files}
-            )
-endif ()
+add_subdirectory(config)
+add_subdirectory(tracing)
+add_subdirectory(query)
+add_subdirectory(search)
+add_subdirectory(db) # target milvus_engine
 
-# cannot be enabled together with ENABLE_CPU_PROFILING
-if (ENABLE_MEM_PROFILING)
-    set(third_party_libs ${third_party_libs}
-            tcmalloc
-            )
-endif ()
+# **************************** Get&Print Include Directories ****************************
+get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES )
 
-if (ENABLE_CPU_PROFILING)
-    set(third_party_libs ${third_party_libs}
-            gperftools
-            libunwind
-            )
-endif ()
-
-if (MILVUS_WITH_PROMETHEUS)
-    set(third_party_libs ${third_party_libs}
-            ${prometheus_lib}
-            )
-endif ()
-
-if (MILVUS_WITH_AWS)
-    set(third_party_libs ${third_party_libs}
-            ${s3_client_lib}
-            curl
-            crypto
-            )
-endif ()
-
-set(engine_libs
-        pthread
-        libgomp.a
-        libgfortran.a
-        dl
-        )
-
-if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
-    set(engine_libs
-            ${engine_libs}
-            libquadmath.a
-            )
-endif ()
+foreach (dir ${dirs})
+    message(STATUS "Current Include DIRS: "${dir})
+endforeach ()
 
 if (MILVUS_WITH_PROMETHEUS)
     add_library(metrics STATIC ${metrics_files} ${metrics_prometheus_files})
@@ -280,15 +142,6 @@ if (MILVUS_WITH_PROMETHEUS)
 endif ()
 
 target_link_libraries(metrics ${metrics_lib})
-
-
-add_library(milvus_engine STATIC ${engine_files})
-target_link_libraries(milvus_engine
-        knowhere
-        ${third_party_libs}
-        ${engine_libs}
-        metrics
-        )
 
 set(server_libs
         milvus_engine
