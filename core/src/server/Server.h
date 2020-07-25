@@ -47,6 +47,13 @@ class Server {
     StopService();
 
  private:
+    static void
+    LogConfigInFile(const std::string& path);
+
+    static void
+    LogCpuInfo();
+
+ private:
     int64_t daemonized_ = 0;
     int pid_fd_ = -1;
     std::string pid_filename_;

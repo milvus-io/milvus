@@ -25,7 +25,6 @@
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
-#include "utils/LogUtil.h"
 
 namespace milvus {
 namespace server {
