@@ -36,24 +36,8 @@ class MetaField {
         return name_ + " " + type_ + " " + setting_;
     }
 
-    // mysql field type has additional information. for instance, a filed type is defined as 'BIGINT'
-    // we get the type from sql is 'bigint(20)', so we need to ignore the '(20)'
     bool
-    IsEqual(const MetaField& field) const {
-        size_t name_len_min = field.name_.length() > name_.length() ? name_.length() : field.name_.length();
-        size_t type_len_min = field.type_.length() > type_.length() ? type_.length() : field.type_.length();
-
-        // only check field type, don't check field width, for example: VARCHAR(255) and VARCHAR(100) is equal
-        std::vector<std::string> type_split;
-        milvus::StringHelpFunctions::SplitStringByDelimeter(type_, "(", type_split);
-        if (!type_split.empty()) {
-            type_len_min = type_split[0].length() > type_len_min ? type_len_min : type_split[0].length();
-        }
-
-        // field name must be equal, ignore type width
-        return strncasecmp(field.name_.c_str(), name_.c_str(), name_len_min) == 0 &&
-               strncasecmp(field.type_.c_str(), type_.c_str(), type_len_min) == 0;
-    }
+    IsEqual(const MetaField& field) const;
 
  private:
     std::string name_;
@@ -74,51 +58,14 @@ class MetaSchema {
     }
 
     std::string
-    ToString() const {
-        std::string result;
-        for (auto& field : fields_) {
-            if (!result.empty()) {
-                result += ",";
-            }
-            result += field.ToString();
-        }
+    ToString() const;
 
-//        std::string constraints;
-//        for (auto& constraint : constraint_fields_) {
-//            if (!constraints.empty()) {
-//                constraints += ",";
-//            }
-//            constraints += constraint.name();
-//        }
-//
-//        if (!constraints.empty()) {
-//            result += ",constraint uq unique(" + constraints + ")";
-//        }
-
-        return result;
-    }
-
-    // if the outer fields contains all this MetaSchema fields, return true
-    // otherwise return false
     bool
-    IsEqual(const MetaFields& fields) const {
-        std::vector<std::string> found_field;
-        for (const auto& this_field : fields_) {
-            for (const auto& outer_field : fields) {
-                if (this_field.IsEqual(outer_field)) {
-                    found_field.push_back(this_field.name());
-                    break;
-                }
-            }
-        }
-
-        return found_field.size() == fields_.size();
-    }
+    IsEqual(const MetaFields& fields) const;
 
  private:
     std::string name_;
     MetaFields fields_;
 };
 
-}
-
+} // namespace milvus::engine::meta

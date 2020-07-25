@@ -12,6 +12,7 @@
 #pragma once
 
 #include <mutex>
+#include <vector>
 
 #include <sqlite3.h>
 
@@ -42,16 +43,11 @@ class SqliteEngine : public MetaEngine {
     Status
     Initialize();
 
-//    int
-//    QueryCallBack(void *data, int argc, char **argv, char **azColName);
-
  private:
     DBMetaOptions options_;
     sqlite3 * db_;
     std::mutex meta_mutex_;
-
-// private
 };
 
-}
+} // namespace milvus::engine::meta
 

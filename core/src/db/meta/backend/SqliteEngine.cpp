@@ -13,7 +13,9 @@
 
 #include <functional>
 #include <iostream>
+#include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "db/meta/MetaNames.h"
@@ -24,7 +26,7 @@ namespace milvus::engine::meta {
 
 ////////// private namespace //////////
 namespace {
-static const auto MetaIdField = MetaField(F_ID, "BIGINT", "PRIMARY KEY AUTO_INCREMENT");
+static const auto MetaIdField = MetaField(F_ID, "INTEGER", "PRIMARY KEY AUTOINCREMENT");
 static const MetaField MetaCollectionIdField = MetaField(F_COLLECTON_ID, "BIGINT", "NOT NULL");
 static const MetaField MetaPartitionIdField = MetaField(F_PARTITION_ID, "BIGINT", "NOT NULL");
 static const MetaField MetaSchemaIdField = MetaField(F_SCHEMA_ID, "BIGINT", "NOT NULL");
@@ -32,14 +34,14 @@ static const MetaField MetaSegmentIdField = MetaField(F_SEGMENT_ID, "BIGINT", "N
 static const MetaField MetaFieldElementIdField = MetaField(F_FIELD_ELEMENT_ID, "BIGINT", "NOT NULL");
 static const MetaField MetaFieldIdField = MetaField(F_FIELD_ID, "BIGINT", "NOT NULL");
 static const MetaField MetaNameField = MetaField(F_NAME, "VARCHAR(255)", "NOT NULL");
-static const MetaField MetaMappingsField = MetaField(F_MAPPINGS, "JSON", "NOT NULL");
+static const MetaField MetaMappingsField = MetaField(F_MAPPINGS, "VARCHAR(255)", "NOT NULL");
 static const MetaField MetaNumField = MetaField(F_NUM, "BIGINT", "NOT NULL");
 static const MetaField MetaLSNField = MetaField(F_LSN, "BIGINT", "NOT NULL");
 static const MetaField MetaFtypeField = MetaField(F_FTYPE, "BIGINT", "NOT NULL");
 static const MetaField MetaStateField = MetaField(F_STATE, "TINYINT", "NOT NULL");
 static const MetaField MetaCreatedOnField = MetaField(F_CREATED_ON, "BIGINT", "NOT NULL");
 static const MetaField MetaUpdatedOnField = MetaField(F_UPDATED_ON, "BIGINT", "NOT NULL");
-static const MetaField MetaParamsField = MetaField(F_PARAMS, "JSON", "NOT NULL");
+static const MetaField MetaParamsField = MetaField(F_PARAMS, "VARCHAR(255)", "NOT NULL");
 static const MetaField MetaSizeField = MetaField(F_SIZE, "BIGINT", "NOT NULL");
 static const MetaField MetaRowCountField = MetaField(F_ROW_COUNT, "BIGINT", "NOT NULL");
 
@@ -122,6 +124,7 @@ static const MetaSchema FIELDELEMENT_SCHEMA(TABLE_FIELD_ELEMENT,
 /////////////////////////////////////////////////////
 static AttrsMapList * QueryData = nullptr;
 static AttrsMapList * InsertData = nullptr;
+static std::vector<int64_t> * InsertedIDs;
 static AttrsMapList * UpdateData = nullptr;
 static AttrsMapList * DeleteData = nullptr;
 
@@ -140,21 +143,6 @@ QueryCallback(void *data, int argc, char **argv, char **azColName) {
 
     QueryData->push_back(raw);
 
-    return 0;
-}
-
-static int
-InsertCallBack(void *data, int argc, char **argv, char **azColName) {
-    return 0;
-}
-
-static int
-UpdateCallBack(void *data, int argc, char **argv, char **azColName) {
-    return 0;
-}
-
-static int
-DeleteCallBack(void *data, int argc, char **argv, char **azColName) {
     return 0;
 }
 
@@ -204,11 +192,6 @@ SqliteEngine::Initialize() {
     return Status::OK();
 }
 
-//int
-//SqliteEngine::QueryCallBack(void *data, int argc, char **argv, char **azColName) {
-//    return 0;
-//}
-
 Status
 SqliteEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
     std::string sql;
@@ -216,16 +199,14 @@ SqliteEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
     STATUS_CHECK(MetaHelper::MetaQueryContextToSql(context, sql));
     std::lock_guard<std::mutex> lock(meta_mutex_);
 
-//    char *zErrMsg = 0;
-//    const char* data = "Callback function called";
     QueryData = &attrs;
-    auto rc = sqlite3_exec(db_, sql.c_str(), QueryCallback, nullptr, nullptr);
+    auto rc = sqlite3_exec(db_, sql.c_str(), QueryCallback, NULL, NULL);
 
     if (rc != SQLITE_OK) {
         std::string err = "Query fail:";
         err += sqlite3_errmsg(db_);
         std::cerr << err << std::endl;
-        return Status(1, err);
+        return Status(DB_META_QUERY_FAILED, err);
     }
 
     QueryData = nullptr;
@@ -238,7 +219,7 @@ SqliteEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contex
     std::vector<std::string> sqls;
 
     std::string sql;
-    for (const auto& context: sql_contexts) {
+    for (const auto& context : sql_contexts) {
         STATUS_CHECK(MetaHelper::MetaApplyContextToSql(context, sql));
         sqls.push_back(sql);
     }
@@ -246,48 +227,60 @@ SqliteEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contex
     std::lock_guard<std::mutex> lock(meta_mutex_);
     int rc = SQLITE_OK;
     sqlite3_exec(db_, "BEGIN", NULL, NULL, NULL);
+
     for (size_t i = 0; i < sql_contexts.size(); i++) {
+        rc = sqlite3_exec(db_, sqls[i].c_str(), NULL, NULL, NULL);
+        if (rc != SQLITE_OK) {
+            break;
+        }
+
+        if (!sql_contexts[i].sql_.empty()) {
+            result_ids.push_back(sql_contexts[i].id_);
+            continue;
+        }
+
         if (sql_contexts[i].op_ == oAdd) {
-            rc = sqlite3_exec(db_, sqls[i].c_str(), InsertCallBack, NULL, NULL);
-        } else if (sql_contexts[i].op_ == oUpdate) {
-            rc = sqlite3_exec(db_, sqls[i].c_str(), UpdateCallBack, NULL, NULL);
-        } else if (sql_contexts[i].op_ == oDelete) {
-            rc = sqlite3_exec(db_, sqls[i].c_str(), DeleteCallBack, NULL, NULL);
+            auto id = sqlite3_last_insert_rowid(db_);
+            result_ids.push_back(id);
+        } else if (sql_contexts[i].op_ == oUpdate || sql_contexts[i].op_ == oDelete) {
+            result_ids.push_back(sql_contexts[i].id_);
         } else {
+            sqlite3_exec(db_, "ROLLBACK", NULL, NULL, NULL);
             return Status(SERVER_UNEXPECTED_ERROR, "Unknown Op");
         }
-
-        if (SQLITE_OK != rc) {
-            std::string err = "Execute Fail:";
-            err += sqlite3_errmsg(db_);
-            std::cerr << err << std::endl;
-            sqlite3_exec(db_, "ROLLBACK", NULL, NULL, NULL);
-            return Status(SERVER_UNEXPECTED_ERROR, err);
-        }
-
-        // TODO: Here Get id from execute result
+    }
+    if (SQLITE_OK != rc) {
+        std::string err = "Execute Fail:";
+        err += sqlite3_errmsg(db_);
+        std::cerr << err << std::endl;
+        sqlite3_exec(db_, "ROLLBACK", NULL, NULL, NULL);
+        return Status(SERVER_UNEXPECTED_ERROR, err);
     }
 
-//    for (auto& context : sql_contexts) {
-//        std::string sql;
-//        STATUS_CHECK(MetaHelper::MetaApplyContextToSql(context, sql));
-//
-////        auto res = query.execute();
-//        if (context.op_ == oAdd) {
-//            auto id = res.insert_id();
-//            result_ids.push_back(id);
-//        } else {
-//            result_ids.push_back(context.id_);
-//        }
-//    }
     sqlite3_exec(db_, "COMMIT", NULL, NULL, NULL);
     return Status();
 }
 
 Status
 SqliteEngine::TruncateAll() {
-//    "DELETE FROM "
-    return Status();
+    static std::vector<std::string> collecton_names = {
+        COLLECTION_SCHEMA.name(),      COLLECTIONCOMMIT_SCHEMA.name(), PARTITION_SCHEMA.name(),
+        PARTITIONCOMMIT_SCHEMA.name(), SEGMENT_SCHEMA.name(),          SEGMENTCOMMIT_SCHEMA.name(),
+        SEGMENTFILE_SCHEMA.name(),     SCHEMACOMMIT_SCHEMA.name(),     FIELD_SCHEMA.name(),
+        FIELDCOMMIT_SCHEMA.name(),     FIELDELEMENT_SCHEMA.name(),
+    };
+
+    std::vector<MetaApplyContext> contexts;
+    for (auto& name : collecton_names) {
+        MetaApplyContext context;
+        context.sql_ = "DELETE FROM " + name + ";";
+        context.id_ = 0;
+
+        contexts.push_back(context);
+    }
+
+    std::vector<snapshot::ID_TYPE> ids;
+    return ExecuteTransaction(contexts, ids);
 }
 
-}
+} // namespace milvus::engine::meta

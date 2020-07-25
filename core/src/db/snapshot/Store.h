@@ -81,6 +81,7 @@ class Store : public std::enable_shared_from_this<Store> {
             DBMetaOptions options;
             /* options.backend_uri_ = "mock://:@:/"; */
             options.backend_uri_ = uri;
+            options.path_ = root_path;
             auto engine = std::make_shared<meta::SqliteEngine>(options);
             auto adapter = std::make_shared<meta::MetaAdapter>(engine);
             return std::make_shared<Store>(adapter, root_path);
