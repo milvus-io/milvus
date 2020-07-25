@@ -148,7 +148,7 @@ static void knn_inner_product_sse (const float * x,
     size_t k = res->k;
     size_t thread_max_num = omp_get_max_threads();
 
-    if (ny > parallel_policy_threshold || (nx == 1 && ny >= thread_max_num * 32)) {
+    if (ny > parallel_policy_threshold || (nx < thread_max_num / 2 && ny >= thread_max_num * 32)) {
         size_t block_x = std::min(
                 get_L3_Size() / (d * sizeof(float) + thread_max_num * k * (sizeof(float) + sizeof(int64_t))),
                 nx);
@@ -257,7 +257,7 @@ static void knn_L2sqr_sse (
     size_t k = res->k;
     size_t thread_max_num = omp_get_max_threads();
 
-    if (ny > parallel_policy_threshold || (nx == 1 && ny >= thread_max_num * 32)) {
+    if (ny > parallel_policy_threshold || (nx < thread_max_num / 2 && ny >= thread_max_num * 32)) {
         size_t block_x = std::min(
                 get_L3_Size() / (d * sizeof(float) + thread_max_num * k * (sizeof(float) + sizeof(int64_t))),
                 nx);
