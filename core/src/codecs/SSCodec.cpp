@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "codecs/snapshot/SSCodec.h"
+#include "codecs/SSCodec.h"
 
 #include <memory>
 

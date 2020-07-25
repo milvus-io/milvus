@@ -17,48 +17,49 @@
 
 #pragma once
 
-#include "codecs/Codec.h"
+#include "codecs/SSBlockFormat.h"
+#include "codecs/SSDeletedDocsFormat.h"
+#include "codecs/SSIdBloomFilterFormat.h"
+#include "codecs/SSStructuredIndexFormat.h"
+#include "codecs/SSVectorCompressFormat.h"
+#include "codecs/SSVectorIndexFormat.h"
 
 namespace milvus {
 namespace codec {
 
-class DefaultCodec : public Codec {
+class SSCodec {
  public:
-    static DefaultCodec&
+    static SSCodec&
     instance();
 
-    VectorsFormatPtr
-    GetVectorsFormat() override;
+    SSBlockFormatPtr
+    GetBlockFormat();
 
-    AttrsFormatPtr
-    GetAttrsFormat() override;
+    SSVectorIndexFormatPtr
+    GetVectorIndexFormat();
 
-    VectorIndexFormatPtr
-    GetVectorIndexFormat() override;
+    SSStructuredIndexFormatPtr
+    GetStructuredIndexFormat();
 
-    AttrsIndexFormatPtr
-    GetAttrsIndexFormat() override;
+    SSDeletedDocsFormatPtr
+    GetDeletedDocsFormat();
 
-    DeletedDocsFormatPtr
-    GetDeletedDocsFormat() override;
+    SSIdBloomFilterFormatPtr
+    GetIdBloomFilterFormat();
 
-    IdBloomFilterFormatPtr
-    GetIdBloomFilterFormat() override;
-
-    VectorCompressFormatPtr
-    GetVectorCompressFormat() override;
+    SSVectorCompressFormatPtr
+    GetVectorCompressFormat();
 
  private:
-    DefaultCodec();
+    SSCodec();
 
  private:
-    VectorsFormatPtr vectors_format_ptr_;
-    AttrsFormatPtr attrs_format_ptr_;
-    VectorIndexFormatPtr vector_index_format_ptr_;
-    AttrsIndexFormatPtr attrs_index_format_ptr_;
-    DeletedDocsFormatPtr deleted_docs_format_ptr_;
-    IdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
-    VectorCompressFormatPtr vector_compress_format_ptr_;
+    SSBlockFormatPtr block_format_ptr_;
+    SSStructuredIndexFormatPtr structured_index_format_ptr_;
+    SSVectorIndexFormatPtr vector_index_format_ptr_;
+    SSDeletedDocsFormatPtr deleted_docs_format_ptr_;
+    SSIdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
+    SSVectorCompressFormatPtr vector_compress_format_ptr_;
 };
 
 }  // namespace codec

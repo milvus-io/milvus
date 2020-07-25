@@ -29,11 +29,7 @@
 #include "server/delivery/request/GetVectorIDsRequest.h"
 #include "server/delivery/request/HasCollectionRequest.h"
 #include "server/delivery/request/HasPartitionRequest.h"
-#include "server/delivery/request/InsertRequest.h"
 #include "server/delivery/request/PreloadCollectionRequest.h"
-#include "server/delivery/request/ReLoadSegmentsRequest.h"
-#include "server/delivery/request/SearchByIDRequest.h"
-#include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/ShowCollectionInfoRequest.h"
 #include "server/delivery/request/ShowCollectionsRequest.h"
 #include "server/delivery/request/ShowPartitionsRequest.h"
@@ -76,18 +72,9 @@ RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::
 }
 
 Status
-RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                       engine::VectorsData& vectors, const std::string& partition_tag) {
-    BaseRequestPtr request_ptr = InsertRequest::Create(context, collection_name, vectors, partition_tag);
-    RequestScheduler::ExecRequest(request_ptr);
-
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::GetVectorIDs(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                             const std::string& segment_name, std::vector<int64_t>& vector_ids) {
-    BaseRequestPtr request_ptr = GetVectorIDsRequest::Create(context, collection_name, segment_name, vector_ids);
+RequestHandler::GetEntityIDs(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                             int64_t segment_id, std::vector<int64_t>& vector_ids) {
+    BaseRequestPtr request_ptr = GetVectorIDsRequest::Create(context, collection_name, segment_id, vector_ids);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -105,29 +92,6 @@ Status
 RequestHandler::ShowCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                    std::string& collection_info) {
     BaseRequestPtr request_ptr = ShowCollectionInfoRequest::Create(context, collection_name, collection_info);
-    RequestScheduler::ExecRequest(request_ptr);
-
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::Search(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                       engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
-                       const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
-                       TopKQueryResult& result) {
-    BaseRequestPtr request_ptr = SearchRequest::Create(context, collection_name, vectors, topk, extra_params,
-                                                       partition_list, file_id_list, result);
-    RequestScheduler::ExecRequest(request_ptr);
-
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                           const std::vector<int64_t>& id_array, int64_t topk, const milvus::json& extra_params,
-                           const std::vector<std::string>& partition_list, TopKQueryResult& result) {
-    BaseRequestPtr request_ptr =
-        SearchByIDRequest::Create(context, collection_name, id_array, topk, extra_params, partition_list, result);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();
@@ -162,15 +126,6 @@ RequestHandler::DeleteByID(const std::shared_ptr<Context>& context, const std::s
 Status
 RequestHandler::PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name) {
     BaseRequestPtr request_ptr = PreloadCollectionRequest::Create(context, collection_name);
-    RequestScheduler::ExecRequest(request_ptr);
-
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::ReLoadSegments(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                               const std::vector<std::string>& segment_ids) {
-    BaseRequestPtr request_ptr = ReLoadSegmentsRequest::Create(context, collection_name, segment_ids);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

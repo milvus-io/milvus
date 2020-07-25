@@ -35,6 +35,9 @@ class SSSearchTask : public Task {
     void
     Execute() override;
 
+    std::string
+    IndexName();
+
  private:
     void
     CreateExecEngine();

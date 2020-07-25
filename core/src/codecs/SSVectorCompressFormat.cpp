@@ -18,7 +18,7 @@
 #include <boost/filesystem.hpp>
 #include <memory>
 
-#include "codecs/snapshot/SSVectorCompressFormat.h"
+#include "codecs/SSVectorCompressFormat.h"
 #include "knowhere/common/BinarySet.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"

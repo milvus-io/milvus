@@ -14,8 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include "db/engine/EngineFactory.h"
-#include "db/engine/ExecutionEngine.h"
 #include "metrics/Metrics.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"

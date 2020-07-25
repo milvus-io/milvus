@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/insert/MemManagerFactory.h"
-#include "MemManagerImpl.h"
 #include "SSMemManagerImpl.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -25,11 +24,6 @@
 
 namespace milvus {
 namespace engine {
-
-MemManagerPtr
-MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options) {
-    return std::make_shared<MemManagerImpl>(meta, options);
-}
 
 SSMemManagerPtr
 MemManagerFactory::SSBuild(const DBOptions& options) {

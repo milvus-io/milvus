@@ -91,6 +91,9 @@ class SSSearchJob : public Job {
         return mutex_;
     }
 
+    int64_t
+    nq();
+
  private:
     void
     GetSegmentsFromQuery(const query::QueryPtr& query_ptr, engine::snapshot::IDS_TYPE& segment_ids);

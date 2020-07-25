@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "codecs/snapshot/SSStructuredIndexFormat.h"
+#include "codecs/SSStructuredIndexFormat.h"
 
 #include <fcntl.h>
 #include <unistd.h>

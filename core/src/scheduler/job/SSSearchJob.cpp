@@ -57,5 +57,10 @@ SSSearchJob::GetSegmentsFromQuery(const query::QueryPtr& query_ptr, engine::snap
     // TODO
 }
 
+int64_t
+SSSearchJob::nq() {
+    return 0;
+}
+
 }  // namespace scheduler
 }  // namespace milvus

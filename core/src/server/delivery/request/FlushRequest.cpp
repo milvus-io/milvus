@@ -52,7 +52,7 @@ FlushRequest::OnExecute() {
 
     // flush all collections
     if (collection_names_.empty()) {
-        status = DBWrapper::DB()->Flush();
+        status = DBWrapper::SSDB()->Flush();
         return status;
     }
 

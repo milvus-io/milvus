@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "db/IDGenerator.h"
-#include "db/engine/ExecutionEngine.h"
 #include "db/insert/SSMemManager.h"
 #include "segment/SSSegmentWriter.h"
 #include "segment/Segment.h"

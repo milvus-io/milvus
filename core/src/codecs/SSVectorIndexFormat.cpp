@@ -18,8 +18,8 @@
 #include <boost/filesystem.hpp>
 #include <memory>
 
-#include "codecs/snapshot/SSCodec.h"
-#include "codecs/snapshot/SSVectorIndexFormat.h"
+#include "codecs/SSCodec.h"
+#include "codecs/SSVectorIndexFormat.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"

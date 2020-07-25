@@ -22,8 +22,7 @@
 #include <utility>
 
 #include "SSSegmentReader.h"
-#include "Vectors.h"
-#include "codecs/snapshot/SSCodec.h"
+#include "codecs/SSCodec.h"
 #include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"

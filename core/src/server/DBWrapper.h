@@ -13,7 +13,6 @@
 
 #include <string>
 
-#include "db/DB.h"
 #include "db/SSDB.h"
 #include "utils/Status.h"
 
@@ -32,11 +31,6 @@ class DBWrapper {
         return wrapper;
     }
 
-    static engine::DBPtr
-    DB() {
-        return GetInstance().EngineDB();
-    }
-
     static engine::SSDBPtr
     SSDB() {
         return GetInstance().EngineSSDB();
@@ -46,11 +40,6 @@ class DBWrapper {
     StartService();
     Status
     StopService();
-
-    engine::DBPtr
-    EngineDB() {
-        return db_;
-    }
 
     engine::SSDBPtr
     EngineSSDB() {
@@ -62,7 +51,6 @@ class DBWrapper {
     //    PreloadCollections(const std::string& preload_collections);
 
  private:
-    engine::DBPtr db_;
     engine::SSDBPtr ssdb_;
 };
 

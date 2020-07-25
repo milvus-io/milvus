@@ -79,13 +79,9 @@ ErrorMap(ErrorCode code) {
 std::string
 RequestMap(BaseRequest::RequestType request_type) {
     static const std::unordered_map<BaseRequest::RequestType, std::string> request_map = {
-        {BaseRequest::kInsert, "Insert"},
-        {BaseRequest::kCreateIndex, "CreateIndex"},
-        {BaseRequest::kSearch, "Search"},
-        {BaseRequest::kSearchByID, "SearchByID"},
-        {BaseRequest::kHybridSearch, "HybridSearch"},
-        {BaseRequest::kFlush, "Flush"},
-        {BaseRequest::kCompact, "Compact"},
+        {BaseRequest::kInsert, "Insert"}, {BaseRequest::kCreateIndex, "CreateIndex"},
+        {BaseRequest::kSearch, "Search"}, {BaseRequest::kHybridSearch, "HybridSearch"},
+        {BaseRequest::kFlush, "Flush"},   {BaseRequest::kCompact, "Compact"},
     };
 
     if (request_map.find(request_type) != request_map.end()) {
@@ -796,8 +792,8 @@ GrpcRequestHandler::GetEntityIDs(::grpc::ServerContext* context, const ::milvus:
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
     std::vector<int64_t> vector_ids;
-    Status status = request_handler_.GetVectorIDs(GetContext(context), request->collection_name(),
-                                                  request->segment_name(), vector_ids);
+    Status status = request_handler_.GetEntityIDs(GetContext(context), request->collection_name(),
+                                                  request->segment_id(), vector_ids);
 
     if (!vector_ids.empty()) {
         response->mutable_entity_id_array()->Resize(vector_ids.size(), -1);
@@ -1057,25 +1053,6 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
     Status status = request_handler_.PreloadCollection(GetContext(context), request->collection_name());
-
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
-    SET_RESPONSE(response, status, context);
-
-    return ::grpc::Status::OK;
-}
-
-::grpc::Status
-GrpcRequestHandler::ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
-                                   ::milvus::grpc::Status* response) {
-    CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
-
-    std::vector<std::string> file_ids;
-    for (size_t i = 0; i < request->segment_id_array_size(); i++) {
-        file_ids.push_back(request->segment_id_array(i));
-    }
-
-    Status status = request_handler_.ReLoadSegments(GetContext(context), request->collection_name(), file_ids);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context);

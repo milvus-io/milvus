@@ -24,7 +24,6 @@
 #include "db/engine/SSExecutionEngineImpl.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SSSearchJob.h"
-#include "segment/SegmentReader.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -159,6 +158,10 @@ SSSearchTask::Execute() {
     }
 
     rc.ElapseFromBegin("totally cost");
+}
+
+std::string
+SSSearchTask::IndexName() {
 }
 
 }  // namespace scheduler

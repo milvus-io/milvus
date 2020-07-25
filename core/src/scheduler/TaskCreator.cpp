@@ -11,11 +11,9 @@
 
 #include "scheduler/TaskCreator.h"
 #include "scheduler/SchedInst.h"
-#include "scheduler/task/BuildIndexTask.h"
 #include "scheduler/task/DeleteTask.h"
 #include "scheduler/task/SSBuildIndexTask.h"
 #include "scheduler/task/SSSearchTask.h"
-#include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/BroadcastLabel.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 
@@ -25,14 +23,8 @@ namespace scheduler {
 std::vector<TaskPtr>
 TaskCreator::Create(const JobPtr& job) {
     switch (job->type()) {
-        case JobType::SEARCH: {
-            return Create(std::static_pointer_cast<SearchJob>(job));
-        }
         case JobType::DELETE: {
             return Create(std::static_pointer_cast<DeleteJob>(job));
-        }
-        case JobType::BUILD: {
-            return Create(std::static_pointer_cast<BuildIndexJob>(job));
         }
         case JobType::SS_SEARCH: {
             return Create(std::static_pointer_cast<SSSearchJob>(job));
@@ -48,18 +40,6 @@ TaskCreator::Create(const JobPtr& job) {
 }
 
 std::vector<TaskPtr>
-TaskCreator::Create(const SearchJobPtr& job) {
-    std::vector<TaskPtr> tasks;
-    for (auto& index_file : job->index_files()) {
-        auto task = std::make_shared<XSearchTask>(job->GetContext(), index_file.second, nullptr);
-        task->job_ = job;
-        tasks.emplace_back(task);
-    }
-
-    return tasks;
-}
-
-std::vector<TaskPtr>
 TaskCreator::Create(const DeleteJobPtr& job) {
     std::vector<TaskPtr> tasks;
     auto label = std::make_shared<BroadcastLabel>();
@@ -67,17 +47,6 @@ TaskCreator::Create(const DeleteJobPtr& job) {
     task->job_ = job;
     tasks.emplace_back(task);
 
-    return tasks;
-}
-
-std::vector<TaskPtr>
-TaskCreator::Create(const BuildIndexJobPtr& job) {
-    std::vector<TaskPtr> tasks;
-    for (auto& to_index_file : job->to_index_files()) {
-        auto task = std::make_shared<XBuildIndexTask>(to_index_file.second, nullptr);
-        task->job_ = job;
-        tasks.emplace_back(task);
-    }
     return tasks;
 }
 

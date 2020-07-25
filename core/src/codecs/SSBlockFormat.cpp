@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "codecs/snapshot/SSBlockFormat.h"
+#include "codecs/SSBlockFormat.h"
 
 #include <fcntl.h>
 #include <unistd.h>

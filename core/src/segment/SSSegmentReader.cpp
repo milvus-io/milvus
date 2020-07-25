@@ -21,8 +21,7 @@
 #include <memory>
 #include <utility>
 
-#include "Vectors.h"
-#include "codecs/snapshot/SSCodec.h"
+#include "codecs/SSCodec.h"
 #include "db/SnapshotUtils.h"
 #include "db/Types.h"
 #include "db/snapshot/ResourceHelper.h"

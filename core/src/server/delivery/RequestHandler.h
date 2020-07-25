@@ -42,12 +42,8 @@ class RequestHandler {
                 const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
 
     Status
-    Insert(const std::shared_ptr<Context>& context, const std::string& collection_name, engine::VectorsData& vectors,
-           const std::string& partition_tag);
-
-    Status
-    GetVectorIDs(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                 const std::string& segment_name, std::vector<int64_t>& vector_ids);
+    GetEntityIDs(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t segment_id,
+                 std::vector<int64_t>& vector_ids);
 
     Status
     ShowCollections(const std::shared_ptr<Context>& context, std::vector<std::string>& collections);
@@ -55,16 +51,6 @@ class RequestHandler {
     Status
     ShowCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name,
                        std::string& collection_info);
-
-    Status
-    Search(const std::shared_ptr<Context>& context, const std::string& collection_name, engine::VectorsData& vectors,
-           int64_t topk, const milvus::json& extra_params, const std::vector<std::string>& partition_list,
-           const std::vector<std::string>& file_id_list, TopKQueryResult& result);
-
-    Status
-    SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-               const std::vector<int64_t>& id_array, int64_t topk, const milvus::json& extra_params,
-               const std::vector<std::string>& partition_list, TopKQueryResult& result);
 
     Status
     CountCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);
@@ -78,10 +64,6 @@ class RequestHandler {
 
     Status
     PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
-
-    Status
-    ReLoadSegments(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                   const std::vector<std::string>& segment_ids);
 
     Status
     DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, IndexParam& param);

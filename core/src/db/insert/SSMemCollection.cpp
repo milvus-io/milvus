@@ -20,7 +20,6 @@
 #include "db/Utils.h"
 #include "db/insert/SSMemCollection.h"
 #include "knowhere/index/vector_index/VecIndex.h"
-#include "segment/SegmentReader.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 

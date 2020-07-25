@@ -14,7 +14,7 @@
 #include "config/ServerConfig.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
-#include "scheduler/task/SearchTask.h"
+#include "scheduler/task/SSSearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
 
@@ -44,12 +44,12 @@ FaissIVFFlatPass::Run(const TaskPtr& task) {
         return false;
     }
 
-    auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
-        return false;
-    }
+    auto search_task = std::static_pointer_cast<SSSearchTask>(task);
+    //    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
+    //        return false;
+    //    }
 
-    auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
+    auto search_job = std::static_pointer_cast<SSSearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFFlatPass: gpu disable, specify cpu to search!", "search", 0);

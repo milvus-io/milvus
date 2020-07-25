@@ -16,7 +16,6 @@
 #include <vector>
 
 #include "config/ConfigMgr.h"
-#include "db/engine/ExecutionEngine.h"
 #include "db/insert/SSVectorSource.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Resources.h"

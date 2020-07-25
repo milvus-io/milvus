@@ -53,7 +53,6 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kPreloadCollection, DQL_REQUEST_GROUP},
         {BaseRequest::kCreateHybridCollection, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kDescribeHybridCollection, INFO_REQUEST_GROUP},
-        {BaseRequest::kReloadSegments, DQL_REQUEST_GROUP},
 
         // partition operations
         {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},
@@ -67,7 +66,6 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kCreateHybridIndex, DDL_DML_REQUEST_GROUP},
 
         // search operations
-        {BaseRequest::kSearchByID, DQL_REQUEST_GROUP},
         {BaseRequest::kSearch, DQL_REQUEST_GROUP},
         {BaseRequest::kSearchCombine, DQL_REQUEST_GROUP},
         {BaseRequest::kHybridSearch, DQL_REQUEST_GROUP},

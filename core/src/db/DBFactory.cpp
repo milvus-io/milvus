@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/DBFactory.h"
-#include "DBImpl.h"
 #include "SSDBImpl.h"
 #include "meta/MetaFactory.h"
 #include "meta/MySQLMetaImpl.h"
@@ -32,11 +31,6 @@ DBFactory::BuildOption() {
     DBOptions options;
     options.meta_ = meta;
     return options;
-}
-
-DBPtr
-DBFactory::Build(const DBOptions& options) {
-    return std::make_shared<DBImpl>(options);
 }
 
 SSDBPtr

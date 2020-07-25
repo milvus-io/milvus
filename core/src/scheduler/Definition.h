@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "db/engine/EngineFactory.h"
-#include "db/engine/ExecutionEngine.h"
+#include "db/engine/SSExecutionEngine.h"
 #include "db/meta/MetaTypes.h"
 
 namespace milvus {
@@ -31,7 +31,7 @@ namespace scheduler {
 using SegmentSchemaPtr = engine::meta::SegmentSchemaPtr;
 using SegmentSchema = engine::meta::SegmentSchema;
 
-using ExecutionEnginePtr = engine::ExecutionEnginePtr;
+using ExecutionEnginePtr = engine::SSExecutionEnginePtr;
 using EngineFactory = engine::EngineFactory;
 using EngineType = engine::EngineType;
 using MetricType = engine::MetricType;

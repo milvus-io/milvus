@@ -21,7 +21,6 @@
 #include <string>
 #include <vector>
 
-#include "codecs/Codec.h"
 #include "db/SnapshotVisitor.h"
 #include "segment/Segment.h"
 #include "storage/FSHandler.h"

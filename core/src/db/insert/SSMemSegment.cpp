@@ -26,7 +26,6 @@
 #include "db/snapshot/Snapshots.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
-#include "segment/SegmentReader.h"
 #include "utils/Log.h"
 
 namespace milvus {

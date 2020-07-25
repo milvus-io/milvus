@@ -23,7 +23,6 @@
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/SSSegmentReader.h"
 #include "segment/SSSegmentWriter.h"
-#include "segment/Types.h"
 #include "utils/Json.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;

@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include "DB.h"
 #include "Options.h"
 #include "SSDB.h"
 
@@ -25,9 +24,6 @@ class DBFactory {
  public:
     static DBOptions
     BuildOption();
-
-    static DBPtr
-    Build(const DBOptions& options);
 
     static SSDBPtr
     BuildSSDB(const DBOptions& options);

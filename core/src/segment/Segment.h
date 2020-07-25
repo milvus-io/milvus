@@ -22,7 +22,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "db/Types.h"
 #include "db/meta/MetaTypes.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "segment/DeletedDocs.h"

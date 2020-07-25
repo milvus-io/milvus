@@ -30,18 +30,18 @@ class GetVectorIDsRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const std::string& segment_name, std::vector<int64_t>& vector_ids);
+           int64_t segment_id, std::vector<int64_t>& vector_ids);
 
  protected:
     GetVectorIDsRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                        const std::string& segment_name, std::vector<int64_t>& vector_ids);
+                        int64_t segment_id, std::vector<int64_t>& vector_ids);
 
     Status
     OnExecute() override;
 
  private:
     std::string collection_name_;
-    std::string segment_name_;
+    int64_t segment_id_;
     std::vector<int64_t>& vector_ids_;
 };
 

@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "codecs/snapshot/SSDeletedDocsFormat.h"
+#include "codecs/SSDeletedDocsFormat.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -30,7 +30,6 @@
 #include <string>
 #include <vector>
 
-#include "segment/Types.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
