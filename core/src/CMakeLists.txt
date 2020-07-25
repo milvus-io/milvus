@@ -27,9 +27,6 @@ foreach (dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach ()
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/metrics/prometheus metrics_prometheus_files)
-
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
@@ -111,6 +108,7 @@ set(s3_client_lib
         )
 
 
+add_subdirectory(metrics)
 add_subdirectory(config)
 add_subdirectory(tracing)
 add_subdirectory(query)
@@ -124,24 +122,6 @@ foreach (dir ${dirs})
     message(STATUS "Current Include DIRS: "${dir})
 endforeach ()
 
-if (MILVUS_WITH_PROMETHEUS)
-    add_library(metrics STATIC ${metrics_files} ${metrics_prometheus_files})
-else ()
-    add_library(metrics STATIC ${metrics_files})
-endif ()
-add_dependencies(metrics fiu)
-
-set(metrics_lib
-        yaml-cpp
-        )
-
-if (MILVUS_WITH_PROMETHEUS)
-    set(metrics_lib ${metrics_lib}
-            ${prometheus_lib}
-            )
-endif ()
-
-target_link_libraries(metrics ${metrics_lib})
 
 set(server_libs
         milvus_engine
