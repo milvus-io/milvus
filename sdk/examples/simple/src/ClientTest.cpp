@@ -110,7 +110,7 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     field_ptr2->index_params = index_param_2.dump();
 
     field_ptr3->field_name = "field_3";
-    field_ptr3->field_type = milvus::DataType::INT8;
+    field_ptr3->field_type = milvus::DataType::INT32;
     JSON index_param_3;
     index_param_3["name"] = "index_3";
     field_ptr3->index_params = index_param_3.dump();
@@ -343,7 +343,7 @@ ClientTest::Test() {
     ShowSdkVersion();
 
     std::vector<std::string> table_array;
-    ShowCollections(table_array);
+//    ShowCollections(table_array);
 
     CreateCollection(collection_name);
     GetCollectionInfo(collection_name);
