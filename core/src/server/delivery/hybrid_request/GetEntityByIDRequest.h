@@ -37,7 +37,7 @@ class GetEntityByIDRequest : public BaseRequest {
            engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
  protected:
-    GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context,const std::string& collection_name,
+    GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                          const engine::IDNumbers& id_array, std::vector<std::string>& field_names,
                          engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 

@@ -16,11 +16,11 @@
 // under the License.
 
 #include "server/delivery/hybrid_request/GetEntityByIDRequest.h"
+#include "db/meta/MetaTypes.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "db/meta/MetaTypes.h"
 
 #include <memory>
 #include <vector>
@@ -44,8 +44,9 @@ GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server:
 }
 
 BaseRequestPtr
-GetEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,const std::string& collection_name,
-                             const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
+GetEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, const engine::IDNumbers& id_array,
+                             std::vector<std::string>& field_names_,
                              engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
     return std::shared_ptr<BaseRequest>(
         new GetEntityByIDRequest(context, collection_name, id_array, field_names_, field_mappings, data_chunk));
@@ -83,16 +84,16 @@ GetEntityByIDRequest::OnExecute() {
 
         if (field_names_.empty()) {
             for (const auto& schema : field_mappings_) {
-              if (schema.first->GetFtype() != engine::meta::hybrid::DataType::UID)
+                if (schema.first->GetFtype() != engine::meta::hybrid::DataType::UID)
                     field_names_.emplace_back(schema.first->GetName());
-                }
+            }
         } else {
             for (const auto& name : field_names_) {
                 bool find_field_name = false;
                 for (const auto& schema : field_mappings_) {
-                        if (name == schema.first->GetName()) {
-                            find_field_name = true;
-                            break;
+                    if (name == schema.first->GetName()) {
+                        find_field_name = true;
+                        break;
                     }
                 }
                 if (not find_field_name) {
