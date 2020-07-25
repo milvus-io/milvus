@@ -11,9 +11,9 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-# foreach (dir ${INDEX_INCLUDE_DIRS})
-#     include_directories(${dir})
-# endforeach ()
+foreach (dir ${INDEX_INCLUDE_DIRS})
+    include_directories(${dir})
+endforeach ()
 
 include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})

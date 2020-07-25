@@ -90,11 +90,6 @@ endif ()
 
 add_subdirectory(src)
 
-# Add index/knwhere include directories for globle scope
-foreach (dir ${INDEX_INCLUDE_DIRS})
-    include_directories(${dir})
-endforeach ()
-
 # Unittest lib
 if (BUILD_UNIT_TEST STREQUAL "ON")
     if (BUILD_COVERAGE STREQUAL "ON")
