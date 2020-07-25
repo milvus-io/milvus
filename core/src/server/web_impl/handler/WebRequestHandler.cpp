@@ -921,12 +921,39 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
 Status
 WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
                                   std::vector<std::string>& field_names, nlohmann::json& json_out) {
-    std::vector<engine::VectorsData> vector_batch;
+    engine::DataChunkPtr data_chunk;
+    engine::snapshot::CollectionMappings field_mappings;
+
     std::vector<engine::AttrsData> attr_batch;
+    std::vector<engine::VectorsData> vector_batch;
     auto status =
-        request_handler_.GetEntityByID(context_ptr_, collection_name, field_names, ids, attr_batch, vector_batch);
+        request_handler_.GetEntityByID(context_ptr_, collection_name, ids, field_names, field_mappings, data_chunk);
     if (!status.ok()) {
         return status;
+    }
+    std::vector<uint8_t> id_array = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
+
+    for (const auto& it : field_mappings) {
+        std::string name = it.first->GetName();
+        uint64_t type = it.first->GetFtype();
+        std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
+        if (type == engine::FieldType::VECTOR_BINARY) {
+            engine::VectorsData vectors_data;
+            memcpy(vectors_data.binary_data_.data(), data.data(), data.size());
+            memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
+            vector_batch.emplace_back(vectors_data);
+        } else if (type == engine::FieldType::VECTOR_FLOAT) {
+            engine::VectorsData vectors_data;
+            memcpy(vectors_data.float_data_.data(), data.data(), data.size());
+            memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
+            vector_batch.emplace_back(vectors_data);
+        } else {
+            engine::AttrsData attrs_data;
+            attrs_data.attr_type_[name] = static_cast<engine::meta::hybrid::DataType>(type);
+            attrs_data.attr_data_[name] = data;
+            memcpy(attrs_data.id_array_.data(), id_array.data(), id_array.size());
+            attr_batch.emplace_back(attrs_data);
+        }
     }
 
     bool bin;
@@ -949,6 +976,7 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
     ConvertRowToColumnJson(attr_batch, field_names, -1, attrs_json);
     json_out["vectors"] = vectors_json;
     json_out["attributes"] = attrs_json;
+    return Status::OK();
 }
 
 Status
