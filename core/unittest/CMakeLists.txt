@@ -24,8 +24,16 @@ include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/config/handler config_handler_files)
+
+set(config_files
+        ${MILVUS_ENGINE_SRC}/config/ConfigMgr.cpp
+        ${MILVUS_ENGINE_SRC}/config/ConfigMgr.h
+        ${MILVUS_ENGINE_SRC}/config/ConfigType.cpp
+        ${MILVUS_ENGINE_SRC}/config/ConfigType.h
+        ${MILVUS_ENGINE_SRC}/config/ServerConfig.cpp
+        ${MILVUS_ENGINE_SRC}/config/ServerConfig.h
+        )
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/attr db_attr_files)
