@@ -1,7 +1,7 @@
 import logging
 import pytest
 
-__version__ = '0.10.1'
+__version__ = '0.10.2'
 
 
 class TestPing:
