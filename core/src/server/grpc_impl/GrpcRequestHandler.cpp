@@ -115,18 +115,18 @@ CopyVectorData(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRo
     }
 
     // copy vector data
-    std::vector<uint8_t> binary_array(data_size, 0);
+    vectors_data.resize(data_size);
     int64_t offset = 0;
     if (float_data_size > 0) {
         for (auto& record : grpc_records) {
             int64_t single_size = record.float_data_size() * sizeof(float);
-            memcpy(&binary_array[offset], record.float_data().data(), single_size);
+            memcpy(&vectors_data[offset], record.float_data().data(), single_size);
             offset += single_size;
         }
     } else if (binary_data_size > 0) {
         for (auto& record : grpc_records) {
             int64_t single_size = record.binary_data().size();
-            memcpy(&binary_array[offset], record.binary_data().data(), single_size);
+            memcpy(&vectors_data[offset], record.binary_data().data(), single_size);
             offset += single_size;
         }
     }
