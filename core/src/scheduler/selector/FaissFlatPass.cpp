@@ -43,17 +43,17 @@ FaissFlatPass::Run(const TaskPtr& task) {
         return false;
     }
 
-    auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IDMAP) {
-        return false;
-    }
+    auto search_task = std::static_pointer_cast<SearchTask>(task);
+    //    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IDMAP) {
+    //        return false;
+    //    }
 
     auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: gpu disable, specify cpu to search!", "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_job->nq() < (uint64_t)threshold_) {
+    } else if (search_job->nq() < (int64_t)threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: nq < gpu_search_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");

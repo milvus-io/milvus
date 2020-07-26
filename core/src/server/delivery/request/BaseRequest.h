@@ -132,7 +132,6 @@ class BaseRequest {
         kCreateHybridCollection,
         kHasHybridCollection,
         kDescribeHybridCollection,
-        kReloadSegments,
 
         // partition operations
         kCreatePartition = 400,
@@ -146,10 +145,8 @@ class BaseRequest {
         kCreateHybridIndex,
 
         // search operations
-        kSearchByID = 600,
         kSearch,
         kSearchCombine,
-        kHybridSearch,
     };
 
  protected:

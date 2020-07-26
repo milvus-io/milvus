@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "context/HybridSearchContext.h"
+#include "context/SearchContext.h"
 #include "db/Types.h"
 #include "db/engine/ExecutionEngine.h"
 #include "db/meta/MetaTypes.h"
@@ -28,8 +28,8 @@
 namespace milvus {
 
 namespace context {
-struct HybridSearchContext;
-using HybridSearchContextPtr = std::shared_ptr<HybridSearchContext>;
+struct SearchContext;
+using SearchContextPtr = std::shared_ptr<SearchContext>;
 }  // namespace context
 
 namespace search {
@@ -45,7 +45,7 @@ class Task {
  public:
     explicit Task(const std::shared_ptr<server::Context>& context, SegmentSchemaPtr& file,
                   query::GeneralQueryPtr general_query, std::unordered_map<std::string, engine::DataType>& attr_type,
-                  context::HybridSearchContextPtr hybrid_search_context);
+                  context::SearchContextPtr hybrid_search_context);
 
     void
     Load();
@@ -79,7 +79,7 @@ class Task {
 
     query::GeneralQueryPtr general_query_;
     std::unordered_map<std::string, engine::DataType> attr_type_;
-    context::HybridSearchContextPtr hybrid_search_context_;
+    context::SearchContextPtr hybrid_search_context_;
 
     ResultIds result_ids_;
     ResultDistances result_distances_;
