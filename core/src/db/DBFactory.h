@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include "Options.h"
 #include "DB.h"
+#include "Options.h"
 
 #include <memory>
 #include <string>

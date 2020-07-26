@@ -27,7 +27,7 @@ namespace scheduler {
 class SearchTask : public Task {
  public:
     explicit SearchTask(const server::ContextPtr& context, const engine::DBOptions& options,
-                          const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
+                        const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;

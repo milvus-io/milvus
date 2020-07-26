@@ -21,15 +21,15 @@
 namespace milvus {
 namespace server {
 
-class HybridSearchRequest : public BaseRequest {
+class SearchRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
            const milvus::json& json_params, engine::QueryResultPtr& result);
 
  protected:
-    HybridSearchRequest(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                        const milvus::json& json_params, engine::QueryResultPtr& result);
+    SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                  const milvus::json& json_params, engine::QueryResultPtr& result);
 
     Status
     OnExecute() override;

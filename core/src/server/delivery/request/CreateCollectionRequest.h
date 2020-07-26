@@ -22,7 +22,7 @@
 namespace milvus {
 namespace server {
 
-class CreateHybridCollectionRequest : public BaseRequest {
+class CreateCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
@@ -31,12 +31,10 @@ class CreateHybridCollectionRequest : public BaseRequest {
            std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params);
 
  protected:
-    CreateHybridCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                  const std::string& collection_name,
-                                  std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-                                  std::unordered_map<std::string, milvus::json>& field_index_params,
-                                  std::unordered_map<std::string, std::string>& field_params,
-                                  milvus::json& extra_params);
+    CreateCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                            std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                            std::unordered_map<std::string, milvus::json>& field_index_params,
+                            std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params);
 
     Status
     OnExecute() override;

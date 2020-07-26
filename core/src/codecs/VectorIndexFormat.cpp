@@ -40,7 +40,7 @@ VectorIndexFormat::FilePostfix() {
 
 void
 VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                             knowhere::BinaryPtr& data) {
+                           knowhere::BinaryPtr& data) {
     milvus::TimeRecorder recorder("SSVectorIndexFormat::ReadRaw");
 
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
@@ -68,7 +68,7 @@ VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::strin
 
 void
 VectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                               knowhere::BinarySet& data) {
+                             knowhere::BinarySet& data) {
     milvus::TimeRecorder recorder("SSVectorIndexFormat::ReadIndex");
 
     std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
@@ -122,7 +122,7 @@ VectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::str
 
 void
 VectorIndexFormat::ReadCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                                  knowhere::BinaryPtr& data) {
+                                knowhere::BinaryPtr& data) {
     auto& ss_codec = codec::Codec::instance();
     ss_codec.GetVectorCompressFormat()->Read(fs_ptr, file_path, data);
 }
@@ -136,8 +136,8 @@ VectorIndexFormat::ConvertRaw(const std::vector<uint8_t>& raw, knowhere::BinaryP
 
 void
 VectorIndexFormat::ConstructIndex(const std::string& index_name, knowhere::BinarySet& index_data,
-                                    knowhere::BinaryPtr& raw_data, knowhere::BinaryPtr& compress_data,
-                                    knowhere::VecIndexPtr& index) {
+                                  knowhere::BinaryPtr& raw_data, knowhere::BinaryPtr& compress_data,
+                                  knowhere::VecIndexPtr& index) {
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
     index = vec_index_factory.CreateVecIndex(index_name, knowhere::IndexMode::MODE_CPU);
     if (index != nullptr) {
@@ -170,7 +170,7 @@ VectorIndexFormat::ConstructIndex(const std::string& index_name, knowhere::Binar
 
 void
 VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                                const knowhere::VecIndexPtr& index) {
+                              const knowhere::VecIndexPtr& index) {
     milvus::TimeRecorder recorder("SVectorIndexFormat::WriteIndex");
 
     std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
@@ -201,7 +201,7 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
 
 void
 VectorIndexFormat::WriteCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                                   const knowhere::VecIndexPtr& index) {
+                                 const knowhere::VecIndexPtr& index) {
     milvus::TimeRecorder recorder("SSVectorIndexFormat::WriteCompress");
 
     auto binaryset = index->Serialize(knowhere::Config());

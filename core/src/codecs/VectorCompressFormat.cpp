@@ -37,7 +37,7 @@ VectorCompressFormat::FilePostfix() {
 
 void
 VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                             knowhere::BinaryPtr& compress) {
+                           knowhere::BinaryPtr& compress) {
     milvus::TimeRecorder recorder("SSVectorCompressFormat::Read");
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
@@ -66,7 +66,7 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
 
 void
 VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                              const knowhere::BinaryPtr& compress) {
+                            const knowhere::BinaryPtr& compress) {
     milvus::TimeRecorder recorder("SSVectorCompressFormat::Write");
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;

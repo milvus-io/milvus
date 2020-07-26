@@ -27,7 +27,7 @@
 namespace milvus {
 namespace scheduler {
 
-TEST(SSTaskTest, INVALID_INDEX) {
+TEST(TaskTest, INVALID_INDEX) {
     auto dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
     opentracing::mocktracer::MockTracerOptions tracer_options;
     auto mock_tracer =
@@ -37,7 +37,7 @@ TEST(SSTaskTest, INVALID_INDEX) {
     dummy_context->SetTraceContext(trace_context);
 }
 
-TEST(SSTaskTest, TEST_PATH) {
+TEST(TaskTest, TEST_PATH) {
     Path path;
     auto empty_path = path.Current();
     ASSERT_TRUE(empty_path.empty());

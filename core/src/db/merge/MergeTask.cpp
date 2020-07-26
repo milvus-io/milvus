@@ -25,8 +25,7 @@
 namespace milvus {
 namespace engine {
 
-MergeTask::MergeTask(const DBOptions& options, const snapshot::ScopedSnapshotT& ss,
-                         const snapshot::IDS_TYPE& segments)
+MergeTask::MergeTask(const DBOptions& options, const snapshot::ScopedSnapshotT& ss, const snapshot::IDS_TYPE& segments)
     : options_(options), snapshot_(ss), segments_(segments) {
 }
 
@@ -106,8 +105,7 @@ MergeTask::Execute() {
     auto visitor = SegmentVisitor::Build(snapshot_, ctx.new_segment, ctx.new_segment_files);
 
     // create segment writer
-    segment::SegmentWriterPtr segment_writer =
-        std::make_shared<segment::SegmentWriter>(options_.meta_.path_, visitor);
+    segment::SegmentWriterPtr segment_writer = std::make_shared<segment::SegmentWriter>(options_.meta_.path_, visitor);
 
     // merge
     for (auto& id : segments_) {

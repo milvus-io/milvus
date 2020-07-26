@@ -130,7 +130,7 @@ class WebRequestHandler {
     ProcessBoolQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query);
 
     Status
-    HybridSearch(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
+    Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
 
     Status
     DeleteByIDs(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);

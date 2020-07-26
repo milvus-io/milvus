@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/delivery/request/GetVectorIDsRequest.h"
+#include "server/delivery/request/GetEntityIDsRequest.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
@@ -27,7 +27,7 @@
 namespace milvus {
 namespace server {
 
-GetVectorIDsRequest::GetVectorIDsRequest(const std::shared_ptr<milvus::server::Context>& context,
+GetEntityIDsRequest::GetEntityIDsRequest(const std::shared_ptr<milvus::server::Context>& context,
                                          const std::string& collection_name, int64_t segment_id,
                                          std::vector<int64_t>& vector_ids)
     : BaseRequest(context, BaseRequest::kGetVectorIDs),
@@ -37,13 +37,13 @@ GetVectorIDsRequest::GetVectorIDsRequest(const std::shared_ptr<milvus::server::C
 }
 
 BaseRequestPtr
-GetVectorIDsRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+GetEntityIDsRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                             int64_t segment_id, std::vector<int64_t>& vector_ids) {
-    return std::shared_ptr<BaseRequest>(new GetVectorIDsRequest(context, collection_name, segment_id, vector_ids));
+    return std::shared_ptr<BaseRequest>(new GetEntityIDsRequest(context, collection_name, segment_id, vector_ids));
 }
 
 Status
-GetVectorIDsRequest::OnExecute() {
+GetEntityIDsRequest::OnExecute() {
     try {
         std::string hdr =
             "GetVectorIDsRequest(collection=" + collection_name_ + " segment=" + std::to_string(segment_id_) + ")";

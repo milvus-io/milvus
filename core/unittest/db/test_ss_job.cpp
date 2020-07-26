@@ -22,7 +22,7 @@ class TestJob : public Job {
     TestJob() : Job(JobType::INVALID) {}
 };
 
-TEST(SSJobTest, TestJob) {
+TEST(JobTest, TestJob) {
 //    engine::DBOptions options;
 //    auto build_index_ptr = std::make_shared<SSBuildIndexJob>(options);
 //    build_index_ptr->Dump();

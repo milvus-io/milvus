@@ -25,7 +25,7 @@ namespace scheduler {
 class BuildIndexTask : public Task {
  public:
     explicit BuildIndexTask(const engine::DBOptions& options, const std::string& collection_name,
-                              engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
+                            engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;

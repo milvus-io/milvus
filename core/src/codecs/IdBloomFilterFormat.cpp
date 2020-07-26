@@ -40,7 +40,7 @@ IdBloomFilterFormat::FilePostfix() {
 
 void
 IdBloomFilterFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                            segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+                          segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
     scaling_bloom_t* bloom_filter =
         new_scaling_bloom_from_file(BLOOM_FILTER_CAPACITY, BLOOM_FILTER_ERROR_RATE, full_file_path.c_str());
@@ -55,7 +55,7 @@ IdBloomFilterFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string
 
 void
 IdBloomFilterFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                             const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+                           const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
     if (scaling_bloom_flush(id_bloom_filter_ptr->GetBloomFilter()) == -1) {
         std::string err_msg = "Failed to write bloom filter to file: " + full_file_path + ". " + std::strerror(errno);
@@ -66,7 +66,7 @@ IdBloomFilterFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::strin
 
 void
 IdBloomFilterFormat::Create(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                              segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+                            segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
     scaling_bloom_t* bloom_filter =
         new_scaling_bloom(BLOOM_FILTER_CAPACITY, BLOOM_FILTER_ERROR_RATE, full_file_path.c_str());

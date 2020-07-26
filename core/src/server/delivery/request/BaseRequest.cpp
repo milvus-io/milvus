@@ -68,7 +68,6 @@ RequestGroup(BaseRequest::RequestType type) {
         // search operations
         {BaseRequest::kSearch, DQL_REQUEST_GROUP},
         {BaseRequest::kSearchCombine, DQL_REQUEST_GROUP},
-        {BaseRequest::kHybridSearch, DQL_REQUEST_GROUP},
     };
 
     auto iter = s_map_type_group.find(type);

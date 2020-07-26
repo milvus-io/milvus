@@ -49,8 +49,8 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 }
 
 void
-BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset,
-                    int64_t num_bytes, std::vector<uint8_t>& raw) {
+BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset, int64_t num_bytes,
+                  std::vector<uint8_t>& raw) {
     if (offset < 0 || num_bytes <= 0) {
         std::string err_msg = "Invalid input to read: " + file_path;
         LOG_ENGINE_ERROR_ << err_msg;
@@ -81,7 +81,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 
 void
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
-                    std::vector<uint8_t>& raw) {
+                  std::vector<uint8_t>& raw) {
     if (read_ranges.empty()) {
         return;
     }
@@ -121,8 +121,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 }
 
 void
-BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                     const std::vector<uint8_t>& raw) {
+BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const std::vector<uint8_t>& raw) {
     if (!fs_ptr->writer_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;

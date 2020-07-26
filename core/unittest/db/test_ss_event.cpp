@@ -12,7 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "db/snapshot/InActiveResourcesGCEvent.h"
-#include "ssdb/utils.h"
+#include "db/utils.h"
 
 using CollectionCommit = milvus::engine::snapshot::CollectionCommit;
 using CollectionCommitPtr = milvus::engine::snapshot::CollectionCommitPtr;
@@ -28,7 +28,7 @@ using FEType = milvus::engine::FieldElementType;
 
 using InActiveResourcesGCEvent = milvus::engine::snapshot::InActiveResourcesGCEvent;
 
-TEST_F(SSEventTest, TestInActiveResGcEvent) {
+TEST_F(EventTest, TestInActiveResGcEvent) {
     CollectionPtr collection;
     auto status = store_->CreateResource(Collection("test_gc_c1"), collection);
     ASSERT_TRUE(status.ok()) << status.ToString();

@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/hybrid_request/HybridSearchRequest.h"
+#include "server/delivery/request/SearchRequest.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
@@ -30,25 +30,21 @@
 namespace milvus {
 namespace server {
 
-HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         const query::QueryPtr& query_ptr, const milvus::json& json_params,
-                                         engine::QueryResultPtr& result)
-    : BaseRequest(context, BaseRequest::kHybridSearch),
-      query_ptr_(query_ptr),
-      json_params_(json_params),
-      result_(result) {
+SearchRequest::SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                             const milvus::json& json_params, engine::QueryResultPtr& result)
+    : BaseRequest(context, BaseRequest::kSearch), query_ptr_(query_ptr), json_params_(json_params), result_(result) {
 }
 
 BaseRequestPtr
-HybridSearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                            const milvus::json& json_params, engine::QueryResultPtr& result) {
-    return std::shared_ptr<BaseRequest>(new HybridSearchRequest(context, query_ptr, json_params, result));
+SearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                      const milvus::json& json_params, engine::QueryResultPtr& result) {
+    return std::shared_ptr<BaseRequest>(new SearchRequest(context, query_ptr, json_params, result));
 }
 
 Status
-HybridSearchRequest::OnExecute() {
+SearchRequest::OnExecute() {
     try {
-        fiu_do_on("HybridSearchRequest.OnExecute.throw_std_exception", throw std::exception());
+        fiu_do_on("SearchRequest.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "SearchRequest(table=" + query_ptr_->collection_id;
 
         TimeRecorder rc(hdr);
@@ -64,8 +60,7 @@ HybridSearchRequest::OnExecute() {
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
         status = DBWrapper::DB()->DescribeCollection(query_ptr_->collection_id, collection, fields_schema);
-        fiu_do_on("HybridSearchRequest.OnExecute.describe_table_fail",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(query_ptr_->collection_id));
@@ -78,7 +73,7 @@ HybridSearchRequest::OnExecute() {
 
         // step 3: check partition tags
         status = ValidatePartitionTags(query_ptr_->partitions);
-        fiu_do_on("HybridSearchRequest.OnExecute.invalid_partition_tags",
+        fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
@@ -122,11 +117,11 @@ HybridSearchRequest::OnExecute() {
         ProfilerStop();
 #endif
 
-        fiu_do_on("HybridSearchRequest.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("SearchRequest.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
-        fiu_do_on("HybridSearchRequest.OnExecute.empty_result_ids", result_->result_ids_.clear());
+        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_->result_ids_.clear());
         if (result_->result_ids_.empty()) {
             auto vector_query = query_ptr_->vectors.begin()->second;
             if (!vector_query->query_vector.binary_data.empty()) {

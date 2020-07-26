@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/hybrid_request/CreateHybridCollectionRequest.h"
+#include "server/delivery/request/CreateCollectionRequest.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
@@ -28,7 +28,7 @@
 namespace milvus {
 namespace server {
 
-CreateHybridCollectionRequest::CreateHybridCollectionRequest(
+CreateCollectionRequest::CreateCollectionRequest(
     const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
     std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
     std::unordered_map<std::string, milvus::json>& field_index_params,
@@ -42,25 +42,25 @@ CreateHybridCollectionRequest::CreateHybridCollectionRequest(
 }
 
 BaseRequestPtr
-CreateHybridCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                                      const std::string& collection_name,
-                                      std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-                                      std::unordered_map<std::string, milvus::json>& field_index_params,
-                                      std::unordered_map<std::string, std::string>& field_params,
-                                      milvus::json& extra_params) {
-    return std::shared_ptr<BaseRequest>(new CreateHybridCollectionRequest(
-        context, collection_name, field_types, field_index_params, field_params, extra_params));
+CreateCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                                const std::string& collection_name,
+                                std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                                std::unordered_map<std::string, milvus::json>& field_index_params,
+                                std::unordered_map<std::string, std::string>& field_params,
+                                milvus::json& extra_params) {
+    return std::shared_ptr<BaseRequest>(new CreateCollectionRequest(context, collection_name, field_types,
+                                                                    field_index_params, field_params, extra_params));
 }
 
 Status
-CreateHybridCollectionRequest::OnExecute() {
+CreateCollectionRequest::OnExecute() {
     std::string hdr = "CreateCollectionRequest(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
         auto status = ValidateCollectionName(collection_name_);
-        fiu_do_on("CreateHybridCollectionRequest.OnExecute.invalid_collection_name",
+        fiu_do_on("CreateCollectionRequest.OnExecute.invalid_collection_name",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -139,7 +139,7 @@ CreateHybridCollectionRequest::OnExecute() {
         }
 
         status = DBWrapper::DB()->CreateCollection(create_collection_context);
-        fiu_do_on("CreateHybridCollectionRequest.OnExecute.invalid_db_execute",
+        fiu_do_on("CreateCollectionRequest.OnExecute.invalid_db_execute",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             // collection could exist

@@ -17,7 +17,7 @@
 #include <set>
 #include <algorithm>
 
-#include "ssdb/utils.h"
+#include "db/utils.h"
 #include "db/snapshot/HandlerFactory.h"
 
 Status

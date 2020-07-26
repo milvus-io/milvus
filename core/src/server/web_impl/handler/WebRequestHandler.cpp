@@ -21,6 +21,7 @@
 
 #include "config/ServerConfig.h"
 #include "metrics/SystemInfo.h"
+#include "query/BinaryQuery.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"
@@ -708,12 +709,11 @@ ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, const st
 }
 
 Status
-WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohmann::json& json,
-                                std::string& result_str) {
+WebRequestHandler::Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str) {
     Status status;
 
     milvus::server::HybridCollectionSchema collection_schema;
-    status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name, collection_schema);
+    status = request_handler_.DescribeCollection(context_ptr_, collection_name, collection_schema);
     if (!status.ok()) {
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }
@@ -754,7 +754,7 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
         query_ptr_->root = general_query->bin;
 
         engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-        status = request_handler_.HybridSearch(context_ptr_, query_ptr_, extra_params, result);
+        status = request_handler_.Search(context_ptr_, query_ptr_, extra_params, result);
 
         if (!status.ok()) {
             return status;
@@ -1040,6 +1040,7 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 StatusDto::ObjectWrapper
 WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
     //    std::string reply;
@@ -1178,6 +1179,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     //    ASSIGN_RETURN_STATUS_DTO(Status::OK());
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
+
 #endif
 
 /*************
@@ -1247,8 +1249,8 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
 
     milvus::json json_params;
 
-    auto status = request_handler_.CreateHybridCollection(context_ptr_, collection_name, field_types,
-                                                          field_index_params, field_extra_params, json_params);
+    auto status = request_handler_.CreateCollection(context_ptr_, collection_name, field_types, field_index_params,
+                                                    field_extra_params, json_params);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1783,7 +1785,7 @@ WebRequestHandler::VectorsOp(const OString& collection_name, const OString& payl
         if (payload_json.contains("delete")) {
             status = DeleteByIDs(collection_name->std_str(), payload_json["delete"], result_str);
         } else if (payload_json.contains("query")) {
-            status = HybridSearch(collection_name->c_str(), payload_json, result_str);
+            status = Search(collection_name->c_str(), payload_json, result_str);
         } else {
             status = Status(ILLEGAL_BODY, "Unknown body");
         }

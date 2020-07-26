@@ -82,7 +82,6 @@ RequestMap(BaseRequest::RequestType request_type) {
         {BaseRequest::kInsert, "Insert"},
         {BaseRequest::kCreateIndex, "CreateIndex"},
         {BaseRequest::kSearch, "Search"},
-        {BaseRequest::kHybridSearch, "HybridSearch"},
         {BaseRequest::kFlush, "Flush"},
         {BaseRequest::kGetEntityByID, "GetEntityByID"},
         {BaseRequest::kCompact, "Compact"},
@@ -669,8 +668,8 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
         }
     }
 
-    Status status = request_handler_.CreateHybridCollection(GetContext(context), request->collection_name(),
-                                                            field_types, field_index_params, field_params, json_params);
+    Status status = request_handler_.CreateCollection(GetContext(context), request->collection_name(), field_types,
+                                                      field_index_params, field_params, json_params);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context)
@@ -953,8 +952,8 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
     CHECK_NULLPTR_RETURN(request);
     try {
         milvus::server::HybridCollectionSchema collection_schema;
-        Status status = request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(),
-                                                                  collection_schema);
+        Status status =
+            request_handler_.DescribeCollection(GetContext(context), request->collection_name(), collection_schema);
         if (!status.ok()) {
             SET_RESPONSE(response->mutable_status(), status, context);
             return ::grpc::Status::OK;
@@ -1381,7 +1380,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
     std::vector<std::string> field_names;
-    status = request_handler_.HybridSearch(GetContext(context), query_ptr, json_params, result);
+    status = request_handler_.Search(GetContext(context), query_ptr, json_params, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
@@ -1682,8 +1681,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     Status status;
 
     HybridCollectionSchema collection_schema;
-    status =
-        request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(), collection_schema);
+    status = request_handler_.DescribeCollection(GetContext(context), request->collection_name(), collection_schema);
 
     field_type_ = collection_schema.field_types_;
 
@@ -1740,7 +1738,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     }
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-    status = request_handler_.HybridSearch(GetContext(context), query_ptr, json_params, result);
+    status = request_handler_.Search(GetContext(context), query_ptr, json_params, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);

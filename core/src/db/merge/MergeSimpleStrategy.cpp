@@ -20,7 +20,7 @@ const char* ROW_COUNT_PER_SEGMENT = "row_count_per_segment";
 
 Status
 MergeSimpleStrategy::RegroupSegments(const snapshot::ScopedSnapshotT& ss, const Partition2SegmentsMap& part2segment,
-                                       SegmentGroups& groups) {
+                                     SegmentGroups& groups) {
     auto collection = ss->GetCollection();
 
     int64_t row_count_per_segment = DEFAULT_ROW_COUNT_PER_SEGMENT;

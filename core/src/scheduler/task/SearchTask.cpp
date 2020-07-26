@@ -31,7 +31,7 @@ namespace milvus {
 namespace scheduler {
 
 SearchTask::SearchTask(const server::ContextPtr& context, const engine::DBOptions& options,
-                           const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
+                       const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
     : Task(TaskType::SearchTask, std::move(label)),
       context_(context),
       options_(options),

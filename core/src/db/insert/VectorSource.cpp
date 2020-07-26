@@ -26,7 +26,7 @@ VectorSource::VectorSource(const DataChunkPtr& chunk) : chunk_(chunk) {
 
 Status
 VectorSource::Add(const segment::SegmentWriterPtr& segment_writer_ptr, const int64_t& num_entities_to_add,
-                    int64_t& num_entities_added) {
+                  int64_t& num_entities_added) {
     // TODO: n = vectors_.vector_count_;???
     int64_t n = chunk_->count_;
     num_entities_added = current_num_added_ + num_entities_to_add <= n ? num_entities_to_add : n - current_num_added_;

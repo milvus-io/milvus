@@ -230,7 +230,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 
 Status
 DBImpl::DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                             snapshot::CollectionMappings& fields_schema) {
+                           snapshot::CollectionMappings& fields_schema) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
@@ -310,7 +310,7 @@ DBImpl::GetCollectionRowCount(const std::string& collection_name, uint64_t& row_
 
 Status
 DBImpl::LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
-                         const std::vector<std::string>& field_names, bool force) {
+                       const std::vector<std::string>& field_names, bool force) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
@@ -394,7 +394,7 @@ DBImpl::HasPartition(const std::string& collection_name, const std::string& part
 
 Status
 DBImpl::InsertEntities(const std::string& collection_name, const std::string& partition_name,
-                         DataChunkPtr& data_chunk) {
+                       DataChunkPtr& data_chunk) {
     CHECK_INITIALIZED;
 
     if (data_chunk == nullptr) {
@@ -545,8 +545,7 @@ DBImpl::Flush() {
 }
 
 Status
-DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                  double threshold) {
+DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_name, double threshold) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -617,7 +616,7 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
 
 Status
 DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                        const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) {
+                      const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
@@ -650,7 +649,7 @@ DBImpl::GetEntityIDs(const std::string& collection_name, int64_t segment_id, IDN
 
 Status
 DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                      const std::string& field_name, const CollectionIndex& index) {
+                    const std::string& field_name, const CollectionIndex& index) {
     CHECK_INITIALIZED;
 
     // step 1: wait merge file thread finished to avoid duplicate data bug

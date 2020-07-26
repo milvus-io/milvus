@@ -11,8 +11,8 @@
 
 #include "scheduler/TaskCreator.h"
 #include "scheduler/SchedInst.h"
-#include "scheduler/task/DeleteTask.h"
 #include "scheduler/task/BuildIndexTask.h"
+#include "scheduler/task/DeleteTask.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/BroadcastLabel.h"
 #include "scheduler/tasklabel/SpecResLabel.h"

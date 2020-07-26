@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/delivery/hybrid_request/GetEntityByIDRequest.h"
+#include "server/delivery/request/GetEntityByIDRequest.h"
 #include "db/meta/MetaTypes.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
@@ -77,7 +77,7 @@ GetEntityByIDRequest::OnExecute() {
 
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collectionPtr;
-        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collectionPtr, field_mappings_);
+        status = DBWrapper::DB()->DescribeCollection(collection_name_, collectionPtr, field_mappings_);
         if (collectionPtr == nullptr) {
             return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
         }
@@ -103,7 +103,7 @@ GetEntityByIDRequest::OnExecute() {
         }
 
         // step 2: get vector data, now only support get one id
-        status = DBWrapper::SSDB()->GetEntityByID(collection_name_, id_array_, field_names_, data_chunk_);
+        status = DBWrapper::DB()->GetEntityByID(collection_name_, id_array_, field_names_, data_chunk_);
         if (!status.ok()) {
             return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
         }

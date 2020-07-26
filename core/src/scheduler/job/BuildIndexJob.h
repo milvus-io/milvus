@@ -32,7 +32,7 @@ namespace scheduler {
 class BuildIndexJob : public Job {
  public:
     explicit BuildIndexJob(engine::DBOptions options, const std::string& collection_name,
-                             const engine::snapshot::IDS_TYPE& segment_ids);
+                           const engine::snapshot::IDS_TYPE& segment_ids);
 
     ~BuildIndexJob() = default;
 

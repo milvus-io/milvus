@@ -155,7 +155,7 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, int64_t partition_id, const
 
 Status
 MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id,
-                                       const milvus::engine::VectorSourcePtr& source, uint64_t lsn) {
+                                     const milvus::engine::VectorSourcePtr& source, uint64_t lsn) {
     SSMemCollectionPtr mem = GetMemByTable(collection_id, partition_id);
     mem->SetLSN(lsn);
 

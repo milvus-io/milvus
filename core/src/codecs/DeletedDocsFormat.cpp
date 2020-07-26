@@ -46,7 +46,7 @@ DeletedDocsFormat::FilePostfix() {
 
 void
 DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                          segment::DeletedDocsPtr& deleted_docs) {
+                        segment::DeletedDocsPtr& deleted_docs) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
 
     int del_fd = open(full_file_path.c_str(), O_RDONLY, 00664);
@@ -84,7 +84,7 @@ DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& 
 
 void
 DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                           const segment::DeletedDocsPtr& deleted_docs) {
+                         const segment::DeletedDocsPtr& deleted_docs) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
 
     // Create a temporary file from the existing file

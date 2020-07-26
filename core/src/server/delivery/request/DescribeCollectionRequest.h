@@ -22,15 +22,15 @@
 namespace milvus {
 namespace server {
 
-class DescribeHybridCollectionRequest : public BaseRequest {
+class DescribeCollectionRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            HybridCollectionSchema& collection_schema);
 
  protected:
-    DescribeHybridCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                    const std::string& collection_name, HybridCollectionSchema& collection_schema);
+    DescribeCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
+                              const std::string& collection_name, HybridCollectionSchema& collection_schema);
 
     Status
     OnExecute() override;

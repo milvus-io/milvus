@@ -28,12 +28,12 @@ using TaskPtr = std::shared_ptr<Task>;
 
 namespace context {
 
-struct HybridSearchContext {
+struct SearchContext {
     query::GeneralQueryPtr general_query_;
     std::vector<::milvus::search::TaskPtr> tasks_;
 };
 
-using HybridSearchContextPtr = std::shared_ptr<HybridSearchContext>;
+using SearchContextPtr = std::shared_ptr<SearchContext>;
 
 }  // namespace context
 }  // namespace milvus

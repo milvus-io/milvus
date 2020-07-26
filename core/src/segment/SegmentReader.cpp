@@ -149,7 +149,7 @@ SegmentReader::LoadFields() {
 
 Status
 SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets,
-                              std::vector<uint8_t>& raw) {
+                            std::vector<uint8_t>& raw) {
     try {
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
@@ -179,7 +179,7 @@ SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int
 
 Status
 SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, const std::vector<int64_t>& offsets,
-                                    engine::DataChunkPtr& data_chunk) {
+                                  engine::DataChunkPtr& data_chunk) {
     data_chunk = std::make_shared<engine::DataChunk>();
     data_chunk->count_ = offsets.size();
     for (auto& name : fields_name) {

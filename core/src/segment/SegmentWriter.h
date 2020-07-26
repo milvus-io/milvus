@@ -24,8 +24,8 @@
 #include <vector>
 
 #include "db/SnapshotVisitor.h"
-#include "segment/SegmentReader.h"
 #include "segment/Segment.h"
+#include "segment/SegmentReader.h"
 #include "storage/FSHandler.h"
 #include "utils/Status.h"
 

@@ -19,7 +19,7 @@ namespace milvus {
 namespace scheduler {
 
 BuildIndexJob::BuildIndexJob(engine::DBOptions options, const std::string& collection_name,
-                                 const engine::snapshot::IDS_TYPE& segment_ids)
+                             const engine::snapshot::IDS_TYPE& segment_ids)
     : Job(JobType::SS_BUILD),
       options_(std::move(options)),
       collection_name_(collection_name),

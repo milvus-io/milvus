@@ -12,7 +12,7 @@
 #include "db/meta/MetaNames.h"
 #include "db/meta/backend/MetaContext.h"
 #include "db/snapshot/ResourceContext.h"
-#include "ssdb/utils.h"
+#include "db/utils.h"
 
 template <typename T>
 using ResourceContext = milvus::engine::snapshot::ResourceContext<T>;
@@ -23,7 +23,7 @@ using FType = milvus::engine::FieldType;
 using FEType = milvus::engine::FieldElementType;
 using Op = milvus::engine::meta::MetaContextOp;
 
-TEST_F(SSMetaTest, ApplyTest) {
+TEST_F(MetaTest, ApplyTest) {
     ID_TYPE result_id;
 
     auto collection = std::make_shared<Collection>("meta_test_c1");
@@ -48,7 +48,7 @@ TEST_F(SSMetaTest, ApplyTest) {
     ASSERT_EQ(result_id, collection->GetID());
 }
 
-TEST_F(SSMetaTest, SessionTest) {
+TEST_F(MetaTest, SessionTest) {
     ID_TYPE result_id;
 
     auto collection = std::make_shared<Collection>("meta_test_c1");
@@ -115,7 +115,7 @@ TEST_F(SSMetaTest, SessionTest) {
     ASSERT_EQ(result_ids.at(3), field_element->GetID());
 }
 
-TEST_F(SSMetaTest, SelectTest) {
+TEST_F(MetaTest, SelectTest) {
     ID_TYPE result_id;
 
     auto collection = std::make_shared<Collection>("meta_test_c1");
@@ -168,7 +168,7 @@ TEST_F(SSMetaTest, SelectTest) {
     ASSERT_EQ(ids.at(0), collection->GetID());
 }
 
-TEST_F(SSMetaTest, TruncateTest) {
+TEST_F(MetaTest, TruncateTest) {
     ID_TYPE result_id;
 
     auto collection = std::make_shared<Collection>("meta_test_c1");

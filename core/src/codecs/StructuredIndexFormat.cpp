@@ -80,7 +80,7 @@ StructuredIndexFormat::CreateStructuredIndex(const milvus::engine::meta::hybrid:
 
 void
 StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                              knowhere::IndexPtr& index) {
+                            knowhere::IndexPtr& index) {
     milvus::TimeRecorder recorder("SSStructuredIndexFormat::Read");
     knowhere::BinarySet load_data_list;
 
@@ -142,7 +142,7 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
 
 void
 StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                               engine::meta::hybrid::DataType data_type, const knowhere::IndexPtr& index) {
+                             engine::meta::hybrid::DataType data_type, const knowhere::IndexPtr& index) {
     milvus::TimeRecorder recorder("SSStructuredIndexFormat::Write");
 
     std::string full_file_path = file_path + STRUCTURED_INDEX_POSTFIX;

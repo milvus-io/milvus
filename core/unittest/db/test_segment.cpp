@@ -15,7 +15,7 @@
 
 #include <string>
 
-#include "ssdb/utils.h"
+#include "db/utils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
 #include "db/snapshot/IterateHandler.h"
@@ -60,7 +60,7 @@ CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name,
 }
 }  // namespace
 
-TEST_F(SSSegmentTest, SegmentTest) {
+TEST_F(SegmentTest, SegmentTest) {
     LSN_TYPE lsn = 0;
     auto next_lsn = [&]() -> decltype(lsn) {
         return ++lsn;

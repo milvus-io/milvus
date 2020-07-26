@@ -147,7 +147,6 @@ class BaseRequest {
         // search operations
         kSearch,
         kSearchCombine,
-        kHybridSearch,
     };
 
  protected:
