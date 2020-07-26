@@ -22,9 +22,6 @@ namespace engine {
 class MergeManagerFactory {
  public:
     static MergeManagerPtr
-    Build(const meta::MetaPtr& meta_ptr, const DBOptions& options);
-
-    static MergeManagerPtr
     SSBuild(const DBOptions& options);
 };
 

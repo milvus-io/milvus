@@ -29,7 +29,7 @@ namespace engine {
 
 class MergeManagerImpl : public MergeManager {
  public:
-    MergeManagerImpl(const meta::MetaPtr& meta_ptr, const DBOptions& options, MergeStrategyType type);
+    MergeManagerImpl(const DBOptions& options, MergeStrategyType type);
 
     MergeStrategyType
     Strategy() const override {
@@ -40,10 +40,9 @@ class MergeManagerImpl : public MergeManager {
     UseStrategy(MergeStrategyType type) override;
 
     Status
-    MergeFiles(const std::string& collection_id) override;
+    MergeFiles(const std::string& collection_name) override;
 
  private:
-    meta::MetaPtr meta_ptr_;
     DBOptions options_;
 
     MergeStrategyType strategy_type_ = MergeStrategyType::SIMPLE;

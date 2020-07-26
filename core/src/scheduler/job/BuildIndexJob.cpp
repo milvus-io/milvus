@@ -13,49 +13,45 @@
 
 #include <utility>
 
-#include "config/ServerConfig.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
 
-BuildIndexJob::BuildIndexJob(engine::meta::MetaPtr meta_ptr, engine::DBOptions options)
-    : Job(JobType::BUILD), meta_ptr_(std::move(meta_ptr)), options_(std::move(options)) {
+BuildIndexJob::BuildIndexJob(engine::DBOptions options, const std::string& collection_name,
+                             const engine::snapshot::IDS_TYPE& segment_ids)
+    : Job(JobType::SS_BUILD),
+      options_(std::move(options)),
+      collection_name_(collection_name),
+      segment_ids_(segment_ids) {
 }
 
-bool
-BuildIndexJob::AddToIndexFiles(const engine::meta::SegmentSchemaPtr& to_index_file) {
+void
+BuildIndexJob::WaitFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
-    if (to_index_file == nullptr || to_index_files_.find(to_index_file->id_) != to_index_files_.end()) {
-        return false;
+    cv_.wait(lock, [this] { return segment_ids_.empty(); });
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] BuildIndexJob %ld all done", "build index", 0, id());
+}
+
+void
+BuildIndexJob::BuildIndexDone(const engine::snapshot::ID_TYPE seg_id) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    for (engine::snapshot::IDS_TYPE::iterator iter = segment_ids_.begin(); iter != segment_ids_.end(); ++iter) {
+        if (*iter == seg_id) {
+            segment_ids_.erase(iter);
+            break;
+        }
     }
-
-    LOG_SERVER_DEBUG_ << "BuildIndexJob " << id() << " add to_index file: " << to_index_file->id_
-                      << ", location: " << to_index_file->location_;
-
-    to_index_files_[to_index_file->id_] = to_index_file;
-    return true;
-}
-
-void
-BuildIndexJob::WaitBuildIndexFinish() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return to_index_files_.empty(); });
-    LOG_SERVER_DEBUG_ << "BuildIndexJob " << id() << " all done";
-}
-
-void
-BuildIndexJob::BuildIndexDone(size_t to_index_id) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    to_index_files_.erase(to_index_id);
-    cv_.notify_all();
-    LOG_SERVER_DEBUG_ << "BuildIndexJob " << id() << " finish index file: " << to_index_id;
+    if (segment_ids_.empty()) {
+        cv_.notify_all();
+    }
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] BuildIndexJob %ld finish segment: %ld", "build index", 0, id(), seg_id);
 }
 
 json
 BuildIndexJob::Dump() const {
     json ret{
-        {"number_of_to_index_file", to_index_files_.size()},
+        {"number_of_to_index_segment", segment_ids_.size()},
     };
     auto base = Job::Dump();
     ret.insert(base.begin(), base.end());

@@ -19,7 +19,6 @@
 #include <utility>
 #include <vector>
 
-#include "context/HybridSearchContext.h"
 #include "query/BooleanQuery.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "utils/Status.h"
@@ -32,6 +31,19 @@ class RequestHandler {
     RequestHandler() = default;
 
     Status
+    CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                     std::unordered_map<std::string, milvus::json>& field_index_params,
+                     std::unordered_map<std::string, std::string>& field_params, milvus::json& json_params);
+
+    Status
+    DescribeCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                       HybridCollectionSchema& collection_schema);
+
+    Status
+    DropCollection(const std::shared_ptr<Context>& context, std::string& collection_name);
+
+    Status
     HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_collection);
 
     Status
@@ -42,12 +54,8 @@ class RequestHandler {
                 const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
 
     Status
-    Insert(const std::shared_ptr<Context>& context, const std::string& collection_name, engine::VectorsData& vectors,
-           const std::string& partition_tag);
-
-    Status
-    GetVectorIDs(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                 const std::string& segment_name, std::vector<int64_t>& vector_ids);
+    GetEntityIDs(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t segment_id,
+                 std::vector<int64_t>& vector_ids);
 
     Status
     ShowCollections(const std::shared_ptr<Context>& context, std::vector<std::string>& collections);
@@ -55,16 +63,6 @@ class RequestHandler {
     Status
     ShowCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name,
                        std::string& collection_info);
-
-    Status
-    Search(const std::shared_ptr<Context>& context, const std::string& collection_name, engine::VectorsData& vectors,
-           int64_t topk, const milvus::json& extra_params, const std::vector<std::string>& partition_list,
-           const std::vector<std::string>& file_id_list, TopKQueryResult& result);
-
-    Status
-    SearchByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-               const std::vector<int64_t>& id_array, int64_t topk, const milvus::json& extra_params,
-               const std::vector<std::string>& partition_list, TopKQueryResult& result);
 
     Status
     CountCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);
@@ -78,10 +76,6 @@ class RequestHandler {
 
     Status
     PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
-
-    Status
-    ReLoadSegments(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                   const std::vector<std::string>& segment_ids);
 
     Status
     DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, IndexParam& param);
@@ -111,24 +105,6 @@ class RequestHandler {
     Status
     Compact(const std::shared_ptr<Context>& context, const std::string& collection_name, double compact_threshold);
 
-    /*******************************************New Interface*********************************************/
-
-    Status
-    CreateHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                           std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-                           std::unordered_map<std::string, milvus::json>& field_index_params,
-                           std::unordered_map<std::string, std::string>& field_params, milvus::json& json_params);
-
-    Status
-    DescribeHybridCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                             HybridCollectionSchema& collection_schema);
-
-    Status
-    HasHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name, bool& has_collection);
-
-    Status
-    DropHybridCollection(const std::shared_ptr<Context>& context, std::string& collection_name);
-
     Status
     InsertEntity(const std::shared_ptr<Context>& context, const std::string& collection_name,
                  const std::string& partition_name, const int32_t& row_count,
@@ -140,8 +116,8 @@ class RequestHandler {
                   engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
     Status
-    HybridSearch(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                 const milvus::json& json_params, engine::QueryResultPtr& result);
+    Search(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+           const milvus::json& json_params, engine::QueryResultPtr& result);
 };
 
 }  // namespace server

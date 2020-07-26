@@ -21,8 +21,8 @@
 #include <string>
 #include <vector>
 
-#include "codecs/Codec.h"
-#include "segment/Types.h"
+#include "db/SnapshotVisitor.h"
+#include "segment/Segment.h"
 #include "storage/FSHandler.h"
 #include "utils/Status.h"
 
@@ -31,27 +31,35 @@ namespace segment {
 
 class SegmentReader {
  public:
-    explicit SegmentReader(const std::string& directory);
-
-    // TODO(zhiru)
-    Status
-    LoadCache(bool& in_cache);
+    explicit SegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor);
 
     Status
     Load();
 
     Status
-    LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors);
+    LoadField(const std::string& field_name, std::vector<uint8_t>& raw);
 
     Status
-    LoadAttrs(const std::string& field_name, off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_attrs);
+    LoadFields();
 
     Status
-    LoadUids(std::vector<doc_id_t>& uids);
+    LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets, std::vector<uint8_t>& raw);
 
     Status
-    LoadVectorIndex(const std::string& location, codec::ExternalData external_data,
-                    segment::VectorIndexPtr& vector_index_ptr);
+    LoadFieldsEntities(const std::vector<std::string>& fields_name, const std::vector<int64_t>& offsets,
+                       engine::DataChunkPtr& data_chunk);
+
+    Status
+    LoadUids(std::vector<int64_t>& uids);
+
+    Status
+    LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr);
+
+    Status
+    LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr);
+
+    Status
+    LoadVectorIndice();
 
     Status
     LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
@@ -60,14 +68,26 @@ class SegmentReader {
     LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr);
 
     Status
-    GetSegment(SegmentPtr& segment_ptr);
-
-    Status
     ReadDeletedDocsSize(size_t& size);
 
+    Status
+    GetSegment(engine::SegmentPtr& segment_ptr);
+
+    Status
+    GetSegmentID(int64_t& id);
+
+    std::string
+    GetSegmentPath();
+
  private:
+    Status
+    Initialize();
+
+ private:
+    engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
-    SegmentPtr segment_ptr_;
+    engine::SegmentPtr segment_ptr_;
+    std::string dir_root_;
 };
 
 using SegmentReaderPtr = std::shared_ptr<SegmentReader>;

@@ -20,10 +20,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/ConfigMgr.h"
+#include "db/insert/MemCollection.h"
 #include "db/insert/MemManager.h"
-#include "db/insert/MemTable.h"
-#include "db/meta/Meta.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -32,51 +30,35 @@ namespace engine {
 class MemManagerImpl : public MemManager {
  public:
     using Ptr = std::shared_ptr<MemManagerImpl>;
-    using MemIdMap = std::map<std::string, MemTablePtr>;
-    using MemList = std::vector<MemTablePtr>;
+    using MemPartitionMap = std::map<int64_t, SSMemCollectionPtr>;
+    using MemCollectionMap = std::map<int64_t, MemPartitionMap>;
+    using MemList = std::vector<SSMemCollectionPtr>;
 
-    MemManagerImpl(const meta::MetaPtr& meta, const DBOptions& options) : meta_(meta), options_(options) {
+    explicit MemManagerImpl(const DBOptions& options) : options_(options) {
     }
 
     ~MemManagerImpl() = default;
 
     Status
-    InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                  const float* vectors, uint64_t lsn) override;
+    InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) override;
 
     Status
-    InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                  const uint8_t* vectors, uint64_t lsn) override;
+    DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t lsn) override;
 
     Status
-    InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                   const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                   const std::unordered_map<std::string, uint64_t>& attr_size,
-                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) override;
+    DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
 
     Status
-    InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                   const Vectors vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                   const std::unordered_map<std::string, uint64_t>& attr_size,
-                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) override;
+    Flush(int64_t collection_id) override;
 
     Status
-    DeleteVector(const std::string& collection_id, IDNumber vector_id, uint64_t lsn) override;
+    Flush(std::set<int64_t>& collection_ids) override;
 
     Status
-    DeleteVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
+    EraseMemVector(int64_t collection_id) override;
 
     Status
-    Flush(const std::string& collection_id) override;
-
-    Status
-    Flush(std::set<std::string>& collection_ids) override;
-
-    //    Status
-    //    Serialize(std::set<std::string>& table_ids) override;
-
-    Status
-    EraseMemVector(const std::string& collection_id) override;
+    EraseMemVector(int64_t collection_id, int64_t partition_id) override;
 
     size_t
     GetCurrentMutableMem() override;
@@ -88,27 +70,30 @@ class MemManagerImpl : public MemManager {
     GetCurrentMem() override;
 
  private:
-    MemTablePtr
-    GetMemByTable(const std::string& collection_id);
+    SSMemCollectionPtr
+    GetMemByTable(int64_t collection_id, int64_t partition_id);
+
+    std::vector<SSMemCollectionPtr>
+    GetMemByTable(int64_t collection_id);
 
     Status
-    InsertVectorsNoLock(const std::string& collection_id, const VectorSourcePtr& source, uint64_t lsn);
+    ValidateChunk(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk);
 
     Status
-    InsertEntitiesNoLock(const std::string& collection_id, const VectorSourcePtr& source, uint64_t lsn);
+    InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const VectorSourcePtr& source, uint64_t lsn);
 
     Status
     ToImmutable();
 
     Status
-    ToImmutable(const std::string& collection_id);
+    ToImmutable(int64_t collection_id);
 
     uint64_t
     GetMaxLSN(const MemList& tables);
 
-    MemIdMap mem_id_map_;
+    MemCollectionMap mem_map_;
     MemList immu_mem_list_;
-    meta::MetaPtr meta_;
+
     DBOptions options_;
     std::mutex mutex_;
     std::mutex serialization_mtx_;

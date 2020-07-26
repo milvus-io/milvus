@@ -17,6 +17,7 @@
 #include "Options.h"
 #include "db/Types.h"
 #include "db/meta/MetaTypes.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {

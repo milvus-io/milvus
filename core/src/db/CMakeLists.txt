@@ -37,8 +37,6 @@ set(storage_files
         )
 aux_source_directory(${MILVUS_ENGINE_SRC}/index/archive wrapper_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/snapshot codecs_snapshot_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
 
 
@@ -67,8 +65,6 @@ set(engine_files
         ${thirdparty_files}
         ${wrapper_files}
         ${codecs_files}
-        ${codecs_default_files}
-        ${codecs_snapshot_files}
         ${segment_files}
         )
 

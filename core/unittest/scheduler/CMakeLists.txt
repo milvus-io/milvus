@@ -29,8 +29,6 @@ add_executable(test_scheduler
         ${log_files}
         ${cache_files}
         ${codecs_files}
-        ${codecs_default_files}
-        ${codecs_snapshot_files}
         ${config_files}
         ${config_handler_files}
         ${db_main_files}
@@ -39,7 +37,6 @@ add_executable(test_scheduler
         ${db_insert_files}
         ${db_meta_files}
         ${db_merge_files}
-        ${db_wal_files}
         ${db_snapshot_files}
         ${scheduler_files}
         ${segment_files}

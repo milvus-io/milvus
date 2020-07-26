@@ -18,7 +18,7 @@
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshot.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "segment/SSSegmentReader.h"
+#include "segment/SegmentReader.h"
 
 #include <unordered_map>
 #include <utility>
@@ -134,7 +134,7 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     if (segment_visitor == nullptr) {
         return Status(DB_ERROR, "Fail to build segment visitor with id " + std::to_string(segment->GetID()));
     }
-    segment::SSSegmentReader segment_reader(dir_root_, segment_visitor);
+    segment::SegmentReader segment_reader(dir_root_, segment_visitor);
 
     auto uid_field_visitor = segment_visitor->GetFieldVisitor(DEFAULT_UID_NAME);
 

@@ -68,11 +68,11 @@ JobMgr::worker_function() {
             break;
         }
 
-        auto search_job = std::dynamic_pointer_cast<SearchJob>(job);
-        if (search_job != nullptr) {
-            search_job->GetResultIds().resize(search_job->nq(), -1);
-            search_job->GetResultDistances().resize(search_job->nq(), std::numeric_limits<float>::max());
-        }
+        //        auto search_job = std::dynamic_pointer_cast<SearchJob>(job);
+        //        if (search_job != nullptr) {
+        //            search_job->GetResultIds().resize(search_job->nq(), -1);
+        //            search_job->GetResultDistances().resize(search_job->nq(), std::numeric_limits<float>::max());
+        //        }
 
         auto tasks = build_task(job);
         for (auto& task : tasks) {

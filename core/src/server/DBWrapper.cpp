@@ -108,24 +108,9 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
-    // SS TODO
-    /* engine::snapshot::OperationExecutor::GetInstance().Start(); */
-
-    // create db instance
-    //    try {
-    //        db_ = engine::DBFactory::Build(opt);
-    //    } catch (std::exception& ex) {
-    //        std::cerr << "Error: failed to open database: " << ex.what()
-    //                  << ". Possible reason: out of storage, meta schema is damaged "
-    //                  << "or created by in-compatible Milvus version." << std::endl;
-    //        kill(0, SIGUSR1);
-    //    }
-
-    //    db_->Start();
-
     try {
-        ssdb_ = engine::DBFactory::BuildSSDB(opt);
-        ssdb_->Start();
+        db_ = engine::DBFactory::BuildDB(opt);
+        db_->Start();
     } catch (std::exception& ex) {
         std::cerr << "Error: failed to open database: " << ex.what()
                   << ". Possible reason: out of storage, meta schema is damaged "
@@ -155,10 +140,6 @@ Status
 DBWrapper::StopService() {
     if (db_) {
         db_->Stop();
-    }
-
-    if (ssdb_) {
-        ssdb_->Stop();
     }
 
     // SS TODO

@@ -52,12 +52,12 @@ HasPartitionRequest::OnExecute() {
         }
 
         bool exists = false;
-        STATUS_CHECK(DBWrapper::SSDB()->HasCollection(collection_name_, exists));
+        STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exists));
         if (!exists) {
             return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
 
-        STATUS_CHECK(DBWrapper::SSDB()->HasPartition(collection_name_, partition_tag_, has_partition_));
+        STATUS_CHECK(DBWrapper::DB()->HasPartition(collection_name_, partition_tag_, has_partition_));
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

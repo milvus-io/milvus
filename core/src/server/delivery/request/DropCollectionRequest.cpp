@@ -51,7 +51,7 @@ DropCollectionRequest::OnExecute() {
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
 
-        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
+        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
         fiu_do_on("DropCollectionRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
         fiu_do_on("DropCollectionRequest.OnExecute.describe_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
@@ -67,7 +67,7 @@ DropCollectionRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 3: Drop collection
-        status = DBWrapper::SSDB()->DropCollection(collection_name_);
+        status = DBWrapper::DB()->DropCollection(collection_name_);
         fiu_do_on("DropCollectionRequest.OnExecute.drop_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -75,7 +75,7 @@ DropCollectionRequest::OnExecute() {
         }
 
         // step 4: flush to trigger CleanUpFilesWithTTL
-        status = DBWrapper::SSDB()->Flush();
+        status = DBWrapper::DB()->Flush();
 
         rc.ElapseFromBegin("total cost");
     } catch (std::exception& ex) {

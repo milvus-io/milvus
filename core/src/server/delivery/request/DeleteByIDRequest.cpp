@@ -55,7 +55,7 @@ DeleteByIDRequest::OnExecute() {
         // step 2: check collection existence
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
+        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
@@ -76,7 +76,7 @@ DeleteByIDRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        status = DBWrapper::SSDB()->DeleteEntities(collection_name_, entity_ids_);
+        status = DBWrapper::DB()->DeleteEntities(collection_name_, entity_ids_);
         if (!status.ok()) {
             return status;
         }

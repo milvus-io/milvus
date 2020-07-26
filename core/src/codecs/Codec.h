@@ -17,55 +17,49 @@
 
 #pragma once
 
-#include "AttrsFormat.h"
-#include "AttrsIndexFormat.h"
-#include "DeletedDocsFormat.h"
-#include "IdBloomFilterFormat.h"
-#include "IdIndexFormat.h"
-#include "VectorCompressFormat.h"
-#include "VectorIndexFormat.h"
-#include "VectorsFormat.h"
-#include "utils/Exception.h"
+#include "codecs/BlockFormat.h"
+#include "codecs/DeletedDocsFormat.h"
+#include "codecs/IdBloomFilterFormat.h"
+#include "codecs/StructuredIndexFormat.h"
+#include "codecs/VectorCompressFormat.h"
+#include "codecs/VectorIndexFormat.h"
 
 namespace milvus {
 namespace codec {
 
 class Codec {
  public:
-    virtual VectorsFormatPtr
-    GetVectorsFormat() {
-        throw Exception(SERVER_UNSUPPORTED_ERROR, "vectors not supported");
-    }
+    static Codec&
+    instance();
 
-    virtual AttrsFormatPtr
-    GetAttrsFormat() {
-        throw Exception(SERVER_UNSUPPORTED_ERROR, "attr not supported");
-    }
+    BlockFormatPtr
+    GetBlockFormat();
 
-    virtual VectorIndexFormatPtr
-    GetVectorIndexFormat() {
-        throw Exception(SERVER_UNSUPPORTED_ERROR, "vectors index not supported");
-    }
+    VectorIndexFormatPtr
+    GetVectorIndexFormat();
 
-    virtual AttrsIndexFormatPtr
-    GetAttrsIndexFormat() {
-        throw Exception(SERVER_UNSUPPORTED_ERROR, "attr index not supported");
-    }
+    StructuredIndexFormatPtr
+    GetStructuredIndexFormat();
 
-    virtual DeletedDocsFormatPtr
-    GetDeletedDocsFormat() {
-        throw Exception(SERVER_UNSUPPORTED_ERROR, "delete doc index not supported");
-    }
+    DeletedDocsFormatPtr
+    GetDeletedDocsFormat();
 
-    virtual IdBloomFilterFormatPtr
-    GetIdBloomFilterFormat() {
-        throw Exception(SERVER_UNSUPPORTED_ERROR, "id bloom filter not supported");
-    }
+    IdBloomFilterFormatPtr
+    GetIdBloomFilterFormat();
 
-    virtual VectorCompressFormatPtr
-    GetVectorCompressFormat() {
-        throw Exception(SERVER_UNSUPPORTED_ERROR, "vector compress not supported");
-    }
+    VectorCompressFormatPtr
+    GetVectorCompressFormat();
+
+ private:
+    Codec();
+
+ private:
+    BlockFormatPtr block_format_ptr_;
+    StructuredIndexFormatPtr structured_index_format_ptr_;
+    VectorIndexFormatPtr vector_index_format_ptr_;
+    DeletedDocsFormatPtr deleted_docs_format_ptr_;
+    IdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
+    VectorCompressFormatPtr vector_compress_format_ptr_;
 };
 
 }  // namespace codec

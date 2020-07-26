@@ -29,7 +29,7 @@ namespace search {
 
 Task::Task(const std::shared_ptr<server::Context>& context, SegmentSchemaPtr& file,
            milvus::query::GeneralQueryPtr general_query, std::unordered_map<std::string, engine::DataType>& attr_type,
-           context::HybridSearchContextPtr hybrid_search_context)
+           context::SearchContextPtr hybrid_search_context)
     : context_(context),
       file_(file),
       general_query_(general_query),

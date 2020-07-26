@@ -49,7 +49,7 @@ PreloadCollectionRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
+        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
@@ -66,7 +66,7 @@ PreloadCollectionRequest::OnExecute() {
 
         // step 2: force load collection data into cache
         // load each segment and insert into cache even cache capacity is not enough
-        status = DBWrapper::SSDB()->LoadCollection(context_, collection_name_, field_names, true);
+        status = DBWrapper::DB()->LoadCollection(context_, collection_name_, field_names, true);
         fiu_do_on("PreloadCollectionRequest.OnExecute.preload_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("PreloadCollectionRequest.OnExecute.throw_std_exception", throw std::exception());

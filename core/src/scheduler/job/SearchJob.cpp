@@ -10,93 +10,56 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/job/SearchJob.h"
-
 #include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
 
-SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, const milvus::json& extra_params,
-                     engine::VectorsData& vectors)
-    : Job(JobType::SEARCH), context_(context), topk_(topk), extra_params_(extra_params), vectors_(vectors) {
-}
-
-SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, milvus::query::GeneralQueryPtr general_query,
-                     query::QueryPtr query_ptr,
-                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-                     engine::VectorsData& vectors)
-    : Job(JobType::SEARCH),
-      context_(context),
-      general_query_(general_query),
-      query_ptr_(query_ptr),
-      attr_type_(attr_type),
-      vectors_(vectors) {
-}
-
-bool
-SearchJob::AddIndexFile(const SegmentSchemaPtr& index_file) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (index_file == nullptr || index_files_.find(index_file->id_) != index_files_.end()) {
-        return false;
-    }
-
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld add index file: %ld", "search", 0, id(), index_file->id_);
-
-    index_files_[index_file->id_] = index_file;
-    return true;
+SearchJob::SearchJob(const server::ContextPtr& context, engine::DBOptions options, const query::QueryPtr& query_ptr)
+    : Job(JobType::SS_SEARCH), context_(context), options_(options), query_ptr_(query_ptr) {
+    GetSegmentsFromQuery(query_ptr, segment_ids_);
 }
 
 void
-SearchJob::WaitResult() {
+SearchJob::WaitFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return index_files_.empty(); });
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld: query_time %f, map_uids_time %f, reduce_time %f", "search", 0,
-                                id(), this->time_stat().query_time, this->time_stat().map_uids_time,
-                                this->time_stat().reduce_time);
+    cv_.wait(lock, [this] { return segment_ids_.empty(); });
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld all done", "search", 0, id());
 }
 
 void
-SearchJob::SearchDone(size_t index_id) {
+SearchJob::SearchDone(const engine::snapshot::ID_TYPE seg_id) {
     std::unique_lock<std::mutex> lock(mutex_);
-    index_files_.erase(index_id);
-    if (index_files_.empty()) {
+    for (engine::snapshot::IDS_TYPE::iterator iter = segment_ids_.begin(); iter != segment_ids_.end(); ++iter) {
+        if (*iter == seg_id) {
+            segment_ids_.erase(iter);
+            break;
+        }
+    }
+    if (segment_ids_.empty()) {
         cv_.notify_all();
     }
-
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld finish index file: %ld", "search", 0, id(), index_id);
-}
-
-ResultIds&
-SearchJob::GetResultIds() {
-    return result_ids_;
-}
-
-ResultDistances&
-SearchJob::GetResultDistances() {
-    return result_distances_;
-}
-
-Status&
-SearchJob::GetStatus() {
-    return status_;
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld finish segment: %ld", "search", 0, id(), seg_id);
 }
 
 json
 SearchJob::Dump() const {
     json ret{
-        {"topk", topk_},
-        {"nq", vectors_.vector_count_},
-        {"extra_params", extra_params_.dump()},
+        {"number_of_search_segment", segment_ids_.size()},
     };
     auto base = Job::Dump();
     ret.insert(base.begin(), base.end());
     return ret;
 }
 
-const std::shared_ptr<server::Context>&
-SearchJob::GetContext() const {
-    return context_;
+void
+SearchJob::GetSegmentsFromQuery(const query::QueryPtr& query_ptr, engine::snapshot::IDS_TYPE& segment_ids) {
+    // TODO
+}
+
+int64_t
+SearchJob::nq() {
+    return 0;
 }
 
 }  // namespace scheduler

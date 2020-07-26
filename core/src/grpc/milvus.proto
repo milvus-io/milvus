@@ -172,14 +172,6 @@ message SearchInSegmentParam {
 }
 
 /**
- * @brief Params for reloading segments
- */
-message ReLoadSegmentsParam {
-    string collection_name = 1;
-    repeated string segment_id_array = 2;
-}
-
-/**
  * @brief Entities
  */
 message Entities {
@@ -283,7 +275,7 @@ message CollectionInfo {
  */
 message GetEntityIDsParam {
     string collection_name = 1;
-    string segment_name = 2;
+    int64 segment_id = 2;
 }
 
 /**
@@ -586,15 +578,6 @@ service MilvusService {
      * @return Status
      */
     rpc PreloadCollection(CollectionName) returns (Status) {}
-
-    /**
-     * @brief This method is used to reload collection segments
-     *
-     * @param ReLoadSegmentsParam, target segments information.
-     *
-     * @return Status
-     */
-    rpc ReloadSegments(ReLoadSegmentsParam) returns (Status) {}
 
     /**
      * @brief This method is used to flush buffer into storage.

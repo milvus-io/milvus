@@ -44,10 +44,10 @@ FaissIVFFlatPass::Run(const TaskPtr& task) {
         return false;
     }
 
-    auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
-        return false;
-    }
+    auto search_task = std::static_pointer_cast<SearchTask>(task);
+    //    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
+    //        return false;
+    //    }
 
     auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;

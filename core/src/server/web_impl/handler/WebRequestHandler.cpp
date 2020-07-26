@@ -21,6 +21,7 @@
 
 #include "config/ServerConfig.h"
 #include "metrics/SystemInfo.h"
+#include "query/BinaryQuery.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"
@@ -173,9 +174,9 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
     json_out["collection_name"] = schema.collection_name_;
     json_out["dimension"] = schema.dimension_;
     json_out["index_file_size"] = schema.index_file_size_;
-    json_out["index"] = IndexMap.at(engine::EngineType(index_param.index_type_));
+    json_out["index"] = index_param.index_type_;
     json_out["index_params"] = index_param.extra_params_;
-    json_out["metric_type"] = MetricMap.at(engine::MetricType(schema.metric_type_));
+    json_out["metric_type"] = schema.metric_type_;
     json_out["count"] = count;
 
     return Status::OK();
@@ -199,10 +200,10 @@ WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohman
 }
 
 Status
-WebRequestHandler::GetSegmentVectors(const std::string& collection_name, const std::string& segment_name,
-                                     int64_t page_size, int64_t offset, nlohmann::json& json_out) {
+WebRequestHandler::GetSegmentVectors(const std::string& collection_name, int64_t segment_id, int64_t page_size,
+                                     int64_t offset, nlohmann::json& json_out) {
     std::vector<int64_t> vector_ids;
-    auto status = request_handler_.GetVectorIDs(context_ptr_, collection_name, segment_name, vector_ids);
+    auto status = request_handler_.GetEntityIDs(context_ptr_, 0, segment_id, vector_ids);
     if (!status.ok()) {
         return status;
     }
@@ -228,10 +229,10 @@ WebRequestHandler::GetSegmentVectors(const std::string& collection_name, const s
 }
 
 Status
-WebRequestHandler::GetSegmentIds(const std::string& collection_name, const std::string& segment_name, int64_t page_size,
+WebRequestHandler::GetSegmentIds(const std::string& collection_name, int64_t segment_id, int64_t page_size,
                                  int64_t offset, nlohmann::json& json_out) {
     std::vector<int64_t> vector_ids;
-    auto status = request_handler_.GetVectorIDs(context_ptr_, collection_name, segment_name, vector_ids);
+    auto status = request_handler_.GetEntityIDs(context_ptr_, collection_name, segment_id, vector_ids);
     if (status.ok()) {
         auto ids_begin = std::min(vector_ids.size(), (size_t)offset);
         auto ids_end = std::min(vector_ids.size(), (size_t)(offset + page_size));
@@ -419,105 +420,6 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
     result["restart_required"] = required;
 
     result_str = result.dump();
-
-    return Status::OK();
-}
-
-Status
-WebRequestHandler::Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str) {
-    if (!json.contains("topk")) {
-        return Status(BODY_FIELD_LOSS, "Field \'topk\' is required");
-    }
-    int64_t topk = json["topk"];
-
-    if (!json.contains("params")) {
-        return Status(BODY_FIELD_LOSS, "Field \'params\' is required");
-    }
-
-    std::vector<std::string> partition_tags;
-    if (json.contains("partition_tags")) {
-        auto tags = json["partition_tags"];
-        if (!tags.is_null() && !tags.is_array()) {
-            return Status(BODY_PARSE_FAIL, "Field \"partition_tags\" must be a array");
-        }
-
-        for (auto& tag : tags) {
-            partition_tags.emplace_back(tag.get<std::string>());
-        }
-    }
-
-    TopKQueryResult result;
-    Status status;
-    if (json.contains("ids")) {
-        auto vec_ids = json["ids"];
-        if (!vec_ids.is_array()) {
-            return Status(BODY_PARSE_FAIL, "Field \"ids\" must be ad array");
-        }
-
-        std::vector<int64_t> id_array;
-        for (auto& id_str : vec_ids) {
-            id_array.emplace_back(std::stol(id_str.get<std::string>()));
-        }
-        //        std::vector<int64_t> id_array(vec_ids.begin(), vec_ids.end());
-        status = request_handler_.SearchByID(context_ptr_, collection_name, id_array, topk, json["params"],
-                                             partition_tags, result);
-    } else {
-        std::vector<std::string> file_id_vec;
-        if (json.contains("file_ids")) {
-            auto ids = json["file_ids"];
-            if (!ids.is_null() && !ids.is_array()) {
-                return Status(BODY_PARSE_FAIL, "Field \"file_ids\" must be a array");
-            }
-            for (auto& id : ids) {
-                file_id_vec.emplace_back(id.get<std::string>());
-            }
-        }
-
-        bool bin_flag = false;
-        status = IsBinaryCollection(collection_name, bin_flag);
-        if (!status.ok()) {
-            return status;
-        }
-
-        if (!json.contains("vectors")) {
-            return Status(BODY_FIELD_LOSS, "Field \"vectors\" is required");
-        }
-
-        engine::VectorsData vectors_data;
-        status = CopyRecordsFromJson(json["vectors"], vectors_data, bin_flag);
-        if (!status.ok()) {
-            return status;
-        }
-
-        status = request_handler_.Search(context_ptr_, collection_name, vectors_data, topk, json["params"],
-                                         partition_tags, file_id_vec, result);
-    }
-    if (!status.ok()) {
-        return status;
-    }
-
-    nlohmann::json result_json;
-    result_json["num"] = result.row_num_;
-    if (result.row_num_ == 0) {
-        result_json["result"] = std::vector<int64_t>();
-        result_str = result_json.dump();
-        return Status::OK();
-    }
-
-    auto step = result.id_list_.size() / result.row_num_;
-    nlohmann::json search_result_json;
-    for (int64_t i = 0; i < result.row_num_; i++) {
-        nlohmann::json raw_result_json;
-        for (size_t j = 0; j < step; j++) {
-            nlohmann::json one_result_json;
-            one_result_json["id"] = std::to_string(result.id_list_.at(i * step + j));
-            one_result_json["distance"] = std::to_string(result.distance_list_.at(i * step + j));
-            raw_result_json.emplace_back(one_result_json);
-        }
-        search_result_json.emplace_back(raw_result_json);
-    }
-    result_json["result"] = search_result_json;
-    result_str = result_json.dump();
 
     return Status::OK();
 }
@@ -807,12 +709,11 @@ ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, const st
 }
 
 Status
-WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohmann::json& json,
-                                std::string& result_str) {
+WebRequestHandler::Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str) {
     Status status;
 
     milvus::server::HybridCollectionSchema collection_schema;
-    status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name, collection_schema);
+    status = request_handler_.DescribeCollection(context_ptr_, collection_name, collection_schema);
     if (!status.ok()) {
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }
@@ -853,7 +754,7 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
         query_ptr_->root = general_query->bin;
 
         engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-        status = request_handler_.HybridSearch(context_ptr_, query_ptr_, extra_params, result);
+        status = request_handler_.Search(context_ptr_, query_ptr_, extra_params, result);
 
         if (!status.ok()) {
             return status;
@@ -1139,6 +1040,7 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 StatusDto::ObjectWrapper
 WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
     //    std::string reply;
@@ -1277,6 +1179,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
     //    ASSIGN_RETURN_STATUS_DTO(Status::OK());
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
+
 #endif
 
 /*************
@@ -1299,10 +1202,6 @@ WebRequestHandler::CreateCollection(const CollectionRequestDto::ObjectWrapper& c
 
     if (nullptr == collection_schema->metric_type.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'metric_type\' is missing")
-    }
-
-    if (MetricNameMap.find(collection_schema->metric_type->std_str()) == MetricNameMap.end()) {
-        RETURN_STATUS_DTO(ILLEGAL_METRIC_TYPE, "metric_type is illegal")
     }
 
     auto status = Status::OK();
@@ -1350,8 +1249,8 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
 
     milvus::json json_params;
 
-    auto status = request_handler_.CreateHybridCollection(context_ptr_, collection_name, field_types,
-                                                          field_index_params, field_extra_params, json_params);
+    auto status = request_handler_.CreateCollection(context_ptr_, collection_name, field_types, field_index_params,
+                                                    field_extra_params, json_params);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1463,15 +1362,6 @@ WebRequestHandler::CreateIndex(const OString& collection_name, const OString& bo
             RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'index_type\' is required");
         }
 
-        std::string index_type = request_json["index_type"];
-        if (IndexNameMap.find(index_type) == IndexNameMap.end()) {
-            RETURN_STATUS_DTO(ILLEGAL_INDEX_TYPE, "The index type is invalid.")
-        }
-        auto index = static_cast<int64_t>(IndexNameMap.at(index_type));
-        if (!request_json.contains("params")) {
-            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'params\' is required")
-        }
-
         auto status = Status::OK();
         //        auto status =
         //            request_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index,
@@ -1493,7 +1383,7 @@ WebRequestHandler::GetIndex(const OString& collection_name, OString& result) {
 
     if (status.ok()) {
         nlohmann::json json_out;
-        auto index_type = IndexMap.at(engine::EngineType(param.index_type_));
+        auto index_type = engine::EngineType(param.index_type_);
         json_out["index_type"] = index_type;
         json_out["params"] = nlohmann::json::parse(param.extra_params_);
         result = json_out.dump().c_str();
@@ -1694,15 +1584,17 @@ WebRequestHandler::GetSegmentInfo(const OString& collection_name, const OString&
             Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
     }
 
+    std::string id_str = segment_name->std_str();
+    int64_t segment_id = atol(id_str.c_str());
     std::string re = info->std_str();
     status = Status::OK();
     nlohmann::json json;
     // Get vectors
     if (re == "vectors") {
-        status = GetSegmentVectors(collection_name->std_str(), segment_name->std_str(), page_size, offset, json);
+        status = GetSegmentVectors(collection_name->std_str(), segment_id, page_size, offset, json);
         // Get vector ids
     } else if (re == "ids") {
-        status = GetSegmentIds(collection_name->std_str(), segment_name->std_str(), page_size, offset, json);
+        status = GetSegmentIds(collection_name->std_str(), segment_id, page_size, offset, json);
     }
 
     result = status.ok() ? json.dump().c_str() : "NULL";
@@ -1710,70 +1602,10 @@ WebRequestHandler::GetSegmentInfo(const OString& collection_name, const OString&
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-/**********
+/**
  *
- * Vector {
+ * Vector
  */
-StatusDto::ObjectWrapper
-WebRequestHandler::Insert(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto) {
-    if (nullptr == body.get() || body->getSize() == 0) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Request payload is required.")
-    }
-
-    // step 1: copy vectors
-    bool bin_flag;
-    auto status = IsBinaryCollection(collection_name->std_str(), bin_flag);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    auto body_json = nlohmann::json::parse(body->std_str());
-    if (!body_json.contains("vectors")) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'vectors\' is required");
-    }
-    engine::VectorsData vectors;
-    CopyRecordsFromJson(body_json["vectors"], vectors, bin_flag);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    // step 2: copy id array
-    if (body_json.contains("ids")) {
-        auto& ids_json = body_json["ids"];
-        if (!ids_json.is_array()) {
-            RETURN_STATUS_DTO(ILLEGAL_BODY, "Field \"ids\" must be a array");
-        }
-        auto& id_array = vectors.id_array_;
-        id_array.clear();
-        try {
-            for (auto& id_str : ids_json) {
-                int64_t id = std::stol(id_str.get<std::string>());
-                id_array.emplace_back(id);
-            }
-        } catch (std::exception& e) {
-            std::string err_msg = std::string("Cannot convert vectors id. details: ") + e.what();
-            RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, err_msg.c_str());
-        }
-    }
-
-    // step 3: copy partition tag
-    std::string tag;
-    if (body_json.contains("partition_tag")) {
-        tag = body_json["partition_tag"];
-    }
-
-    // step 4: construct result
-    status = request_handler_.Insert(context_ptr_, collection_name->std_str(), vectors, tag);
-    if (status.ok()) {
-        ids_dto->ids = ids_dto->ids->createShared();
-        for (auto& id : vectors.id_array_) {
-            ids_dto->ids->pushBack(std::to_string(id).c_str());
-        }
-    }
-
-    ASSIGN_RETURN_STATUS_DTO(status)
-}
-
 StatusDto::ObjectWrapper
 WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::server::web::OString& body,
                                 VectorIdsDto::ObjectWrapper& ids_dto) {
@@ -1952,10 +1784,8 @@ WebRequestHandler::VectorsOp(const OString& collection_name, const OString& payl
 
         if (payload_json.contains("delete")) {
             status = DeleteByIDs(collection_name->std_str(), payload_json["delete"], result_str);
-        } else if (payload_json.contains("search")) {
-            status = Search(collection_name->std_str(), payload_json["search"], result_str);
         } else if (payload_json.contains("query")) {
-            status = HybridSearch(collection_name->c_str(), payload_json, result_str);
+            status = Search(collection_name->c_str(), payload_json, result_str);
         } else {
             status = Status(ILLEGAL_BODY, "Unknown body");
         }

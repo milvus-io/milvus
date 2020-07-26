@@ -43,13 +43,13 @@ ShowPartitionsRequest::OnExecute() {
 
     /* check collection existence */
     bool exist = false;
-    auto status = DBWrapper::SSDB()->HasCollection(collection_name_, exist);
+    auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
     if (!exist) {
         return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
     }
 
     /* get partitions */
-    status = DBWrapper::SSDB()->ShowPartitions(collection_name_, partition_list_);
+    status = DBWrapper::DB()->ShowPartitions(collection_name_, partition_list_);
     fiu_do_on("ShowPartitionsRequest.OnExecute.show_partition_fail",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     return status;
