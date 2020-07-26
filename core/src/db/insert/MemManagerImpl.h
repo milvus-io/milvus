@@ -80,7 +80,7 @@ class MemManagerImpl : public MemManager {
     ValidateChunk(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk);
 
     Status
-    InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const SSVectorSourcePtr& source, uint64_t lsn);
+    InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const VectorSourcePtr& source, uint64_t lsn);
 
     Status
     ToImmutable();

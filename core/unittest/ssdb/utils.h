@@ -19,7 +19,7 @@
 #include <set>
 #include <string>
 
-#include "db/SSDBImpl.h"
+#include "db/DBImpl.h"
 #include "db/meta/MetaAdapter.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Context.h"
@@ -78,7 +78,7 @@ using IteratePartitionHandler = milvus::engine::snapshot::IterateHandler<Partiti
 using IterateSegmentFileHandler = milvus::engine::snapshot::IterateHandler<SegmentFile>;
 using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
 using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
-using SSDBImpl = milvus::engine::SSDBImpl;
+using SSDBImpl = milvus::engine::DBImpl;
 using Status = milvus::Status;
 using Store = milvus::engine::snapshot::Store;
 

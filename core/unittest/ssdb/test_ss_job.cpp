@@ -11,8 +11,8 @@
 
 #include <gtest/gtest.h>
 
-#include "scheduler/job/SSBuildIndexJob.h"
-#include "scheduler/job/SSSearchJob.h"
+#include "scheduler/job/BuildIndexJob.h"
+#include "scheduler/job/SearchJob.h"
 
 namespace milvus {
 namespace scheduler {

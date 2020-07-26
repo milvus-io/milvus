@@ -19,7 +19,7 @@
 #include "db/insert/VectorSource.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Resources.h"
-#include "segment/SSSegmentWriter.h"
+#include "segment/SegmentWriter.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -33,7 +33,7 @@ class MemSegment {
 
  public:
     Status
-    Add(const SSVectorSourcePtr& source);
+    Add(const VectorSourcePtr& source);
 
     Status
     Delete(segment::doc_id_t doc_id);
@@ -73,10 +73,10 @@ class MemSegment {
     int64_t current_mem_;
 
     //    ExecutionEnginePtr execution_engine_;
-    segment::SSSegmentWriterPtr segment_writer_ptr_;
+    segment::SegmentWriterPtr segment_writer_ptr_;
 };  // SSMemTableFile
 
-using SSMemSegmentPtr = std::shared_ptr<MemSegment>;
+using MemSegmentPtr = std::shared_ptr<MemSegment>;
 
 }  // namespace engine
 }  // namespace milvus

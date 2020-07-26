@@ -107,7 +107,7 @@ MemSegment::CreateSegment() {
     auto visitor = SegmentVisitor::Build(ss, ctx.new_segment, ctx.new_segment_files);
 
     // create segment writer
-    segment_writer_ptr_ = std::make_shared<segment::SSSegmentWriter>(options_.meta_.path_, visitor);
+    segment_writer_ptr_ = std::make_shared<segment::SegmentWriter>(options_.meta_.path_, visitor);
 
     return Status::OK();
 }
@@ -175,7 +175,7 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
 }
 
 Status
-MemSegment::Add(const SSVectorSourcePtr& source) {
+MemSegment::Add(const VectorSourcePtr& source) {
     int64_t single_entity_mem_size = 0;
     auto status = GetSingleEntitySize(single_entity_mem_size);
     if (!status.ok()) {

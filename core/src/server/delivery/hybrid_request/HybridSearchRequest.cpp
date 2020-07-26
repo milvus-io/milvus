@@ -63,7 +63,7 @@ HybridSearchRequest::OnExecute() {
         // only process root table, ignore partition table
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::SSDB()->DescribeCollection(query_ptr_->collection_id, collection, fields_schema);
+        status = DBWrapper::DB()->DescribeCollection(query_ptr_->collection_id, collection, fields_schema);
         fiu_do_on("HybridSearchRequest.OnExecute.describe_table_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -116,7 +116,7 @@ HybridSearchRequest::OnExecute() {
         }
 
         result_->row_num_ = 0;
-        status = DBWrapper::SSDB()->Query(context_, query_ptr_, result_);
+        status = DBWrapper::DB()->Query(context_, query_ptr_, result_);
 
 #ifdef ENABLE_CPU_PROFILING
         ProfilerStop();

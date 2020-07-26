@@ -28,14 +28,14 @@ namespace engine {
 
 class MemCollection {
  public:
-    using SSMemCollectionFileList = std::vector<SSMemSegmentPtr>;
+    using SSMemCollectionFileList = std::vector<MemSegmentPtr>;
 
     MemCollection(int64_t collection_id, int64_t partition_id, const DBOptions& options);
 
     ~MemCollection() = default;
 
     Status
-    Add(const SSVectorSourcePtr& source);
+    Add(const VectorSourcePtr& source);
 
     Status
     Delete(segment::doc_id_t doc_id);
@@ -44,7 +44,7 @@ class MemCollection {
     Delete(const std::vector<segment::doc_id_t>& doc_ids);
 
     void
-    GetCurrentMemSegment(SSMemSegmentPtr& mem_segment);
+    GetCurrentMemSegment(MemSegmentPtr& mem_segment);
 
     size_t
     GetTableFileCount();

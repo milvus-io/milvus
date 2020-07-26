@@ -21,15 +21,15 @@
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/Resources.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "segment/SSSegmentReader.h"
-#include "segment/SSSegmentWriter.h"
+#include "segment/SegmentReader.h"
+#include "segment/SegmentWriter.h"
 #include "utils/Json.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
 
 namespace {
 milvus::Status
-CreateCollection(std::shared_ptr<SSDBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
+CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
     CreateCollectionContext context;
     context.lsn = lsn;
     auto collection_schema = std::make_shared<Collection>(collection_name);
@@ -127,7 +127,7 @@ TEST_F(SSSegmentTest, SegmentTest) {
         // std::cout << ss->ToString() << std::endl;
 
         /* write data */
-        milvus::segment::SSSegmentWriter segment_writer(db_root, visitor);
+        milvus::segment::SegmentWriter segment_writer(db_root, visitor);
 
 //        status = segment_writer.AddChunk("test", raw_vectors, raw_uids);
 //        ASSERT_TRUE(status.ok())

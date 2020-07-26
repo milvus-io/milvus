@@ -72,7 +72,7 @@ InsertEntityRequest::OnExecute() {
         // step 2: check table existence
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings mappings;
-        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, mappings);
+        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, mappings);
         if (collection == nullptr) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
@@ -84,7 +84,7 @@ InsertEntityRequest::OnExecute() {
         engine::DataChunkPtr data_chunk = std::make_shared<engine::DataChunk>();
         data_chunk->count_ = row_count_;
         data_chunk->fixed_fields_.swap(chunk_data_);
-        status = DBWrapper::SSDB()->InsertEntities(collection_name_, partition_name_, data_chunk);
+        status = DBWrapper::DB()->InsertEntities(collection_name_, partition_name_, data_chunk);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "InsertEntities", 0, status.message().c_str());
             return status;

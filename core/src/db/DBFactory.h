@@ -12,7 +12,7 @@
 #pragma once
 
 #include "Options.h"
-#include "SSDB.h"
+#include "DB.h"
 
 #include <memory>
 #include <string>
@@ -25,8 +25,8 @@ class DBFactory {
     static DBOptions
     BuildOption();
 
-    static SSDBPtr
-    BuildSSDB(const DBOptions& options);
+    static DBPtr
+    BuildDB(const DBOptions& options);
 };
 
 }  // namespace engine

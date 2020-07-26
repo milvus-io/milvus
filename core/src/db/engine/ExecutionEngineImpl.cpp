@@ -20,8 +20,8 @@
 #include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/snapshot/CompoundOperations.h"
-#include "segment/SSSegmentReader.h"
-#include "segment/SSSegmentWriter.h"
+#include "segment/SegmentReader.h"
+#include "segment/SegmentWriter.h"
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
 #include "utils/Exception.h"
@@ -93,7 +93,7 @@ MappingMetricType(MetricType metric_type, milvus::json& conf) {
 
 ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
     : root_path_(dir_root), segment_visitor_(segment_visitor), gpu_enable_(config.gpu.enable()) {
-    segment_reader_ = std::make_shared<segment::SSSegmentReader>(dir_root, segment_visitor);
+    segment_reader_ = std::make_shared<segment::SegmentReader>(dir_root, segment_visitor);
 }
 
 knowhere::VecIndexPtr
@@ -337,7 +337,7 @@ ExecutionEngineImpl::BuildIndex() {
 
         rc.RecordSection("build index");
 
-        auto segment_writer_ptr = std::make_shared<segment::SSSegmentWriter>(root_path_, segment_visitor_);
+        auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(root_path_, segment_visitor_);
         segment_writer_ptr->SetVectorIndex(field->GetName(), to_index);
         segment_writer_ptr->WriteVectorIndex(field->GetName());
 

@@ -31,16 +31,16 @@ MemCollection::MemCollection(int64_t collection_id, int64_t partition_id, const 
 }
 
 Status
-MemCollection::Add(const milvus::engine::SSVectorSourcePtr& source) {
+MemCollection::Add(const milvus::engine::VectorSourcePtr& source) {
     while (!source->AllAdded()) {
-        SSMemSegmentPtr current_mem_segment;
+        MemSegmentPtr current_mem_segment;
         if (!mem_segment_list_.empty()) {
             current_mem_segment = mem_segment_list_.back();
         }
 
         Status status;
         if (mem_segment_list_.empty() || current_mem_segment->IsFull()) {
-            SSMemSegmentPtr new_mem_segment = std::make_shared<MemSegment>(collection_id_, partition_id_, options_);
+            MemSegmentPtr new_mem_segment = std::make_shared<MemSegment>(collection_id_, partition_id_, options_);
             status = new_mem_segment->Add(source);
             if (status.ok()) {
                 mem_segment_list_.emplace_back(new_mem_segment);
@@ -87,7 +87,7 @@ MemCollection::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
 }
 
 void
-MemCollection::GetCurrentMemSegment(SSMemSegmentPtr& mem_segment) {
+MemCollection::GetCurrentMemSegment(MemSegmentPtr& mem_segment) {
     mem_segment = mem_segment_list_.back();
 }
 

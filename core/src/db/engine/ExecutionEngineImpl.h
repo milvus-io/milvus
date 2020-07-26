@@ -18,7 +18,7 @@
 
 #include "ExecutionEngine.h"
 #include "db/SnapshotVisitor.h"
-#include "segment/SSSegmentReader.h"
+#include "segment/SegmentReader.h"
 
 namespace milvus {
 namespace engine {
@@ -55,7 +55,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
  private:
     std::string root_path_;
     SegmentVisitorPtr segment_visitor_;
-    segment::SSSegmentReaderPtr segment_reader_;
+    segment::SegmentReaderPtr segment_reader_;
 
     int64_t gpu_num_ = 0;
     bool gpu_enable_ = false;

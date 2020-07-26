@@ -12,8 +12,8 @@
 #include "scheduler/TaskCreator.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/task/DeleteTask.h"
-#include "scheduler/task/SSBuildIndexTask.h"
-#include "scheduler/task/SSSearchTask.h"
+#include "scheduler/task/BuildIndexTask.h"
+#include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/BroadcastLabel.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 
@@ -27,10 +27,10 @@ TaskCreator::Create(const JobPtr& job) {
             return Create(std::static_pointer_cast<DeleteJob>(job));
         }
         case JobType::SS_SEARCH: {
-            return Create(std::static_pointer_cast<SSSearchJob>(job));
+            return Create(std::static_pointer_cast<SearchJob>(job));
         }
         case JobType::SS_BUILD: {
-            return Create(std::static_pointer_cast<SSBuildIndexJob>(job));
+            return Create(std::static_pointer_cast<BuildIndexJob>(job));
         }
         default: {
             // TODO(wxyu): error
@@ -54,7 +54,7 @@ std::vector<TaskPtr>
 TaskCreator::Create(const SSSearchJobPtr& job) {
     std::vector<TaskPtr> tasks;
     for (auto& id : job->segment_ids()) {
-        auto task = std::make_shared<SSSearchTask>(job->GetContext(), job->options(), job->query_ptr(), id, nullptr);
+        auto task = std::make_shared<SearchTask>(job->GetContext(), job->options(), job->query_ptr(), id, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);
     }
@@ -66,7 +66,7 @@ TaskCreator::Create(const SSBuildIndexJobPtr& job) {
     std::vector<TaskPtr> tasks;
     const std::string& collection_name = job->collection_name();
     for (auto& id : job->segment_ids()) {
-        auto task = std::make_shared<SSBuildIndexTask>(job->options(), collection_name, id, nullptr);
+        auto task = std::make_shared<BuildIndexTask>(job->options(), collection_name, id, nullptr);
         task->job_ = job;
         tasks.emplace_back(task);
     }

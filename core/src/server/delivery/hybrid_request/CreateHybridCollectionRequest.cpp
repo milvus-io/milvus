@@ -138,7 +138,7 @@ CreateHybridCollectionRequest::OnExecute() {
             create_collection_context.fields_schema[field] = {field_element};
         }
 
-        status = DBWrapper::SSDB()->CreateCollection(create_collection_context);
+        status = DBWrapper::DB()->CreateCollection(create_collection_context);
         fiu_do_on("CreateHybridCollectionRequest.OnExecute.invalid_db_execute",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {

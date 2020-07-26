@@ -47,7 +47,7 @@ DropPartitionRequest::OnExecute() {
 
     /* check collection */
     bool exist = false;
-    auto status = DBWrapper::SSDB()->HasCollection(collection_name_, exist);
+    auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
     if (!exist) {
         return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
     }
@@ -55,7 +55,7 @@ DropPartitionRequest::OnExecute() {
     rc.RecordSection("check validation");
 
     /* drop partition */
-    return DBWrapper::SSDB()->DropPartition(collection_name_, tag_);
+    return DBWrapper::DB()->DropPartition(collection_name_, tag_);
 }
 
 }  // namespace server

@@ -7,3 +7,4 @@ set(log_files
     )
 
 add_library(log STATIC ${log_files})
+add_dependencies(log fiu)

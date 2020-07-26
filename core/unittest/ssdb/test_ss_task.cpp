@@ -17,12 +17,12 @@
 //#include "db/meta/SqliteMetaImpl.h"
 #include "db/DBFactory.h"
 #include "scheduler/SchedInst.h"
-#include "scheduler/job/SSBuildIndexJob.h"
-#include "scheduler/job/SSSearchJob.h"
+#include "scheduler/job/BuildIndexJob.h"
+#include "scheduler/job/SearchJob.h"
 #include "scheduler/resource/CpuResource.h"
 #include "scheduler/tasklabel/BroadcastLabel.h"
-#include "scheduler/task/SSBuildIndexTask.h"
-#include "scheduler/task/SSSearchTask.h"
+#include "scheduler/task/BuildIndexTask.h"
+#include "scheduler/task/SearchTask.h"
 
 namespace milvus {
 namespace scheduler {

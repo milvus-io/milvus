@@ -54,7 +54,7 @@ DropIndexRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
+        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
         fiu_do_on("DropIndexRequest.OnExecute.collection_not_exist",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -68,7 +68,7 @@ DropIndexRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 2: drop index
-        status = DBWrapper::SSDB()->DropIndex(collection_name_, field_name_);
+        status = DBWrapper::DB()->DropIndex(collection_name_, field_name_);
         fiu_do_on("DropIndexRequest.OnExecute.drop_index_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;

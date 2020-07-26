@@ -22,8 +22,8 @@
 #include <vector>
 
 #include "job/DeleteJob.h"
-#include "job/SSBuildIndexJob.h"
-#include "job/SSSearchJob.h"
+#include "src/scheduler/job/BuildIndexJob.h"
+#include "src/scheduler/job/SearchJob.h"
 #include "task/Task.h"
 
 namespace milvus {

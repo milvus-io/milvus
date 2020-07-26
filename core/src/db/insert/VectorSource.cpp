@@ -25,7 +25,7 @@ VectorSource::VectorSource(const DataChunkPtr& chunk) : chunk_(chunk) {
 }
 
 Status
-VectorSource::Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const int64_t& num_entities_to_add,
+VectorSource::Add(const segment::SegmentWriterPtr& segment_writer_ptr, const int64_t& num_entities_to_add,
                     int64_t& num_entities_added) {
     // TODO: n = vectors_.vector_count_;???
     int64_t n = chunk_->count_;

@@ -13,7 +13,7 @@
 
 #include <string>
 
-#include "db/SSDB.h"
+#include "db/DB.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -31,9 +31,9 @@ class DBWrapper {
         return wrapper;
     }
 
-    static engine::SSDBPtr
-    SSDB() {
-        return GetInstance().EngineSSDB();
+    static engine::DBPtr
+    DB() {
+        return GetInstance().EngineDB();
     }
 
     Status
@@ -41,9 +41,9 @@ class DBWrapper {
     Status
     StopService();
 
-    engine::SSDBPtr
-    EngineSSDB() {
-        return ssdb_;
+    engine::DBPtr
+    EngineDB() {
+        return db_;
     }
 
     // private:
@@ -51,7 +51,7 @@ class DBWrapper {
     //    PreloadCollections(const std::string& preload_collections);
 
  private:
-    engine::SSDBPtr ssdb_;
+    engine::DBPtr db_;
 };
 
 }  // namespace server

@@ -62,7 +62,7 @@ class MemManager {
     GetCurrentMem() = 0;
 };  // MemManagerAbstract
 
-using SSMemManagerPtr = std::shared_ptr<MemManager>;
+using MemManagerPtr = std::shared_ptr<MemManager>;
 
 }  // namespace engine
 }  // namespace milvus

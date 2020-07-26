@@ -21,8 +21,8 @@ namespace engine {
 
 class MemManagerFactory {
  public:
-    static SSMemManagerPtr
-    SSBuild(const DBOptions& options);
+    static MemManagerPtr
+    Build(const DBOptions& options);
 };
 
 }  // namespace engine

@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/DBFactory.h"
-#include "SSDBImpl.h"
+#include "DBImpl.h"
 #include "meta/MetaFactory.h"
 #include "meta/MySQLMetaImpl.h"
 #include "meta/SqliteMetaImpl.h"
@@ -33,9 +33,9 @@ DBFactory::BuildOption() {
     return options;
 }
 
-SSDBPtr
-DBFactory::BuildSSDB(const DBOptions& options) {
-    return std::make_shared<SSDBImpl>(options);
+DBPtr
+DBFactory::BuildDB(const DBOptions& options) {
+    return std::make_shared<DBImpl>(options);
 }
 
 }  // namespace engine

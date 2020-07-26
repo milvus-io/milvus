@@ -25,8 +25,8 @@
 namespace milvus {
 namespace engine {
 
-SSMemManagerPtr
-MemManagerFactory::SSBuild(const DBOptions& options) {
+MemManagerPtr
+MemManagerFactory::Build(const DBOptions& options) {
     return std::make_shared<MemManagerImpl>(options);
 }
 

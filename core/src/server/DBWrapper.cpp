@@ -109,8 +109,8 @@ DBWrapper::StartService() {
     }
 
     try {
-        ssdb_ = engine::DBFactory::BuildSSDB(opt);
-        ssdb_->Start();
+        db_ = engine::DBFactory::BuildDB(opt);
+        db_->Start();
     } catch (std::exception& ex) {
         std::cerr << "Error: failed to open database: " << ex.what()
                   << ". Possible reason: out of storage, meta schema is damaged "
@@ -138,8 +138,8 @@ DBWrapper::StartService() {
 
 Status
 DBWrapper::StopService() {
-    if (ssdb_) {
-        ssdb_->Stop();
+    if (db_) {
+        db_->Stop();
     }
 
     // SS TODO

@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/merge/MergeManagerFactory.h"
-#include "db/merge/SSMergeManagerImpl.h"
+#include "db/merge/MergeManagerImpl.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -19,7 +19,7 @@ namespace engine {
 
 MergeManagerPtr
 MergeManagerFactory::SSBuild(const DBOptions& options) {
-    return std::make_shared<SSMergeManagerImpl>(options, MergeStrategyType::SIMPLE);
+    return std::make_shared<MergeManagerImpl>(options, MergeStrategyType::SIMPLE);
 }
 
 }  // namespace engine

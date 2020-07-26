@@ -59,7 +59,7 @@ MemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, cons
         return status;
     }
 
-    SSVectorSourcePtr source = std::make_shared<VectorSource>(chunk);
+    VectorSourcePtr source = std::make_shared<VectorSource>(chunk);
     std::unique_lock<std::mutex> lock(mutex_);
     return InsertEntitiesNoLock(collection_id, partition_id, source, lsn);
 }
@@ -155,7 +155,7 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, int64_t partition_id, const
 
 Status
 MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id,
-                                       const milvus::engine::SSVectorSourcePtr& source, uint64_t lsn) {
+                                       const milvus::engine::VectorSourcePtr& source, uint64_t lsn) {
     SSMemCollectionPtr mem = GetMemByTable(collection_id, partition_id);
     mem->SetLSN(lsn);
 

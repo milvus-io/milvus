@@ -217,7 +217,7 @@ void
 SSDBTest::SetUp() {
     BaseTest::SetUp();
     BaseTest::SnapshotStart(false, GetOptions());
-    db_ = std::make_shared<milvus::engine::SSDBImpl>(GetOptions());
+    db_ = std::make_shared<milvus::engine::DBImpl>(GetOptions());
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
     res_mgr->Clear();
@@ -263,7 +263,7 @@ SSSegmentTest::SetUp() {
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(false, options);
 
-    db_ = std::make_shared<milvus::engine::SSDBImpl>(options);
+    db_ = std::make_shared<milvus::engine::DBImpl>(options);
 }
 
 void
@@ -297,7 +297,7 @@ SSSchedulerTest::SetUp() {
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(true, options);
-    db_ = std::make_shared<milvus::engine::SSDBImpl>(options);
+    db_ = std::make_shared<milvus::engine::DBImpl>(options);
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
     res_mgr->Clear();

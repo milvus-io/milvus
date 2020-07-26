@@ -58,7 +58,7 @@ GetVectorIDsRequest::OnExecute() {
         // step 2: check table existence
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings mappings;
-        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, mappings);
+        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, mappings);
         if (collection == nullptr) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
@@ -69,7 +69,7 @@ GetVectorIDsRequest::OnExecute() {
 
         // step 2: get vector data, now only support get one id
         vector_ids_.clear();
-        return DBWrapper::SSDB()->GetEntityIDs(collection_name_, segment_id_, vector_ids_);
+        return DBWrapper::DB()->GetEntityIDs(collection_name_, segment_id_, vector_ids_);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
