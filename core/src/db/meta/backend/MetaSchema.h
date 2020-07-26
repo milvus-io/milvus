@@ -68,4 +68,4 @@ class MetaSchema {
     MetaFields fields_;
 };
 
-} // namespace milvus::engine::meta
+}  // namespace milvus::engine::meta

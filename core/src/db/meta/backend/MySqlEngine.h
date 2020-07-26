@@ -25,8 +25,7 @@ namespace milvus::engine::meta {
 
 class MySqlEngine : public MetaEngine {
  public:
-    explicit
-    MySqlEngine(const DBMetaOptions& options) : options_(options) {
+    explicit MySqlEngine(const DBMetaOptions& options) : options_(options) {
         Initialize();
     }
 

@@ -24,8 +24,7 @@ namespace milvus::engine::meta {
 
 class SqliteEngine : public MetaEngine {
  public:
-    explicit
-    SqliteEngine(const DBMetaOptions& options);
+    explicit SqliteEngine(const DBMetaOptions& options);
 
     ~SqliteEngine();
 
@@ -45,9 +44,8 @@ class SqliteEngine : public MetaEngine {
 
  private:
     DBMetaOptions options_;
-    sqlite3 * db_;
+    sqlite3* db_;
     std::mutex meta_mutex_;
 };
 
-} // namespace milvus::engine::meta
-
+}  // namespace milvus::engine::meta

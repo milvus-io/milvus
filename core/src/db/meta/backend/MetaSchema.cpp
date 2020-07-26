@@ -14,7 +14,7 @@
 namespace milvus::engine::meta {
 
 bool
-MetaField::IsEqual(const MetaField &field) const {
+MetaField::IsEqual(const MetaField& field) const {
     // mysql field type has additional information. for instance, a filed type is defined as 'BIGINT'
     // we get the type from sql is 'bigint(20)', so we need to ignore the '(20)'
     size_t name_len_min = field.name_.length() > name_.length() ? name_.length() : field.name_.length();
@@ -62,4 +62,4 @@ MetaSchema::IsEqual(const MetaFields& fields) const {
     return found_field.size() == fields_.size();
 }
 
-} // namespace milvus::engine::meta
+}  // namespace milvus::engine::meta

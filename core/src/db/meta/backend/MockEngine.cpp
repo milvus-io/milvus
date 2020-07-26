@@ -176,8 +176,7 @@ MockEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
 }
 
 Status
-MockEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts,
-                               std::vector<int64_t>& result_ids) {
+MockEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
     std::unique_lock<std::mutex> lock(mutex_);
 
     auto status = Status::OK();

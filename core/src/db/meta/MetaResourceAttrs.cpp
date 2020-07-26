@@ -47,7 +47,6 @@ const char* TABLE_FIELD = snapshot::Field::Name;
 const char* TABLE_FIELD_COMMIT = snapshot::FieldCommit::Name;
 const char* TABLE_FIELD_ELEMENT = snapshot::FieldElement::Name;
 
-
 ///////////////////////////////////////////////////////////////
 Status
 ResourceAttrMapOf(const std::string& table, std::vector<std::string>& attrs) {

@@ -46,9 +46,8 @@ static const MetaField MetaSizeField = MetaField(F_SIZE, "BIGINT", "NOT NULL");
 static const MetaField MetaRowCountField = MetaField(F_ROW_COUNT, "BIGINT", "NOT NULL");
 
 // Environment schema
-static const MetaSchema COLLECTION_SCHEMA(TABLE_COLLECTION,
-                                          {MetaIdField, MetaNameField, MetaLSNField, MetaParamsField, MetaStateField,
-                                           MetaCreatedOnField, MetaUpdatedOnField});
+static const MetaSchema COLLECTION_SCHEMA(TABLE_COLLECTION, {MetaIdField, MetaNameField, MetaLSNField, MetaParamsField,
+                                                             MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
 // Tables schema
 static const MetaSchema COLLECTIONCOMMIT_SCHEMA(TABLE_COLLECTION_COMMIT,
@@ -68,29 +67,29 @@ static const MetaSchema PARTITIONCOMMIT_SCHEMA(TABLE_PARTITION_COMMIT,
                                                 MetaLSNField, MetaCreatedOnField, MetaUpdatedOnField});
 
 static const MetaSchema SEGMENT_SCHEMA(TABLE_SEGMENT, {
-    MetaIdField,
-    MetaCollectionIdField,
-    MetaPartitionIdField,
-    MetaNumField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField,
-});
+                                                          MetaIdField,
+                                                          MetaCollectionIdField,
+                                                          MetaPartitionIdField,
+                                                          MetaNumField,
+                                                          MetaLSNField,
+                                                          MetaStateField,
+                                                          MetaCreatedOnField,
+                                                          MetaUpdatedOnField,
+                                                      });
 
 static const MetaSchema SEGMENTCOMMIT_SCHEMA(TABLE_SEGMENT_COMMIT, {
-    MetaIdField,
-    MetaSchemaIdField,
-    MetaPartitionIdField,
-    MetaSegmentIdField,
-    MetaMappingsField,
-    MetaRowCountField,
-    MetaSizeField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField,
-});
+                                                                       MetaIdField,
+                                                                       MetaSchemaIdField,
+                                                                       MetaPartitionIdField,
+                                                                       MetaSegmentIdField,
+                                                                       MetaMappingsField,
+                                                                       MetaRowCountField,
+                                                                       MetaSizeField,
+                                                                       MetaLSNField,
+                                                                       MetaStateField,
+                                                                       MetaCreatedOnField,
+                                                                       MetaUpdatedOnField,
+                                                                   });
 
 static const MetaSchema SEGMENTFILE_SCHEMA(TABLE_SEGMENT_FILE,
                                            {MetaIdField, MetaCollectionIdField, MetaPartitionIdField,
@@ -99,14 +98,14 @@ static const MetaSchema SEGMENTFILE_SCHEMA(TABLE_SEGMENT_FILE,
                                             MetaUpdatedOnField});
 
 static const MetaSchema SCHEMACOMMIT_SCHEMA(TABLE_SCHEMA_COMMIT, {
-    MetaIdField,
-    MetaCollectionIdField,
-    MetaMappingsField,
-    MetaLSNField,
-    MetaStateField,
-    MetaCreatedOnField,
-    MetaUpdatedOnField,
-});
+                                                                     MetaIdField,
+                                                                     MetaCollectionIdField,
+                                                                     MetaMappingsField,
+                                                                     MetaLSNField,
+                                                                     MetaStateField,
+                                                                     MetaCreatedOnField,
+                                                                     MetaUpdatedOnField,
+                                                                 });
 
 static const MetaSchema FIELD_SCHEMA(TABLE_FIELD,
                                      {MetaIdField, MetaNameField, MetaNumField, MetaFtypeField, MetaParamsField,
@@ -122,14 +121,14 @@ static const MetaSchema FIELDELEMENT_SCHEMA(TABLE_FIELD_ELEMENT,
                                              MetaCreatedOnField, MetaUpdatedOnField});
 
 /////////////////////////////////////////////////////
-static AttrsMapList * QueryData = nullptr;
-static AttrsMapList * InsertData = nullptr;
-static std::vector<int64_t> * InsertedIDs;
-static AttrsMapList * UpdateData = nullptr;
-static AttrsMapList * DeleteData = nullptr;
+static AttrsMapList* QueryData = nullptr;
+static AttrsMapList* InsertData = nullptr;
+static std::vector<int64_t>* InsertedIDs;
+static AttrsMapList* UpdateData = nullptr;
+static AttrsMapList* DeleteData = nullptr;
 
 static int
-QueryCallback(void *data, int argc, char **argv, char **azColName) {
+QueryCallback(void* data, int argc, char** argv, char** azColName) {
     AttrsMap raw;
     for (size_t i = 0; i < argc; i++) {
         // TODO: here check argv[i]. Refer to 'https://www.tutorialspoint.com/sqlite/sqlite_c_cpp.htm'
@@ -283,4 +282,4 @@ SqliteEngine::TruncateAll() {
     return ExecuteTransaction(contexts, ids);
 }
 
-} // namespace milvus::engine::meta
+}  // namespace milvus::engine::meta
