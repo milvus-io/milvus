@@ -9,8 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/snapshot/Resources.h"
-
 namespace milvus::engine::meta {
 
 extern const char* F_MAPPINGS;
@@ -31,5 +29,19 @@ extern const char* F_NAME;
 extern const char* F_PARAMS;
 extern const char* F_SIZE;
 extern const char* F_ROW_COUNT;
+
+////////////////////////////////////////////////////////
+// Table names
+extern const char* TABLE_COLLECTION;
+extern const char* TABLE_COLLECTION_COMMIT;
+extern const char* TABLE_PARTITION;
+extern const char* TABLE_PARTITION_COMMIT;
+extern const char* TABLE_SEGMENT;
+extern const char* TABLE_SEGMENT_COMMIT;
+extern const char* TABLE_SEGMENT_FILE;
+extern const char* TABLE_SCHEMA_COMMIT;
+extern const char* TABLE_FIELD;
+extern const char* TABLE_FIELD_COMMIT;
+extern const char* TABLE_FIELD_ELEMENT;
 
 }  // namespace milvus::engine::meta

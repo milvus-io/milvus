@@ -73,7 +73,16 @@ class Store : public std::enable_shared_from_this<Store> {
             return std::make_shared<Store>(adapter, root_path);
         } else if (strcasecmp(uri_info.dialect_.c_str(), "mock") == 0) {
             LOG_ENGINE_INFO_ << "Using Mock. Should only be used in test environment";
-            auto engine = std::make_shared<meta::MockMetaEngine>();
+            auto engine = std::make_shared<meta::MockEngine>();
+            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
+            return std::make_shared<Store>(adapter, root_path);
+        } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
+            LOG_ENGINE_INFO_ << "Using Sqlite";
+            DBMetaOptions options;
+            /* options.backend_uri_ = "mock://:@:/"; */
+            options.backend_uri_ = uri;
+            options.path_ = root_path;
+            auto engine = std::make_shared<meta::SqliteEngine>(options);
             auto adapter = std::make_shared<meta::MetaAdapter>(engine);
             return std::make_shared<Store>(adapter, root_path);
         } else {

@@ -11,7 +11,7 @@
 
 #include "db/meta/MetaResourceAttrs.h"
 
-#include "db/meta/MetaFields.h"
+#include "db/meta/MetaNames.h"
 #include "utils/Status.h"
 
 namespace milvus::engine::meta {
@@ -34,6 +34,18 @@ const char* F_NAME = snapshot::NameField::Name;
 const char* F_PARAMS = snapshot::ParamsField::Name;
 const char* F_SIZE = snapshot::SizeField::Name;
 const char* F_ROW_COUNT = snapshot::RowCountField::Name;
+
+const char* TABLE_COLLECTION = snapshot::Collection::Name;
+const char* TABLE_COLLECTION_COMMIT = snapshot::CollectionCommit::Name;
+const char* TABLE_PARTITION = snapshot::Partition::Name;
+const char* TABLE_PARTITION_COMMIT = snapshot::PartitionCommit::Name;
+const char* TABLE_SEGMENT = snapshot::Segment::Name;
+const char* TABLE_SEGMENT_COMMIT = snapshot::SegmentCommit::Name;
+const char* TABLE_SEGMENT_FILE = snapshot::SegmentFile::Name;
+const char* TABLE_SCHEMA_COMMIT = snapshot::SchemaCommit::Name;
+const char* TABLE_FIELD = snapshot::Field::Name;
+const char* TABLE_FIELD_COMMIT = snapshot::FieldCommit::Name;
+const char* TABLE_FIELD_ELEMENT = snapshot::FieldElement::Name;
 
 ///////////////////////////////////////////////////////////////
 Status

@@ -22,17 +22,17 @@
 
 namespace milvus::engine::meta {
 
-class MockMetaEngine : public MetaEngine {
+class MockEngine : public MetaEngine {
  private:
     using TableRaw = std::unordered_map<std::string, std::string>;
     using TableEntity = std::pair<std::string, TableRaw>;
 
  public:
-    MockMetaEngine() {
+    MockEngine() {
         Init();
     }
 
-    ~MockMetaEngine() = default;
+    ~MockEngine() = default;
 
     Status
     Query(const MetaQueryContext& context, AttrsMapList& attrs) override;

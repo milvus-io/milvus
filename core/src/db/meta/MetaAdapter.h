@@ -17,8 +17,9 @@
 #include <vector>
 
 #include "db/meta/MetaSession.h"
-#include "db/meta/backend/MockMetaEngine.h"
+#include "db/meta/backend/MockEngine.h"
 #include "db/meta/backend/MySqlEngine.h"
+#include "db/meta/backend/SqliteEngine.h"
 #include "db/snapshot/Resources.h"
 #include "utils/Exception.h"
 

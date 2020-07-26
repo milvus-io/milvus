@@ -9,23 +9,23 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/meta/backend/MockMetaEngine.h"
+#include "db/meta/backend/MockEngine.h"
 
 #include <utility>
 
-#include "db/meta/MetaFields.h"
+#include "db/meta/MetaNames.h"
 #include "utils/StringHelpFunctions.h"
 
 namespace milvus::engine::meta {
 
 void
-MockMetaEngine::Init() {
+MockEngine::Init() {
     max_ip_map_.clear();
     resources_.clear();
 }
 
 Status
-MockMetaEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs) {
+MockEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs) {
     if (resources_.find(context.table_) == resources_.end()) {
         return Status(0, "Empty");
     }
@@ -108,7 +108,7 @@ MockMetaEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs
 }
 
 Status
-MockMetaEngine::AddNoLock(const MetaApplyContext& add_context, int64_t& result_id, TableRaw& pre_raw) {
+MockEngine::AddNoLock(const MetaApplyContext& add_context, int64_t& result_id, TableRaw& pre_raw) {
     if (max_ip_map_.find(add_context.table_) == max_ip_map_.end() ||
         resources_.find(add_context.table_) == resources_.end()) {
         max_ip_map_[add_context.table_] = 0;
@@ -132,7 +132,7 @@ MockMetaEngine::AddNoLock(const MetaApplyContext& add_context, int64_t& result_i
 }
 
 Status
-MockMetaEngine::UpdateNoLock(const MetaApplyContext& update_context, int64_t& result_id, TableRaw& pre_raw) {
+MockEngine::UpdateNoLock(const MetaApplyContext& update_context, int64_t& result_id, TableRaw& pre_raw) {
     const std::string id_str = std::to_string(update_context.id_);
 
     auto& target_collection = resources_[update_context.table_];
@@ -152,7 +152,7 @@ MockMetaEngine::UpdateNoLock(const MetaApplyContext& update_context, int64_t& re
 }
 
 Status
-MockMetaEngine::DeleteNoLock(const MetaApplyContext& delete_context, int64_t& result_id, TableRaw& pre_raw) {
+MockEngine::DeleteNoLock(const MetaApplyContext& delete_context, int64_t& result_id, TableRaw& pre_raw) {
     const std::string id_str = std::to_string(delete_context.id_);
     auto& target_collection = resources_[delete_context.table_];
 
@@ -170,14 +170,13 @@ MockMetaEngine::DeleteNoLock(const MetaApplyContext& delete_context, int64_t& re
 }
 
 Status
-MockMetaEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
+MockEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
     std::lock_guard<std::mutex> lock(mutex_);
     return QueryNoLock(context, attrs);
 }
 
 Status
-MockMetaEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts,
-                                   std::vector<int64_t>& result_ids) {
+MockEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
     std::unique_lock<std::mutex> lock(mutex_);
 
     auto status = Status::OK();
@@ -210,7 +209,7 @@ MockMetaEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_cont
 }
 
 Status
-MockMetaEngine::RollBackNoLock(const std::vector<std::pair<MetaContextOp, TableEntity>>& pre_entities) {
+MockEngine::RollBackNoLock(const std::vector<std::pair<MetaContextOp, TableEntity>>& pre_entities) {
     for (auto& o_e : pre_entities) {
         auto table = o_e.second.first;
         if (o_e.first == oAdd) {
@@ -246,7 +245,7 @@ MockMetaEngine::RollBackNoLock(const std::vector<std::pair<MetaContextOp, TableE
 }
 
 Status
-MockMetaEngine::TruncateAll() {
+MockEngine::TruncateAll() {
     max_ip_map_.clear();
     resources_.clear();
     return Status::OK();

@@ -11,29 +11,41 @@
 
 #pragma once
 
-#include <string>
-#include <unordered_map>
-#include <utility>
+#include <mutex>
 #include <vector>
+
+#include <sqlite3.h>
+
+#include "db/Options.h"
+#include "db/meta/backend/MetaEngine.h"
+#include "utils/Status.h"
 
 namespace milvus::engine::meta {
 
-enum MetaContextOp { oAdd = 1, oUpdate, oDelete };
+class SqliteEngine : public MetaEngine {
+ public:
+    explicit SqliteEngine(const DBMetaOptions& options);
 
-struct MetaQueryContext {
-    std::string table_;
-    bool all_required_ = true;
-    std::vector<std::string> query_fields_;
-    std::unordered_map<std::string, std::vector<std::string>> filter_attrs_;
-};
+    ~SqliteEngine();
 
-struct MetaApplyContext {
-    std::string table_;
-    MetaContextOp op_;
-    int64_t id_ = 0;
-    std::unordered_map<std::string, std::string> attrs_;
-    std::unordered_map<std::string, std::string> filter_attrs_;
-    std::string sql_;
+ public:
+    Status
+    Query(const MetaQueryContext& context, AttrsMapList& attrs) override;
+
+    Status
+    ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) override;
+
+    Status
+    TruncateAll() override;
+
+ private:
+    Status
+    Initialize();
+
+ private:
+    DBMetaOptions options_;
+    sqlite3* db_;
+    std::mutex meta_mutex_;
 };
 
 }  // namespace milvus::engine::meta
