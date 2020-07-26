@@ -10,19 +10,19 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/merge/MergeManagerImpl.h"
-#include "db/merge/MergeAdaptiveStrategy.h"
-#include "db/merge/MergeLayeredStrategy.h"
 #include "db/merge/MergeSimpleStrategy.h"
-#include "db/merge/MergeStrategy.h"
 #include "db/merge/MergeTask.h"
+#include "db/snapshot/Snapshots.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+
+#include <map>
 
 namespace milvus {
 namespace engine {
 
-MergeManagerImpl::MergeManagerImpl(const meta::MetaPtr& meta_ptr, const DBOptions& options, MergeStrategyType type)
-    : meta_ptr_(meta_ptr), options_(options), strategy_type_(type) {
+MergeManagerImpl::MergeManagerImpl(const DBOptions& options, MergeStrategyType type)
+    : options_(options), strategy_type_(type) {
     UseStrategy(type);
 }
 
@@ -33,14 +33,8 @@ MergeManagerImpl::UseStrategy(MergeStrategyType type) {
             strategy_ = std::make_shared<MergeSimpleStrategy>();
             break;
         }
-        case MergeStrategyType::LAYERED: {
-            strategy_ = std::make_shared<MergeLayeredStrategy>();
-            break;
-        }
-        case MergeStrategyType::ADAPTIVE: {
-            strategy_ = std::make_shared<MergeAdaptiveStrategy>();
-            break;
-        }
+        case MergeStrategyType::LAYERED:
+        case MergeStrategyType::ADAPTIVE:
         default: {
             std::string msg = "Unsupported merge strategy type: " + std::to_string((int32_t)type);
             LOG_ENGINE_ERROR_ << msg;
@@ -53,42 +47,52 @@ MergeManagerImpl::UseStrategy(MergeStrategyType type) {
 }
 
 Status
-MergeManagerImpl::MergeFiles(const std::string& collection_id) {
+MergeManagerImpl::MergeFiles(const std::string& collection_name) {
     if (strategy_ == nullptr) {
         std::string msg = "No merge strategy specified";
         LOG_ENGINE_ERROR_ << msg;
         return Status(DB_ERROR, msg);
     }
 
-    meta::FilesHolder files_holder;
-    auto status = meta_ptr_->FilesToMerge(collection_id, files_holder);
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_id;
-        return status;
+    while (true) {
+        snapshot::ScopedSnapshotT latest_ss;
+        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
+
+        Partition2SegmentsMap part2seg;
+        auto& segments = latest_ss->GetResources<snapshot::Segment>();
+        for (auto& kv : segments) {
+            auto segment_commit = latest_ss->GetSegmentCommitBySegmentId(kv.second->GetID());
+            part2seg[kv.second->GetPartitionId()].push_back(kv.second->GetID());
+        }
+
+        Partition2SegmentsMap::iterator it;
+        for (it = part2seg.begin(); it != part2seg.end();) {
+            if (it->second.size() <= 1) {
+                part2seg.erase(it++);
+            } else {
+                ++it;
+            }
+        }
+
+        if (part2seg.empty()) {
+            break;
+        }
+
+        SegmentGroups segment_groups;
+        auto status = strategy_->RegroupSegments(latest_ss, part2seg, segment_groups);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << "Failed to regroup segments for: " << collection_name
+                              << ", continue to merge all files into one";
+            return status;
+        }
+
+        for (auto& segments : segment_groups) {
+            MergeTask task(options_, latest_ss, segments);
+            task.Execute();
+        }
     }
 
-    if (files_holder.HoldFiles().size() < 2) {
-        return Status::OK();
-    }
-
-    MergeFilesGroups files_groups;
-    status = strategy_->RegroupFiles(files_holder, files_groups);
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to regroup files for: " << collection_id
-                          << ", continue to merge all files into one";
-
-        MergeTask task(meta_ptr_, options_, files_holder.HoldFiles());
-        return task.Execute();
-    }
-
-    for (auto& group : files_groups) {
-        MergeTask task(meta_ptr_, options_, group);
-        status = task.Execute();
-
-        files_holder.UnmarkFiles(group);
-    }
-
-    return status;
+    return Status::OK();
 }
 
 }  // namespace engine

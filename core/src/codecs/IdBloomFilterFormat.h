@@ -18,6 +18,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "segment/IdBloomFilter.h"
 #include "storage/FSHandler.h"
@@ -27,14 +28,31 @@ namespace codec {
 
 class IdBloomFilterFormat {
  public:
-    virtual void
-    read(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
+    IdBloomFilterFormat() = default;
 
-    virtual void
-    write(const storage::FSHandlerPtr& fs_ptr, const segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
+    std::string
+    FilePostfix();
 
-    virtual void
-    create(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) = 0;
+    void
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+         segment::IdBloomFilterPtr& id_bloom_filter_ptr);
+
+    void
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+          const segment::IdBloomFilterPtr& id_bloom_filter_ptr);
+
+    void
+    Create(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+           segment::IdBloomFilterPtr& id_bloom_filter_ptr);
+
+    // No copy and move
+    IdBloomFilterFormat(const IdBloomFilterFormat&) = delete;
+    IdBloomFilterFormat(IdBloomFilterFormat&&) = delete;
+
+    IdBloomFilterFormat&
+    operator=(const IdBloomFilterFormat&) = delete;
+    IdBloomFilterFormat&
+    operator=(IdBloomFilterFormat&&) = delete;
 };
 
 using IdBloomFilterFormatPtr = std::shared_ptr<IdBloomFilterFormat>;

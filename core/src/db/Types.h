@@ -22,15 +22,13 @@
 #include <utility>
 #include <vector>
 
-#include "db/engine/ExecutionEngine.h"
 #include "db/meta/MetaTypes.h"
-#include "segment/Types.h"
 #include "utils/Json.h"
 
 namespace milvus {
 namespace engine {
 
-typedef segment::doc_id_t IDNumber;
+typedef int64_t IDNumber;
 typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
 

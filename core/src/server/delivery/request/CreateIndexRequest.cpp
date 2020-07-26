@@ -69,7 +69,7 @@ CreateIndexRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
+        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
@@ -131,7 +131,7 @@ CreateIndexRequest::OnExecute() {
             index.index_name_ = index_name_;
         }
 
-        status = DBWrapper::SSDB()->CreateIndex(context_, collection_name_, field_name_, index);
+        status = DBWrapper::DB()->CreateIndex(context_, collection_name_, field_name_, index);
         if (!status.ok()) {
             return status;
         }
