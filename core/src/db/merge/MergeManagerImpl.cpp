@@ -54,7 +54,6 @@ MergeManagerImpl::MergeFiles(const std::string& collection_name) {
         return Status(DB_ERROR, msg);
     }
 
-    int64_t row_count_per_segment = DEFAULT_ROW_COUNT_PER_SEGMENT;
     while (true) {
         snapshot::ScopedSnapshotT latest_ss;
         STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
@@ -71,7 +70,7 @@ MergeManagerImpl::MergeFiles(const std::string& collection_name) {
             if (it->second.size() <= 1) {
                 part2seg.erase(it++);
             } else {
-                it++;
+                ++it;
             }
         }
 

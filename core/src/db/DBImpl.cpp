@@ -259,7 +259,7 @@ DBImpl::DropCollection(const std::string& name) {
         /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
     }
 
-    auto status = mem_mgr_->EraseMemVector(ss->GetCollectionId());  // not allow insert
+    mem_mgr_->EraseMemVector(ss->GetCollectionId());  // not allow insert
 
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
