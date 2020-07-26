@@ -61,7 +61,7 @@ FlushRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::SSDB()->DescribeCollection(name, collection, fields_schema);
+        status = DBWrapper::DB()->DescribeCollection(name, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(name));
@@ -70,7 +70,7 @@ FlushRequest::OnExecute() {
             }
         }
 
-        status = DBWrapper::SSDB()->Flush(name);
+        status = DBWrapper::DB()->Flush(name);
         if (!status.ok()) {
             return status;
         }

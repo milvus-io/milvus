@@ -15,6 +15,7 @@
 #include "utils/Status.h"
 
 #include <cstddef>
+#include <mutex>
 #include <vector>
 
 namespace milvus {

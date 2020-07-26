@@ -82,8 +82,6 @@ RequestMap(BaseRequest::RequestType request_type) {
         {BaseRequest::kInsert, "Insert"},
         {BaseRequest::kCreateIndex, "CreateIndex"},
         {BaseRequest::kSearch, "Search"},
-        {BaseRequest::kSearchByID, "SearchByID"},
-        {BaseRequest::kHybridSearch, "HybridSearch"},
         {BaseRequest::kFlush, "Flush"},
         {BaseRequest::kGetEntityByID, "GetEntityByID"},
         {BaseRequest::kCompact, "Compact"},
@@ -670,8 +668,8 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
         }
     }
 
-    Status status = request_handler_.CreateHybridCollection(GetContext(context), request->collection_name(),
-                                                            field_types, field_index_params, field_params, json_params);
+    Status status = request_handler_.CreateCollection(GetContext(context), request->collection_name(), field_types,
+                                                      field_index_params, field_params, json_params);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context)
@@ -844,8 +842,8 @@ GrpcRequestHandler::GetEntityIDs(::grpc::ServerContext* context, const ::milvus:
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
     std::vector<int64_t> vector_ids;
-    Status status = request_handler_.GetVectorIDs(GetContext(context), request->collection_name(),
-                                                  request->segment_name(), vector_ids);
+    Status status = request_handler_.GetEntityIDs(GetContext(context), request->collection_name(),
+                                                  request->segment_id(), vector_ids);
 
     if (!vector_ids.empty()) {
         response->mutable_entity_id_array()->Resize(vector_ids.size(), -1);
@@ -954,8 +952,8 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
     CHECK_NULLPTR_RETURN(request);
     try {
         milvus::server::HybridCollectionSchema collection_schema;
-        Status status = request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(),
-                                                                  collection_schema);
+        Status status =
+            request_handler_.DescribeCollection(GetContext(context), request->collection_name(), collection_schema);
         if (!status.ok()) {
             SET_RESPONSE(response->mutable_status(), status, context);
             return ::grpc::Status::OK;
@@ -1105,25 +1103,6 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
     Status status = request_handler_.PreloadCollection(GetContext(context), request->collection_name());
-
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
-    SET_RESPONSE(response, status, context);
-
-    return ::grpc::Status::OK;
-}
-
-::grpc::Status
-GrpcRequestHandler::ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
-                                   ::milvus::grpc::Status* response) {
-    CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
-
-    std::vector<std::string> file_ids;
-    for (size_t i = 0; i < request->segment_id_array_size(); i++) {
-        file_ids.push_back(request->segment_id_array(i));
-    }
-
-    Status status = request_handler_.ReLoadSegments(GetContext(context), request->collection_name(), file_ids);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
@@ -1401,7 +1380,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
     std::vector<std::string> field_names;
-    status = request_handler_.HybridSearch(GetContext(context), query_ptr, json_params, result);
+    status = request_handler_.Search(GetContext(context), query_ptr, json_params, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
@@ -1702,8 +1681,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     Status status;
 
     HybridCollectionSchema collection_schema;
-    status =
-        request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(), collection_schema);
+    status = request_handler_.DescribeCollection(GetContext(context), request->collection_name(), collection_schema);
 
     field_type_ = collection_schema.field_types_;
 
@@ -1760,7 +1738,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     }
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-    status = request_handler_.HybridSearch(GetContext(context), query_ptr, json_params, result);
+    status = request_handler_.Search(GetContext(context), query_ptr, json_params, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);

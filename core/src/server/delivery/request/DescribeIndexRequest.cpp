@@ -50,7 +50,7 @@ DescribeIndexRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
+        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
         fiu_do_on("DropIndexRequest.OnExecute.collection_not_exist",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -86,7 +86,7 @@ DescribeIndexRequest::OnExecute() {
         //
         //        // step 2: check collection existence
         //        engine::CollectionIndex index;
-        //        status = DBWrapper::SSDB()->DescribeIndex(collection_name_, field_name, index);
+        //        status = DBWrapper::DB()->DescribeIndex(collection_name_, field_name, index);
         //        if (!status.ok()) {
         //            return status;
         //        }

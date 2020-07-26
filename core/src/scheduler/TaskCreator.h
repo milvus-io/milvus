@@ -21,11 +21,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "job/BuildIndexJob.h"
 #include "job/DeleteJob.h"
-#include "job/SSBuildIndexJob.h"
-#include "job/SSSearchJob.h"
-#include "job/SearchJob.h"
+#include "src/scheduler/job/BuildIndexJob.h"
+#include "src/scheduler/job/SearchJob.h"
 #include "task/Task.h"
 
 namespace milvus {
@@ -38,13 +36,7 @@ class TaskCreator {
 
  public:
     static std::vector<TaskPtr>
-    Create(const SearchJobPtr& job);
-
-    static std::vector<TaskPtr>
     Create(const DeleteJobPtr& job);
-
-    static std::vector<TaskPtr>
-    Create(const BuildIndexJobPtr& job);
 
     static std::vector<TaskPtr>
     Create(const SSSearchJobPtr& job);
