@@ -21,7 +21,7 @@
 #include <utility>
 
 #include "db/Utils.h"
-#include "db/engine/SSExecutionEngineImpl.h"
+#include "db/engine/ExecutionEngineImpl.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SSSearchJob.h"
 #include "utils/Log.h"

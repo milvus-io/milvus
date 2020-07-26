@@ -26,7 +26,7 @@ namespace engine {
 
 extern const char* VECTOR_FIELD;
 
-class SSMemManager {
+class MemManager {
  public:
     virtual Status
     InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) = 0;
@@ -62,7 +62,7 @@ class SSMemManager {
     GetCurrentMem() = 0;
 };  // MemManagerAbstract
 
-using SSMemManagerPtr = std::shared_ptr<SSMemManager>;
+using SSMemManagerPtr = std::shared_ptr<MemManager>;
 
 }  // namespace engine
 }  // namespace milvus

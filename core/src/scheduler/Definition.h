@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "db/engine/EngineFactory.h"
-#include "db/engine/SSExecutionEngine.h"
+#include "db/engine/ExecutionEngine.h"
 #include "db/meta/MetaTypes.h"
 
 namespace milvus {

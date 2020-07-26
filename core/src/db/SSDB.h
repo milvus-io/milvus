@@ -19,7 +19,7 @@
 #include "db/Options.h"
 #include "db/SimpleWaitNotify.h"
 #include "db/SnapshotHandlers.h"
-#include "db/insert/SSMemManager.h"
+#include "db/insert/MemManager.h"
 #include "db/merge/MergeManager.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/ResourceTypes.h"

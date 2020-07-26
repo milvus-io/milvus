@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/engine/SSExecutionEngineImpl.h"
+#include "db/engine/ExecutionEngineImpl.h"
 
 #include <stdexcept>
 #include <unordered_map>
@@ -91,13 +91,13 @@ MappingMetricType(MetricType metric_type, milvus::json& conf) {
 
 }  // namespace
 
-SSExecutionEngineImpl::SSExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
+ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
     : root_path_(dir_root), segment_visitor_(segment_visitor), gpu_enable_(config.gpu.enable()) {
     segment_reader_ = std::make_shared<segment::SSSegmentReader>(dir_root, segment_visitor);
 }
 
 knowhere::VecIndexPtr
-SSExecutionEngineImpl::CreatetVecIndex(const std::string& index_name) {
+ExecutionEngineImpl::CreatetVecIndex(const std::string& index_name) {
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
     knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
 #ifdef MILVUS_GPU_VERSION
@@ -115,7 +115,7 @@ SSExecutionEngineImpl::CreatetVecIndex(const std::string& index_name) {
 }
 
 Status
-SSExecutionEngineImpl::Load(ExecutionEngineContext& context) {
+ExecutionEngineImpl::Load(ExecutionEngineContext& context) {
     if (context.query_ptr_ != nullptr) {
         return LoadForSearch(context.query_ptr_);
     } else {
@@ -124,7 +124,7 @@ SSExecutionEngineImpl::Load(ExecutionEngineContext& context) {
 }
 
 Status
-SSExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
+ExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
 
@@ -135,7 +135,7 @@ SSExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
 }
 
 Status
-SSExecutionEngineImpl::LoadForIndex() {
+ExecutionEngineImpl::LoadForIndex() {
     std::vector<std::string> field_names;
 
     auto field_visitors = segment_visitor_->GetFieldVisitors();
@@ -152,7 +152,7 @@ SSExecutionEngineImpl::LoadForIndex() {
 }
 
 Status
-SSExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
+ExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
     TimeRecorderAuto rc("SSExecutionEngineImpl::Load");
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
@@ -183,7 +183,7 @@ SSExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
 }
 
 Status
-SSExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
+ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 #ifdef MILVUS_GPU_VERSION
     TimeRecorderAuto rc("SSExecutionEngineImpl::CopyToGpu");
 
@@ -204,12 +204,12 @@ SSExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 }
 
 Status
-SSExecutionEngineImpl::Search(ExecutionEngineContext& context) {
+ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
     return Status::OK();
 }
 
 Status
-SSExecutionEngineImpl::BuildIndex() {
+ExecutionEngineImpl::BuildIndex() {
     TimeRecorderAuto rc("SSExecutionEngineImpl::BuildIndex");
 
     SegmentPtr segment_ptr;

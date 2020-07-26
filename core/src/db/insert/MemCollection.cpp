@@ -18,7 +18,7 @@
 #include "cache/CpuCacheMgr.h"
 #include "config/ServerConfig.h"
 #include "db/Utils.h"
-#include "db/insert/SSMemCollection.h"
+#include "db/insert/MemCollection.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -26,12 +26,12 @@
 namespace milvus {
 namespace engine {
 
-SSMemCollection::SSMemCollection(int64_t collection_id, int64_t partition_id, const DBOptions& options)
+MemCollection::MemCollection(int64_t collection_id, int64_t partition_id, const DBOptions& options)
     : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
 }
 
 Status
-SSMemCollection::Add(const milvus::engine::SSVectorSourcePtr& source) {
+MemCollection::Add(const milvus::engine::SSVectorSourcePtr& source) {
     while (!source->AllAdded()) {
         SSMemSegmentPtr current_mem_segment;
         if (!mem_segment_list_.empty()) {
@@ -40,7 +40,7 @@ SSMemCollection::Add(const milvus::engine::SSVectorSourcePtr& source) {
 
         Status status;
         if (mem_segment_list_.empty() || current_mem_segment->IsFull()) {
-            SSMemSegmentPtr new_mem_segment = std::make_shared<SSMemSegment>(collection_id_, partition_id_, options_);
+            SSMemSegmentPtr new_mem_segment = std::make_shared<MemSegment>(collection_id_, partition_id_, options_);
             status = new_mem_segment->Add(source);
             if (status.ok()) {
                 mem_segment_list_.emplace_back(new_mem_segment);
@@ -61,7 +61,7 @@ SSMemCollection::Add(const milvus::engine::SSVectorSourcePtr& source) {
 }
 
 Status
-SSMemCollection::Delete(segment::doc_id_t doc_id) {
+MemCollection::Delete(segment::doc_id_t doc_id) {
     // Locate which collection file the doc id lands in
     for (auto& mem_segment : mem_segment_list_) {
         mem_segment->Delete(doc_id);
@@ -73,7 +73,7 @@ SSMemCollection::Delete(segment::doc_id_t doc_id) {
 }
 
 Status
-SSMemCollection::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
+MemCollection::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
     // Locate which collection file the doc id lands in
     for (auto& mem_segment : mem_segment_list_) {
         mem_segment->Delete(doc_ids);
@@ -87,17 +87,17 @@ SSMemCollection::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
 }
 
 void
-SSMemCollection::GetCurrentMemSegment(SSMemSegmentPtr& mem_segment) {
+MemCollection::GetCurrentMemSegment(SSMemSegmentPtr& mem_segment) {
     mem_segment = mem_segment_list_.back();
 }
 
 size_t
-SSMemCollection::GetTableFileCount() {
+MemCollection::GetTableFileCount() {
     return mem_segment_list_.size();
 }
 
 Status
-SSMemCollection::Serialize(uint64_t wal_lsn) {
+MemCollection::Serialize(uint64_t wal_lsn) {
     TimeRecorder recorder("SSMemCollection::Serialize collection " + collection_id_);
 
     if (!doc_ids_to_delete_.empty()) {
@@ -127,22 +127,22 @@ SSMemCollection::Serialize(uint64_t wal_lsn) {
 }
 
 bool
-SSMemCollection::Empty() {
+MemCollection::Empty() {
     return mem_segment_list_.empty() && doc_ids_to_delete_.empty();
 }
 
 int64_t
-SSMemCollection::GetCollectionId() const {
+MemCollection::GetCollectionId() const {
     return collection_id_;
 }
 
 int64_t
-SSMemCollection::GetPartitionId() const {
+MemCollection::GetPartitionId() const {
     return partition_id_;
 }
 
 size_t
-SSMemCollection::GetCurrentMem() {
+MemCollection::GetCurrentMem() {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t total_mem = 0;
     for (auto& mem_table_file : mem_segment_list_) {
@@ -152,7 +152,7 @@ SSMemCollection::GetCurrentMem() {
 }
 
 Status
-SSMemCollection::ApplyDeletes() {
+MemCollection::ApplyDeletes() {
     // Applying deletes to other segments on disk and their corresponding cache:
     // For each segment in collection:
     //     Load its bloom filter
@@ -359,12 +359,12 @@ SSMemCollection::ApplyDeletes() {
 }
 
 uint64_t
-SSMemCollection::GetLSN() {
+MemCollection::GetLSN() {
     return lsn_;
 }
 
 void
-SSMemCollection::SetLSN(uint64_t lsn) {
+MemCollection::SetLSN(uint64_t lsn) {
     lsn_ = lsn;
 }
 

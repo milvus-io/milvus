@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/insert/SSVectorSource.h"
+#include "db/insert/VectorSource.h"
 
 #include <utility>
 #include <vector>
@@ -21,11 +21,11 @@
 namespace milvus {
 namespace engine {
 
-SSVectorSource::SSVectorSource(const DataChunkPtr& chunk) : chunk_(chunk) {
+VectorSource::VectorSource(const DataChunkPtr& chunk) : chunk_(chunk) {
 }
 
 Status
-SSVectorSource::Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const int64_t& num_entities_to_add,
+VectorSource::Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const int64_t& num_entities_to_add,
                     int64_t& num_entities_added) {
     // TODO: n = vectors_.vector_count_;???
     int64_t n = chunk_->count_;
@@ -41,7 +41,7 @@ SSVectorSource::Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const
 }
 
 bool
-SSVectorSource::AllAdded() {
+VectorSource::AllAdded() {
     return (current_num_added_ >= chunk_->count_);
 }
 

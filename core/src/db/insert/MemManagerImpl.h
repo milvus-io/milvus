@@ -20,24 +20,24 @@
 #include <unordered_map>
 #include <vector>
 
-#include "db/insert/SSMemCollection.h"
-#include "db/insert/SSMemManager.h"
+#include "db/insert/MemCollection.h"
+#include "db/insert/MemManager.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-class SSMemManagerImpl : public SSMemManager {
+class MemManagerImpl : public MemManager {
  public:
-    using Ptr = std::shared_ptr<SSMemManagerImpl>;
+    using Ptr = std::shared_ptr<MemManagerImpl>;
     using MemPartitionMap = std::map<int64_t, SSMemCollectionPtr>;
     using MemCollectionMap = std::map<int64_t, MemPartitionMap>;
     using MemList = std::vector<SSMemCollectionPtr>;
 
-    explicit SSMemManagerImpl(const DBOptions& options) : options_(options) {
+    explicit MemManagerImpl(const DBOptions& options) : options_(options) {
     }
 
-    ~SSMemManagerImpl() = default;
+    ~MemManagerImpl() = default;
 
     Status
     InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) override;

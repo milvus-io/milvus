@@ -11,40 +11,41 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include "db/IDGenerator.h"
-#include "db/insert/SSMemManager.h"
-#include "segment/SSSegmentWriter.h"
-#include "segment/Segment.h"
+#include "db/Types.h"
+#include "db/meta/MetaTypes.h"
+#include "query/GeneralQuery.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-// TODO(zhiru): this class needs to be refactored once attributes are added
+struct ExecutionEngineContext {
+    query::QueryPtr query_ptr_;
+    QueryResultPtr query_result_;
+};
 
-class SSVectorSource {
+class ExecutionEngine {
  public:
-    explicit SSVectorSource(const DataChunkPtr& chunk);
+    virtual Status
+    Load(ExecutionEngineContext& context) = 0;
 
-    Status
-    Add(const segment::SSSegmentWriterPtr& segment_writer_ptr, const int64_t& num_attrs_to_add,
-        int64_t& num_attrs_added);
+    virtual Status
+    CopyToGpu(uint64_t device_id) = 0;
 
-    bool
-    AllAdded();
+    virtual Status
+    Search(ExecutionEngineContext& context) = 0;
 
- private:
-    DataChunkPtr chunk_;
+    virtual Status
+    BuildIndex() = 0;
+};
 
-    int64_t current_num_added_ = 0;
-};  // SSVectorSource
-
-using SSVectorSourcePtr = std::shared_ptr<SSVectorSource>;
+using SSExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;
 
 }  // namespace engine
 }  // namespace milvus

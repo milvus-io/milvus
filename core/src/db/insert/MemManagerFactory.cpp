@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/insert/MemManagerFactory.h"
-#include "SSMemManagerImpl.h"
+#include "MemManagerImpl.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -27,7 +27,7 @@ namespace engine {
 
 SSMemManagerPtr
 MemManagerFactory::SSBuild(const DBOptions& options) {
-    return std::make_shared<SSMemManagerImpl>(options);
+    return std::make_shared<MemManagerImpl>(options);
 }
 
 }  // namespace engine

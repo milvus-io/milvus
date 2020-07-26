@@ -16,16 +16,16 @@
 #include <unordered_map>
 #include <vector>
 
-#include "SSExecutionEngine.h"
+#include "ExecutionEngine.h"
 #include "db/SnapshotVisitor.h"
 #include "segment/SSSegmentReader.h"
 
 namespace milvus {
 namespace engine {
 
-class SSExecutionEngineImpl : public SSExecutionEngine {
+class ExecutionEngineImpl : public ExecutionEngine {
  public:
-    SSExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor);
+    ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor);
 
     Status
     Load(ExecutionEngineContext& context) override;

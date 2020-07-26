@@ -11,29 +11,27 @@
 
 #pragma once
 
-#include <atomic>
 #include <memory>
-#include <mutex>
-#include <set>
 #include <string>
 #include <vector>
 
 #include "config/ConfigMgr.h"
-#include "db/insert/SSMemSegment.h"
-#include "db/insert/SSVectorSource.h"
+#include "db/insert/VectorSource.h"
+#include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/Resources.h"
+#include "segment/SSSegmentWriter.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-class SSMemCollection {
+class MemSegment {
  public:
-    using SSMemCollectionFileList = std::vector<SSMemSegmentPtr>;
+    MemSegment(int64_t collection_id, int64_t partition_id, const DBOptions& options);
 
-    SSMemCollection(int64_t collection_id, int64_t partition_id, const DBOptions& options);
+    ~MemSegment() = default;
 
-    ~SSMemCollection() = default;
-
+ public:
     Status
     Add(const SSVectorSourcePtr& source);
 
@@ -43,53 +41,42 @@ class SSMemCollection {
     Status
     Delete(const std::vector<segment::doc_id_t>& doc_ids);
 
-    void
-    GetCurrentMemSegment(SSMemSegmentPtr& mem_segment);
+    int64_t
+    GetCurrentMem();
 
-    size_t
-    GetTableFileCount();
+    int64_t
+    GetMemLeft();
+
+    bool
+    IsFull();
 
     Status
     Serialize(uint64_t wal_lsn);
 
-    bool
-    Empty();
-
     int64_t
-    GetCollectionId() const;
-
-    int64_t
-    GetPartitionId() const;
-
-    size_t
-    GetCurrentMem();
-
-    uint64_t
-    GetLSN();
-
-    void
-    SetLSN(uint64_t lsn);
+    GetSegmentId() const;
 
  private:
     Status
-    ApplyDeletes();
+    CreateSegment();
+
+    Status
+    GetSingleEntitySize(int64_t& single_size);
 
  private:
     int64_t collection_id_;
     int64_t partition_id_;
 
-    SSMemCollectionFileList mem_segment_list_;
-
+    std::shared_ptr<snapshot::NewSegmentOperation> operation_;
+    snapshot::SegmentPtr segment_;
     DBOptions options_;
+    int64_t current_mem_;
 
-    std::mutex mutex_;
+    //    ExecutionEnginePtr execution_engine_;
+    segment::SSSegmentWriterPtr segment_writer_ptr_;
+};  // SSMemTableFile
 
-    std::set<segment::doc_id_t> doc_ids_to_delete_;
-
-    std::atomic<uint64_t> lsn_;
-};  // SSMemCollection
-
-using SSMemCollectionPtr = std::shared_ptr<SSMemCollection>;
+using SSMemSegmentPtr = std::shared_ptr<MemSegment>;
 
 }  // namespace engine
 }  // namespace milvus

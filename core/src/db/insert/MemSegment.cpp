@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/insert/SSMemSegment.h"
+#include "db/insert/MemSegment.h"
 
 #include <algorithm>
 #include <cmath>
@@ -31,14 +31,14 @@
 namespace milvus {
 namespace engine {
 
-SSMemSegment::SSMemSegment(int64_t collection_id, int64_t partition_id, const DBOptions& options)
+MemSegment::MemSegment(int64_t collection_id, int64_t partition_id, const DBOptions& options)
     : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
     current_mem_ = 0;
     CreateSegment();
 }
 
 Status
-SSMemSegment::CreateSegment() {
+MemSegment::CreateSegment() {
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
     if (!status.ok()) {
@@ -113,7 +113,7 @@ SSMemSegment::CreateSegment() {
 }
 
 Status
-SSMemSegment::GetSingleEntitySize(int64_t& single_size) {
+MemSegment::GetSingleEntitySize(int64_t& single_size) {
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
     if (!status.ok()) {
@@ -175,7 +175,7 @@ SSMemSegment::GetSingleEntitySize(int64_t& single_size) {
 }
 
 Status
-SSMemSegment::Add(const SSVectorSourcePtr& source) {
+MemSegment::Add(const SSVectorSourcePtr& source) {
     int64_t single_entity_mem_size = 0;
     auto status = GetSingleEntitySize(single_entity_mem_size);
     if (!status.ok()) {
@@ -198,7 +198,7 @@ SSMemSegment::Add(const SSVectorSourcePtr& source) {
 }
 
 Status
-SSMemSegment::Delete(segment::doc_id_t doc_id) {
+MemSegment::Delete(segment::doc_id_t doc_id) {
     engine::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
 
@@ -221,7 +221,7 @@ SSMemSegment::Delete(segment::doc_id_t doc_id) {
 }
 
 Status
-SSMemSegment::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
+MemSegment::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
     engine::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
 
@@ -252,17 +252,17 @@ SSMemSegment::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
 }
 
 int64_t
-SSMemSegment::GetCurrentMem() {
+MemSegment::GetCurrentMem() {
     return current_mem_;
 }
 
 int64_t
-SSMemSegment::GetMemLeft() {
+MemSegment::GetMemLeft() {
     return (MAX_TABLE_FILE_MEM - current_mem_);
 }
 
 bool
-SSMemSegment::IsFull() {
+MemSegment::IsFull() {
     int64_t single_entity_mem_size = 0;
     auto status = GetSingleEntitySize(single_entity_mem_size);
     if (!status.ok()) {
@@ -273,7 +273,7 @@ SSMemSegment::IsFull() {
 }
 
 Status
-SSMemSegment::Serialize(uint64_t wal_lsn) {
+MemSegment::Serialize(uint64_t wal_lsn) {
     int64_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
@@ -290,7 +290,7 @@ SSMemSegment::Serialize(uint64_t wal_lsn) {
 }
 
 int64_t
-SSMemSegment::GetSegmentId() const {
+MemSegment::GetSegmentId() const {
     return segment_->GetID();
 }
 

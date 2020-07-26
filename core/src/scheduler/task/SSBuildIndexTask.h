@@ -13,7 +13,7 @@
 
 #include <string>
 
-#include "db/engine/SSExecutionEngine.h"
+#include "db/engine/ExecutionEngine.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/SSBuildIndexJob.h"

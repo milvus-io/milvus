@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "SSMemManager.h"
+#include "MemManager.h"
 #include "db/meta/Meta.h"
 
 #include <memory>
