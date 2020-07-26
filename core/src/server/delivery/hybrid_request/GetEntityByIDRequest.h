@@ -32,13 +32,13 @@ namespace server {
 class GetEntityByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, std::string collection_name,
-           const engine::IDNumbers& id_array, const std::vector<std::string>& field_names_,
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
            engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
  protected:
-    GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context, std::string collection_name,
-                         const engine::IDNumbers& id_array, const std::vector<std::string>& field_names,
+    GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         const engine::IDNumbers& id_array, std::vector<std::string>& field_names,
                          engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
     Status
@@ -47,9 +47,9 @@ class GetEntityByIDRequest : public BaseRequest {
  private:
     std::string collection_name_;
     engine::IDNumbers id_array_;
-    std::vector<std::string> field_names_;
-    engine::snapshot::CollectionMappings field_mappings_;
-    engine::DataChunkPtr data_chunk_;
+    std::vector<std::string>& field_names_;
+    engine::snapshot::CollectionMappings& field_mappings_;
+    engine::DataChunkPtr& data_chunk_;
 };
 
 }  // namespace server
