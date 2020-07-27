@@ -46,7 +46,7 @@ ArchiveConf::ParseCritirias(const std::string& criterias) {
     boost::algorithm::split(tokens, criterias, boost::is_any_of(";"));
 
     fiu_do_on("ArchiveConf.ParseCritirias.empty_tokens", tokens.clear());
-    if (tokens.size() == 0) {
+    if (tokens.empty()) {
         return;
     }
 

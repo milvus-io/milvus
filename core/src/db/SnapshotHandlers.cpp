@@ -82,6 +82,7 @@ SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT s
 Status
 SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
     segment_ids_.push_back(segment_commit->GetSegmentId());
+    return Status::OK();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
