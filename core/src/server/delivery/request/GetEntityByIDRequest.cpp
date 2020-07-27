@@ -15,12 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "server/delivery/request/GetEntityByIDRequest.h"
 #include "db/meta/MetaTypes.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
-#include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "GetEntityByIDRequest.h"
 
 #include <memory>
 #include <vector>
