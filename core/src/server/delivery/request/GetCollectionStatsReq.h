@@ -33,8 +33,8 @@ class GetCollectionStatsReq : public BaseReq {
            std::string& collection_stats);
 
  protected:
-    GetCollectionStatsReq(const std::shared_ptr<milvus::server::Context>& context,
-                          const std::string& collection_name, std::string& collection_stats);
+    GetCollectionStatsReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                          std::string& collection_stats);
 
     Status
     OnExecute() override;

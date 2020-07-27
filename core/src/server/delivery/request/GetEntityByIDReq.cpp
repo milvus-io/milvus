@@ -43,10 +43,9 @@ GetEntityByIDReq::GetEntityByIDReq(const std::shared_ptr<milvus::server::Context
 }
 
 BaseReqPtr
-GetEntityByIDReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, const engine::IDNumbers& id_array,
-                             std::vector<std::string>& field_names_,
-                             engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
+GetEntityByIDReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
+                         engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
     return std::shared_ptr<BaseReq>(
         new GetEntityByIDReq(context, collection_name, id_array, field_names_, field_mappings, data_chunk));
 }

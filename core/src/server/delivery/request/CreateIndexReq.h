@@ -26,7 +26,7 @@ class CreateIndexReq : public BaseReq {
 
  protected:
     CreateIndexReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                       const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
+                   const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
 
     Status
     OnExecute() override;

@@ -91,8 +91,7 @@ ReqHandler::GetCollectionStats(const std::shared_ptr<Context>& context, const st
 }
 
 Status
-ReqHandler::CountEntities(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                          int64_t& count) {
+ReqHandler::CountEntities(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count) {
     BaseReqPtr req_ptr = CountEntitiesReq::Create(context, collection_name, count);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
@@ -132,8 +131,7 @@ ReqHandler::ListPartitions(const std::shared_ptr<Context>& context, const std::s
 
 Status
 ReqHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                        const std::string& field_name, const std::string& index_name,
-                        const milvus::json& json_params) {
+                        const std::string& field_name, const std::string& index_name, const milvus::json& json_params) {
     BaseReqPtr req_ptr = CreateIndexReq::Create(context, collection_name, field_name, index_name, json_params);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
@@ -206,7 +204,7 @@ ReqHandler::Flush(const std::shared_ptr<Context>& context, const std::vector<std
 
 Status
 ReqHandler::Compact(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                        double compact_threshold) {
+                    double compact_threshold) {
     BaseReqPtr req_ptr = CompactReq::Create(context, collection_name, compact_threshold);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();

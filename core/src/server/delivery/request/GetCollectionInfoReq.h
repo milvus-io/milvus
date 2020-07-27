@@ -29,8 +29,8 @@ class GetCollectionInfoReq : public BaseReq {
            CollectionSchema& collection_schema);
 
  protected:
-    GetCollectionInfoReq(const std::shared_ptr<milvus::server::Context>& context,
-                         const std::string& collection_name, CollectionSchema& collection_schema);
+    GetCollectionInfoReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         CollectionSchema& collection_schema);
 
     Status
     OnExecute() override;

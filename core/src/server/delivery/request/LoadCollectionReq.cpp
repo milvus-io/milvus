@@ -29,8 +29,7 @@ LoadCollectionReq::LoadCollectionReq(const std::shared_ptr<milvus::server::Conte
 }
 
 BaseReqPtr
-LoadCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                          const std::string& collection_name) {
+LoadCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
     return std::shared_ptr<BaseReq>(new LoadCollectionReq(context, collection_name));
 }
 

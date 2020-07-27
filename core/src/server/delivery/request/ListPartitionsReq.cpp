@@ -24,14 +24,12 @@ namespace server {
 
 ListPartitionsReq::ListPartitionsReq(const std::shared_ptr<milvus::server::Context>& context,
                                      const std::string& collection_name, std::vector<std::string>& partition_list)
-    : BaseReq(context, BaseReq::kListPartitions),
-      collection_name_(collection_name),
-      partition_list_(partition_list) {
+    : BaseReq(context, BaseReq::kListPartitions), collection_name_(collection_name), partition_list_(partition_list) {
 }
 
 BaseReqPtr
-ListPartitionsReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                          const std::string& collection_name, std::vector<std::string>& partition_list) {
+ListPartitionsReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                          std::vector<std::string>& partition_list) {
     return std::shared_ptr<BaseReq>(new ListPartitionsReq(context, collection_name, partition_list));
 }
 

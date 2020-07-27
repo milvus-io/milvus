@@ -30,9 +30,7 @@ namespace server {
 
 CompactReq::CompactReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                        double compact_threshold)
-    : BaseReq(context, BaseReq::kCompact),
-      collection_name_(collection_name),
-      compact_threshold_(compact_threshold) {
+    : BaseReq(context, BaseReq::kCompact), collection_name_(collection_name), compact_threshold_(compact_threshold) {
 }
 
 BaseReqPtr

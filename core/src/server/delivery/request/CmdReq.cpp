@@ -27,8 +27,7 @@ CmdReq::CmdReq(const std::shared_ptr<milvus::server::Context>& context, const st
 }
 
 BaseReqPtr
-CmdReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& cmd,
-                   std::string& result) {
+CmdReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& cmd, std::string& result) {
     return std::shared_ptr<BaseReq>(new CmdReq(context, cmd, result));
 }
 

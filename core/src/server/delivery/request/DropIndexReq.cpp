@@ -23,9 +23,8 @@
 namespace milvus {
 namespace server {
 
-DropIndexReq::DropIndexReq(const std::shared_ptr<milvus::server::Context>& context,
-                           const std::string& collection_name, const std::string& field_name,
-                           const std::string& index_name)
+DropIndexReq::DropIndexReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                           const std::string& field_name, const std::string& index_name)
     : BaseReq(context, BaseReq::kDropIndex),
       collection_name_(collection_name),
       field_name_(field_name),

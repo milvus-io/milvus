@@ -31,8 +31,8 @@ CreatePartitionReq::CreatePartitionReq(const std::shared_ptr<milvus::server::Con
 }
 
 BaseReqPtr
-CreatePartitionReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                           const std::string& collection_name, const std::string& tag) {
+CreatePartitionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                           const std::string& tag) {
     return std::shared_ptr<BaseReq>(new CreatePartitionReq(context, collection_name, tag));
 }
 

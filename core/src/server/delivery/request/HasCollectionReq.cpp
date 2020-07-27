@@ -27,8 +27,8 @@ HasCollectionReq::HasCollectionReq(const std::shared_ptr<milvus::server::Context
 }
 
 BaseReqPtr
-HasCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                         const std::string& collection_name, bool& exist) {
+HasCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         bool& exist) {
     return std::shared_ptr<BaseReq>(new HasCollectionReq(context, collection_name, exist));
 }
 

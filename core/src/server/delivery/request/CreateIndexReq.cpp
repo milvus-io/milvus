@@ -38,10 +38,8 @@ CreateIndexReq::CreateIndexReq(const std::shared_ptr<milvus::server::Context>& c
 
 BaseReqPtr
 CreateIndexReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                       const std::string& field_name, const std::string& index_name,
-                       const milvus::json& json_params) {
-    return std::shared_ptr<BaseReq>(
-        new CreateIndexReq(context, collection_name, field_name, index_name, json_params));
+                       const std::string& field_name, const std::string& index_name, const milvus::json& json_params) {
+    return std::shared_ptr<BaseReq>(new CreateIndexReq(context, collection_name, field_name, index_name, json_params));
 }
 
 Status

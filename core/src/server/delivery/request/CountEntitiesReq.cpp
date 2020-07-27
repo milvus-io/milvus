@@ -30,8 +30,8 @@ CountEntitiesReq::CountEntitiesReq(const std::shared_ptr<milvus::server::Context
 }
 
 BaseReqPtr
-CountEntitiesReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, int64_t& row_count) {
+CountEntitiesReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         int64_t& row_count) {
     return std::shared_ptr<BaseReq>(new CountEntitiesReq(context, collection_name, row_count));
 }
 

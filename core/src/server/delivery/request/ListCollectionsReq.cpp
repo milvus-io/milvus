@@ -29,7 +29,7 @@ ListCollectionsReq::ListCollectionsReq(const std::shared_ptr<milvus::server::Con
 
 BaseReqPtr
 ListCollectionsReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                               std::vector<std::string>& collection_name_list) {
+                           std::vector<std::string>& collection_name_list) {
     return std::shared_ptr<BaseReq>(new ListCollectionsReq(context, collection_name_list));
 }
 

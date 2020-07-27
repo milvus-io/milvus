@@ -1235,7 +1235,7 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
     milvus::json json_params;
 
     auto status = req_handler_.CreateCollection(context_ptr_, collection_name, field_types, field_index_params,
-                                                    field_extra_params, json_params);
+                                                field_extra_params, json_params);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }

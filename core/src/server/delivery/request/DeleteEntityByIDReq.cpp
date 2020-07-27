@@ -36,8 +36,8 @@ DeleteEntityByIDReq::DeleteEntityByIDReq(const std::shared_ptr<milvus::server::C
 }
 
 BaseReqPtr
-DeleteEntityByIDReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                            const std::string& collection_name, const engine::IDNumbers& entity_ids) {
+DeleteEntityByIDReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                            const engine::IDNumbers& entity_ids) {
     return std::shared_ptr<BaseReq>(new DeleteEntityByIDReq(context, collection_name, entity_ids));
 }
 

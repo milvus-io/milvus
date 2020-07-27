@@ -79,12 +79,8 @@ ErrorMap(ErrorCode code) {
 std::string
 RequestMap(BaseReq::ReqType req_type) {
     static const std::unordered_map<BaseReq::ReqType, std::string> req_map = {
-        {BaseReq::kInsert, "Insert"},
-        {BaseReq::kCreateIndex, "CreateIndex"},
-        {BaseReq::kSearch, "Search"},
-        {BaseReq::kFlush, "Flush"},
-        {BaseReq::kGetEntityByID, "GetEntityByID"},
-        {BaseReq::kCompact, "Compact"},
+        {BaseReq::kInsert, "Insert"}, {BaseReq::kCreateIndex, "CreateIndex"},     {BaseReq::kSearch, "Search"},
+        {BaseReq::kFlush, "Flush"},   {BaseReq::kGetEntityByID, "GetEntityByID"}, {BaseReq::kCompact, "Compact"},
     };
 
     if (req_map.find(req_type) != req_map.end()) {
@@ -669,7 +665,7 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
     }
 
     Status status = req_handler_.CreateCollection(GetContext(context), request->collection_name(), field_types,
-                                                      field_index_params, field_params, json_params);
+                                                  field_index_params, field_params, json_params);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context)
@@ -722,7 +718,7 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
     }
 
     Status status = req_handler_.CreateIndex(GetContext(context), request->collection_name(), request->field_name(),
-                                                 request->index_name(), json_params);
+                                             request->index_name(), json_params);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
@@ -752,8 +748,8 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     std::vector<engine::AttrsData> attrs;
     std::vector<engine::VectorsData> vectors;
 
-    Status status = req_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids,
-                                                   field_names, field_mappings, data_chunk);
+    Status status = req_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, field_names,
+                                               field_mappings, data_chunk);
 
     auto id_size = vector_ids.size();
     for (const auto& it : field_mappings) {
@@ -856,8 +852,8 @@ GrpcRequestHandler::GetEntityIDs(::grpc::ServerContext* context, const ::milvus:
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     std::vector<int64_t> vector_ids;
-    Status status = req_handler_.ListIDInSegment(GetContext(context), request->collection_name(),
-                                                     request->segment_id(), vector_ids);
+    Status status = req_handler_.ListIDInSegment(GetContext(context), request->collection_name(), request->segment_id(),
+                                                 vector_ids);
 
     if (!vector_ids.empty()) {
         response->mutable_entity_id_array()->Resize(vector_ids.size(), -1);
@@ -1041,8 +1037,7 @@ GrpcRequestHandler::ShowCollectionInfo(::grpc::ServerContext* context, const ::m
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     std::string collection_stats;
-    Status status =
-        req_handler_.GetCollectionStats(GetContext(context), request->collection_name(), collection_stats);
+    Status status = req_handler_.GetCollectionStats(GetContext(context), request->collection_name(), collection_stats);
     response->set_json_info(collection_stats);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
@@ -1137,7 +1132,7 @@ GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::gr
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     Status status = req_handler_.DropIndex(GetContext(context), request->collection_name(), request->field_name(),
-                                               request->index_name());
+                                           request->index_name());
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
