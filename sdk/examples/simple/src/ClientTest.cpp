@@ -67,14 +67,14 @@ ClientTest::~ClientTest() {
 }
 
 void
-ClientTest::ShowCollections(std::vector<std::string>& collection_array) {
+ClientTest::ListCollections(std::vector<std::string>& collection_array) {
     milvus::Status stat = conn_->ListCollections(collection_array);
-    std::cout << "ShowCollections function call status: " << stat.message() << std::endl;
-    std::cout << "All collections: " << std::endl;
+    std::cout << "ListCollections function call status: " << stat.message() << std::endl;
+    std::cout << "Collection list: " << std::endl;
     for (auto& collection : collection_array) {
         int64_t entity_count = 0;
         stat = conn_->CountEntities(collection, entity_count);
-        std::cout << "\t" << collection << "(" << entity_count << " entities)" << std::endl;
+        std::cout << "\t" << collection << " (" << entity_count << " entities)" << std::endl;
     }
 }
 
@@ -324,14 +324,17 @@ ClientTest::Test() {
     milvus::MetricType metric_type = COLLECTION_METRIC_TYPE;
 
     std::vector<std::string> table_array;
-//    ShowCollections(table_array);
+    ListCollections(table_array);
 
     CreateCollection(collection_name);
     GetCollectionInfo(collection_name);
 
-    InsertEntities(collection_name);
-    Flush(collection_name);
+    ListCollections(table_array);
     CountEntities(collection_name);
+
+//    InsertEntities(collection_name);
+//    Flush(collection_name);
+//    CountEntities(collection_name);
 //    GetCollectionStats(collection_name);
 //
 //    BuildVectors(NQ, COLLECTION_DIMENSION);
@@ -348,5 +351,5 @@ ClientTest::Test() {
 //    SearchEntities(collection_name, TOP_K, NPROBE);  // this line get two search error since we delete two entities
 //
 //    DropIndex(collection_name, "field_vec", "index_3");
-//    DropCollection(collection_name);
+    DropCollection(collection_name);
 }

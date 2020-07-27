@@ -28,7 +28,7 @@ class ClientTest {
 
  private:
     void
-    ShowCollections(std::vector<std::string>&);
+    ListCollections(std::vector<std::string>&);
 
     void
     CreateCollection(const std::string& collection_name);
