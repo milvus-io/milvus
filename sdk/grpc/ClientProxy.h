@@ -35,32 +35,45 @@ class ClientProxy : public Connection {
     Status
     Disconnect() override;
 
-    std::string
-    ClientVersion() const override;
-
-    std::string
-    ServerVersion() const override;
-
-    std::string
-    ServerStatus() const override;
-
-    Status
-    GetConfig(const std::string& node_name, std::string& value) const override;
-
-    Status
-    SetConfig(const std::string& node_name, const std::string& value) const override;
-
     Status
     CreateCollection(const Mapping& mapping, const std::string& extra_params) override;
+
+    Status
+    DropCollection(const std::string& collection_name) override;
 
     bool
     HasCollection(const std::string& collection_name) override;
 
     Status
-    DropCollection(const std::string& collection_name) override;
+    ListCollections(std::vector<std::string>& collection_array) override;
+
+    Status
+    GetCollectionInfo(const std::string& collection_name, Mapping& mapping) override;
+
+    Status
+    GetCollectionStats(const std::string& collection_name, std::string& collection_stats) override;
+
+    Status
+    CountEntities(const std::string& collection_name, int64_t& entity_count) override;
+
+    Status
+    CreatePartition(const PartitionParam& partition_param) override;
+
+    Status
+    DropPartition(const PartitionParam& partition_param) override;
+
+    bool
+    HasPartition(const std::string& collection_name, const std::string& partition_tag) const override;
+
+    Status
+    ListPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;
 
     Status
     CreateIndex(const IndexParam& index_param) override;
+
+    Status
+    DropIndex(const std::string& collection_name, const std::string& field_name,
+              const std::string& index_name) const override;
 
     Status
     Insert(const std::string& collection_name, const std::string& partition_tag, const FieldValue& entity_array,
@@ -71,8 +84,7 @@ class ClientProxy : public Connection {
                   std::string& entities) override;
 
     Status
-    ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
-                    std::vector<int64_t>& id_array) override;
+    DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
 
     Status
     Search(const std::string& collection_name, const std::vector<std::string>& partition_list, const std::string& dsl,
@@ -83,41 +95,11 @@ class ClientProxy : public Connection {
              BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) override;
 
     Status
-    GetCollectionInfo(const std::string& collection_name, Mapping& mapping) override;
-
-    Status
-    CountEntities(const std::string& collection_name, int64_t& entity_count) override;
-
-    Status
-    ListCollections(std::vector<std::string>& collection_array) override;
-
-    Status
-    GetCollectionStats(const std::string& collection_name, std::string& collection_stats) override;
-
-    Status
-    DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
+    ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
+                    std::vector<int64_t>& id_array) override;
 
     Status
     LoadCollection(const std::string& collection_name) const override;
-
-    Status
-    GetIndexInfo(const std::string& collection_name, IndexParam& index_param) const override;
-
-    Status
-    DropIndex(const std::string& collection_name, const std::string& field_name,
-              const std::string& index_name) const override;
-
-    Status
-    CreatePartition(const PartitionParam& partition_param) override;
-
-    bool
-    HasPartition(const std::string& collection_name, const std::string& partition_tag) const override;
-
-    Status
-    ListPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;
-
-    Status
-    DropPartition(const PartitionParam& partition_param) override;
 
     Status
     Flush(const std::vector<std::string>& collection_name_array) override;

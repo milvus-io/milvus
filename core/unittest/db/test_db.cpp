@@ -150,13 +150,13 @@ TEST_F(DBTest, CollectionTest) {
     ASSERT_TRUE(status.ok());
 
     ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), 0);
-    milvus::engine::snapshot::SIZE_TYPE row_cnt = 0;
-    status = db_->GetCollectionRowCount(c1, row_cnt);
+    int64_t row_cnt = 0;
+    status = db_->CountEntities(c1, row_cnt);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(row_cnt, 0);
 
     std::vector<std::string> names;
-    status = db_->AllCollections(names);
+    status = db_->ListCollections(names);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(names.size(), 1);
     ASSERT_EQ(names[0], c1);
@@ -169,14 +169,14 @@ TEST_F(DBTest, CollectionTest) {
     status = CreateCollection(db_, c2, next_lsn());
     ASSERT_TRUE(status.ok());
 
-    status = db_->AllCollections(names);
+    status = db_->ListCollections(names);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(names.size(), 2);
 
     status = db_->DropCollection(c1);
     ASSERT_TRUE(status.ok());
 
-    status = db_->AllCollections(names);
+    status = db_->ListCollections(names);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(names.size(), 1);
     ASSERT_EQ(names[0], c2);
@@ -195,7 +195,7 @@ TEST_F(DBTest, PartitionTest) {
     ASSERT_TRUE(status.ok());
 
     std::vector<std::string> partition_names;
-    status = db_->ShowPartitions(c1, partition_names);
+    status = db_->ListPartitions(c1, partition_names);
     ASSERT_EQ(partition_names.size(), 1);
     ASSERT_EQ(partition_names[0], "_default");
 
@@ -207,7 +207,7 @@ TEST_F(DBTest, PartitionTest) {
     status = db_->CreatePartition(c1, p1);
     ASSERT_TRUE(status.ok());
 
-    status = db_->ShowPartitions(c1, partition_names);
+    status = db_->ListPartitions(c1, partition_names);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(partition_names.size(), 2);
 
@@ -219,7 +219,7 @@ TEST_F(DBTest, PartitionTest) {
 
     status = db_->DropPartition(c1, p1);
     ASSERT_TRUE(status.ok());
-    status = db_->ShowPartitions(c1, partition_names);
+    status = db_->ListPartitions(c1, partition_names);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(partition_names.size(), 1);
 }
@@ -461,14 +461,14 @@ TEST_F(DBTest, InsertTest) {
     milvus::engine::DataChunkPtr data_chunk;
     BuildEntities(entity_count, 0, data_chunk);
 
-    status = db_->InsertEntities(collection_name, "", data_chunk);
+    status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
     status = db_->Flush();
     ASSERT_TRUE(status.ok());
 
-    uint64_t row_count = 0;
-    status = db_->GetCollectionRowCount(collection_name, row_count);
+    int64_t row_count = 0;
+    status = db_->CountEntities(collection_name, row_count);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(row_count, entity_count);
 }
@@ -484,7 +484,7 @@ TEST_F(DBTest, MergeTest) {
 
     int64_t repeat = 2;
     for (int32_t i = 0; i < repeat; i++) {
-        status = db_->InsertEntities(collection_name, "", data_chunk);
+        status = db_->Insert(collection_name, "", data_chunk);
         ASSERT_TRUE(status.ok());
 
         status = db_->Flush();
@@ -493,8 +493,8 @@ TEST_F(DBTest, MergeTest) {
 
     sleep(2); // wait to merge
 
-    uint64_t row_count = 0;
-    status = db_->GetCollectionRowCount(collection_name, row_count);
+    int64_t row_count = 0;
+    status = db_->CountEntities(collection_name, row_count);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(row_count, entity_count * repeat);
 }
