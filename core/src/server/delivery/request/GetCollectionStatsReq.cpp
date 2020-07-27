@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/delivery/request/GetCollectionStatsRequest.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
+#include "server/delivery/request/GetCollectionStatsRequest.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 

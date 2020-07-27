@@ -25,8 +25,7 @@ class LoadCollectionRequest : public BaseRequest {
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
 
  protected:
-    LoadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                          const std::string& collection_name);
+    LoadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
 
     Status
     OnExecute() override;

@@ -37,8 +37,8 @@ ListIDInSegmentRequest::ListIDInSegmentRequest(const std::shared_ptr<milvus::ser
 }
 
 BaseRequestPtr
-ListIDInSegmentRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                               int64_t segment_id, engine::IDNumbers& ids) {
+ListIDInSegmentRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                               const std::string& collection_name, int64_t segment_id, engine::IDNumbers& ids) {
     return std::shared_ptr<BaseRequest>(new ListIDInSegmentRequest(context, collection_name, segment_id, ids));
 }
 

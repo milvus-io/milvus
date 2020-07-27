@@ -24,7 +24,7 @@ namespace milvus {
 namespace server {
 
 LoadCollectionRequest::LoadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                                 const std::string& collection_name)
+                                             const std::string& collection_name)
     : BaseRequest(context, BaseRequest::kLoadCollection), collection_name_(collection_name) {
 }
 

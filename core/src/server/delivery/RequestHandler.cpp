@@ -22,22 +22,22 @@
 #include "server/delivery/request/CreateIndexReq.h"
 #include "server/delivery/request/CreatePartitionReq.h"
 #include "server/delivery/request/DeleteEntityByIDReq.h"
-#include "server/delivery/request/GetCollectionInfoReq.h"
 #include "server/delivery/request/DescribeIndexReq.h"
 #include "server/delivery/request/DropCollectionReq.h"
 #include "server/delivery/request/DropIndexReq.h"
 #include "server/delivery/request/DropPartitionReq.h"
 #include "server/delivery/request/FlushReq.h"
+#include "server/delivery/request/GetCollectionInfoReq.h"
+#include "server/delivery/request/GetCollectionStatsRequest.h"
 #include "server/delivery/request/GetEntityByIDReq.h"
-#include "server/delivery/request/ListIDInSegmentReq.h"
 #include "server/delivery/request/HasCollectionReq.h"
 #include "server/delivery/request/HasPartitionReq.h"
 #include "server/delivery/request/InsertReq.h"
+#include "server/delivery/request/ListCollectionsReq.h"
+#include "server/delivery/request/ListIDInSegmentReq.h"
+#include "server/delivery/request/ListPartitionsReq.h"
 #include "server/delivery/request/LoadCollectionReq.h"
 #include "server/delivery/request/SearchReq.h"
-#include "server/delivery/request/GetCollectionStatsRequest.h"
-#include "server/delivery/request/ListCollectionsReq.h"
-#include "server/delivery/request/ListPartitionsReq.h"
 
 namespace milvus {
 namespace server {
@@ -171,7 +171,7 @@ RequestHandler::GetEntityByID(const std::shared_ptr<Context>& context, const std
                               const engine::IDNumbers& ids, std::vector<std::string>& field_names,
                               engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
     BaseRequestPtr request_ptr =
-            GetEntityByIDRequest::Create(context, collection_name, ids, field_names, field_mappings, data_chunk);
+        GetEntityByIDRequest::Create(context, collection_name, ids, field_names, field_mappings, data_chunk);
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }

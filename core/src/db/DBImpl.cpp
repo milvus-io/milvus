@@ -679,7 +679,7 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
 
     auto read_visitor = engine::SegmentVisitor::Build(ss, segment_id);
     segment::SegmentReaderPtr segment_reader =
-            std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
+        std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
 
     STATUS_CHECK(segment_reader->LoadUids(entity_ids));
 

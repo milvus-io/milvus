@@ -45,8 +45,8 @@ InsertRequest::InsertRequest(const std::shared_ptr<milvus::server::Context>& con
 
 BaseRequestPtr
 InsertRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                            const std::string& partition_name, const int64_t& row_count,
-                            std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
+                      const std::string& partition_name, const int64_t& row_count,
+                      std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
     return std::shared_ptr<BaseRequest>(
         new InsertRequest(context, collection_name, partition_name, row_count, chunk_data));
 }

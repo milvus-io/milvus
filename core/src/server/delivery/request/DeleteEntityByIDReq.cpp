@@ -31,7 +31,8 @@ namespace milvus {
 namespace server {
 
 DeleteEntityByIDRequest::DeleteEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, const engine::IDNumbers& entity_ids)
+                                                 const std::string& collection_name,
+                                                 const engine::IDNumbers& entity_ids)
     : BaseRequest(context, BaseRequest::kDeleteEntityByID), collection_name_(collection_name), entity_ids_(entity_ids) {
 }
 
