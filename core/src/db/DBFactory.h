@@ -13,7 +13,6 @@
 
 #include "DB.h"
 #include "Options.h"
-#include "SSDB.h"
 
 #include <memory>
 #include <string>
@@ -27,10 +26,7 @@ class DBFactory {
     BuildOption();
 
     static DBPtr
-    Build(const DBOptions& options);
-
-    static SSDBPtr
-    BuildSSDB(const DBOptions& options);
+    BuildDB(const DBOptions& options);
 };
 
 }  // namespace engine

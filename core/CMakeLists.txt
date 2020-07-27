@@ -63,6 +63,8 @@ if (MILVUS_GPU_VERSION)
     add_compile_definitions("MILVUS_GPU_VERSION")
     enable_language(CUDA)
     find_package(CUDA 10 REQUIRED)
+    include_directories(${CUDA_INCLUDE_DIRS})
+    link_directories(${CUDA_TOOLKIT_ROOT_DIR}/lib64)
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES --expt-extended-lambda")
 else ()
     message(STATUS "Building Milvus CPU version")
@@ -85,8 +87,10 @@ else ()
 endif ()
 
 # **************************** Source files ****************************
+
 add_subdirectory(src)
 
+# Unittest lib
 if (BUILD_UNIT_TEST STREQUAL "ON")
     if (BUILD_COVERAGE STREQUAL "ON")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
@@ -94,6 +98,7 @@ if (BUILD_UNIT_TEST STREQUAL "ON")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DELPP_DISABLE_LOGS")
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
 endif ()
+
 
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 

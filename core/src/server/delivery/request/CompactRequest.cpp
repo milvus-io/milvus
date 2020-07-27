@@ -56,7 +56,7 @@ CompactRequest::OnExecute() {
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::SSDB()->DescribeCollection(collection_name_, collection, fields_schema);
+        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
@@ -68,7 +68,7 @@ CompactRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 2: check collection existence
-        status = DBWrapper::SSDB()->Compact(context_, collection_name_, compact_threshold_);
+        status = DBWrapper::DB()->Compact(context_, collection_name_, compact_threshold_);
         if (!status.ok()) {
             return status;
         }

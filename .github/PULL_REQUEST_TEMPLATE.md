@@ -1,10 +1,11 @@
 **What type of PR is this?**
 
-[] API-change
-[] BUG
-[] Improvement
-[] Documentation
-[] Feature
+- [ ] API-change
+- [ ] BUG
+- [ ] Improvement
+- [ ] Documentation
+- [ ] Feature
+- [ ] Test and CI
 
 **Which branch you want to cherry-pick to?**
 

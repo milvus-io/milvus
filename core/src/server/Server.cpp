@@ -20,6 +20,7 @@
 
 #include "config/ServerConfig.h"
 #include "index/archive/KnowhereResource.h"
+#include "log/LogMgr.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
@@ -30,9 +31,9 @@
 #include "server/web_impl/WebServer.h"
 #include "src/version.h"
 //#include "storage/s3/S3ClientWrapper.h"
+#include <yaml-cpp/yaml.h>
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
-#include "utils/LogUtil.h"
 #include "utils/SignalHandler.h"
 #include "utils/TimeRecorder.h"
 
@@ -216,8 +217,8 @@ Server::Start() {
                     return Status(SERVER_UNEXPECTED_ERROR, "invalid log level");
             }
 
-            InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable, logs_path,
-                    max_log_file_size, delete_exceeds);
+            LogMgr::InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable,
+                            logs_path, max_log_file_size, delete_exceeds);
         }
 
         bool cluster_enable = config.cluster.enable();
@@ -394,6 +395,41 @@ Server::StopService() {
     DBWrapper::GetInstance().StopService();
     scheduler::StopSchedulerService();
     engine::KnowhereResource::Finalize();
+}
+
+void
+Server::LogConfigInFile(const std::string& path) {
+    // TODO(yhz): Check if file exists
+    auto node = YAML::LoadFile(path);
+    YAML::Emitter out;
+    out << node;
+    LOG_SERVER_INFO_ << "\n\n"
+                     << std::string(15, '*') << "Config in file" << std::string(15, '*') << "\n\n"
+                     << out.c_str();
+}
+
+void
+Server::LogCpuInfo() {
+    /*CPU information*/
+    std::fstream fcpu("/proc/cpuinfo", std::ios::in);
+    if (!fcpu.is_open()) {
+        LOG_SERVER_WARNING_ << "Cannot obtain CPU information. Open file /proc/cpuinfo fail: " << strerror(errno)
+                            << "(errno: " << errno << ")";
+        return;
+    }
+    std::stringstream cpu_info_ss;
+    cpu_info_ss << fcpu.rdbuf();
+    fcpu.close();
+    std::string cpu_info = cpu_info_ss.str();
+
+    auto processor_pos = cpu_info.rfind("processor");
+    if (std::string::npos == processor_pos) {
+        LOG_SERVER_WARNING_ << "Cannot obtain CPU information. No sub string \'processor\'";
+        return;
+    }
+
+    auto sub_str = cpu_info.substr(processor_pos);
+    LOG_SERVER_INFO_ << "\n\n" << std::string(15, '*') << "CPU" << std::string(15, '*') << "\n\n" << sub_str;
 }
 
 }  // namespace server
