@@ -18,7 +18,7 @@
 #include <grpcpp/server_context.h>
 
 #include "server/context/ConnectionContext.h"
-#include "server/delivery/request/BaseRequest.h"
+#include "server/delivery/request/BaseReq.h"
 #include "tracing/TraceContext.h"
 
 namespace milvus {

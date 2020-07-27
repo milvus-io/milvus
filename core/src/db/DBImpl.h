@@ -48,24 +48,20 @@ class DBImpl : public DB {
     DropCollection(const std::string& name) override;
 
     Status
-    DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                       snapshot::CollectionMappings& fields_schema) override;
-
-    Status
     HasCollection(const std::string& collection_name, bool& has_or_not) override;
 
     Status
-    AllCollections(std::vector<std::string>& names) override;
+    ListCollections(std::vector<std::string>& names) override;
 
     Status
-    GetCollectionInfo(const std::string& collection_name, std::string& collection_info);
+    GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
+                      snapshot::CollectionMappings& fields_schema) override;
 
     Status
-    GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count) override;
+    GetCollectionStats(const std::string& collection_name, std::string& collection_stats);
 
     Status
-    LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
-                   const std::vector<std::string>& field_names, bool force = false) override;
+    CountEntities(const std::string& collection_name, int64_t& row_count) override;
 
     Status
     CreatePartition(const std::string& collection_name, const std::string& partition_name) override;
@@ -74,17 +70,40 @@ class DBImpl : public DB {
     DropPartition(const std::string& collection_name, const std::string& partition_name) override;
 
     Status
-    ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) override;
-
-    Status
     HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) override;
 
     Status
-    InsertEntities(const std::string& collection_name, const std::string& partition_name,
-                   DataChunkPtr& data_chunk) override;
+    ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) override;
 
     Status
-    DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids) override;
+    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
+                const std::string& field_name, const CollectionIndex& index) override;
+
+    Status
+    DropIndex(const std::string& collection_name, const std::string& field_name) override;
+
+    Status
+    DropIndex(const std::string& collection_name) override;
+
+    Status
+    Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) override;
+
+    Status
+    GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
+                  const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) override;
+
+    Status
+    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers entity_ids) override;
+
+    Status
+    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) override;
+
+    Status
+    ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) override;
+
+    Status
+    LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
+                   const std::vector<std::string>& field_names, bool force = false) override;
 
     Status
     Flush(const std::string& collection_name) override;
@@ -94,29 +113,6 @@ class DBImpl : public DB {
 
     Status
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold = 0.0) override;
-
-    Status
-    GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                  const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) override;
-
-    Status
-    GetEntityIDs(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) override;
-
-    Status
-    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                const std::string& field_name, const CollectionIndex& index) override;
-
-    Status
-    DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) override;
-
-    Status
-    DropIndex(const std::string& collection_name, const std::string& field_name) override;
-
-    Status
-    DropIndex(const std::string& collection_name) override;
-
-    Status
-    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) override;
 
  private:
     void

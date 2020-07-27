@@ -53,24 +53,20 @@ class DB {
     DropCollection(const std::string& name) = 0;
 
     virtual Status
-    DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                       snapshot::CollectionMappings& fields_schema) = 0;
-
-    virtual Status
     HasCollection(const std::string& collection_name, bool& has_or_not) = 0;
 
     virtual Status
-    AllCollections(std::vector<std::string>& names) = 0;
+    ListCollections(std::vector<std::string>& names) = 0;
 
     virtual Status
-    GetCollectionInfo(const std::string& collection_name, std::string& collection_info) = 0;
+    GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
+                      snapshot::CollectionMappings& fields_schema) = 0;
 
     virtual Status
-    GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count) = 0;
+    GetCollectionStats(const std::string& collection_name, std::string& collection_stats) = 0;
 
     virtual Status
-    LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
-                   const std::vector<std::string>& field_names, bool force = false) = 0;
+    CountEntities(const std::string& collection_name, int64_t& row_count) = 0;
 
     virtual Status
     CreatePartition(const std::string& collection_name, const std::string& partition_name) = 0;
@@ -79,16 +75,40 @@ class DB {
     DropPartition(const std::string& collection_name, const std::string& partition_name) = 0;
 
     virtual Status
-    ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) = 0;
-
-    virtual Status
     HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) = 0;
 
     virtual Status
-    InsertEntities(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) = 0;
+    ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) = 0;
 
     virtual Status
-    DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids) = 0;
+    CreateIndex(const server::ContextPtr& context, const std::string& collection_id, const std::string& field_name,
+                const CollectionIndex& index) = 0;
+
+    virtual Status
+    DropIndex(const std::string& collection_name, const std::string& field_name) = 0;
+
+    virtual Status
+    DropIndex(const std::string& collection_id) = 0;
+
+    virtual Status
+    Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) = 0;
+
+    virtual Status
+    GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
+                  const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) = 0;
+
+    virtual Status
+    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers entity_ids) = 0;
+
+    virtual Status
+    ListIDInSegment(const std::string& collection_id, int64_t segment_id, IDNumbers& entity_ids) = 0;
+
+    virtual Status
+    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) = 0;
+
+    virtual Status
+    LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
+                   const std::vector<std::string>& field_names, bool force = false) = 0;
 
     virtual Status
     Flush(const std::string& collection_name) = 0;
@@ -98,29 +118,6 @@ class DB {
 
     virtual Status
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold = 0.0) = 0;
-
-    virtual Status
-    GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                  const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) = 0;
-
-    virtual Status
-    GetEntityIDs(const std::string& collection_id, int64_t segment_id, IDNumbers& entity_ids) = 0;
-
-    virtual Status
-    CreateIndex(const server::ContextPtr& context, const std::string& collection_id, const std::string& field_name,
-                const CollectionIndex& index) = 0;
-
-    virtual Status
-    DescribeIndex(const std::string& collection_id, const std::string& field_name, CollectionIndex& index) = 0;
-
-    virtual Status
-    DropIndex(const std::string& collection_name, const std::string& field_name) = 0;
-
-    virtual Status
-    DropIndex(const std::string& collection_id) = 0;
-
-    virtual Status
-    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) = 0;
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;

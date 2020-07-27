@@ -28,13 +28,7 @@ class ClientTest {
 
  private:
     void
-    ShowServerVersion();
-
-    void
-    ShowSdkVersion();
-
-    void
-    ShowCollections(std::vector<std::string>&);
+    ListCollections(std::vector<std::string>&);
 
     void
     CreateCollection(const std::string& collection_name);

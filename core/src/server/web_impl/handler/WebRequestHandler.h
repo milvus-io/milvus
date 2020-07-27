@@ -184,9 +184,6 @@ class WebRequestHandler {
     CreateIndex(const OString& collection_name, const OString& body);
 
     StatusDto::ObjectWrapper
-    GetIndex(const OString& collection_name, OString& result);
-
-    StatusDto::ObjectWrapper
     DropIndex(const OString& collection_name);
 
     StatusDto::ObjectWrapper
