@@ -83,9 +83,9 @@ struct IndexParam {
 
 class Context;
 
-class BaseRequest {
+class BaseReq {
  public:
-    enum RequestType {
+    enum ReqType {
         // general operations
         kCmd = 0,
 
@@ -122,10 +122,9 @@ class BaseRequest {
     };
 
  protected:
-    BaseRequest(const std::shared_ptr<milvus::server::Context>& context, BaseRequest::RequestType type,
-                bool async = false);
+    BaseReq(const std::shared_ptr<milvus::server::Context>& context, BaseReq::ReqType type, bool async = false);
 
-    virtual ~BaseRequest();
+    virtual ~BaseReq();
 
  public:
     Status
@@ -143,14 +142,14 @@ class BaseRequest {
     Status
     WaitToFinish();
 
-    RequestType
-    GetRequestType() const {
+    ReqType
+    GetReqType() const {
         return type_;
     }
 
     std::string
-    RequestGroup() const {
-        return request_group_;
+    ReqGroup() const {
+        return req_group_;
     }
 
     const Status&
@@ -182,8 +181,8 @@ class BaseRequest {
  protected:
     const std::shared_ptr<milvus::server::Context> context_;
 
-    RequestType type_;
-    std::string request_group_;
+    ReqType type_;
+    std::string req_group_;
     bool async_;
     Status status_;
 
@@ -199,7 +198,7 @@ class BaseRequest {
     }
 };
 
-using BaseRequestPtr = std::shared_ptr<BaseRequest>;
+using BaseReqPtr = std::shared_ptr<BaseReq>;
 
 }  // namespace server
 }  // namespace milvus

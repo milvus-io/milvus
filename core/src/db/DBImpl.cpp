@@ -232,7 +232,7 @@ Status
 DBImpl::DropCollection(const std::string& name) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Prepare to delete collection " << name;
+    LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << name;
 
     snapshot::ScopedSnapshotT ss;
     auto& snapshots = snapshot::Snapshots::GetInstance();

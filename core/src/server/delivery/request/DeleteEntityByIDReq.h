@@ -26,15 +26,15 @@
 namespace milvus {
 namespace server {
 
-class DeleteEntityByIDRequest : public BaseRequest {
+class DeleteEntityByIDReq : public BaseReq {
  public:
-    static BaseRequestPtr
+    static BaseReqPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            const engine::IDNumbers& entity_ids);
 
  protected:
-    DeleteEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                            const engine::IDNumbers& entity_ids);
+    DeleteEntityByIDReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                        const engine::IDNumbers& entity_ids);
 
     Status
     OnExecute() override;
