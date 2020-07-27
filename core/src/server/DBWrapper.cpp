@@ -59,6 +59,9 @@ DBWrapper::StartService() {
 
     opt.wal_enable_ = config.wal.enable();
 
+    // disable wal for ci devtest
+    opt.wal_enable_ = false;
+
     if (opt.wal_enable_) {
         opt.recovery_error_ignore_ = config.wal.recovery_error_ignore();
         int64_t wal_buffer_size = config.wal.buffer_size();
