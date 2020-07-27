@@ -157,15 +157,11 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
     int64_t count;
     STATUS_CHECK(request_handler_.CountEntities(context_ptr_, collection_name, count));
 
-    IndexParam index_param;
-    STATUS_CHECK(request_handler_.DescribeIndex(context_ptr_, collection_name, index_param));
-
     json_out["collection_name"] = schema.collection_name_;
     json_out["dimension"] = schema.extra_params_[engine::PARAM_COLLECTION_DIMENSION].get<int64_t>();
     json_out["index_file_size"] = schema.extra_params_[engine::PARAM_SEGMENT_SIZE].get<int64_t>();
     json_out["metric_type"] = schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE].get<int64_t>();
-    json_out["index"] = index_param.index_type_;
-    json_out["index_params"] = index_param.extra_params_;
+    json_out["index_params"] = schema.extra_params_[engine::PARAM_INDEX_EXTRA_PARAMS].get<std::string>();
     json_out["count"] = count;
 
     return Status::OK();
@@ -1363,22 +1359,6 @@ WebRequestHandler::CreateIndex(const OString& collection_name, const OString& bo
     }
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK())
-}
-
-StatusDto::ObjectWrapper
-WebRequestHandler::GetIndex(const OString& collection_name, OString& result) {
-    IndexParam param;
-    auto status = request_handler_.DescribeIndex(context_ptr_, collection_name->std_str(), param);
-
-    if (status.ok()) {
-        nlohmann::json json_out;
-        auto index_type = engine::EngineType(param.index_type_);
-        json_out["index_type"] = index_type;
-        json_out["params"] = nlohmann::json::parse(param.extra_params_);
-        result = json_out.dump().c_str();
-    }
-
-    ASSIGN_RETURN_STATUS_DTO(status)
 }
 
 StatusDto::ObjectWrapper

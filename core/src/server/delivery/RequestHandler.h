@@ -57,17 +57,6 @@ class RequestHandler {
     CountEntities(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);
 
     Status
-    CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
-
-    Status
-    DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-              const std::string& field_name, const std::string& index_name);
-
-    Status
-    DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name, IndexParam& param);
-
-    Status
     CreatePartition(const std::shared_ptr<Context>& context, const std::string& collection_name,
                     const std::string& tag);
 
@@ -81,6 +70,14 @@ class RequestHandler {
     Status
     ListPartitions(const std::shared_ptr<Context>& context, const std::string& collection_name,
                    std::vector<std::string>& partitions);
+
+    Status
+    CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
+
+    Status
+    DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+              const std::string& field_name, const std::string& index_name);
 
     Status
     Insert(const std::shared_ptr<Context>& context, const std::string& collection_name,

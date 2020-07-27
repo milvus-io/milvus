@@ -98,16 +98,15 @@ class BaseRequest {
         kGetCollectionStats,
         kCountEntities,
 
-        /* index operations */
-        kCreateIndex = 200,
-        kDropIndex,
-        kDescribeIndex,
-
         /* partition operations */
-        kCreatePartition = 300,
+        kCreatePartition = 200,
         kDropPartition,
         kHasPartition,
         kListPartitions,
+
+        /* index operations */
+        kCreateIndex = 300,
+        kDropIndex,
 
         /* data operations */
         kInsert = 400,

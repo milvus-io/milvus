@@ -306,6 +306,76 @@ DBImpl::CountEntities(const std::string& collection_name, int64_t& row_count) {
 }
 
 Status
+DBImpl::CreatePartition(const std::string& collection_name, const std::string& partition_name) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    snapshot::LSN_TYPE lsn = 0;
+    if (options_.wal_enable_) {
+        // SS TODO
+        /* lsn = wal_mgr_->CreatePartition(collection_name, partition_tag); */
+    }
+
+    snapshot::OperationContext context;
+    context.lsn = lsn;
+    auto op = std::make_shared<snapshot::CreatePartitionOperation>(context, ss);
+
+    snapshot::PartitionContext p_ctx;
+    p_ctx.name = partition_name;
+    snapshot::PartitionPtr partition;
+    STATUS_CHECK(op->CommitNewPartition(p_ctx, partition));
+    return op->Push();
+}
+
+Status
+DBImpl::DropPartition(const std::string& collection_name, const std::string& partition_name) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    // SS TODO: Is below step needed? Or How to implement it?
+    /* mem_mgr_->EraseMemVector(partition_name); */
+
+    snapshot::PartitionContext context;
+    context.name = partition_name;
+    auto op = std::make_shared<snapshot::DropPartitionOperation>(context, ss);
+    return op->Push();
+}
+
+Status
+DBImpl::HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    auto partition_tags = std::move(ss->GetPartitionNames());
+    for (auto& tag : partition_tags) {
+        if (tag == partition_tag) {
+            exist = true;
+            return Status::OK();
+        }
+    }
+
+    exist = false;
+    return Status::OK();
+}
+
+Status
+DBImpl::ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    partition_names = std::move(ss->GetPartitionNames());
+    return Status::OK();
+}
+
+Status
 DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
                     const std::string& field_name, const CollectionIndex& index) {
     CHECK_INITIALIZED;
@@ -317,10 +387,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
     // step 2: compare old index and new index
     CollectionIndex new_index = index;
     CollectionIndex old_index;
-    status = DescribeIndex(collection_name, field_name, old_index);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(GetSnapshotIndex(collection_name, field_name, old_index));
 
     if (utils::IsSameIndex(old_index, new_index)) {
         return Status::OK();  // same index
@@ -395,83 +462,6 @@ DBImpl::DropIndex(const std::string& collection_name) {
 
     std::set<std::string> merge_collection_names = {collection_name};
     StartMergeTask(merge_collection_names, true);
-    return Status::OK();
-}
-
-Status
-DBImpl::DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) {
-    CHECK_INITIALIZED;
-
-    return GetSnapshotIndex(collection_name, field_name, index);
-}
-
-Status
-DBImpl::CreatePartition(const std::string& collection_name, const std::string& partition_name) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    snapshot::LSN_TYPE lsn = 0;
-    if (options_.wal_enable_) {
-        // SS TODO
-        /* lsn = wal_mgr_->CreatePartition(collection_name, partition_tag); */
-    }
-
-    snapshot::OperationContext context;
-    context.lsn = lsn;
-    auto op = std::make_shared<snapshot::CreatePartitionOperation>(context, ss);
-
-    snapshot::PartitionContext p_ctx;
-    p_ctx.name = partition_name;
-    snapshot::PartitionPtr partition;
-    STATUS_CHECK(op->CommitNewPartition(p_ctx, partition));
-    return op->Push();
-}
-
-Status
-DBImpl::DropPartition(const std::string& collection_name, const std::string& partition_name) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    // SS TODO: Is below step needed? Or How to implement it?
-    /* mem_mgr_->EraseMemVector(partition_name); */
-
-    snapshot::PartitionContext context;
-    context.name = partition_name;
-    auto op = std::make_shared<snapshot::DropPartitionOperation>(context, ss);
-    return op->Push();
-}
-
-Status
-DBImpl::HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    auto partition_tags = std::move(ss->GetPartitionNames());
-    for (auto& tag : partition_tags) {
-        if (tag == partition_tag) {
-            exist = true;
-            return Status::OK();
-        }
-    }
-
-    exist = false;
-    return Status::OK();
-}
-
-Status
-DBImpl::ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    partition_names = std::move(ss->GetPartitionNames());
     return Status::OK();
 }
 

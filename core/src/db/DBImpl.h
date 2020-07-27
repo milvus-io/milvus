@@ -64,19 +64,6 @@ class DBImpl : public DB {
     CountEntities(const std::string& collection_name, int64_t& row_count) override;
 
     Status
-    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                const std::string& field_name, const CollectionIndex& index) override;
-
-    Status
-    DropIndex(const std::string& collection_name, const std::string& field_name) override;
-
-    Status
-    DropIndex(const std::string& collection_name) override;
-
-    Status
-    DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) override;
-
-    Status
     CreatePartition(const std::string& collection_name, const std::string& partition_name) override;
 
     Status
@@ -87,6 +74,16 @@ class DBImpl : public DB {
 
     Status
     ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) override;
+
+    Status
+    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
+                const std::string& field_name, const CollectionIndex& index) override;
+
+    Status
+    DropIndex(const std::string& collection_name, const std::string& field_name) override;
+
+    Status
+    DropIndex(const std::string& collection_name) override;
 
     Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) override;

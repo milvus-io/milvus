@@ -22,7 +22,6 @@
 #include "server/delivery/request/CreateIndexReq.h"
 #include "server/delivery/request/CreatePartitionReq.h"
 #include "server/delivery/request/DeleteEntityByIDReq.h"
-#include "server/delivery/request/DescribeIndexReq.h"
 #include "server/delivery/request/DropCollectionReq.h"
 #include "server/delivery/request/DropIndexReq.h"
 #include "server/delivery/request/DropPartitionReq.h"
@@ -100,32 +99,6 @@ RequestHandler::CountEntities(const std::shared_ptr<Context>& context, const std
 }
 
 Status
-RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                            const std::string& field_name, const std::string& index_name,
-                            const milvus::json& json_params) {
-    BaseRequestPtr request_ptr =
-        CreateIndexRequest::Create(context, collection_name, field_name, index_name, json_params);
-    RequestScheduler::ExecRequest(request_ptr);
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                          const std::string& field_name, const std::string& index_name) {
-    BaseRequestPtr request_ptr = DropIndexRequest::Create(context, collection_name, index_name, field_name);
-    RequestScheduler::ExecRequest(request_ptr);
-    return request_ptr->status();
-}
-
-Status
-RequestHandler::DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                              IndexParam& param) {
-    BaseRequestPtr request_ptr = DescribeIndexRequest::Create(context, collection_name, param);
-    RequestScheduler::ExecRequest(request_ptr);
-    return request_ptr->status();
-}
-
-Status
 RequestHandler::CreatePartition(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                 const std::string& tag) {
     BaseRequestPtr request_ptr = CreatePartitionRequest::Create(context, collection_name, tag);
@@ -153,6 +126,24 @@ Status
 RequestHandler::ListPartitions(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                std::vector<std::string>& partitions) {
     BaseRequestPtr request_ptr = ListPartitionsRequest::Create(context, collection_name, partitions);
+    RequestScheduler::ExecRequest(request_ptr);
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                            const std::string& field_name, const std::string& index_name,
+                            const milvus::json& json_params) {
+    BaseRequestPtr request_ptr =
+        CreateIndexRequest::Create(context, collection_name, field_name, index_name, json_params);
+    RequestScheduler::ExecRequest(request_ptr);
+    return request_ptr->status();
+}
+
+Status
+RequestHandler::DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                          const std::string& field_name, const std::string& index_name) {
+    BaseRequestPtr request_ptr = DropIndexRequest::Create(context, collection_name, index_name, field_name);
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }

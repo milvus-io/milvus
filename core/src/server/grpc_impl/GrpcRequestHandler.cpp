@@ -1127,20 +1127,6 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
 ::grpc::Status
 GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
                                   ::milvus::grpc::IndexParam* response) {
-    CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
-
-    IndexParam param;
-    Status status = request_handler_.DescribeIndex(GetContext(context), request->collection_name(), param);
-    response->set_collection_name(param.collection_name_);
-    response->set_index_name(param.index_name_);
-    ::milvus::grpc::KeyValuePair* kv = response->add_extra_params();
-    kv->set_key(EXTRA_PARAM_KEY);
-    kv->set_value(param.extra_params_);
-
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
-    SET_RESPONSE(response->mutable_status(), status, context);
-
     return ::grpc::Status::OK;
 }
 

@@ -41,16 +41,15 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kGetCollectionStats, INFO_REQUEST_GROUP},
         {BaseRequest::kCountEntities, INFO_REQUEST_GROUP},
 
-        /* index operations */
-        {BaseRequest::kCreateIndex, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kDropIndex, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kDescribeIndex, INFO_REQUEST_GROUP},
-
         /* partition operations */
         {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kDropPartition, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kHasPartition, INFO_REQUEST_GROUP},
         {BaseRequest::kListPartitions, INFO_REQUEST_GROUP},
+
+        /* index operations */
+        {BaseRequest::kCreateIndex, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kDropIndex, DDL_DML_REQUEST_GROUP},
 
         /* data operations */
         {BaseRequest::kInsert, DDL_DML_REQUEST_GROUP},

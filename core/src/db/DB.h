@@ -69,19 +69,6 @@ class DB {
     CountEntities(const std::string& collection_name, int64_t& row_count) = 0;
 
     virtual Status
-    CreateIndex(const server::ContextPtr& context, const std::string& collection_id, const std::string& field_name,
-                const CollectionIndex& index) = 0;
-
-    virtual Status
-    DropIndex(const std::string& collection_name, const std::string& field_name) = 0;
-
-    virtual Status
-    DropIndex(const std::string& collection_id) = 0;
-
-    virtual Status
-    DescribeIndex(const std::string& collection_id, const std::string& field_name, CollectionIndex& index) = 0;
-
-    virtual Status
     CreatePartition(const std::string& collection_name, const std::string& partition_name) = 0;
 
     virtual Status
@@ -92,6 +79,16 @@ class DB {
 
     virtual Status
     ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) = 0;
+
+    virtual Status
+    CreateIndex(const server::ContextPtr& context, const std::string& collection_id, const std::string& field_name,
+                const CollectionIndex& index) = 0;
+
+    virtual Status
+    DropIndex(const std::string& collection_name, const std::string& field_name) = 0;
+
+    virtual Status
+    DropIndex(const std::string& collection_id) = 0;
 
     virtual Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) = 0;
