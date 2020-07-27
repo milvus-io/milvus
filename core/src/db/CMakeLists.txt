@@ -51,7 +51,6 @@ set(thirdparty_files
         )
 
 set(engine_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/../main.cpp
         ${cache_files}
         ${db_main_files}
         ${db_attr_files}
