@@ -192,7 +192,7 @@ def gen_unique_str(str_value=None):
 def gen_single_filter_fields():
     fields = []
     for data_type in DataType:
-        if data_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE]:
+        if data_type in [DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE]:
             fields.append({"field": data_type.name, "type": data_type})
     return fields
 
@@ -213,7 +213,6 @@ def gen_single_vector_fields():
 def gen_default_fields():
     default_fields = {
         "fields": [
-            {"field": "int8", "type": DataType.INT8},
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
             {"field": "vector", "type": DataType.FLOAT_VECTOR, "params": {"metric_type": "L2", "dimension": dimension}}
@@ -226,7 +225,6 @@ def gen_default_fields():
 def gen_entities(nb, is_normal=False):
     vectors = gen_vectors(nb, dimension, is_normal)
     entities = [
-        {"field": "int8", "type": DataType.INT8, "values": [1 for i in range(nb)]},
         {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
         {"field": "vector", "type": DataType.FLOAT_VECTOR, "values": vectors}
@@ -237,7 +235,6 @@ def gen_entities(nb, is_normal=False):
 def gen_binary_entities(nb):
     raw_vectors, vectors = gen_binary_vectors(nb, dimension)
     entities = [
-        {"field": "int8", "type": DataType.INT8, "values": [1 for i in range(nb)]},
         {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
         {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "values": vectors}
@@ -248,7 +245,7 @@ def gen_binary_entities(nb):
 def gen_entities_by_fields(fields, nb, dimension):
     entities = []
     for field in fields:
-        if field["type"] in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]:
+        if field["type"] in [DataType.INT32, DataType.INT64]:
             field_value = [1 for i in range(nb)]
         elif field["type"] in [DataType.FLOAT, DataType.DOUBLE]:
             field_value = [3.0 for i in range(nb)]
@@ -295,7 +292,7 @@ def add_field(entities):
     nb = len(entities[0]["values"])
     field = {
         "field": gen_unique_str(), 
-        "type": DataType.INT8, 
+        "type": DataType.INT64, 
         "values": [1 for i in range(nb)]
     }
     entities.append(field)
