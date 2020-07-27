@@ -10,11 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/SearchRequest.h"
-
-#include <memory>
-
-#include <fiu-local.h>
-
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
@@ -22,6 +17,12 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
+#include <fiu-local.h>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 #ifdef ENABLE_CPU_PROFILING
 #include <gperftools/profiler.h>
 #endif
@@ -29,156 +30,122 @@
 namespace milvus {
 namespace server {
 
-SearchRequest::SearchRequest(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, engine::VectorsData& vectors, int64_t topk,
-                             const milvus::json& extra_params, const std::vector<std::string>& partition_list,
-                             const std::vector<std::string>& file_id_list, TopKQueryResult& result)
-    : BaseRequest(context, BaseRequest::kSearch),
-      collection_name_(collection_name),
-      vectors_data_(vectors),
-      topk_(topk),
-      extra_params_(extra_params),
-      partition_list_(partition_list),
-      file_id_list_(file_id_list),
-      result_(result) {
+SearchRequest::SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                             const milvus::json& json_params, engine::QueryResultPtr& result)
+    : BaseRequest(context, BaseRequest::kSearch), query_ptr_(query_ptr), json_params_(json_params), result_(result) {
 }
 
 BaseRequestPtr
-SearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                      engine::VectorsData& vectors, int64_t topk, const milvus::json& extra_params,
-                      const std::vector<std::string>& partition_list, const std::vector<std::string>& file_id_list,
-                      TopKQueryResult& result) {
-    return std::shared_ptr<BaseRequest>(
-        new SearchRequest(context, collection_name, vectors, topk, extra_params, partition_list, file_id_list, result));
-}
-
-Status
-SearchRequest::OnPreExecute() {
-    LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "search", 0) << "Search pre-execute. Check search parameters";
-    std::string hdr = "SearchRequest pre-execute(collection=" + collection_name_ + ")";
-    TimeRecorderAuto rc(LogOut("[%s][%ld] %s", "search", 0, hdr.c_str()));
-
-    milvus::server::ContextChild tracer_pre(context_, "Pre Query");
-    // step 1: check collection name
-    auto status = ValidateCollectionName(collection_name_);
-    if (!status.ok()) {
-        LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
-        return status;
-    }
-
-    // step 2: check search topk
-    status = ValidateSearchTopk(topk_);
-    if (!status.ok()) {
-        LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
-        return status;
-    }
-
-    // step 3: check partition tags
-    status = ValidatePartitionTags(partition_list_);
-    fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-    if (!status.ok()) {
-        LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
-        return status;
-    }
-
-    return Status::OK();
+SearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                      const milvus::json& json_params, engine::QueryResultPtr& result) {
+    return std::shared_ptr<BaseRequest>(new SearchRequest(context, query_ptr, json_params, result));
 }
 
 Status
 SearchRequest::OnExecute() {
-    LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "search", 0) << "Search execute.";
     try {
-        uint64_t vector_count = vectors_data_.vector_count_;
         fiu_do_on("SearchRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "SearchRequest execute(collection=" + collection_name_ +
-                          ", nq=" + std::to_string(vector_count) + ", k=" + std::to_string(topk_) + ")";
-        TimeRecorderAuto rc(LogOut("[%s][%ld] %s", "search", 0, hdr.c_str()));
+        std::string hdr = "SearchRequest(table=" + query_ptr_->collection_id;
 
-        // step 4: check collection existence
-        // only process root collection, ignore partition collection
-        collection_schema_.collection_id_ = collection_name_;
-        auto status = DBWrapper::DB()->DescribeCollection(collection_schema_);
+        TimeRecorder rc(hdr);
 
-        fiu_do_on("SearchRequest.OnExecute.describe_collection_fail",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        // step 1: check table name
+        auto status = ValidateCollectionName(query_ptr_->collection_id);
+        if (!status.ok()) {
+            return status;
+        }
+
+        // step 2: check table existence
+        // only process root table, ignore partition table
+        engine::snapshot::CollectionPtr collection;
+        engine::snapshot::CollectionMappings fields_schema;
+        status = DBWrapper::DB()->DescribeCollection(query_ptr_->collection_id, collection, fields_schema);
+        fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Collection %s not found: %s", "search", 0,
-                                            collection_name_.c_str(), status.message().c_str());
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(query_ptr_->collection_id));
             } else {
-                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Error occurred when describing collection %s: %s", "search", 0,
-                                            collection_name_.c_str(), status.message().c_str());
                 return status;
             }
-        } else {
-            if (!collection_schema_.owner_collection_.empty()) {
-                LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0,
-                                            CollectionNotExistMsg(collection_name_).c_str());
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
+        }
+
+        int64_t dimension = collection->GetParams()[engine::DIMENSION].get<int64_t>();
+
+        // step 3: check partition tags
+        status = ValidatePartitionTags(query_ptr_->partitions);
+        fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        if (!status.ok()) {
+            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
+            return status;
+        }
+
+        // step 4: Get field info
+        std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
+        for (auto& schema : fields_schema) {
+            field_types.insert(
+                std::make_pair(schema.first->GetName(), (engine::meta::hybrid::DataType)schema.first->GetFtype()));
+        }
+
+        // step 5: check field names
+        if (json_params_.contains("fields")) {
+            if (json_params_["fields"].is_array()) {
+                for (auto& name : json_params_["fields"]) {
+                    status = ValidateFieldName(name.get<std::string>());
+                    if (!status.ok()) {
+                        return status;
+                    }
+                    bool find_field_name = false;
+                    for (const auto& schema : field_types) {
+                        if (name.get<std::string>() == schema.first) {
+                            find_field_name = true;
+                            break;
+                        }
+                    }
+                    if (not find_field_name) {
+                        return Status{SERVER_INVALID_FIELD_NAME, "Field: " + name.get<std::string>() + " not exist"};
+                    }
+                    query_ptr_->field_names.emplace_back(name.get<std::string>());
+                }
             }
         }
 
-        // step 5: check search parameters
-        status = ValidateSearchParams(extra_params_, collection_schema_, topk_);
-        if (!status.ok()) {
-            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Invalid search params: %s", "search", 0, status.message().c_str());
-            return status;
-        }
-
-        // step 6: check vector data according to metric type
-        status = ValidateVectorData(vectors_data_, collection_schema_);
-        if (!status.ok()) {
-            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Invalid vector data: %s", "search", 0, status.message().c_str());
-            return status;
-        }
-
-        rc.RecordSection("check validation");
-
-        // step 7: search vectors
-#ifdef ENABLE_CPU_PROFILING
-        std::string fname = "/tmp/search_" + CommonUtil::GetCurrentTimeStr() + ".profiling";
-        ProfilerStart(fname.c_str());
-#endif
-
-        engine::ResultIds result_ids;
-        engine::ResultDistances result_distances;
-
-        if (file_id_list_.empty()) {
-            status = DBWrapper::DB()->Query(context_, collection_name_, partition_list_, (size_t)topk_, extra_params_,
-                                            vectors_data_, result_ids, result_distances);
-        } else {
-            status = DBWrapper::DB()->QueryByFileID(context_, file_id_list_, (size_t)topk_, extra_params_,
-                                                    vectors_data_, result_ids, result_distances);
-        }
-
-        rc.RecordSection("query vectors from engine");
+        result_->row_num_ = 0;
+        status = DBWrapper::DB()->Query(context_, query_ptr_, result_);
 
 #ifdef ENABLE_CPU_PROFILING
         ProfilerStop();
 #endif
+
         fiu_do_on("SearchRequest.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
-            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Query fail: %s", "search", 0, status.message().c_str());
             return status;
         }
-        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_ids.clear());
-        if (result_ids.empty()) {
-            return Status::OK();  // empty collection
+        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_->result_ids_.clear());
+        if (result_->result_ids_.empty()) {
+            auto vector_query = query_ptr_->vectors.begin()->second;
+            if (!vector_query->query_vector.binary_data.empty()) {
+                result_->row_num_ = vector_query->query_vector.binary_data.size() * 8 / dimension;
+            } else if (!vector_query->query_vector.float_data.empty()) {
+                result_->row_num_ = vector_query->query_vector.float_data.size() / dimension;
+            }
+            return Status::OK();  // empty table
         }
 
-        // step 8: construct result array
-        milvus::server::ContextChild tracer(context_, "Constructing result");
-        result_.row_num_ = vectors_data_.vector_count_;
-        result_.id_list_.swap(result_ids);
-        result_.distance_list_.swap(result_distances);
-        rc.RecordSection("construct result");
+        auto post_query_ctx = context_->Child("Constructing result");
+
+        // step 7: construct result array
+        post_query_ctx->GetTraceContext()->GetSpan()->Finish();
+
+        // step 8: print time cost percent
+        rc.RecordSection("construct result and send");
+        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
-        LOG_SERVER_ERROR_ << LogOut("[%s][%ld] Encounter exception: %s", "search", 0, ex.what());
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
     return Status::OK();
 }
+
 }  // namespace server
 }  // namespace milvus

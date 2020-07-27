@@ -56,14 +56,14 @@ CreatePartitionRequest::OnExecute() {
 
         // only process root collection, ignore partition collection
         bool exist = false;
-        status = DBWrapper::SSDB()->HasCollection(collection_name_, exist);
+        status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
             return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
 
         // check partition total count
         std::vector<std::string> partition_names;
-        status = DBWrapper::SSDB()->ShowPartitions(collection_name_, partition_names);
+        status = DBWrapper::DB()->ShowPartitions(collection_name_, partition_names);
         if (partition_names.size() >= MAX_PARTITION_LIMIT) {
             std::stringstream err_ss;
             err_ss << "The number of partitions exceeds the upper limit (" << MAX_PARTITION_LIMIT << ")";
@@ -73,7 +73,7 @@ CreatePartitionRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 2: create partition
-        status = DBWrapper::SSDB()->CreatePartition(collection_name_, tag_);
+        status = DBWrapper::DB()->CreatePartition(collection_name_, tag_);
         fiu_do_on("CreatePartitionRequest.OnExecute.create_partition_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreatePartitionRequest.OnExecute.throw_std_exception", throw std::exception());

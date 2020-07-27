@@ -134,8 +134,6 @@ set(storage_files
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/default codecs_default_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/codecs/snapshot codecs_snapshot_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
 
@@ -151,8 +149,8 @@ set(common_files
         )
 
 set(log_files
-        ${MILVUS_ENGINE_SRC}/utils/Log.cpp
-        ${MILVUS_ENGINE_SRC}/utils/LogUtil.cpp
+        ${MILVUS_ENGINE_SRC}/log/Log.cpp
+        ${MILVUS_ENGINE_SRC}/log/LogMgr.cpp
         ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         )
 
@@ -220,10 +218,8 @@ if (MILVUS_GPU_VERSION)
             )
 endif ()
 
-#add_subdirectory(db)
-add_subdirectory(ssdb)
+add_subdirectory(db)
 #add_subdirectory(metrics)
 #add_subdirectory(scheduler)
-#add_subdirectory(server)
 #add_subdirectory(thirdparty)
 #add_subdirectory(storage)

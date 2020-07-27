@@ -28,11 +28,25 @@ namespace codec {
 
 class VectorCompressFormat {
  public:
-    virtual void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, knowhere::BinaryPtr& compress) = 0;
+    VectorCompressFormat() = default;
 
-    virtual void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location, const knowhere::BinaryPtr& compress) = 0;
+    std::string
+    FilePostfix();
+
+    void
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinaryPtr& compress);
+
+    void
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const knowhere::BinaryPtr& compress);
+
+    // No copy and move
+    VectorCompressFormat(const VectorCompressFormat&) = delete;
+    VectorCompressFormat(VectorCompressFormat&&) = delete;
+
+    VectorCompressFormat&
+    operator=(const VectorCompressFormat&) = delete;
+    VectorCompressFormat&
+    operator=(VectorCompressFormat&&) = delete;
 };
 
 using VectorCompressFormatPtr = std::shared_ptr<VectorCompressFormat>;

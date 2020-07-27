@@ -95,12 +95,12 @@ class WebRequestHandler {
     GetCollectionStat(const std::string& collection_name, nlohmann::json& json_out);
 
     Status
-    GetSegmentVectors(const std::string& collection_name, const std::string& segment_name, int64_t page_size,
-                      int64_t offset, nlohmann::json& json_out);
+    GetSegmentVectors(const std::string& collection_name, int64_t segment_id, int64_t page_size, int64_t offset,
+                      nlohmann::json& json_out);
 
     Status
-    GetSegmentIds(const std::string& collection_name, const std::string& segment_name, int64_t page_size,
-                  int64_t offset, nlohmann::json& json_out);
+    GetSegmentIds(const std::string& collection_name, int64_t segment_id, int64_t page_size, int64_t offset,
+                  nlohmann::json& json_out);
 
     Status
     CommandLine(const std::string& cmd, std::string& reply);
@@ -124,16 +124,13 @@ class WebRequestHandler {
     SetConfig(const nlohmann::json& json, std::string& result_str);
 
     Status
-    Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
-
-    Status
     ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& boolean_query);
 
     Status
     ProcessBoolQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query);
 
     Status
-    HybridSearch(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
+    Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
 
     Status
     DeleteByIDs(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
@@ -217,9 +214,6 @@ class WebRequestHandler {
      *
      * Vector
      */
-    StatusDto::ObjectWrapper
-    Insert(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
-
     StatusDto::ObjectWrapper
     InsertEntity(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
 

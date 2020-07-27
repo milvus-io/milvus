@@ -25,7 +25,6 @@
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
-#include "utils/LogUtil.h"
 
 namespace milvus {
 namespace server {
@@ -83,9 +82,8 @@ RequestMap(BaseRequest::RequestType request_type) {
         {BaseRequest::kInsert, "Insert"},
         {BaseRequest::kCreateIndex, "CreateIndex"},
         {BaseRequest::kSearch, "Search"},
-        {BaseRequest::kSearchByID, "SearchByID"},
-        {BaseRequest::kHybridSearch, "HybridSearch"},
         {BaseRequest::kFlush, "Flush"},
+        {BaseRequest::kGetEntityByID, "GetEntityByID"},
         {BaseRequest::kCompact, "Compact"},
     };
 
@@ -670,8 +668,8 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
         }
     }
 
-    Status status = request_handler_.CreateHybridCollection(GetContext(context), request->collection_name(),
-                                                            field_types, field_index_params, field_params, json_params);
+    Status status = request_handler_.CreateCollection(GetContext(context), request->collection_name(), field_types,
+                                                      field_index_params, field_params, json_params);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context)
@@ -757,32 +755,79 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     Status status = request_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids,
                                                    field_names, field_mappings, data_chunk);
 
-    std::vector<uint8_t> id_array = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
-
     for (const auto& it : field_mappings) {
+        auto type = it.first->GetFtype();
         std::string name = it.first->GetName();
-        uint64_t type = it.first->GetFtype();
         std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
-        if (type == engine::FieldType::VECTOR_BINARY) {
-            engine::VectorsData vectors_data;
-            memcpy(vectors_data.binary_data_.data(), data.data(), data.size());
-            memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
-            vectors.emplace_back(vectors_data);
-        } else if (type == engine::FieldType::VECTOR_FLOAT) {
-            engine::VectorsData vectors_data;
-            memcpy(vectors_data.float_data_.data(), data.data(), data.size());
-            memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
-            vectors.emplace_back(vectors_data);
+
+        if (type == engine::meta::hybrid::DataType::UID) {
+            response->mutable_ids()->Resize(data.size(), 0);
+            memcpy(response->mutable_ids()->mutable_data(), data.data(), data.size() * sizeof(uint64_t));
+            continue;
+        }
+
+        auto field_value = response->add_fields();
+        auto vector_record = field_value->mutable_vector_record();
+
+        field_value->set_field_name(name);
+        field_value->set_type(static_cast<milvus::grpc::DataType>(type));
+        // general data
+        if (type == engine::meta::hybrid::DataType::VECTOR_BINARY) {
+            // add binary vector data
+            auto vector_row_record = vector_record->add_records();
+
+            std::vector<int8_t> binary_vector;
+            binary_vector.resize(data.size());
+            memcpy(binary_vector.data(), data.data(), data.size());
+            vector_row_record->mutable_binary_data()->resize(binary_vector.size());
+            memcpy(vector_row_record->mutable_binary_data()->data(), binary_vector.data(), binary_vector.size());
+
+            continue;
+        } else if (type == engine::meta::hybrid::DataType::VECTOR_FLOAT) {
+            // add float vector data
+            auto vector_row_record = vector_record->add_records();
+            std::vector<float> float_vector;
+            float_vector.resize(data.size() * sizeof(int8_t) / sizeof(float));
+            memcpy(float_vector.data(), data.data(), data.size());
+            vector_row_record->mutable_float_data()->Resize(float_vector.size(), 0.0);
+            memcpy(vector_row_record->mutable_float_data()->mutable_data(), float_vector.data(),
+                   float_vector.size() * sizeof(float));
+
+            continue;
         } else {
-            engine::AttrsData attrs_data;
-            attrs_data.attr_type_[name] = static_cast<engine::meta::hybrid::DataType>(type);
-            attrs_data.attr_data_[name] = data;
-            memcpy(attrs_data.id_array_.data(), id_array.data(), id_array.size());
-            attrs.emplace_back(attrs_data);
+            // add attribute data
+            auto attr_record = field_value->mutable_attr_record();
+            if (type == engine::meta::hybrid::DataType::INT32) {
+                // add int32 data
+                std::vector<int32_t> int32_value;
+                int32_value.resize(data.size() * sizeof(int8_t) / sizeof(int32_t));
+                memcpy(int32_value.data(), data.data(), data.size());
+                attr_record->mutable_int32_value()->Resize(int32_value.size(), 0);
+                memcpy(attr_record->mutable_int32_value()->mutable_data(), int32_value.data(), int32_value.size());
+            } else if (type == engine::meta::hybrid::DataType::INT64) {
+                // add int64 data
+                std::vector<int64_t> int64_value;
+                int64_value.resize(data.size() * sizeof(int8_t) / sizeof(int64_t));
+                memcpy(int64_value.data(), data.data(), data.size());
+                attr_record->mutable_int64_value()->Resize(int64_value.size(), 0);
+                memcpy(attr_record->mutable_int64_value()->mutable_data(), int64_value.data(), int64_value.size());
+            } else if (type == engine::meta::hybrid::DataType::DOUBLE) {
+                // add double data
+                std::vector<double> double_value;
+                double_value.resize(data.size() * sizeof(int8_t) / sizeof(double));
+                memcpy(double_value.data(), data.data(), data.size());
+                attr_record->mutable_double_value()->Resize(double_value.size(), 0.0);
+                memcpy(attr_record->mutable_double_value()->mutable_data(), double_value.data(), double_value.size());
+            } else if (type == engine::meta::hybrid::DataType::FLOAT) {
+                // add float data
+                std::vector<float> float_value;
+                float_value.resize(data.size() * sizeof(int8_t) / sizeof(float));
+                memcpy(float_value.data(), data.data(), data.size());
+                attr_record->mutable_float_value()->Resize(float_value.size(), 0.0);
+                memcpy(attr_record->mutable_float_value()->mutable_data(), float_value.data(), float_value.size());
+            }
         }
     }
-
-    ConstructEntityResults(attrs, vectors, field_names, response);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -797,8 +842,8 @@ GrpcRequestHandler::GetEntityIDs(::grpc::ServerContext* context, const ::milvus:
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
     std::vector<int64_t> vector_ids;
-    Status status = request_handler_.GetVectorIDs(GetContext(context), request->collection_name(),
-                                                  request->segment_name(), vector_ids);
+    Status status = request_handler_.GetEntityIDs(GetContext(context), request->collection_name(),
+                                                  request->segment_id(), vector_ids);
 
     if (!vector_ids.empty()) {
         response->mutable_entity_id_array()->Resize(vector_ids.size(), -1);
@@ -907,8 +952,8 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
     CHECK_NULLPTR_RETURN(request);
     try {
         milvus::server::HybridCollectionSchema collection_schema;
-        Status status = request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(),
-                                                                  collection_schema);
+        Status status =
+            request_handler_.DescribeCollection(GetContext(context), request->collection_name(), collection_schema);
         if (!status.ok()) {
             SET_RESPONSE(response->mutable_status(), status, context);
             return ::grpc::Status::OK;
@@ -1058,25 +1103,6 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
     Status status = request_handler_.PreloadCollection(GetContext(context), request->collection_name());
-
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
-    SET_RESPONSE(response, status, context);
-
-    return ::grpc::Status::OK;
-}
-
-::grpc::Status
-GrpcRequestHandler::ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
-                                   ::milvus::grpc::Status* response) {
-    CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
-
-    std::vector<std::string> file_ids;
-    for (size_t i = 0; i < request->segment_id_array_size(); i++) {
-        file_ids.push_back(request->segment_id_array(i));
-    }
-
-    Status status = request_handler_.ReLoadSegments(GetContext(context), request->collection_name(), file_ids);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
@@ -1354,7 +1380,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
     std::vector<std::string> field_names;
-    status = request_handler_.HybridSearch(GetContext(context), query_ptr, json_params, result);
+    status = request_handler_.Search(GetContext(context), query_ptr, json_params, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
@@ -1655,8 +1681,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     Status status;
 
     HybridCollectionSchema collection_schema;
-    status =
-        request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(), collection_schema);
+    status = request_handler_.DescribeCollection(GetContext(context), request->collection_name(), collection_schema);
 
     field_type_ = collection_schema.field_types_;
 
@@ -1713,7 +1738,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     }
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-    status = request_handler_.HybridSearch(GetContext(context), query_ptr, json_params, result);
+    status = request_handler_.Search(GetContext(context), query_ptr, json_params, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
