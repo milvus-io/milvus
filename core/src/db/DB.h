@@ -121,7 +121,6 @@ class DB {
 
     virtual Status
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold = 0.0) = 0;
-
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;

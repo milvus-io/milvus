@@ -120,7 +120,6 @@ class BaseRequest {
         kLoadCollection = 500,
         kFlush,
         kCompact,
-
     };
 
  protected:
