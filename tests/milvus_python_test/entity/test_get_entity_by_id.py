@@ -307,7 +307,7 @@ class TestGetBase:
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
-        fields = ["int8"]
+        fields = ["int64"]
         res = connect.get_entity_by_id(collection, get_ids, fields = fields)
         # assert fields
 
@@ -321,7 +321,7 @@ class TestGetBase:
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
-        fields = ["int8", "int64", "float", "vector"]
+        fields = ["int64", "float", "vector"]
         res = connect.get_entity_by_id(collection, get_ids, fields = fields)
         # assert fields
 
@@ -349,7 +349,7 @@ class TestGetBase:
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
-        fields = ["int1288", "int8"]
+        fields = ["int1288"]
         with pytest.raises(Exception) as e:
             res = connect.get_entity_by_id(collection, get_ids, fields = fields)
 

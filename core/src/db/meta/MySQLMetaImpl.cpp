@@ -2327,6 +2327,7 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hold
 }
 
 // TODO(myh): Support swap to cloud storage
+// TODO(yhz): May use archive_conf_ in MySqlEngine
 Status
 MySQLMetaImpl::Archive() {
     auto& criterias = options_.archive_conf_.GetCriterias();
