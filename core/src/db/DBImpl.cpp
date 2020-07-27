@@ -229,22 +229,6 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 }
 
 Status
-DBImpl::DescribeCollection(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                           snapshot::CollectionMappings& fields_schema) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    collection = ss->GetCollection();
-    auto& fields = ss->GetResources<snapshot::Field>();
-    for (auto& kv : fields) {
-        fields_schema[kv.second.Get()] = ss->GetFieldElementsByField(kv.second->GetName());
-    }
-    return Status::OK();
-}
-
-Status
 DBImpl::DropCollection(const std::string& name) {
     CHECK_INITIALIZED;
 
@@ -276,7 +260,7 @@ DBImpl::HasCollection(const std::string& collection_name, bool& has_or_not) {
 }
 
 Status
-DBImpl::AllCollections(std::vector<std::string>& names) {
+DBImpl::ListCollections(std::vector<std::string>& names) {
     CHECK_INITIALIZED;
 
     names.clear();
@@ -284,21 +268,34 @@ DBImpl::AllCollections(std::vector<std::string>& names) {
 }
 
 Status
-DBImpl::GetCollectionInfo(const std::string& collection_name, std::string& collection_info) {
+DBImpl::GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
+                          snapshot::CollectionMappings& fields_schema) {
     CHECK_INITIALIZED;
 
-    nlohmann::json json;
-    auto status = GetSnapshotInfo(collection_name, json);
-    if (!status.ok()) {
-        return status;
-    }
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    collection_info = json.dump();
+    collection = ss->GetCollection();
+    auto& fields = ss->GetResources<snapshot::Field>();
+    for (auto& kv : fields) {
+        fields_schema[kv.second.Get()] = ss->GetFieldElementsByField(kv.second->GetName());
+    }
     return Status::OK();
 }
 
 Status
-DBImpl::GetCollectionRowCount(const std::string& collection_name, uint64_t& row_count) {
+DBImpl::GetCollectionStats(const std::string& collection_name, std::string& collection_stats) {
+    CHECK_INITIALIZED;
+
+    nlohmann::json json;
+    STATUS_CHECK(GetSnapshotInfo(collection_name, json));
+
+    collection_stats = json.dump();
+    return Status::OK();
+}
+
+Status
+DBImpl::CountEntities(const std::string& collection_name, int64_t& row_count) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
@@ -306,20 +303,6 @@ DBImpl::GetCollectionRowCount(const std::string& collection_name, uint64_t& row_
 
     row_count = ss->GetCollectionCommit()->GetRowCount();
     return Status::OK();
-}
-
-Status
-DBImpl::LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
-                       const std::vector<std::string>& field_names, bool force) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    auto handler = std::make_shared<LoadVectorFieldHandler>(context, ss);
-    handler->Iterate();
-
-    return handler->GetStatus();
 }
 
 Status
@@ -363,17 +346,6 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
 }
 
 Status
-DBImpl::ShowPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    partition_names = std::move(ss->GetPartitionNames());
-    return Status::OK();
-}
-
-Status
 DBImpl::HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) {
     CHECK_INITIALIZED;
 
@@ -393,8 +365,108 @@ DBImpl::HasPartition(const std::string& collection_name, const std::string& part
 }
 
 Status
-DBImpl::InsertEntities(const std::string& collection_name, const std::string& partition_name,
-                       DataChunkPtr& data_chunk) {
+DBImpl::ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    partition_names = std::move(ss->GetPartitionNames());
+    return Status::OK();
+}
+
+Status
+DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
+                    const std::string& field_name, const CollectionIndex& index) {
+    CHECK_INITIALIZED;
+
+    // step 1: wait merge file thread finished to avoid duplicate data bug
+    auto status = Flush();
+    WaitMergeFileFinish();  // let merge file thread finish
+
+    // step 2: compare old index and new index
+    CollectionIndex new_index = index;
+    CollectionIndex old_index;
+    STATUS_CHECK(GetSnapshotIndex(collection_name, field_name, old_index));
+
+    if (utils::IsSameIndex(old_index, new_index)) {
+        return Status::OK();  // same index
+    }
+
+    // step 3: drop old index
+    DropIndex(collection_name);
+    WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
+
+    // step 4: create field element for index
+    status = SetSnapshotIndex(collection_name, field_name, new_index);
+    if (!status.ok()) {
+        return status;
+    }
+
+    // step 5: start background build index thread
+    std::vector<std::string> collection_names = {collection_name};
+    WaitBuildIndexFinish();
+    StartBuildIndexTask(collection_names);
+
+    // step 6: iterate segments need to be build index, wait until all segments are built
+    while (true) {
+        SnapshotVisitor ss_visitor(collection_name);
+        snapshot::IDS_TYPE segment_ids;
+        ss_visitor.SegmentsToIndex(field_name, segment_ids);
+        if (segment_ids.empty()) {
+            break;
+        }
+
+        index_req_swn_.Wait_For(std::chrono::seconds(1));
+
+        // client break the connection, no need to block, check every 1 second
+        if (context && context->IsConnectionBroken()) {
+            LOG_ENGINE_DEBUG_ << "Client connection broken, build index in background";
+            break;  // just break, not return, continue to update partitions files to to_index
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+DBImpl::DropIndex(const std::string& collection_name, const std::string& field_name) {
+    CHECK_INITIALIZED;
+
+    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
+
+    STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
+
+    std::set<std::string> merge_collection_names = {collection_name};
+    StartMergeTask(merge_collection_names, true);
+    return Status::OK();
+}
+
+Status
+DBImpl::DropIndex(const std::string& collection_name) {
+    CHECK_INITIALIZED;
+
+    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
+
+    std::vector<std::string> field_names;
+    {
+        snapshot::ScopedSnapshotT ss;
+        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+        field_names = ss->GetFieldNames();
+    }
+
+    snapshot::OperationContext context;
+    for (auto& field_name : field_names) {
+        STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
+    }
+
+    std::set<std::string> merge_collection_names = {collection_name};
+    StartMergeTask(merge_collection_names, true);
+    return Status::OK();
+}
+
+Status
+DBImpl::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) {
     CHECK_INITIALIZED;
 
     if (data_chunk == nullptr) {
@@ -421,17 +493,17 @@ DBImpl::InsertEntities(const std::string& collection_name, const std::string& pa
 
     if (options_.wal_enable_) {
         return Status(SERVER_NOT_IMPLEMENT, "Wal not implemented");
-        //        auto vector_it = entity.vector_data_.begin();
-        //        if (!vector_it->second.binary_data_.empty()) {
-        //            wal_mgr_->InsertEntities(collection_name, partition_name, entity.id_array_,
-        //            vector_it->second.binary_data_,
-        //                                     attr_nbytes, attr_data);
-        //        } else if (!vector_it->second.float_data_.empty()) {
-        //            wal_mgr_->InsertEntities(collection_name, partition_name, entity.id_array_,
-        //            vector_it->second.float_data_,
-        //                                     attr_nbytes, attr_data);
-        //        }
-        //        swn_wal_.Notify();
+        //  auto vector_it = entity.vector_data_.begin();
+        //  if (!vector_it->second.binary_data_.empty()) {
+        //      wal_mgr_->InsertEntities(collection_name, partition_name, entity.id_array_,
+        //      vector_it->second.binary_data_,
+        //                               attr_nbytes, attr_data);
+        //  } else if (!vector_it->second.float_data_.empty()) {
+        //      wal_mgr_->InsertEntities(collection_name, partition_name, entity.id_array_,
+        //      vector_it->second.float_data_,
+        //                               attr_nbytes, attr_data);
+        //  }
+        //  swn_wal_.Notify();
     } else {
         // insert entities: collection_name is field id
         wal::MXLogRecord record;
@@ -449,14 +521,31 @@ DBImpl::InsertEntities(const std::string& collection_name, const std::string& pa
 }
 
 Status
-DBImpl::DeleteEntities(const std::string& collection_name, engine::IDNumbers entity_ids) {
+DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
+                      const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    std::string dir_root = options_.meta_.path_;
+    auto handler = std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, dir_root, id_array, field_names);
+    handler->Iterate();
+    STATUS_CHECK(handler->GetStatus());
+
+    data_chunk = handler->data_chunk_;
+    return Status::OK();
+}
+
+Status
+DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers entity_ids) {
     CHECK_INITIALIZED;
 
     Status status;
     if (options_.wal_enable_) {
         return Status(SERVER_NOT_IMPLEMENT, "Wal not implemented");
-        //        wal_mgr_->DeleteById(collection_name, entity_ids);
-        //        swn_wal_.Notify();
+        //  wal_mgr_->DeleteById(collection_name, entity_ids);
+        //  swn_wal_.Notify();
     } else {
         wal::MXLogRecord record;
         record.lsn = 0;  // need to get from meta ?
@@ -469,6 +558,136 @@ DBImpl::DeleteEntities(const std::string& collection_name, engine::IDNumbers ent
     }
 
     return status;
+}
+
+Status
+DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) {
+    CHECK_INITIALIZED;
+
+    TimeRecorder rc("SSDBImpl::Query");
+
+    scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr);
+
+    /* put search job to scheduler and wait job finish */
+    scheduler::JobMgrInst::GetInstance()->Put(job);
+    job->WaitFinish();
+
+    if (!job->status().ok()) {
+        return job->status();
+    }
+
+    //    snapshot::ScopedSnapshotT ss;
+    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+    //
+    //    /* collect all valid segment */
+    //    std::vector<SegmentVisitor::Ptr> segment_visitors;
+    //    auto exec = [&] (const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
+    //        auto p_id = segment->GetPartitionId();
+    //        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
+    //        auto& p_name = p_ptr->GetName();
+    //
+    //        /* check partition match pattern */
+    //        bool match = false;
+    //        if (partition_patterns.empty()) {
+    //            match = true;
+    //        } else {
+    //            for (auto &pattern : partition_patterns) {
+    //                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
+    //                    match = true;
+    //                    break;
+    //                }
+    //            }
+    //        }
+    //
+    //        if (match) {
+    //            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
+    //            if (!visitor) {
+    //                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
+    //            }
+    //            segment_visitors.push_back(visitor);
+    //        }
+    //        return Status::OK();
+    //    };
+    //
+    //    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
+    //    segment_iter->Iterate();
+    //    STATUS_CHECK(segment_iter->GetStatus());
+    //
+    //    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
+    //
+    //    VectorsData vectors;
+    //    scheduler::SSSearchJobPtr job =
+    //        std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
+    //    for (auto& sv : segment_visitors) {
+    //        job->AddSegmentVisitor(sv);
+    //    }
+    //
+    //    // step 2: put search job to scheduler and wait result
+    //    scheduler::JobMgrInst::GetInstance()->Put(job);
+    //    job->WaitResult();
+    //
+    //    if (!job->GetStatus().ok()) {
+    //        return job->GetStatus();
+    //    }
+    //
+    //    // step 3: construct results
+    //    result.row_num_ = job->vector_count();
+    //    result.result_ids_ = job->GetResultIds();
+    //    result.result_distances_ = job->GetResultDistances();
+
+    // step 4: get entities by result ids
+    // STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));
+
+    // step 5: filter entities by field names
+    //    std::vector<engine::AttrsData> filter_attrs;
+    //    for (auto attr : result.attrs_) {
+    //        AttrsData attrs_data;
+    //        attrs_data.attr_type_ = attr.attr_type_;
+    //        attrs_data.attr_count_ = attr.attr_count_;
+    //        attrs_data.id_array_ = attr.id_array_;
+    //        for (auto& name : field_names) {
+    //            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
+    //                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
+    //            }
+    //        }
+    //        filter_attrs.emplace_back(attrs_data);
+    //    }
+
+    rc.ElapseFromBegin("Engine query totally cost");
+
+    // tracer.Context()->GetTraceContext()->GetSpan()->Finish();
+
+    return Status::OK();
+}
+
+Status
+DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    auto read_visitor = engine::SegmentVisitor::Build(ss, segment_id);
+    segment::SegmentReaderPtr segment_reader =
+        std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
+
+    STATUS_CHECK(segment_reader->LoadUids(entity_ids));
+
+    return Status::OK();
+}
+
+Status
+DBImpl::LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
+                       const std::vector<std::string>& field_names, bool force) {
+    CHECK_INITIALIZED;
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    auto handler = std::make_shared<LoadVectorFieldHandler>(context, ss);
+    handler->Iterate();
+
+    return handler->GetStatus();
 }
 
 Status
@@ -612,239 +831,6 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
     }
 
     return status;
-}
-
-Status
-DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                      const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    std::string dir_root = options_.meta_.path_;
-    auto handler = std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, dir_root, id_array, field_names);
-    handler->Iterate();
-    STATUS_CHECK(handler->GetStatus());
-
-    data_chunk = handler->data_chunk_;
-    return Status::OK();
-}
-
-Status
-DBImpl::GetEntityIDs(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) {
-    CHECK_INITIALIZED;
-
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-
-    auto read_visitor = engine::SegmentVisitor::Build(ss, segment_id);
-    segment::SegmentReaderPtr segment_reader =
-        std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
-
-    STATUS_CHECK(segment_reader->LoadUids(entity_ids));
-
-    return Status::OK();
-}
-
-Status
-DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                    const std::string& field_name, const CollectionIndex& index) {
-    CHECK_INITIALIZED;
-
-    // step 1: wait merge file thread finished to avoid duplicate data bug
-    auto status = Flush();
-    WaitMergeFileFinish();  // let merge file thread finish
-
-    // step 2: compare old index and new index
-    CollectionIndex new_index = index;
-    CollectionIndex old_index;
-    status = DescribeIndex(collection_name, field_name, old_index);
-    if (!status.ok()) {
-        return status;
-    }
-
-    if (utils::IsSameIndex(old_index, new_index)) {
-        return Status::OK();  // same index
-    }
-
-    // step 3: drop old index
-    DropIndex(collection_name);
-    WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
-
-    // step 4: create field element for index
-    status = SetSnapshotIndex(collection_name, field_name, new_index);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // step 5: start background build index thread
-    std::vector<std::string> collection_names = {collection_name};
-    WaitBuildIndexFinish();
-    StartBuildIndexTask(collection_names);
-
-    // step 6: iterate segments need to be build index, wait until all segments are built
-    while (true) {
-        SnapshotVisitor ss_visitor(collection_name);
-        snapshot::IDS_TYPE segment_ids;
-        ss_visitor.SegmentsToIndex(field_name, segment_ids);
-        if (segment_ids.empty()) {
-            break;
-        }
-
-        index_req_swn_.Wait_For(std::chrono::seconds(1));
-
-        // client break the connection, no need to block, check every 1 second
-        if (context && context->IsConnectionBroken()) {
-            LOG_ENGINE_DEBUG_ << "Client connection broken, build index in background";
-            break;  // just break, not return, continue to update partitions files to to_index
-        }
-    }
-
-    return Status::OK();
-}
-
-Status
-DBImpl::DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) {
-    CHECK_INITIALIZED;
-
-    return GetSnapshotIndex(collection_name, field_name, index);
-}
-
-Status
-DBImpl::DropIndex(const std::string& collection_name, const std::string& field_name) {
-    CHECK_INITIALIZED;
-
-    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
-
-    STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
-
-    std::set<std::string> merge_collection_names = {collection_name};
-    StartMergeTask(merge_collection_names, true);
-    return Status::OK();
-}
-
-Status
-DBImpl::DropIndex(const std::string& collection_name) {
-    CHECK_INITIALIZED;
-
-    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
-
-    std::vector<std::string> field_names;
-    {
-        snapshot::ScopedSnapshotT ss;
-        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-        field_names = ss->GetFieldNames();
-    }
-
-    snapshot::OperationContext context;
-    for (auto& field_name : field_names) {
-        STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
-    }
-
-    std::set<std::string> merge_collection_names = {collection_name};
-    StartMergeTask(merge_collection_names, true);
-    return Status::OK();
-}
-
-Status
-DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) {
-    CHECK_INITIALIZED;
-
-    TimeRecorder rc("SSDBImpl::Query");
-
-    scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr);
-
-    /* put search job to scheduler and wait job finish */
-    scheduler::JobMgrInst::GetInstance()->Put(job);
-    job->WaitFinish();
-
-    if (!job->status().ok()) {
-        return job->status();
-    }
-
-    //    snapshot::ScopedSnapshotT ss;
-    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-    //
-    //    /* collect all valid segment */
-    //    std::vector<SegmentVisitor::Ptr> segment_visitors;
-    //    auto exec = [&] (const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
-    //        auto p_id = segment->GetPartitionId();
-    //        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
-    //        auto& p_name = p_ptr->GetName();
-    //
-    //        /* check partition match pattern */
-    //        bool match = false;
-    //        if (partition_patterns.empty()) {
-    //            match = true;
-    //        } else {
-    //            for (auto &pattern : partition_patterns) {
-    //                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
-    //                    match = true;
-    //                    break;
-    //                }
-    //            }
-    //        }
-    //
-    //        if (match) {
-    //            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
-    //            if (!visitor) {
-    //                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
-    //            }
-    //            segment_visitors.push_back(visitor);
-    //        }
-    //        return Status::OK();
-    //    };
-    //
-    //    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
-    //    segment_iter->Iterate();
-    //    STATUS_CHECK(segment_iter->GetStatus());
-    //
-    //    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
-    //
-    //    VectorsData vectors;
-    //    scheduler::SSSearchJobPtr job =
-    //        std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
-    //    for (auto& sv : segment_visitors) {
-    //        job->AddSegmentVisitor(sv);
-    //    }
-    //
-    //    // step 2: put search job to scheduler and wait result
-    //    scheduler::JobMgrInst::GetInstance()->Put(job);
-    //    job->WaitResult();
-    //
-    //    if (!job->GetStatus().ok()) {
-    //        return job->GetStatus();
-    //    }
-    //
-    //    // step 3: construct results
-    //    result.row_num_ = job->vector_count();
-    //    result.result_ids_ = job->GetResultIds();
-    //    result.result_distances_ = job->GetResultDistances();
-
-    // step 4: get entities by result ids
-    // STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));
-
-    // step 5: filter entities by field names
-    //    std::vector<engine::AttrsData> filter_attrs;
-    //    for (auto attr : result.attrs_) {
-    //        AttrsData attrs_data;
-    //        attrs_data.attr_type_ = attr.attr_type_;
-    //        attrs_data.attr_count_ = attr.attr_count_;
-    //        attrs_data.id_array_ = attr.id_array_;
-    //        for (auto& name : field_names) {
-    //            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
-    //                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
-    //            }
-    //        }
-    //        filter_attrs.emplace_back(attrs_data);
-    //    }
-
-    rc.ElapseFromBegin("Engine query totally cost");
-
-    // tracer.Context()->GetTraceContext()->GetSpan()->Finish();
-
-    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
