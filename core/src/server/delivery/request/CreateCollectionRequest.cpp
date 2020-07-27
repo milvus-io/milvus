@@ -120,9 +120,8 @@ CreateCollectionRequest::OnExecute() {
         }
 
         if (vector_param.contains(engine::PARAM_INDEX_METRIC_TYPE)) {
-            int32_t metric_type =
-                (int32_t)milvus::engine::s_map_metric_type.at(vector_param[engine::PARAM_INDEX_METRIC_TYPE]);
-            collection_info.metric_type_ = metric_type;
+            auto metric_type = engine::s_map_metric_type.at(vector_param[engine::PARAM_INDEX_METRIC_TYPE]);
+            collection_info.metric_type_ = (int32_t)metric_type;
         }
 
         // step 3: create snapshot collection

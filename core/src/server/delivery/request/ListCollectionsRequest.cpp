@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/request/ShowCollectionsRequest.h"
+#include "server/delivery/request/ListCollectionsRequest.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -22,31 +22,31 @@
 namespace milvus {
 namespace server {
 
-ShowCollectionsRequest::ShowCollectionsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                               std::vector<std::string>& collection_name_list)
-    : BaseRequest(context, BaseRequest::kListCollections), collection_name_list_(collection_name_list) {
+ListCollectionsRequest::ListCollectionsRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                               std::vector<std::string>& collection_list)
+    : BaseRequest(context, BaseRequest::kListCollections), collection_list_(collection_list) {
 }
 
 BaseRequestPtr
-ShowCollectionsRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+ListCollectionsRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
                                std::vector<std::string>& collection_name_list) {
-    return std::shared_ptr<BaseRequest>(new ShowCollectionsRequest(context, collection_name_list));
+    return std::shared_ptr<BaseRequest>(new ListCollectionsRequest(context, collection_name_list));
 }
 
 Status
-ShowCollectionsRequest::OnExecute() {
-    TimeRecorderAuto rc("ShowCollectionsRequest");
+ListCollectionsRequest::OnExecute() {
+    TimeRecorderAuto rc("ListCollectionsRequest");
 
     std::vector<std::string> names;
     auto status = DBWrapper::DB()->AllCollections(names);
-    fiu_do_on("ShowCollectionsRequest.OnExecute.show_collections_fail",
+    fiu_do_on("ListCollectionsRequest.OnExecute.show_collections_fail",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         return status;
     }
 
     for (auto& name : names) {
-        collection_name_list_.push_back(name);
+        collection_list_.push_back(name);
     }
     return Status::OK();
 }

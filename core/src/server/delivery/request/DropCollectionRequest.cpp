@@ -40,33 +40,12 @@ DropCollectionRequest::OnExecute() {
         std::string hdr = "DropCollectionRequest(collection=" + collection_name_ + ")";
         TimeRecorder rc(hdr);
 
-        // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
 
-        // step 2: check collection existence
-        // only process root collection, ignore partition collection
-        engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings fields_schema;
-
-        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
-        fiu_do_on("DropCollectionRequest.OnExecute.db_not_found", status = Status(milvus::DB_NOT_FOUND, ""));
-        fiu_do_on("DropCollectionRequest.OnExecute.describe_collection_fail",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        fiu_do_on("DropCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-            } else {
-                return status;
-            }
-        }
-
-        rc.RecordSection("check validation");
-
-        // step 3: Drop collection
         status = DBWrapper::DB()->DropCollection(collection_name_);
         fiu_do_on("DropCollectionRequest.OnExecute.drop_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
@@ -74,7 +53,7 @@ DropCollectionRequest::OnExecute() {
             return status;
         }
 
-        // step 4: flush to trigger CleanUpFilesWithTTL
+        /* flush to trigger CleanUpFilesWithTTL */
         status = DBWrapper::DB()->Flush();
 
         rc.ElapseFromBegin("total cost");

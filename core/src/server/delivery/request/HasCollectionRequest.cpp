@@ -22,16 +22,14 @@ namespace milvus {
 namespace server {
 
 HasCollectionRequest::HasCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, bool& has_collection)
-    : BaseRequest(context, BaseRequest::kHasCollection),
-      collection_name_(collection_name),
-      has_collection_(has_collection) {
+                                           const std::string& collection_name, bool& exist)
+    : BaseRequest(context, BaseRequest::kHasCollection), collection_name_(collection_name), exist_(exist) {
 }
 
 BaseRequestPtr
 HasCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, bool& has_collection) {
-    return std::shared_ptr<BaseRequest>(new HasCollectionRequest(context, collection_name, has_collection));
+                             const std::string& collection_name, bool& exist) {
+    return std::shared_ptr<BaseRequest>(new HasCollectionRequest(context, collection_name, exist));
 }
 
 Status
@@ -40,14 +38,7 @@ HasCollectionRequest::OnExecute() {
         std::string hdr = "HasCollectionRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
-        // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // step 2: check collection existence
-        status = DBWrapper::DB()->HasCollection(collection_name_, has_collection_);
+        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist_);
         fiu_do_on("HasCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
 
         return status;
