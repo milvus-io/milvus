@@ -67,18 +67,6 @@ ClientTest::~ClientTest() {
 }
 
 void
-ClientTest::ShowServerVersion() {
-    std::string version = conn_->ServerVersion();
-    std::cout << "Server version: " << version << std::endl;
-}
-
-void
-ClientTest::ShowSdkVersion() {
-    std::string version = conn_->ClientVersion();
-    std::cout << "SDK version: " << version << std::endl;
-}
-
-void
 ClientTest::ShowCollections(std::vector<std::string>& collection_array) {
     milvus::Status stat = conn_->ListCollections(collection_array);
     std::cout << "ShowCollections function call status: " << stat.message() << std::endl;
@@ -281,11 +269,7 @@ ClientTest::CreateIndex(const std::string& collection_name, int64_t nlist) {
     milvus_sdk::Utils::PrintIndexParam(index1);
     milvus::Status stat = conn_->CreateIndex(index1);
     std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
-
-    milvus::IndexParam index2;
-    stat = conn_->GetIndexInfo(collection_name, index2);
-    std::cout << "GetIndexInfo function call status: " << stat.message() << std::endl;
-    milvus_sdk::Utils::PrintIndexParam(index2);
+    milvus_sdk::Utils::PrintIndexParam(index1);
 }
 
 void
@@ -338,9 +322,6 @@ ClientTest::Test() {
     std::string collection_name = COLLECTION_NAME;
     int64_t dim = COLLECTION_DIMENSION;
     milvus::MetricType metric_type = COLLECTION_METRIC_TYPE;
-
-    ShowServerVersion();
-    ShowSdkVersion();
 
     std::vector<std::string> table_array;
 //    ShowCollections(table_array);

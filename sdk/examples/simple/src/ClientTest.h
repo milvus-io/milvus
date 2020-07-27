@@ -28,12 +28,6 @@ class ClientTest {
 
  private:
     void
-    ShowServerVersion();
-
-    void
-    ShowSdkVersion();
-
-    void
     ShowCollections(std::vector<std::string>&);
 
     void
