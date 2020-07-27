@@ -4,7 +4,6 @@ import logging
 import itertools
 from time import sleep
 from multiprocessing import Process
-from milvus import IndexType, MetricType
 from utils import *
 
 dim = 128

@@ -8,7 +8,6 @@ from multiprocessing import Process
 import sklearn.preprocessing
 
 import pytest
-from milvus import IndexType, MetricType
 from utils import *
 
 nb = 6000

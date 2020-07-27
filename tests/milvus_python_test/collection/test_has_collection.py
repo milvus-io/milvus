@@ -5,7 +5,6 @@ import itertools
 import threading
 from time import sleep
 from multiprocessing import Process
-from milvus import IndexType, MetricType
 from utils import *
 
 collection_id = "has_collection"

@@ -3,7 +3,7 @@ import logging
 import socket
 import pytest
 from utils import gen_unique_str
-from milvus import Milvus, IndexType, MetricType, DataType
+from milvus import Milvus, DataType
 from utils import *
 
 timeout = 60
