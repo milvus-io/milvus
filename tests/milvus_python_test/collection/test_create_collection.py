@@ -322,7 +322,7 @@ class TestCreateCollectionInvalid(object):
         fields = copy.deepcopy(default_fields)
         for i in range(limit_num):
             field_name = gen_unique_str("field_name")
-            field = {"field": field_name, "type": DataType.INT8}
+            field = {"field": field_name, "type": DataType.INT64}
             fields["fields"].append(field)
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
@@ -332,7 +332,7 @@ class TestCreateCollectionInvalid(object):
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
         field_name = get_invalid_string
-        field = {"field": field_name, "type": DataType.INT8}
+        field = {"field": field_name, "type": DataType.INT64}
         fields["fields"].append(field)
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
