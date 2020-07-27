@@ -19,7 +19,6 @@
 #include "db/meta/MetaTypes.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
-#include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
 #include <memory>
