@@ -77,14 +77,21 @@ set_milvus_definition(MILVUS_WITH_FIU "FIU_ENABLE")
 config_summary()
 
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
+    append_flags(CMAKE_CXX_FLAGS FLAGS "-O3")
+    append_flags(CUDA_NVCC_FLAGS FLAGS "-O3")
 elseif (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
+    append_flags(CMAKE_CXX_FLAGS FLAGS "-O0" "-g")
+    append_flags(CUDA_NVCC_FLAGS FLAGS "-O0" "-g")
 else ()
     message(FATAL_ERROR "Unknown CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
 endif ()
+
+append_flags(CMAKE_CXX_FLAGS
+    FLAGS
+    "-fPIC"
+    "-DELPP_THREAD_SAFE"
+    "-fopenmp"
+    )
 
 # **************************** Source files ****************************
 
