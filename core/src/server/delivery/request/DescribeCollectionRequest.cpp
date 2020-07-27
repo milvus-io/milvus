@@ -30,7 +30,7 @@ namespace server {
 DescribeCollectionRequest::DescribeCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
                                                      const std::string& collection_name,
                                                      HybridCollectionSchema& collection_schema)
-    : BaseRequest(context, BaseRequest::kDescribeHybridCollection),
+    : BaseRequest(context, BaseRequest::kGetCollectionInfo),
       collection_name_(collection_name),
       collection_schema_(collection_schema) {
 }

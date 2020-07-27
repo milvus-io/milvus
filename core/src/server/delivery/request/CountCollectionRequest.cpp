@@ -26,7 +26,7 @@ namespace server {
 
 CountCollectionRequest::CountCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
                                                const std::string& collection_name, int64_t& row_count)
-    : BaseRequest(context, BaseRequest::kCountCollection), collection_name_(collection_name), row_count_(row_count) {
+    : BaseRequest(context, BaseRequest::kCountEntities), collection_name_(collection_name), row_count_(row_count) {
 }
 
 BaseRequestPtr

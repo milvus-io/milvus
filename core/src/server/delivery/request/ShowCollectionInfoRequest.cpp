@@ -30,7 +30,7 @@ namespace server {
 
 ShowCollectionInfoRequest::ShowCollectionInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
                                                      const std::string& collection_name, std::string& collection_info)
-    : BaseRequest(context, BaseRequest::kShowCollectionInfo),
+    : BaseRequest(context, BaseRequest::kGetCollectionStats),
       collection_name_(collection_name),
       collection_info_(collection_info) {
 }

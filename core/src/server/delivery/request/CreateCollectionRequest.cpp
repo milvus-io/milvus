@@ -33,7 +33,7 @@ CreateCollectionRequest::CreateCollectionRequest(
     std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
     std::unordered_map<std::string, milvus::json>& field_index_params,
     std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params)
-    : BaseRequest(context, BaseRequest::kCreateHybridCollection),
+    : BaseRequest(context, BaseRequest::kCreateCollection),
       collection_name_(collection_name),
       field_types_(field_types),
       field_index_params_(field_index_params),

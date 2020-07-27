@@ -121,28 +121,24 @@ class BaseRequest {
         kGetEntityByID,
 
         // collection operations
-        kShowCollections = 300,
-        kCreateCollection,
-        kHasCollection,
-        kDescribeCollection,
-        kCountCollection,
-        kShowCollectionInfo,
+        kCreateCollection = 300,
         kDropCollection,
+        kHasCollection,
+        kListCollections,
+        kGetCollectionInfo,
+        kGetCollectionStats,
+        kCountEntities,
         kPreloadCollection,
-        kCreateHybridCollection,
-        kHasHybridCollection,
-        kDescribeHybridCollection,
 
         // partition operations
         kCreatePartition = 400,
-        kShowPartitions,
         kDropPartition,
+        kShowPartitions,
 
         // index operations
         kCreateIndex = 500,
         kDescribeIndex,
         kDropIndex,
-        kCreateHybridIndex,
 
         // search operations
         kSearch,

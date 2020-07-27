@@ -43,16 +43,14 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kGetEntityByID, INFO_REQUEST_GROUP},
 
         // collection operations
-        {BaseRequest::kShowCollections, INFO_REQUEST_GROUP},
         {BaseRequest::kCreateCollection, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kHasCollection, INFO_REQUEST_GROUP},
-        {BaseRequest::kDescribeCollection, INFO_REQUEST_GROUP},
-        {BaseRequest::kCountCollection, INFO_REQUEST_GROUP},
-        {BaseRequest::kShowCollectionInfo, INFO_REQUEST_GROUP},
         {BaseRequest::kDropCollection, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kHasCollection, INFO_REQUEST_GROUP},
+        {BaseRequest::kListCollections, INFO_REQUEST_GROUP},
+        {BaseRequest::kGetCollectionInfo, INFO_REQUEST_GROUP},
+        {BaseRequest::kGetCollectionStats, INFO_REQUEST_GROUP},
+        {BaseRequest::kCountEntities, INFO_REQUEST_GROUP},
         {BaseRequest::kPreloadCollection, DQL_REQUEST_GROUP},
-        {BaseRequest::kCreateHybridCollection, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kDescribeHybridCollection, INFO_REQUEST_GROUP},
 
         // partition operations
         {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},
@@ -63,7 +61,6 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kCreateIndex, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kDescribeIndex, INFO_REQUEST_GROUP},
         {BaseRequest::kDropIndex, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kCreateHybridIndex, DDL_DML_REQUEST_GROUP},
 
         // search operations
         {BaseRequest::kSearch, DQL_REQUEST_GROUP},
