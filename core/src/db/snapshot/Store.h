@@ -17,6 +17,7 @@
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Utils.h"
+#include "segment/Segment.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/Status.h"
@@ -50,7 +51,7 @@ class Store : public std::enable_shared_from_this<Store> {
     using Ptr = typename std::shared_ptr<Store>;
 
     explicit Store(meta::MetaAdapterPtr adapter, const std::string& root_path)
-        : adapter_(adapter), root_path_(root_path) {
+        : adapter_(adapter), root_path_(root_path + engine::COLLECTIONS_FOLDER) {
     }
 
     static Store::Ptr
@@ -91,7 +92,7 @@ class Store : public std::enable_shared_from_this<Store> {
         }
     }
 
-    std::string
+    const std::string&
     GetRootPath() const {
         return root_path_;
     }
