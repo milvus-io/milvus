@@ -205,7 +205,7 @@ def gen_single_vector_fields():
                 continue
             if metric_type not in ["L2", "IP"] and data_type == DataType.FLOAT_VECTOR:
                 continue
-            field = {"field": data_type.name, "type": data_type, "params": {"metric_type": metric_type, "dimension": dimension}}
+            field = {"field": data_type.name, "type": data_type, "params": {"metric_type": metric_type, "dim": dimension}}
             fields.append(field)
     return fields
 
@@ -215,7 +215,7 @@ def gen_default_fields():
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": "vector", "type": DataType.FLOAT_VECTOR, "params": {"metric_type": "L2", "dimension": dimension}}
+            {"field": "vector", "type": DataType.FLOAT_VECTOR, "params": {"metric_type": "L2", "dim": dimension}}
         ],
         "segment_size": segment_size
     }
