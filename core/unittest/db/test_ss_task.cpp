@@ -14,7 +14,6 @@
 #include <gtest/gtest.h>
 #include <opentracing/mocktracer/tracer.h>
 
-//#include "db/meta/SqliteMetaImpl.h"
 #include "db/DBFactory.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/BuildIndexJob.h"

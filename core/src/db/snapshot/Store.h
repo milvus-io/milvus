@@ -12,7 +12,7 @@
 #pragma once
 
 #include "db/Utils.h"
-#include "db/meta/MetaAdapter.h"
+#include "db/meta/MetaFactory.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
@@ -50,45 +50,17 @@ class Store : public std::enable_shared_from_this<Store> {
     using Ptr = typename std::shared_ptr<Store>;
 
     explicit Store(meta::MetaAdapterPtr adapter, const std::string& root_path)
-        : adapter_(adapter), root_path_(root_path) {
+        : adapter_(std::move(adapter)), root_path_(root_path) {
     }
 
     static Store::Ptr
     Build(const std::string& uri, const std::string& root_path) {
-        utils::MetaUriInfo uri_info;
-        LOG_ENGINE_DEBUG_ << "MetaUri: " << uri << std::endl;
-        auto status = utils::ParseMetaUri(uri, uri_info);
-        if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Wrong URI format: URI = " << uri;
-            throw InvalidArgumentException("Wrong URI format ");
-        }
+        DBMetaOptions options;
+        options.backend_uri_ = uri;
+        options.path_ = root_path;
 
-        if (strcasecmp(uri_info.dialect_.c_str(), "mysql") == 0) {
-            LOG_ENGINE_INFO_ << "Using MySQL";
-            DBMetaOptions options;
-            /* options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
-            options.backend_uri_ = uri;
-            auto engine = std::make_shared<meta::MySqlEngine>(options);
-            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
-            return std::make_shared<Store>(adapter, root_path);
-        } else if (strcasecmp(uri_info.dialect_.c_str(), "mock") == 0) {
-            LOG_ENGINE_INFO_ << "Using Mock. Should only be used in test environment";
-            auto engine = std::make_shared<meta::MockEngine>();
-            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
-            return std::make_shared<Store>(adapter, root_path);
-        } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
-            LOG_ENGINE_INFO_ << "Using Sqlite";
-            DBMetaOptions options;
-            /* options.backend_uri_ = "mock://:@:/"; */
-            options.backend_uri_ = uri;
-            options.path_ = root_path;
-            auto engine = std::make_shared<meta::SqliteEngine>(options);
-            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
-            return std::make_shared<Store>(adapter, root_path);
-        } else {
-            LOG_ENGINE_ERROR_ << "Invalid dialect in URI: dialect = " << uri_info.dialect_;
-            throw InvalidArgumentException("URI dialect is not mysql / sqlite / mock");
-        }
+        auto adapter = MetaFactory::Build(options);
+        return std::make_shared<Store>(adapter, root_path);
     }
 
     std::string

@@ -10,17 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/DBFactory.h"
-#include "DBImpl.h"
+#include "db/DBImpl.h"
 #include "meta/MetaFactory.h"
-#include "meta/MySQLMetaImpl.h"
-#include "meta/SqliteMetaImpl.h"
-#include "utils/Exception.h"
-
-#include <stdlib.h>
-#include <time.h>
-#include <cstdlib>
-#include <sstream>
-#include <string>
 
 namespace milvus {
 namespace engine {
