@@ -19,15 +19,15 @@
 namespace milvus {
 namespace server {
 
-class CountCollectionRequest : public BaseRequest {
+class CountEntitiesRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            int64_t& row_count);
 
  protected:
-    CountCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                           int64_t& row_count);
+    CountEntitiesRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         int64_t& row_count);
 
     Status
     OnExecute() override;

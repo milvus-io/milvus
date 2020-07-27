@@ -24,49 +24,32 @@
 namespace milvus {
 namespace server {
 
-CountCollectionRequest::CountCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                               const std::string& collection_name, int64_t& row_count)
+CountEntitiesRequest::CountEntitiesRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                           const std::string& collection_name, int64_t& row_count)
     : BaseRequest(context, BaseRequest::kCountEntities), collection_name_(collection_name), row_count_(row_count) {
 }
 
 BaseRequestPtr
-CountCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                               const std::string& collection_name, int64_t& row_count) {
-    return std::shared_ptr<BaseRequest>(new CountCollectionRequest(context, collection_name, row_count));
+CountEntitiesRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, int64_t& row_count) {
+    return std::shared_ptr<BaseRequest>(new CountEntitiesRequest(context, collection_name, row_count));
 }
 
 Status
-CountCollectionRequest::OnExecute() {
+CountEntitiesRequest::OnExecute() {
     try {
-        std::string hdr = "CountCollectionRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "CountEntitiesRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
-        // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
-
-        // only process root collection, ignore partition collection
-        engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-            } else {
-                return status;
-            }
-        }
-
-        rc.RecordSection("check validation");
 
         // step 2: get row count
         uint64_t row_count = 0;
         status = DBWrapper::DB()->GetCollectionRowCount(collection_name_, row_count);
-        fiu_do_on("CountCollectionRequest.OnExecute.db_not_found", status = Status(DB_NOT_FOUND, ""));
-        fiu_do_on("CountCollectionRequest.OnExecute.status_error", status = Status(SERVER_UNEXPECTED_ERROR, ""));
-        fiu_do_on("CountCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));

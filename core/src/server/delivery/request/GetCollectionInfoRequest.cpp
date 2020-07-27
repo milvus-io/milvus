@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/request/DescribeCollectionRequest.h"
+#include "server/delivery/request/GetCollectionInfoRequest.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/delivery/request/BaseRequest.h"
@@ -27,23 +27,23 @@
 namespace milvus {
 namespace server {
 
-DescribeCollectionRequest::DescribeCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                                     const std::string& collection_name,
-                                                     HybridCollectionSchema& collection_schema)
+GetCollectionInfoRequest::GetCollectionInfoRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                                   const std::string& collection_name,
+                                                   CollectionSchema& collection_schema)
     : BaseRequest(context, BaseRequest::kGetCollectionInfo),
       collection_name_(collection_name),
       collection_schema_(collection_schema) {
 }
 
 BaseRequestPtr
-DescribeCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                                  const std::string& collection_name, HybridCollectionSchema& collection_schema) {
-    return std::shared_ptr<BaseRequest>(new DescribeCollectionRequest(context, collection_name, collection_schema));
+GetCollectionInfoRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                                 const std::string& collection_name, CollectionSchema& collection_schema) {
+    return std::shared_ptr<BaseRequest>(new GetCollectionInfoRequest(context, collection_name, collection_schema));
 }
 
 Status
-DescribeCollectionRequest::OnExecute() {
-    std::string hdr = "CreateCollectionRequest(collection=" + collection_name_ + ")";
+GetCollectionInfoRequest::OnExecute() {
+    std::string hdr = "GetCollectionInfoRequest(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
