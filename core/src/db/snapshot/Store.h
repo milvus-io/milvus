@@ -17,6 +17,7 @@
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Utils.h"
+#include "codecs/Codec.h"
 #include "segment/Segment.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -95,6 +96,11 @@ class Store : public std::enable_shared_from_this<Store> {
     const std::string&
     GetRootPath() const {
         return root_path_;
+    }
+
+    const codec::Codec&
+    GetCodec() const {
+        return codec::Codec::instance();
     }
 
     template <typename OpT>
