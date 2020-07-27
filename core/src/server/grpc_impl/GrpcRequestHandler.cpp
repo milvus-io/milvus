@@ -755,6 +755,7 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     Status status = request_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids,
                                                    field_names, field_mappings, data_chunk);
 
+    auto id_size = vector_ids.size();
     for (const auto& it : field_mappings) {
         auto type = it.first->GetFtype();
         std::string name = it.first->GetName();
@@ -771,60 +772,73 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
 
         field_value->set_field_name(name);
         field_value->set_type(static_cast<milvus::grpc::DataType>(type));
+        auto single_size = data.size() / id_size;
         // general data
         if (type == engine::meta::hybrid::DataType::VECTOR_BINARY) {
             // add binary vector data
-            auto vector_row_record = vector_record->add_records();
-
             std::vector<int8_t> binary_vector;
-            binary_vector.resize(data.size());
-            memcpy(binary_vector.data(), data.data(), data.size());
-            vector_row_record->mutable_binary_data()->resize(binary_vector.size());
-            memcpy(vector_row_record->mutable_binary_data()->data(), binary_vector.data(), binary_vector.size());
+            auto vector_size = single_size * sizeof(int8_t) / sizeof(int8_t);
+            binary_vector.resize(vector_size);
+            for (int i = 0; i < id_size; i++) {
+                auto vector_row_record = vector_record->add_records();
+                auto offset = i * single_size;
+                memcpy(binary_vector.data(), data.data() + offset, single_size);
+                vector_row_record->mutable_binary_data()->resize(binary_vector.size());
+                memcpy(vector_row_record->mutable_binary_data()->data(), binary_vector.data(), binary_vector.size());
+            }
 
-            continue;
         } else if (type == engine::meta::hybrid::DataType::VECTOR_FLOAT) {
             // add float vector data
-            auto vector_row_record = vector_record->add_records();
             std::vector<float> float_vector;
-            float_vector.resize(data.size() * sizeof(int8_t) / sizeof(float));
-            memcpy(float_vector.data(), data.data(), data.size());
-            vector_row_record->mutable_float_data()->Resize(float_vector.size(), 0.0);
-            memcpy(vector_row_record->mutable_float_data()->mutable_data(), float_vector.data(),
-                   float_vector.size() * sizeof(float));
-
-            continue;
+            auto vector_size = single_size * sizeof(int8_t) / sizeof(float);
+            float_vector.resize(vector_size);
+            for (int i = 0; i < id_size; i++) {
+                auto vector_row_record = vector_record->add_records();
+                auto offset = i * single_size;
+                memcpy(float_vector.data(), data.data() + offset, single_size);
+                vector_row_record->mutable_float_data()->Resize(vector_size, 0.0);
+                memcpy(vector_row_record->mutable_float_data()->mutable_data(), float_vector.data(),
+                       float_vector.size() * sizeof(float));
+            }
         } else {
             // add attribute data
             auto attr_record = field_value->mutable_attr_record();
             if (type == engine::meta::hybrid::DataType::INT32) {
                 // add int32 data
-                std::vector<int32_t> int32_value;
-                int32_value.resize(data.size() * sizeof(int8_t) / sizeof(int32_t));
-                memcpy(int32_value.data(), data.data(), data.size());
-                attr_record->mutable_int32_value()->Resize(int32_value.size(), 0);
-                memcpy(attr_record->mutable_int32_value()->mutable_data(), int32_value.data(), int32_value.size());
+                int32_t int32_value;
+                auto int32_size = single_size * sizeof(int8_t) / sizeof(int32_t);
+                for (int i = 0; i < id_size; i++) {
+                    auto offset = i * single_size;
+                    memcpy(&int32_value, data.data() + offset, single_size);
+                    attr_record->add_int32_value(int32_value);
+                }
             } else if (type == engine::meta::hybrid::DataType::INT64) {
                 // add int64 data
-                std::vector<int64_t> int64_value;
-                int64_value.resize(data.size() * sizeof(int8_t) / sizeof(int64_t));
-                memcpy(int64_value.data(), data.data(), data.size());
-                attr_record->mutable_int64_value()->Resize(int64_value.size(), 0);
-                memcpy(attr_record->mutable_int64_value()->mutable_data(), int64_value.data(), int64_value.size());
+                int64_t int64_value;
+                auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
+                for (int i = 0; i < id_size; i++) {
+                    auto offset = i * single_size;
+                    memcpy(&int64_value, data.data() + offset, single_size);
+                    attr_record->add_int64_value(int64_value);
+                }
             } else if (type == engine::meta::hybrid::DataType::DOUBLE) {
                 // add double data
-                std::vector<double> double_value;
-                double_value.resize(data.size() * sizeof(int8_t) / sizeof(double));
-                memcpy(double_value.data(), data.data(), data.size());
-                attr_record->mutable_double_value()->Resize(double_value.size(), 0.0);
-                memcpy(attr_record->mutable_double_value()->mutable_data(), double_value.data(), double_value.size());
+                double double_value;
+                auto int32_size = single_size * sizeof(int8_t) / sizeof(double);
+                for (int i = 0; i < id_size; i++) {
+                    auto offset = i * single_size;
+                    memcpy(&double_value, data.data() + offset, single_size);
+                    attr_record->add_double_value(double_value);
+                }
             } else if (type == engine::meta::hybrid::DataType::FLOAT) {
                 // add float data
-                std::vector<float> float_value;
-                float_value.resize(data.size() * sizeof(int8_t) / sizeof(float));
-                memcpy(float_value.data(), data.data(), data.size());
-                attr_record->mutable_float_value()->Resize(float_value.size(), 0.0);
-                memcpy(attr_record->mutable_float_value()->mutable_data(), float_value.data(), float_value.size());
+                float float_value;
+                auto float_size = single_size * sizeof(int8_t) / sizeof(float);
+                for (int i = 0; i < id_size; i++) {
+                    auto offset = i * single_size;
+                    memcpy(&float_value, data.data() + offset, single_size);
+                    attr_record->add_float_value(float_value);
+                }
             }
         }
     }
