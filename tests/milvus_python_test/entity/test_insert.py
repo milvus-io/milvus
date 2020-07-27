@@ -391,7 +391,7 @@ class TestInsertBase:
         method: update entity field name
         expected: error raised
         '''
-        tmp_entity = update_field_name(copy.deepcopy(entity), "int8", "int8new")
+        tmp_entity = update_field_name(copy.deepcopy(entity), "int64", "int64new")
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -402,7 +402,7 @@ class TestInsertBase:
         method: update entity field type
         expected: error raised
         '''
-        tmp_entity = update_field_type(copy.deepcopy(entity), DataType.INT8, DataType.FLOAT)
+        tmp_entity = update_field_type(copy.deepcopy(entity), DataType.INT64, DataType.FLOAT)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -413,7 +413,7 @@ class TestInsertBase:
         method: update entity field value
         expected: error raised
         '''
-        tmp_entity = update_field_value(copy.deepcopy(entity), 'int8', 's')
+        tmp_entity = update_field_value(copy.deepcopy(entity), 'int64', 's')
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -848,7 +848,7 @@ class TestInsertInvalid(object):
 
     def test_insert_with_invalid_field_name(self, connect, collection, get_field_name):
         field_name = get_field_name
-        tmp_entity = update_field_name(copy.deepcopy(entity), "int8", get_field_name)
+        tmp_entity = update_field_name(copy.deepcopy(entity), "int64", get_field_name)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -860,7 +860,7 @@ class TestInsertInvalid(object):
 
     def test_insert_with_invalid_field_value(self, connect, collection, get_field_int_value):
         field_value = get_field_int_value
-        tmp_entity = update_field_type(copy.deepcopy(entity), 'int8', field_value)
+        tmp_entity = update_field_type(copy.deepcopy(entity), 'int64', field_value)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -951,7 +951,7 @@ class TestInsertInvalidIP(object):
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_name(self, connect, ip_collection, get_field_name):
         field_name = get_field_name
-        tmp_entity = update_field_name(copy.deepcopy(entity), "int8", get_field_name)
+        tmp_entity = update_field_name(copy.deepcopy(entity), "int64", get_field_name)
         with pytest.raises(Exception):
             connect.insert(ip_collection, tmp_entity)
 
@@ -965,7 +965,7 @@ class TestInsertInvalidIP(object):
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_value(self, connect, ip_collection, get_field_int_value):
         field_value = get_field_int_value
-        tmp_entity = update_field_type(copy.deepcopy(entity), 'int8', field_value)
+        tmp_entity = update_field_type(copy.deepcopy(entity), 'int64', field_value)
         with pytest.raises(Exception):
             connect.insert(ip_collection, tmp_entity)
 
@@ -1057,14 +1057,14 @@ class TestInsertInvalidBinary(object):
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_name(self, connect, jac_collection, get_field_name):
         field_name = get_field_name
-        tmp_entity = update_field_name(copy.deepcopy(binary_entity), "int8", get_field_name)
+        tmp_entity = update_field_name(copy.deepcopy(binary_entity), "int64", get_field_name)
         with pytest.raises(Exception):
             connect.insert(jac_collection, tmp_entity)
 
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_value(self, connect, jac_collection, get_field_int_value):
         field_value = get_field_int_value
-        tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int8', field_value)
+        tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int64', field_value)
         with pytest.raises(Exception):
             connect.insert(jac_collection, tmp_entity)
 
@@ -1091,21 +1091,21 @@ class TestInsertInvalidBinary(object):
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_name(self, connect, jac_collection, get_field_name):
         field_name = get_field_name
-        tmp_entity = update_field_name(copy.deepcopy(binary_entity), "int8", get_field_name)
+        tmp_entity = update_field_name(copy.deepcopy(binary_entity), "int64", get_field_name)
         with pytest.raises(Exception):
             connect.insert(jac_collection, tmp_entity)
 
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_type(self, connect, jac_collection, get_field_type):
         field_type = get_field_type
-        tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int8', field_type)
+        tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int64', field_type)
         with pytest.raises(Exception):
             connect.insert(jac_collection, tmp_entity)
 
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_value(self, connect, jac_collection, get_field_int_value):
         field_value = get_field_int_value
-        tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int8', field_value)
+        tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int64', field_value)
         with pytest.raises(Exception):
             connect.insert(jac_collection, tmp_entity)
 

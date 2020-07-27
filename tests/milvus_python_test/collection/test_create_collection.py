@@ -243,7 +243,7 @@ class TestCreateCollectionInvalid(object):
         dimension = get_dim
         collection_name = gen_unique_str()
         fields = copy.deepcopy(default_fields)
-        fields["fields"][-1]["params"]["dimension"] = dimension
+        fields["fields"][-1]["params"]["dim"] = dimension
         with pytest.raises(Exception) as e:
              connect.create_collection(collection_name, fields)
 
@@ -282,7 +282,7 @@ class TestCreateCollectionInvalid(object):
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields["fields"][-1]["params"].pop("dimension")
+        fields["fields"][-1]["params"].pop("dim")
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
 
@@ -322,7 +322,7 @@ class TestCreateCollectionInvalid(object):
         fields = copy.deepcopy(default_fields)
         for i in range(limit_num):
             field_name = gen_unique_str("field_name")
-            field = {"field": field_name, "type": DataType.INT8}
+            field = {"field": field_name, "type": DataType.INT64}
             fields["fields"].append(field)
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
@@ -332,7 +332,7 @@ class TestCreateCollectionInvalid(object):
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
         field_name = get_invalid_string
-        field = {"field": field_name, "type": DataType.INT8}
+        field = {"field": field_name, "type": DataType.INT64}
         fields["fields"].append(field)
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
