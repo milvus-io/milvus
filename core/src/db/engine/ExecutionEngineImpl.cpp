@@ -163,13 +163,14 @@ ExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
 
         bool index_exist = false;
         if (field_type == FIELD_TYPE::VECTOR_FLOAT || field_type == FIELD_TYPE::VECTOR_BINARY) {
-            knowhere::VecIndexPtr index_ptr;
-            segment_reader_->LoadVectorIndex(name, index_ptr);
-            index_exist = (index_ptr != nullptr);
+            // knowhere::VecIndexPtr index_ptr;
+            segment_reader_->LoadVectorIndex(name, vec_index_ptr_);
+            index_exist = (vec_index_ptr_ != nullptr);
         } else {
             knowhere::IndexPtr index_ptr;
             segment_reader_->LoadStructuredIndex(name, index_ptr);
             index_exist = (index_ptr != nullptr);
+            attr_index_.insert(std::make_pair(name, index_ptr));
         }
 
         // index not yet build, load raw data
@@ -205,6 +206,259 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 
 Status
 ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
+    try {
+        faiss::ConcurrentBitsetPtr bitset;
+        std::string vector_placeholder;
+        faiss::ConcurrentBitsetPtr list;
+        list = vec_index_ptr_->GetBlacklist();
+        entity_count_ = list->capacity();
+
+        // Parse general query
+        auto status =
+            ExecBinaryQuery(context.query_ptr_->root, bitset, context.query_ptr_->attr_types, vector_placeholder);
+        if (!status.ok()) {
+            return status;
+        }
+
+        // Do And
+        for (int64_t i = 0; i < entity_count_; i++) {
+            if (list->test(i) && !bitset->test(i)) {
+                list->clear(i);
+            }
+        }
+        vec_index_ptr_->SetBlacklist(list);
+
+        auto vector_query = context.query_ptr_->vectors.at(vector_placeholder);
+
+        if (!status.ok()) {
+            return status;
+        }
+    } catch (std::exception& exception) {
+        return Status{DB_ERROR, "Illegal search params"};
+    }
+
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& general_query,
+                                     faiss::ConcurrentBitsetPtr& bitset,
+                                     std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                                     std::string& vector_placeholder) {
+    Status status = Status::OK();
+    if (general_query->leaf == nullptr) {
+        faiss::ConcurrentBitsetPtr left_bitset, right_bitset;
+        if (general_query->bin->left_query != nullptr) {
+            status = ExecBinaryQuery(general_query->bin->left_query, left_bitset, attr_type, vector_placeholder);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+        if (general_query->bin->right_query != nullptr) {
+            status = ExecBinaryQuery(general_query->bin->right_query, right_bitset, attr_type, vector_placeholder);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+
+        if (left_bitset == nullptr || right_bitset == nullptr) {
+            bitset = left_bitset != nullptr ? left_bitset : right_bitset;
+        } else {
+            switch (general_query->bin->relation) {
+                case milvus::query::QueryRelation::AND:
+                case milvus::query::QueryRelation::R1: {
+                    bitset = (*left_bitset) & right_bitset;
+                    break;
+                }
+                case milvus::query::QueryRelation::OR:
+                case milvus::query::QueryRelation::R2:
+                case milvus::query::QueryRelation::R3: {
+                    bitset = (*left_bitset) | right_bitset;
+                    break;
+                }
+                case milvus::query::QueryRelation::R4: {
+                    for (uint64_t i = 0; i < entity_count_; ++i) {
+                        if (left_bitset->test(i) && !right_bitset->test(i)) {
+                            bitset->set(i);
+                        }
+                    }
+                    break;
+                }
+                default: {
+                    std::string msg = "Invalid QueryRelation in RangeQuery";
+                    return Status{SERVER_INVALID_ARGUMENT, msg};
+                }
+            }
+        }
+        return status;
+    } else {
+        bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_);
+        if (general_query->leaf->term_query != nullptr) {
+            // process attrs_data
+            status = ProcessTermQuery(bitset, general_query->leaf->term_query, attr_type);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+        if (general_query->leaf->range_query != nullptr) {
+            status = ProcessRangeQuery(attr_type, bitset, general_query->leaf->range_query);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+        if (!general_query->leaf->vector_placeholder.empty()) {
+            // skip vector query
+            vector_placeholder = general_query->leaf->vector_placeholder;
+            bitset = nullptr;
+        }
+    }
+    return status;
+}
+
+template <typename T>
+Status
+ProcessIndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr& index_ptr,
+                        milvus::json& term_values_json) {
+    try {
+        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<T>>(index_ptr);
+        if (not T_index) {
+            return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
+        }
+        size_t term_size = term_values_json.size();
+        std::vector<T> term_value(term_size);
+        size_t offset = 0;
+        for (auto& data : term_values_json) {
+            term_value[offset] = data.get<T>();
+            ++offset;
+        }
+
+        bitset = T_index->In(term_size, term_value.data());
+    } catch (std::exception& exception) {
+        return Status{SERVER_INVALID_DSL_PARAMETER, exception.what()};
+    }
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const std::string& field_name,
+                                      const meta::hybrid::DataType& data_type, milvus::json& term_values_json) {
+    switch (data_type) {
+        case meta::hybrid::DataType::INT8: {
+            ProcessIndexedTermQuery<int8_t>(bitset, attr_index_.at(field_name), term_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::INT16: {
+            ProcessIndexedTermQuery<int16_t>(bitset, attr_index_.at(field_name), term_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::INT32: {
+            ProcessIndexedTermQuery<int32_t>(bitset, attr_index_.at(field_name), term_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::INT64: {
+            ProcessIndexedTermQuery<int64_t>(bitset, attr_index_.at(field_name), term_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::FLOAT: {
+            ProcessIndexedTermQuery<float>(bitset, attr_index_.at(field_name), term_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::DOUBLE: {
+            ProcessIndexedTermQuery<double>(bitset, attr_index_.at(field_name), term_values_json);
+            break;
+        }
+        default: { return Status{SERVER_INVALID_ARGUMENT, "Attribute:" + field_name + " type is wrong"}; }
+    }
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, const query::TermQueryPtr& term_query,
+                                      std::unordered_map<std::string, meta::hybrid::DataType>& attr_type) {
+    auto status = Status::OK();
+    auto term_query_json = term_query->json_obj;
+    auto term_it = term_query_json.begin();
+    if (term_it != term_query_json.end()) {
+        const std::string& field_name = term_it.key();
+        if (term_it.value().is_object()) {
+            milvus::json term_values_json = term_it.value()["values"];
+            status = IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_values_json);
+        } else {
+            status = IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_it.value());
+        }
+    }
+    return status;
+}
+
+template <typename T>
+Status
+ProcessIndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr& index_ptr,
+                         milvus::json& range_values_json) {
+    try {
+        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<T>>(index_ptr);
+
+        bool flag = false;
+        for (auto& range_value_it : range_values_json.items()) {
+            const std::string& comp_op = range_value_it.key();
+            T value = range_value_it.value().get<T>();
+            if (not flag) {
+                bitset = (*bitset) | T_index->Range(value, knowhere::s_map_operator_type.at(comp_op));
+                flag = true;
+            } else {
+                bitset = (*bitset) & T_index->Range(value, knowhere::s_map_operator_type.at(comp_op));
+            }
+        }
+    } catch (std::exception& exception) {
+        return Status{SERVER_INVALID_DSL_PARAMETER, exception.what()};
+    }
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const meta::hybrid::DataType& data_type,
+                                       knowhere::IndexPtr& index_ptr, milvus::json& range_values_json) {
+    auto status = Status::OK();
+    switch (data_type) {
+        case meta::hybrid::DataType::INT8: {
+            ProcessIndexedRangeQuery<int8_t>(bitset, index_ptr, range_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::INT16: {
+            ProcessIndexedRangeQuery<int16_t>(bitset, index_ptr, range_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::INT32: {
+            ProcessIndexedRangeQuery<int32_t>(bitset, index_ptr, range_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::INT64: {
+            ProcessIndexedRangeQuery<int64_t>(bitset, index_ptr, range_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::FLOAT: {
+            ProcessIndexedRangeQuery<float>(bitset, index_ptr, range_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::DOUBLE: {
+            ProcessIndexedRangeQuery<double>(bitset, index_ptr, range_values_json);
+            break;
+        }
+        default:
+            break;
+    }
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                                       faiss::ConcurrentBitsetPtr& bitset, const query::RangeQueryPtr& range_query) {
+    auto status = Status::OK();
+    auto range_query_json = range_query->json_obj;
+    auto range_it = range_query_json.begin();
+    if (range_it != range_query_json.end()) {
+        const std::string& field_name = range_it.key();
+        IndexedRangeQuery(bitset, attr_type.at(field_name), attr_index_.at(field_name), range_it.value());
+    }
     return Status::OK();
 }
 

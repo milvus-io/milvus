@@ -753,6 +753,21 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
     TimeRecorder rc("SSDBImpl::Query");
 
+    snapshot::CollectionPtr collection;
+    snapshot::CollectionMappings collection_mappings;
+    auto status = DescribeCollection(query_ptr->collection_id, collection, collection_mappings);
+    std::unordered_map<std::string, meta::hybrid::DataType> attr_types;
+    for (const auto& field_it : collection_mappings) {
+        auto field = field_it.first;
+        if (field->GetFtype() == (int)meta::hybrid::DataType::VECTOR_FLOAT ||
+            field->GetFtype() == (int)meta::hybrid::DataType::VECTOR_BINARY ||
+            field->GetFtype() == (int)meta::hybrid::DataType::UID) {
+            continue;
+        }
+        attr_types.insert(std::make_pair(field->GetName(), (meta::hybrid::DataType)field->GetFtype()));
+    }
+
+    query_ptr->attr_types = attr_types;
     scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr);
 
     /* put search job to scheduler and wait job finish */

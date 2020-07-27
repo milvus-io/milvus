@@ -16,6 +16,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "db/meta/MetaTypes.h"
 #include "utils/Json.h"
 
 namespace milvus {
@@ -107,12 +108,13 @@ struct BinaryQuery {
 };
 
 struct Query {
-    BinaryQueryPtr root;
+    GeneralQueryPtr root;
     std::unordered_map<std::string, VectorQueryPtr> vectors;
 
     std::string collection_id;
     std::vector<std::string> partitions;
     std::vector<std::string> field_names;
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_types;
 };
 using QueryPtr = std::shared_ptr<Query>;
 
