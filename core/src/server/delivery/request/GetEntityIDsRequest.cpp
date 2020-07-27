@@ -27,54 +27,40 @@
 namespace milvus {
 namespace server {
 
-GetEntityIDsRequest::GetEntityIDsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name, int64_t segment_id,
-                                         std::vector<int64_t>& vector_ids)
-    : BaseRequest(context, BaseRequest::kGetVectorIDs),
+ListIDInSegmentRequest::ListIDInSegmentRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                               const std::string& collection_name, int64_t segment_id,
+                                               engine::IDNumbers& ids)
+    : BaseRequest(context, BaseRequest::kListIDInSegment),
       collection_name_(collection_name),
       segment_id_(segment_id),
-      vector_ids_(vector_ids) {
+      ids_(ids) {
 }
 
 BaseRequestPtr
-GetEntityIDsRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                            int64_t segment_id, std::vector<int64_t>& vector_ids) {
-    return std::shared_ptr<BaseRequest>(new GetEntityIDsRequest(context, collection_name, segment_id, vector_ids));
+ListIDInSegmentRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                               int64_t segment_id, engine::IDNumbers& ids) {
+    return std::shared_ptr<BaseRequest>(new ListIDInSegmentRequest(context, collection_name, segment_id, ids));
 }
 
 Status
-GetEntityIDsRequest::OnExecute() {
+ListIDInSegmentRequest::OnExecute() {
     try {
         std::string hdr =
-            "GetVectorIDsRequest(collection=" + collection_name_ + " segment=" + std::to_string(segment_id_) + ")";
+            "ListIDInSegmentRequest(collection=" + collection_name_ + " segment=" + std::to_string(segment_id_) + ")";
         TimeRecorderAuto rc(hdr);
 
-        // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // step 2: check table existence
-        engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings mappings;
-        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, mappings);
-        if (collection == nullptr) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-            } else {
-                return status;
-            }
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
 
         // step 2: get vector data, now only support get one id
-        vector_ids_.clear();
-        return DBWrapper::DB()->GetEntityIDs(collection_name_, segment_id_, vector_ids_);
+        ids_.clear();
+        return DBWrapper::DB()->ListIDInSegment(collection_name_, segment_id_, ids_);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
-
-    return Status::OK();
 }
 
 }  // namespace server

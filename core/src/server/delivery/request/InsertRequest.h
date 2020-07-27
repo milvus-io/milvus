@@ -15,27 +15,32 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace milvus {
 namespace server {
 
-class ShowPartitionsRequest : public BaseRequest {
+class InsertRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::vector<std::string>& partition_list);
+           const std::string& partition_name, const int64_t& row_count,
+           std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
 
  protected:
-    ShowPartitionsRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                          std::vector<std::string>& partition_list);
+    InsertRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                  const std::string& partition_name, const int64_t& row_count,
+                  std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
-    std::vector<std::string>& partition_list_;
+    const std::string partition_name_;
+    const int64_t row_count_;
+    std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data_;
 };
 
 }  // namespace server

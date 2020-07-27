@@ -84,7 +84,7 @@ class RequestHandler {
 
     Status
     Insert(const std::shared_ptr<Context>& context, const std::string& collection_name,
-           const std::string& partition_name, const int32_t& row_count,
+           const std::string& partition_name, const int64_t& row_count,
            std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
 
     Status
@@ -105,7 +105,7 @@ class RequestHandler {
                     engine::IDNumbers& ids);
 
     Status
-    PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
+    LoadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
 
     Status
     Flush(const std::shared_ptr<Context>& context, const std::vector<std::string>& collection_names);

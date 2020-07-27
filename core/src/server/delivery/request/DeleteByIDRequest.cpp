@@ -30,41 +30,30 @@
 namespace milvus {
 namespace server {
 
-DeleteByIDRequest::DeleteByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                     const std::string& collection_name, const std::vector<int64_t>& entity_ids)
-    : BaseRequest(context, BaseRequest::kDeleteByID), collection_name_(collection_name), entity_ids_(entity_ids) {
+DeleteEntityByIDRequest::DeleteEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                           const std::string& collection_name, const engine::IDNumbers& entity_ids)
+    : BaseRequest(context, BaseRequest::kDeleteEntityByID), collection_name_(collection_name), entity_ids_(entity_ids) {
 }
 
 BaseRequestPtr
-DeleteByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                          const std::vector<int64_t>& entity_ids) {
-    return std::shared_ptr<BaseRequest>(new DeleteByIDRequest(context, collection_name, entity_ids));
+DeleteEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                                const std::string& collection_name, const engine::IDNumbers& entity_ids) {
+    return std::shared_ptr<BaseRequest>(new DeleteEntityByIDRequest(context, collection_name, entity_ids));
 }
 
 Status
-DeleteByIDRequest::OnExecute() {
+DeleteEntityByIDRequest::OnExecute() {
     try {
-        TimeRecorderAuto rc("DeleteByIDRequest");
+        TimeRecorderAuto rc("DeleteEntityByIDRequest");
 
-        // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
 
-        // step 2: check collection existence
-        engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-            } else {
-                return status;
-            }
-        }
-        // Check collection's index type supports delete
 #ifdef MILVUS_SUPPORT_SPTAG
+        /* Check collection's index type supports delete */
         if (collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_BKT ||
             collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_KDT) {
             std::string err_msg =
@@ -74,12 +63,7 @@ DeleteByIDRequest::OnExecute() {
         }
 #endif
 
-        rc.RecordSection("check validation");
-
-        status = DBWrapper::DB()->DeleteEntities(collection_name_, entity_ids_);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(DBWrapper::DB()->DeleteEntityByID(collection_name_, entity_ids_));
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

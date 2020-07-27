@@ -1102,7 +1102,7 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
-    Status status = request_handler_.PreloadCollection(GetContext(context), request->collection_name());
+    Status status = request_handler_.LoadCollection(GetContext(context), request->collection_name());
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context);

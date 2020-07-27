@@ -47,31 +47,13 @@ CompactRequest::OnExecute() {
         std::string hdr = "CompactRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
-        // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
 
-        // only process root collection, ignore partition collection
-        engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-            } else {
-                return status;
-            }
-        }
-
-        rc.RecordSection("check validation");
-
-        // step 2: check collection existence
-        status = DBWrapper::DB()->Compact(context_, collection_name_, compact_threshold_);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(DBWrapper::DB()->Compact(context_, collection_name_, compact_threshold_));
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

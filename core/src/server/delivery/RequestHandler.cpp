@@ -17,7 +17,7 @@
 #include "server/delivery/request/BaseRequest.h"
 #include "server/delivery/request/CmdRequest.h"
 #include "server/delivery/request/CompactRequest.h"
-#include "server/delivery/request/CountCollectionRequest.h"
+#include "server/delivery/request/CountEntitiesRequest.h"
 #include "server/delivery/request/CreateCollectionRequest.h"
 #include "server/delivery/request/CreateIndexRequest.h"
 #include "server/delivery/request/CreatePartitionRequest.h"
@@ -32,12 +32,12 @@
 #include "server/delivery/request/GetEntityIDsRequest.h"
 #include "server/delivery/request/HasCollectionRequest.h"
 #include "server/delivery/request/HasPartitionRequest.h"
-#include "server/delivery/request/InsertEntityRequest.h"
-#include "server/delivery/request/PreloadCollectionRequest.h"
+#include "server/delivery/request/InsertRequest.h"
+#include "server/delivery/request/LoadCollectionRequest.h"
 #include "server/delivery/request/SearchRequest.h"
 #include "server/delivery/request/GetCollectionStatsRequest.h"
 #include "server/delivery/request/ListCollectionsRequest.h"
-#include "server/delivery/request/ShowPartitionsRequest.h"
+#include "server/delivery/request/ListPartitionsRequest.h"
 
 namespace milvus {
 namespace server {
@@ -130,7 +130,6 @@ RequestHandler::CreatePartition(const std::shared_ptr<Context>& context, const s
                                 const std::string& tag) {
     BaseRequestPtr request_ptr = CreatePartitionRequest::Create(context, collection_name, tag);
     RequestScheduler::ExecRequest(request_ptr);
-
     return request_ptr->status();
 }
 
@@ -139,7 +138,6 @@ RequestHandler::DropPartition(const std::shared_ptr<Context>& context, const std
                               const std::string& tag) {
     BaseRequestPtr request_ptr = DropPartitionRequest::Create(context, collection_name, tag);
     RequestScheduler::ExecRequest(request_ptr);
-
     return request_ptr->status();
 }
 
@@ -154,17 +152,16 @@ RequestHandler::HasPartition(const std::shared_ptr<Context>& context, const std:
 Status
 RequestHandler::ListPartitions(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                std::vector<std::string>& partitions) {
-    BaseRequestPtr request_ptr = ShowPartitionsRequest::Create(context, collection_name, partitions);
+    BaseRequestPtr request_ptr = ListPartitionsRequest::Create(context, collection_name, partitions);
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }
 
 Status
 RequestHandler::Insert(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                       const std::string& partition_name, const int32_t& row_count,
+                       const std::string& partition_name, const int64_t& row_count,
                        std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
-    BaseRequestPtr request_ptr =
-            InsertEntityRequest::Create(context, collection_name, partition_name, row_count, chunk_data);
+    BaseRequestPtr request_ptr = InsertRequest::Create(context, collection_name, partition_name, row_count, chunk_data);
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }
@@ -182,7 +179,7 @@ RequestHandler::GetEntityByID(const std::shared_ptr<Context>& context, const std
 Status
 RequestHandler::DeleteEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                  const engine::IDNumbers& ids) {
-    BaseRequestPtr request_ptr = DeleteByIDRequest::Create(context, collection_name, ids);
+    BaseRequestPtr request_ptr = DeleteEntityByIDRequest::Create(context, collection_name, ids);
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }
@@ -198,16 +195,15 @@ RequestHandler::Search(const std::shared_ptr<milvus::server::Context>& context, 
 Status
 RequestHandler::ListIDInSegment(const std::shared_ptr<Context>& context, const std::string& collection_name,
                                 int64_t segment_id, engine::IDNumbers& ids) {
-    BaseRequestPtr request_ptr = GetEntityIDsRequest::Create(context, collection_name, segment_id, ids);
+    BaseRequestPtr request_ptr = ListIDInSegmentRequest::Create(context, collection_name, segment_id, ids);
     RequestScheduler::ExecRequest(request_ptr);
     return request_ptr->status();
 }
 
 Status
-RequestHandler::PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name) {
-    BaseRequestPtr request_ptr = PreloadCollectionRequest::Create(context, collection_name);
+RequestHandler::LoadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name) {
+    BaseRequestPtr request_ptr = LoadCollectionRequest::Create(context, collection_name);
     RequestScheduler::ExecRequest(request_ptr);
-
     return request_ptr->status();
 }
 

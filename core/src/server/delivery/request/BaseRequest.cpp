@@ -29,20 +29,10 @@ namespace {
 std::string
 RequestGroup(BaseRequest::RequestType type) {
     static std::map<BaseRequest::RequestType, std::string> s_map_type_group = {
-        // general operations
+        /* general operations */
         {BaseRequest::kCmd, INFO_REQUEST_GROUP},
 
-        // data operations
-        {BaseRequest::kInsert, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kCompact, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kFlush, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kDeleteByID, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kGetVectorByID, INFO_REQUEST_GROUP},
-        {BaseRequest::kGetVectorIDs, INFO_REQUEST_GROUP},
-        {BaseRequest::kInsertEntity, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kGetEntityByID, INFO_REQUEST_GROUP},
-
-        // collection operations
+        /* collection operations */
         {BaseRequest::kCreateCollection, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kDropCollection, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kHasCollection, INFO_REQUEST_GROUP},
@@ -50,21 +40,29 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kGetCollectionInfo, INFO_REQUEST_GROUP},
         {BaseRequest::kGetCollectionStats, INFO_REQUEST_GROUP},
         {BaseRequest::kCountEntities, INFO_REQUEST_GROUP},
-        {BaseRequest::kPreloadCollection, DQL_REQUEST_GROUP},
 
-        // partition operations
-        {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kShowPartitions, INFO_REQUEST_GROUP},
-        {BaseRequest::kDropPartition, DDL_DML_REQUEST_GROUP},
-
-        // index operations
+        /* index operations */
         {BaseRequest::kCreateIndex, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kDescribeIndex, INFO_REQUEST_GROUP},
         {BaseRequest::kDropIndex, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kDescribeIndex, INFO_REQUEST_GROUP},
 
-        // search operations
+        /* partition operations */
+        {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kDropPartition, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kHasPartition, INFO_REQUEST_GROUP},
+        {BaseRequest::kListPartitions, INFO_REQUEST_GROUP},
+
+        /* data operations */
+        {BaseRequest::kInsert, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kGetEntityByID, INFO_REQUEST_GROUP},
+        {BaseRequest::kDeleteEntityByID, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kSearch, DQL_REQUEST_GROUP},
-        {BaseRequest::kSearchCombine, DQL_REQUEST_GROUP},
+        {BaseRequest::kListIDInSegment, DQL_REQUEST_GROUP},
+
+        /* other operations */
+        {BaseRequest::kLoadCollection, DQL_REQUEST_GROUP},
+        {BaseRequest::kFlush, DDL_DML_REQUEST_GROUP},
+        {BaseRequest::kCompact, DDL_DML_REQUEST_GROUP},
     };
 
     auto iter = s_map_type_group.find(type);

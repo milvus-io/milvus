@@ -15,24 +15,27 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace milvus {
 namespace server {
 
-class PreloadCollectionRequest : public BaseRequest {
+class ListPartitionsRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           std::vector<std::string>& partition_list);
 
  protected:
-    PreloadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name);
+    ListPartitionsRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                          std::vector<std::string>& partition_list);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
+    std::vector<std::string>& partition_list_;
 };
 
 }  // namespace server

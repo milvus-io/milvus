@@ -49,17 +49,11 @@ SearchRequest::OnExecute() {
 
         TimeRecorder rc(hdr);
 
-        // step 1: check table name
-        auto status = ValidateCollectionName(query_ptr_->collection_id);
-        if (!status.ok()) {
-            return status;
-        }
-
         // step 2: check table existence
         // only process root table, ignore partition table
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::DB()->DescribeCollection(query_ptr_->collection_id, collection, fields_schema);
+        auto status = DBWrapper::DB()->GetCollectionInfo(query_ptr_->collection_id, collection, fields_schema);
         fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
@@ -70,15 +64,6 @@ SearchRequest::OnExecute() {
         }
 
         int64_t dimension = collection->GetParams()[engine::DIMENSION].get<int64_t>();
-
-        // step 3: check partition tags
-        status = ValidatePartitionTags(query_ptr_->partitions);
-        fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        if (!status.ok()) {
-            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
-            return status;
-        }
 
         // step 4: Get field info
         std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;

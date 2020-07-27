@@ -49,7 +49,7 @@ GetCollectionInfoRequest::OnExecute() {
     try {
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings collection_mappings;
-        auto status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, collection_mappings);
+        auto status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, collection_mappings);
         if (!status.ok()) {
             return status;
         }

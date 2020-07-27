@@ -52,7 +52,7 @@ GetCollectionStatsRequest::OnExecute() {
         return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
     }
 
-    status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection_stats_);
+    status = DBWrapper::DB()->GetCollectionStats(collection_name_, collection_stats_);
     if (!status.ok()) {
         return status;
     }

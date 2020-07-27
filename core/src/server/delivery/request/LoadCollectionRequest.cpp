@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/request/PreloadCollectionRequest.h"
+#include "server/delivery/request/LoadCollectionRequest.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
@@ -23,33 +23,26 @@
 namespace milvus {
 namespace server {
 
-PreloadCollectionRequest::PreloadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                                   const std::string& collection_name)
-    : BaseRequest(context, BaseRequest::kPreloadCollection), collection_name_(collection_name) {
+LoadCollectionRequest::LoadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
+                                                 const std::string& collection_name)
+    : BaseRequest(context, BaseRequest::kLoadCollection), collection_name_(collection_name) {
 }
 
 BaseRequestPtr
-PreloadCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                                 const std::string& collection_name) {
-    return std::shared_ptr<BaseRequest>(new PreloadCollectionRequest(context, collection_name));
+LoadCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
+                              const std::string& collection_name) {
+    return std::shared_ptr<BaseRequest>(new LoadCollectionRequest(context, collection_name));
 }
 
 Status
-PreloadCollectionRequest::OnExecute() {
+LoadCollectionRequest::OnExecute() {
     try {
-        std::string hdr = "PreloadCollectionRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "LoadCollectionRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
-        // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
-        }
-
-        // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
+        auto status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));

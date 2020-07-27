@@ -87,41 +87,40 @@ class BaseRequest {
  public:
     enum RequestType {
         // general operations
-        kCmd = 100,
+        kCmd = 0,
 
-        // data operations
-        kInsert = 200,
-        kCompact,
-        kFlush,
-        kDeleteByID,
-        kGetVectorByID,
-        kGetVectorIDs,
-        kInsertEntity,
-        kGetEntityByID,
-
-        // collection operations
-        kCreateCollection = 300,
+        /* collection operations */
+        kCreateCollection = 100,
         kDropCollection,
         kHasCollection,
         kListCollections,
         kGetCollectionInfo,
         kGetCollectionStats,
         kCountEntities,
-        kPreloadCollection,
 
-        // partition operations
-        kCreatePartition = 400,
-        kDropPartition,
-        kShowPartitions,
-
-        // index operations
-        kCreateIndex = 500,
-        kDescribeIndex,
+        /* index operations */
+        kCreateIndex = 200,
         kDropIndex,
+        kDescribeIndex,
 
-        // search operations
+        /* partition operations */
+        kCreatePartition = 300,
+        kDropPartition,
+        kHasPartition,
+        kListPartitions,
+
+        /* data operations */
+        kInsert = 400,
+        kGetEntityByID,
+        kDeleteEntityByID,
         kSearch,
-        kSearchCombine,
+        kListIDInSegment,
+
+        /* other operations */
+        kLoadCollection = 500,
+        kFlush,
+        kCompact,
+
     };
 
  protected:

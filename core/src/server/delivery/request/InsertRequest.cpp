@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/request/InsertEntityRequest.h"
+#include "server/delivery/request/InsertRequest.h"
 #include "db/Utils.h"
 #include "db/snapshot/Context.h"
 #include "server/DBWrapper.h"
@@ -32,11 +32,11 @@
 namespace milvus {
 namespace server {
 
-InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name, const std::string& partition_name,
-                                         const int32_t& row_count,
-                                         std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data)
-    : BaseRequest(context, BaseRequest::kInsertEntity),
+InsertRequest::InsertRequest(const std::shared_ptr<milvus::server::Context>& context,
+                             const std::string& collection_name, const std::string& partition_name,
+                             const int64_t& row_count,
+                             std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data)
+    : BaseRequest(context, BaseRequest::kInsert),
       collection_name_(collection_name),
       partition_name_(partition_name),
       row_count_(row_count),
@@ -44,54 +44,42 @@ InsertEntityRequest::InsertEntityRequest(const std::shared_ptr<milvus::server::C
 }
 
 BaseRequestPtr
-InsertEntityRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                            const std::string& partition_name, const int32_t& row_count,
+InsertRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                            const std::string& partition_name, const int64_t& row_count,
                             std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
     return std::shared_ptr<BaseRequest>(
-        new InsertEntityRequest(context, collection_name, partition_name, row_count, chunk_data));
+        new InsertRequest(context, collection_name, partition_name, row_count, chunk_data));
 }
 
 Status
-InsertEntityRequest::OnExecute() {
+InsertRequest::OnExecute() {
     LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute insert request.";
     try {
-        std::string hdr = "InsertEntityRequest(table=" + collection_name_ + ", partition_name=" + partition_name_ + ")";
+        std::string hdr = "InsertRequest(table=" + collection_name_ + ", partition_name=" + partition_name_ + ")";
         TimeRecorder rc(hdr);
-
-        // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
-        }
 
         if (chunk_data_.empty()) {
             return Status{SERVER_INVALID_ARGUMENT,
                           "The vector field is empty, Make sure you have entered vector records"};
         }
 
-        // step 2: check table existence
-        engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings mappings;
-        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, mappings);
-        if (collection == nullptr) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-            } else {
-                return status;
-            }
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
 
         engine::DataChunkPtr data_chunk = std::make_shared<engine::DataChunk>();
         data_chunk->count_ = row_count_;
         data_chunk->fixed_fields_.swap(chunk_data_);
-        status = DBWrapper::DB()->InsertEntities(collection_name_, partition_name_, data_chunk);
+        status = DBWrapper::DB()->Insert(collection_name_, partition_name_, data_chunk);
         if (!status.ok()) {
-            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "InsertEntities", 0, status.message().c_str());
+            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "Insert", 0, status.message().c_str());
             return status;
         }
         chunk_data_[engine::DEFAULT_UID_NAME] = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
 
-        rc.RecordSection("add vectors to engine");
+        rc.RecordSection("add entities");
         rc.ElapseFromBegin("total cost");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());

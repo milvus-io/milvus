@@ -45,27 +45,11 @@ DropIndexRequest::OnExecute() {
         std::string hdr = "DropIndexRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
-        // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
-
-        // only process root collection, ignore partition collection
-        engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::DB()->DescribeCollection(collection_name_, collection, fields_schema);
-        fiu_do_on("DropIndexRequest.OnExecute.collection_not_exist",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-            } else {
-                return status;
-            }
-        }
-
-        rc.RecordSection("check validation");
 
         // step 2: drop index
         status = DBWrapper::DB()->DropIndex(collection_name_, field_name_);

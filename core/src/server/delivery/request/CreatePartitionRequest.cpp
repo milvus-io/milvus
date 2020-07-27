@@ -54,7 +54,6 @@ CreatePartitionRequest::OnExecute() {
             return status;
         }
 
-        // only process root collection, ignore partition collection
         bool exist = false;
         status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
@@ -63,7 +62,7 @@ CreatePartitionRequest::OnExecute() {
 
         // check partition total count
         std::vector<std::string> partition_names;
-        status = DBWrapper::DB()->ShowPartitions(collection_name_, partition_names);
+        status = DBWrapper::DB()->ListPartitions(collection_name_, partition_names);
         if (partition_names.size() >= MAX_PARTITION_LIMIT) {
             std::stringstream err_ss;
             err_ss << "The number of partitions exceeds the upper limit (" << MAX_PARTITION_LIMIT << ")";

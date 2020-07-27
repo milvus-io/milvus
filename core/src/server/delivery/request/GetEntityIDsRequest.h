@@ -26,15 +26,15 @@
 namespace milvus {
 namespace server {
 
-class GetEntityIDsRequest : public BaseRequest {
+class ListIDInSegmentRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           int64_t segment_id, std::vector<int64_t>& vector_ids);
+           int64_t segment_id, engine::IDNumbers& ids);
 
  protected:
-    GetEntityIDsRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                        int64_t segment_id, std::vector<int64_t>& vector_ids);
+    ListIDInSegmentRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                           int64_t segment_id, engine::IDNumbers& ids);
 
     Status
     OnExecute() override;
@@ -42,7 +42,7 @@ class GetEntityIDsRequest : public BaseRequest {
  private:
     std::string collection_name_;
     int64_t segment_id_;
-    std::vector<int64_t>& vector_ids_;
+    engine::IDNumbers& ids_;
 };
 
 }  // namespace server

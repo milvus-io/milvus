@@ -52,31 +52,21 @@ FlushRequest::OnExecute() {
 
     // flush all collections
     if (collection_names_.empty()) {
-        status = DBWrapper::DB()->Flush();
-        return status;
+        return DBWrapper::DB()->Flush();
     }
 
     // flush specified collections
     for (auto& name : collection_names_) {
-        // only process root collection, ignore partition collection
-        engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::DB()->DescribeCollection(name, collection, fields_schema);
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(name));
-            } else {
-                return status;
-            }
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasCollection(name, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(name));
         }
 
-        status = DBWrapper::DB()->Flush(name);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(DBWrapper::DB()->Flush(name));
     }
 
-    return status;
+    return Status::OK();
 }
 
 }  // namespace server

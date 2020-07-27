@@ -35,7 +35,7 @@ GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server:
                                            std::vector<std::string>& field_names,
                                            engine::snapshot::CollectionMappings& field_mappings,
                                            engine::DataChunkPtr& data_chunk)
-    : BaseRequest(context, BaseRequest::kGetVectorByID),
+    : BaseRequest(context, BaseRequest::kGetEntityByID),
       collection_name_(collection_name),
       id_array_(id_array),
       field_names_(field_names),
@@ -55,7 +55,7 @@ GetEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& con
 Status
 GetEntityByIDRequest::OnExecute() {
     try {
-        std::string hdr = "GetEntitiesByIDRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "GetEntityByIDRequest(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -77,7 +77,7 @@ GetEntityByIDRequest::OnExecute() {
 
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collectionPtr;
-        status = DBWrapper::DB()->DescribeCollection(collection_name_, collectionPtr, field_mappings_);
+        status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collectionPtr, field_mappings_);
         if (collectionPtr == nullptr) {
             return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
         }

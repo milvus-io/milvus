@@ -266,7 +266,7 @@ WebRequestHandler::PreLoadCollection(const nlohmann::json& json, std::string& re
     }
 
     auto collection_name = json["collection_name"];
-    auto status = request_handler_.PreloadCollection(context_ptr_, collection_name.get<std::string>());
+    auto status = request_handler_.LoadCollection(context_ptr_, collection_name.get<std::string>());
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());
