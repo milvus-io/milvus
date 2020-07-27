@@ -11,10 +11,10 @@
 
 #pragma once
 
+#include <boost/filesystem.hpp>
 #include <memory>
 #include <string>
 #include <vector>
-#include <boost/filesystem.hpp>
 
 #include "db/snapshot/MetaEvent.h"
 #include "db/snapshot/Operations.h"

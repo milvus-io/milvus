@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include "utils/Status.h"
 #include "db/snapshot/Store.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
