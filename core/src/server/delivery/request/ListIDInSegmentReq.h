@@ -26,22 +26,23 @@
 namespace milvus {
 namespace server {
 
-class GetCollectionStatsRequest : public BaseRequest {
+class ListIDInSegmentRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::string& collection_stats);
+           int64_t segment_id, engine::IDNumbers& ids);
 
  protected:
-    GetCollectionStatsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                              const std::string& collection_name, std::string& collection_stats);
+    ListIDInSegmentRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                           int64_t segment_id, engine::IDNumbers& ids);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
-    std::string& collection_stats_;
+    std::string collection_name_;
+    int64_t segment_id_;
+    engine::IDNumbers& ids_;
 };
 
 }  // namespace server

@@ -22,7 +22,7 @@
 #include "config/ServerConfig.h"
 #include "metrics/SystemInfo.h"
 #include "query/BinaryQuery.h"
-#include "server/delivery/request/BaseRequest.h"
+#include "server/delivery/request/BaseReq.h"
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/PartitionDto.hpp"

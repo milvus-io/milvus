@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "query/BooleanQuery.h"
-#include "server/delivery/request/BaseRequest.h"
+#include "server/delivery/request/BaseReq.h"
 #include "utils/Status.h"
 
 namespace milvus {

@@ -21,27 +21,26 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 namespace milvus {
 namespace server {
 
-class GetCollectionStatsRequest : public BaseRequest {
+class CompactRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::string& collection_stats);
+           double compact_threshold);
 
  protected:
-    GetCollectionStatsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                              const std::string& collection_name, std::string& collection_stats);
+    CompactRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                   double compact_threshold);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
-    std::string& collection_stats_;
+    double compact_threshold_ = 0.0;
 };
 
 }  // namespace server

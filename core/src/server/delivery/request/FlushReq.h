@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseReq.h"
+#include "BaseReq.h"
 
 #include <memory>
 #include <string>
@@ -26,22 +26,20 @@
 namespace milvus {
 namespace server {
 
-class GetCollectionStatsRequest : public BaseRequest {
+class FlushRequest : public BaseRequest {
  public:
     static BaseRequestPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::string& collection_stats);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::vector<std::string>& collection_names);
 
  protected:
-    GetCollectionStatsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                              const std::string& collection_name, std::string& collection_stats);
+    FlushRequest(const std::shared_ptr<milvus::server::Context>& context,
+                 const std::vector<std::string>& collection_names);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
-    std::string& collection_stats_;
+    std::vector<std::string> collection_names_;
 };
 
 }  // namespace server

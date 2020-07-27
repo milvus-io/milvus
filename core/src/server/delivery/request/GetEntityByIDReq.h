@@ -19,6 +19,9 @@
 
 #include "server/delivery/request/BaseReq.h"
 
+#include <src/db/snapshot/Context.h>
+#include <src/db/snapshot/Resources.h>
+#include <src/segment/Segment.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -26,22 +29,27 @@
 namespace milvus {
 namespace server {
 
-class GetCollectionStatsRequest : public BaseRequest {
+class GetEntityByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::string& collection_stats);
+           const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
+           engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
  protected:
-    GetCollectionStatsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                              const std::string& collection_name, std::string& collection_stats);
+    GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         const engine::IDNumbers& id_array, std::vector<std::string>& field_names,
+                         engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
     Status
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
-    std::string& collection_stats_;
+    std::string collection_name_;
+    engine::IDNumbers id_array_;
+    std::vector<std::string>& field_names_;
+    engine::snapshot::CollectionMappings& field_mappings_;
+    engine::DataChunkPtr& data_chunk_;
 };
 
 }  // namespace server

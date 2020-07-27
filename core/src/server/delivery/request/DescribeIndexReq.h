@@ -11,29 +11,31 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseReq.h"
-#include "utils/BlockingQueue.h"
-#include "utils/Status.h"
-
 #include <memory>
-#include <queue>
 #include <string>
-#include <utility>
-#include <vector>
+
+#include "server/delivery/request/BaseReq.h"
 
 namespace milvus {
 namespace server {
 
-class RequestStrategy {
- protected:
-    RequestStrategy() = default;
-
+class DescribeIndexRequest : public BaseRequest {
  public:
-    virtual Status
-    ReScheduleQueue(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) = 0;
-};
+    static BaseRequestPtr
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           IndexParam& index_param);
 
-using RequestStrategyPtr = std::shared_ptr<RequestStrategy>;
+ protected:
+    DescribeIndexRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         IndexParam& index_param);
+
+    Status
+    OnExecute() override;
+
+ private:
+    const std::string collection_name_;
+    IndexParam& index_param_;
+};
 
 }  // namespace server
 }  // namespace milvus

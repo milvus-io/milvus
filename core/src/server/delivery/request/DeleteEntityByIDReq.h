@@ -17,31 +17,31 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseReq.h"
-
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "server/delivery/request/BaseReq.h"
+
 namespace milvus {
 namespace server {
 
-class GetCollectionStatsRequest : public BaseRequest {
+class DeleteEntityByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::string& collection_stats);
+           const engine::IDNumbers& entity_ids);
 
  protected:
-    GetCollectionStatsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                              const std::string& collection_name, std::string& collection_stats);
+    DeleteEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                            const engine::IDNumbers& entity_ids);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
-    std::string& collection_stats_;
+    const std::vector<int64_t>& entity_ids_;
 };
 
 }  // namespace server
