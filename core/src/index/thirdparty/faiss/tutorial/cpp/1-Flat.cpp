@@ -19,6 +19,8 @@ int main() {
     float *xb = new float[d * nb];
     float *xq = new float[d * nq];
 
+    srand48(54321);
+
     for(int i = 0; i < nb; i++) {
         for(int j = 0; j < d; j++)
             xb[d * i + j] = drand48();
