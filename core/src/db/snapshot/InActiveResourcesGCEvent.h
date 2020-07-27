@@ -14,9 +14,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <boost/filesystem.hpp>
 
-#include "db/snapshot/Event.h"
-#include "db/snapshot/EventExecutor.h"
+#include "db/snapshot/MetaEvent.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Store.h"

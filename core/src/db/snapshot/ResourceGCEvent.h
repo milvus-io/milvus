@@ -16,19 +16,13 @@
 #include <string>
 #include <vector>
 
+#include "db/snapshot/MetaEvent.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
-
-class MetaEvent {
- public:
-    virtual Status Process(StorePtr) = 0;
-};
+namespace milvus::engine::snapshot {
 
 template <class ResourceT>
 class ResourceGCEvent : public MetaEvent {
@@ -75,6 +69,4 @@ class ResourceGCEvent : public MetaEvent {
     class ResourceT::Ptr res_;
 };
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}
