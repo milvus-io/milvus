@@ -66,6 +66,5 @@ extern const char* INDEX_HNSW_SQ8NM;
 
 enum class IndexMode { MODE_CPU = 0, MODE_GPU = 1 };
 
-
 }  // namespace knowhere
 }  // namespace milvus
