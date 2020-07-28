@@ -27,7 +27,6 @@ namespace engine {
 
 struct ExecutionEngineContext {
     query::QueryPtr query_ptr_;
-    std::unordered_map<std::string, meta::hybrid::DataType> attr_type_;
     QueryResultPtr query_result_;
 };
 

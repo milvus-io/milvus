@@ -114,7 +114,6 @@ struct Query {
     std::string collection_id;
     std::vector<std::string> partitions;
     std::vector<std::string> field_names;
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_types;
 };
 using QueryPtr = std::shared_ptr<Query>;
 

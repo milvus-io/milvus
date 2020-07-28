@@ -213,9 +213,22 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         list = vec_index_ptr_->GetBlacklist();
         entity_count_ = list->capacity();
 
+        std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
+
+        auto field_visitors = segment_visitor_->GetFieldVisitors();
+        for (auto& pair : field_visitors) {
+            auto& field_visitor = pair.second;
+            auto field = field_visitor->GetField();
+            auto type = field->GetFtype();
+            if (type == (int)engine::meta::hybrid::DataType::VECTOR_BINARY ||
+                type == (int)engine::meta::hybrid::DataType::VECTOR_FLOAT ||
+                type == (int)engine::meta::hybrid::DataType::UID) {
+                attr_type.insert(std::make_pair(field->GetName(), (engine::meta::hybrid::DataType)type));
+            }
+        }
+
         // Parse general query
-        auto status =
-            ExecBinaryQuery(context.query_ptr_->root, bitset, context.query_ptr_->attr_types, vector_placeholder);
+        auto status = ExecBinaryQuery(context.query_ptr_->root, bitset, attr_type, vector_placeholder);
         if (!status.ok()) {
             return status;
         }
