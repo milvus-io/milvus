@@ -1255,6 +1255,11 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     auto valid_row_count = [&](int32_t& base, int32_t test) -> bool {
         if (base < 0) {
             base = test;
+            if (request->entity_id_array_size() > 0 && base != request->entity_id_array_size()) {
+                auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "ID size not matches entity size"};
+                SET_RESPONSE(response->mutable_status(), status, context);
+                return false;
+            }
         } else if (base != test) {
             auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "Field row count inconsist"};
             SET_RESPONSE(response->mutable_status(), status, context);
