@@ -18,7 +18,6 @@
 #include <vector>
 
 #include "db/Types.h"
-#include "db/meta/FilesHolder.h"
 #include "utils/Status.h"
 
 namespace milvus {

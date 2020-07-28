@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include "db/meta/FilesHolder.h"
 #include "db/snapshot/Snapshot.h"
 
 #include <map>

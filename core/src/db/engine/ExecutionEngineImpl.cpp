@@ -53,6 +53,13 @@ namespace milvus {
 namespace engine {
 
 namespace {
+Status
+GetRequiredIndexFields(const query::QueryPtr& query_ptr, TargetFields& field_names) {
+    for (const auto& name : query_ptr->index_fields) {
+        field_names.insert(name);
+    }
+    return Status::OK();
+}
 
 Status
 MappingMetricType(MetricType metric_type, milvus::json& conf) {
@@ -115,31 +122,14 @@ ExecutionEngineImpl::Load(ExecutionEngineContext& context) {
     if (context.query_ptr_ != nullptr) {
         return LoadForSearch(context.query_ptr_);
     } else {
-        return LoadForIndex();
+        return Load(context.target_fields_);
     }
 }
 
 Status
 ExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
-    SegmentPtr segment_ptr;
-    segment_reader_->GetSegment(segment_ptr);
-
-    return Load(query_ptr->index_fields);
-}
-
-Status
-ExecutionEngineImpl::LoadForIndex() {
-    std::vector<std::string> field_names;
-
-    auto field_visitors = segment_visitor_->GetFieldVisitors();
-    for (auto& pair : field_visitors) {
-        auto& field_visitor = pair.second;
-        auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
-            field_names.push_back(field_visitor->GetField()->GetName());
-            break;
-        }
-    }
+    TargetFields field_names;
+    STATUS_CHECK(GetRequiredIndexFields(query_ptr, field_names));
 
     return Load(field_names);
 }
@@ -178,8 +168,9 @@ ExecutionEngineImpl::CreateStructuredIndex(const milvus::engine::meta::hybrid::D
 }
 
 Status
-ExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
-    TimeRecorderAuto rc("SSExecutionEngineImpl::Load");
+ExecutionEngineImpl::Load(const TargetFields& field_names) {
+    TimeRecorderAuto rc("ExecutionEngineImpl::Load");
+
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
 
@@ -209,6 +200,8 @@ ExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
             std::vector<uint8_t> raw;
             segment_reader_->LoadField(name, raw);
         }
+
+        target_fields_.insert(name);
     }
 
     return Status::OK();
@@ -217,7 +210,7 @@ ExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 #ifdef MILVUS_GPU_VERSION
-    TimeRecorderAuto rc("SSExecutionEngineImpl::CopyToGpu");
+    TimeRecorderAuto rc("ExecutionEngineImpl::CopyToGpu");
 
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
@@ -225,8 +218,10 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
     engine::VECTOR_INDEX_MAP new_map;
     engine::VECTOR_INDEX_MAP& indice = segment_ptr->GetVectorIndice();
     for (auto& pair : indice) {
-        auto gpu_index = knowhere::cloner::CopyCpuToGpu(pair.second, device_id, knowhere::Config());
-        new_map.insert(std::make_pair(pair.first, gpu_index));
+        if (pair.second != nullptr) {
+            auto gpu_index = knowhere::cloner::CopyCpuToGpu(pair.second, device_id, knowhere::Config());
+            new_map.insert(std::make_pair(pair.first, gpu_index));
+        }
     }
 
     indice.swap(new_map);
@@ -524,7 +519,7 @@ ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, met
 
 Status
 ExecutionEngineImpl::BuildIndex() {
-    TimeRecorderAuto rc("SSExecutionEngineImpl::BuildIndex");
+    TimeRecorderAuto rc("ExecutionEngineImpl::BuildIndex");
 
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
@@ -533,9 +528,8 @@ ExecutionEngineImpl::BuildIndex() {
     auto collection = snapshot->GetCollection();
     auto& segment = segment_visitor_->GetSegment();
 
-    auto field_visitors = segment_visitor_->GetFieldVisitors();
-    for (auto& pair : field_visitors) {
-        auto& field_visitor = pair.second;
+    for (auto& field_name : target_fields_) {
+        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
         auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (element_visitor == nullptr) {
             continue;  // no index specified
