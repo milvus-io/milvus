@@ -265,7 +265,6 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
 
         list = vec_index->GetBlacklist();
         entity_count_ = list->capacity();
-
         // Parse general query
         auto status = ExecBinaryQuery(context.query_ptr_->root, bitset, attr_type, vector_placeholder);
         if (!status.ok()) {
