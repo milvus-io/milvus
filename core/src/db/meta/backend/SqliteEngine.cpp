@@ -93,9 +93,9 @@ static const MetaSchema SEGMENTCOMMIT_SCHEMA(TABLE_SEGMENT_COMMIT, {
 
 static const MetaSchema SEGMENTFILE_SCHEMA(TABLE_SEGMENT_FILE,
                                            {MetaIdField, MetaCollectionIdField, MetaPartitionIdField,
-                                            MetaSegmentIdField, MetaFieldElementIdField, MetaRowCountField,
-                                            MetaSizeField, MetaLSNField, MetaStateField, MetaCreatedOnField,
-                                            MetaUpdatedOnField});
+                                            MetaSegmentIdField, MetaFieldElementIdField, MetaFtypeField,
+                                            MetaRowCountField, MetaSizeField, MetaLSNField, MetaStateField,
+                                            MetaCreatedOnField, MetaUpdatedOnField});
 
 static const MetaSchema SCHEMACOMMIT_SCHEMA(TABLE_SCHEMA_COMMIT, {
                                                                      MetaIdField,

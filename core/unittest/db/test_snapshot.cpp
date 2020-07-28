@@ -1466,7 +1466,6 @@ TEST_F(SnapshotTest, CompoundTest2) {
         ASSERT_EQ(new_seg->GetPartitionId(), partition->GetID());
     };
 
-    // TODO: If any Compound Operation find larger Snapshot. This Operation should be rollback to latest
     auto handler_worker = [&] {
         auto loop_cnt = RandomInt(30, 35);
         ScopedSnapshotT latest_ss;

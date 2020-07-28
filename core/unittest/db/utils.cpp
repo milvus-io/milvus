@@ -25,6 +25,7 @@
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/ServerConfig.h"
+#include "codecs/Codec.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
 #include "db/snapshot/EventExecutor.h"
@@ -140,7 +141,8 @@ BaseTest::InitLog() {
 
 void
 BaseTest::SnapshotStart(bool mock_store, milvus::engine::DBOptions options) {
-    auto store = Store::Build(options.meta_.backend_uri_, options.meta_.path_);
+    auto store = Store::Build(options.meta_.backend_uri_, options.meta_.path_,
+            milvus::codec::Codec::instance().GetSuffixSet());
 
     milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();

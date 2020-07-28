@@ -123,7 +123,7 @@ CreateResPtr<SegmentCommit>() {
 template <>
 inline SegmentFile::Ptr
 CreateResPtr<SegmentFile>() {
-    return std::make_shared<SegmentFile>(0, 0, 0, 0);
+    return std::make_shared<SegmentFile>(0, 0, 0, 0, 0);
 }
 
 template <>

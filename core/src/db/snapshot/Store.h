@@ -11,12 +11,14 @@
 
 #pragma once
 
+#include "codecs/Codec.h"
 #include "db/Utils.h"
 #include "db/meta/MetaFactory.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Utils.h"
+#include "segment/Segment.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/Status.h"
@@ -49,23 +51,29 @@ class Store : public std::enable_shared_from_this<Store> {
  public:
     using Ptr = typename std::shared_ptr<Store>;
 
-    explicit Store(meta::MetaAdapterPtr adapter, const std::string& root_path)
-        : adapter_(std::move(adapter)), root_path_(root_path) {
+    explicit Store(meta::MetaAdapterPtr adapter, const std::string& root_path,
+                   const std::set<std::string>& suffix_set = {})
+        : adapter_(adapter), root_path_(root_path + engine::COLLECTIONS_FOLDER), suffix_set_(suffix_set) {
     }
 
     static Store::Ptr
-    Build(const std::string& uri, const std::string& root_path) {
+    Build(const std::string& uri, const std::string& root_path, const std::set<std::string> suffix_set = {}) {
         DBMetaOptions options;
         options.backend_uri_ = uri;
         options.path_ = root_path;
 
         auto adapter = MetaFactory::Build(options);
-        return std::make_shared<Store>(adapter, root_path);
+        return std::make_shared<Store>(adapter, root_path, suffix_set);
     }
 
-    std::string
+    const std::string&
     GetRootPath() const {
         return root_path_;
+    }
+
+    const std::set<std::string>&
+    GetSuffixSet() const {
+        return suffix_set_;
     }
 
     template <typename OpT>
@@ -307,8 +315,11 @@ class Store : public std::enable_shared_from_this<Store> {
                         auto& f_c_m = field_commit->GetMappings();
                         for (auto& field_element_id : f_c_m) {
                             SegmentFilePtr sf;
+                            FieldElementPtr fe_p;
+                            GetResource<FieldElement>(field_element_id, fe_p);
                             CreateResource<SegmentFile>(
-                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_element_id, 0, 0, 0, 0, ACTIVE),
+                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_element_id, fe_p->GetFtype(), 0,
+                                            0, 0, 0, ACTIVE),
                                 sf);
                             all_records.push_back(sf);
 
@@ -359,6 +370,7 @@ class Store : public std::enable_shared_from_this<Store> {
 
     meta::MetaAdapterPtr adapter_;
     std::string root_path_;
+    std::set<std::string> suffix_set_;
 };
 
 using StorePtr = Store::Ptr;

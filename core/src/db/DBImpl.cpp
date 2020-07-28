@@ -11,6 +11,7 @@
 
 #include "db/DBImpl.h"
 #include "cache/CpuCacheMgr.h"
+#include "codecs/Codec.h"
 #include "config/ServerConfig.h"
 #include "db/IDGenerator.h"
 #include "db/SnapshotUtils.h"
@@ -89,7 +90,8 @@ DBImpl::Start() {
     }
 
     // snapshot
-    auto store = snapshot::Store::Build(options_.meta_.backend_uri_, options_.meta_.path_);
+    auto store = snapshot::Store::Build(options_.meta_.backend_uri_, options_.meta_.path_,
+                                        codec::Codec::instance().GetSuffixSet());
     snapshot::OperationExecutor::Init(store);
     snapshot::OperationExecutor::GetInstance().Start();
     snapshot::EventExecutor::Init(store);
