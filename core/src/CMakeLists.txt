@@ -127,7 +127,8 @@ set(server_libs
         )
 
 add_executable(milvus_server
-        ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp ${context_files}
+        ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
+        ${context_files}
         ${scheduler_files}
         ${server_files}
         ${grpc_server_files}
