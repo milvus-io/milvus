@@ -167,7 +167,7 @@ class DBImpl : public DB {
     MemManagerPtr mem_mgr_;
     MergeManagerPtr merge_mgr_ptr_;
 
-    std::shared_ptr<wal::WalManager> wal_mgr_;
+    //    std::shared_ptr<wal::WalManager> wal_mgr_;
     std::thread bg_wal_thread_;
 
     std::thread bg_flush_thread_;

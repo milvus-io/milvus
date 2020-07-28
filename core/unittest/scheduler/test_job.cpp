@@ -13,7 +13,6 @@
 
 #include "scheduler/job/Job.h"
 #include "scheduler/job/BuildIndexJob.h"
-#include "scheduler/job/DeleteJob.h"
 #include "scheduler/job/SearchJob.h"
 
 namespace milvus {
@@ -21,24 +20,25 @@ namespace scheduler {
 class TestJob : public Job {
  public:
     TestJob() : Job(JobType::INVALID) {}
+
+    JobTasks
+    CreateTasks() {
+        JobTasks tasks;
+        return tasks;
+    }
 };
 
 TEST(JobTest, TestJob) {
     engine::DBOptions options;
-    auto build_index_ptr = std::make_shared<BuildIndexJob>(nullptr, options);
+    std::vector<int64_t> ids = {1, 2, 3};
+    auto build_index_ptr = std::make_shared<BuildIndexJob>(options, "AAA", ids);
     build_index_ptr->Dump();
-    build_index_ptr->AddToIndexFiles(nullptr);
 
     TestJob test_job;
     test_job.Dump();
 
-    auto delete_ptr = std::make_shared<DeleteJob>("collection_id", nullptr, 1);
-    delete_ptr->Dump();
-
-    engine::VectorsData vectors;
-    auto search_ptr = std::make_shared<SearchJob>(nullptr, 1, 1, vectors);
+    auto search_ptr = std::make_shared<SearchJob>(nullptr, options, nullptr);
     search_ptr->Dump();
-    search_ptr->AddIndexFile(nullptr);
 }
 
 }  // namespace scheduler
