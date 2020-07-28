@@ -127,6 +127,31 @@ class BaseReq {
     virtual ~BaseReq();
 
  public:
+    const std::shared_ptr<milvus::server::Context>&
+    context() const {
+        return context_;
+    }
+
+    ReqType
+    type() const {
+        return type_;
+    }
+
+    std::string
+    req_group() const {
+        return req_group_;
+    }
+
+    const Status&
+    status() const {
+        return status_;
+    }
+
+    bool
+    async() const {
+        return async_;
+    }
+
     Status
     PreExecute();
 
@@ -142,28 +167,8 @@ class BaseReq {
     Status
     WaitToFinish();
 
-    ReqType
-    GetReqType() const {
-        return type_;
-    }
-
-    std::string
-    ReqGroup() const {
-        return req_group_;
-    }
-
-    const Status&
-    status() const {
-        return status_;
-    }
-
     void
-    set_status(const Status& status);
-
-    bool
-    IsAsync() const {
-        return async_;
-    }
+    SetStatus(const Status& status);
 
  protected:
     virtual Status
@@ -180,7 +185,6 @@ class BaseReq {
 
  protected:
     const std::shared_ptr<milvus::server::Context> context_;
-
     ReqType type_;
     std::string req_group_;
     bool async_;
@@ -190,12 +194,6 @@ class BaseReq {
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
     bool done_;
-
- public:
-    const std::shared_ptr<milvus::server::Context>&
-    Context() const {
-        return context_;
-    }
 };
 
 using BaseReqPtr = std::shared_ptr<BaseReq>;

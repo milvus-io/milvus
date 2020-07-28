@@ -125,7 +125,7 @@ BaseReq::Done() {
 }
 
 void
-BaseReq::set_status(const Status& status) {
+BaseReq::SetStatus(const Status& status) {
     status_ = status;
     if (!status_.ok()) {
         LOG_SERVER_ERROR_ << status_.message();

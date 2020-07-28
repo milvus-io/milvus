@@ -95,7 +95,7 @@ ReqScheduler::ExecuteReq(const BaseReqPtr& req_ptr) {
         return status;
     }
 
-    if (req_ptr->IsAsync()) {
+    if (req_ptr->async()) {
         return Status::OK();  // async execution, caller need to call WaitToFinish at somewhere
     }
 
@@ -139,7 +139,7 @@ Status
 ReqScheduler::PutToQueue(const BaseReqPtr& req_ptr) {
     std::lock_guard<std::mutex> lock(queue_mtx_);
 
-    std::string group_name = req_ptr->ReqGroup();
+    std::string group_name = req_ptr->req_group();
     if (req_groups_.count(group_name) > 0) {
         req_groups_[group_name]->PutReq(req_ptr);
     } else {

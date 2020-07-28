@@ -38,7 +38,7 @@ ScheduleReq(const BaseReqPtr& req, std::queue<BaseReqPtr>& queue) {
     static std::map<BaseReq::ReqType, ReqStrategyPtr> s_schedulers = {
         {BaseReq::kSearch, std::make_shared<SearchReqStrategy>()}};
 
-    auto iter = s_schedulers.find(req->GetReqType());
+    auto iter = s_schedulers.find(req->type());
     if (iter == s_schedulers.end() || iter->second == nullptr) {
         queue.push(req);
     } else {
