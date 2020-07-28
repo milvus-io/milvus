@@ -5,7 +5,8 @@
 
 -include ../../makefile.inc
 
-CPU_TARGETS = 1-Flat 2-IVFFlat 3-IVFPQ 9-BinaryFlat
+#CPU_TARGETS = 1-Flat 2-IVFFlat 3-IVFPQ 9-BinaryFlat
+CPU_TARGETS = hnsw-sq8-milvus hnsw-sq8-faiss
 GPU_TARGETS = 4-GPU 5-Multiple-GPUs
 
 default: cpu
@@ -17,7 +18,7 @@ cpu: $(CPU_TARGETS)
 gpu: $(GPU_TARGETS)
 
 %: %.cpp ../../libfaiss.a
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDFLAGS) -I../../ $(LIBS)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDFLAGS) -I../../ $(LIBS) -lhdf5_serial
 
 clean:
 	rm -f $(CPU_TARGETS) $(GPU_TARGETS)
