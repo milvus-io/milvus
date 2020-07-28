@@ -22,11 +22,11 @@ namespace milvus {
 namespace knowhere {
 
 template <typename T>
-class StructuredIndexSort : public StructuredIndex<T> {
+class StructuredIndexFlat : public StructuredIndex<T> {
  public:
-    StructuredIndexSort();
-    StructuredIndexSort(const size_t n, const T* values);
-    ~StructuredIndexSort();
+    StructuredIndexFlat();
+    StructuredIndexFlat(const size_t n, const T* values);
+    ~StructuredIndexFlat();
 
     BinarySet
     Serialize(const Config& config = Config()) override;
@@ -73,8 +73,8 @@ class StructuredIndexSort : public StructuredIndex<T> {
 };
 
 template <typename T>
-using StructuredIndexSortPtr = std::shared_ptr<StructuredIndexSort<T>>;
+using StructuredIndexFlatPtr = std::shared_ptr<StructuredIndexFlat<T>>;
 }  // namespace knowhere
 }  // namespace milvus
 
-#include "knowhere/index/structured_index/StructuredIndexSort-inl.h"
+#include "knowhere/index/structured_index/StructuredIndexFlat-inl.h"
