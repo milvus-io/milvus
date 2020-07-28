@@ -51,7 +51,7 @@ TaskCreator::Create(const DeleteJobPtr& job) {
 }
 
 std::vector<TaskPtr>
-TaskCreator::Create(const SSSearchJobPtr& job) {
+TaskCreator::Create(const SearchJobPtr& job) {
     std::vector<TaskPtr> tasks;
     for (auto& id : job->segment_ids()) {
         auto task = std::make_shared<SearchTask>(job->GetContext(), job->options(), job->query_ptr(), id, nullptr);
@@ -62,7 +62,7 @@ TaskCreator::Create(const SSSearchJobPtr& job) {
 }
 
 std::vector<TaskPtr>
-TaskCreator::Create(const SSBuildIndexJobPtr& job) {
+TaskCreator::Create(const BuildIndexJobPtr& job) {
     std::vector<TaskPtr> tasks;
     const std::string& collection_name = job->collection_name();
     for (auto& id : job->segment_ids()) {

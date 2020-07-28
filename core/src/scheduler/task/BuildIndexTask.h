@@ -42,7 +42,7 @@ class BuildIndexTask : public Task {
     std::string collection_name_;
     engine::snapshot::ID_TYPE segment_id_;
 
-    engine::SSExecutionEnginePtr execution_engine_;
+    engine::ExecutionEnginePtr execution_engine_;
 };
 
 }  // namespace scheduler

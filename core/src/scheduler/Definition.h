@@ -31,7 +31,7 @@ namespace scheduler {
 using SegmentSchemaPtr = engine::meta::SegmentSchemaPtr;
 using SegmentSchema = engine::meta::SegmentSchema;
 
-using ExecutionEnginePtr = engine::SSExecutionEnginePtr;
+using ExecutionEnginePtr = engine::ExecutionEnginePtr;
 using EngineFactory = engine::EngineFactory;
 using EngineType = engine::EngineType;
 using MetricType = engine::MetricType;

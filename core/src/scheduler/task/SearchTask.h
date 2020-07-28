@@ -49,7 +49,7 @@ class SearchTask : public Task {
     query::QueryPtr query_ptr_;
     engine::snapshot::ID_TYPE segment_id_;
 
-    engine::SSExecutionEnginePtr execution_engine_;
+    engine::ExecutionEnginePtr execution_engine_;
 };
 
 }  // namespace scheduler

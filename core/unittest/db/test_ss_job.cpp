@@ -48,7 +48,7 @@ TEST(JobTest, TestJob) {
 //    ASSERT_EQ(segment_visitors.size(), 2);
 
     /* create BuildIndexJob */
-//    milvus::scheduler::SSBuildIndexJobPtr build_index_job =
+//    milvus::scheduler::BuildIndexJobPtr build_index_job =
 //        std::make_shared<milvus::scheduler::SSBuildIndexJob>("");
 //    for (auto& sv : segment_visitors) {
 //        build_index_job->AddSegmentVisitor(sv);
@@ -59,7 +59,7 @@ TEST(JobTest, TestJob) {
 //    build_index_job->WaitFinish();
 
 //    /* create SearchJob */
-//    milvus::scheduler::SSSearchJobPtr search_job =
+//    milvus::scheduler::SearchJobPtr search_job =
 //        std::make_shared<milvus::scheduler::SSSearchJob>(nullptr, "", nullptr);
 //    for (auto& sv : segment_visitors) {
 //        search_job->AddSegmentVisitor(sv);

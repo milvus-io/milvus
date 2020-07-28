@@ -28,7 +28,7 @@ namespace engine {
 
 class MemCollection {
  public:
-    using SSMemCollectionFileList = std::vector<MemSegmentPtr>;
+    using MemCollectionFileList = std::vector<MemSegmentPtr>;
 
     MemCollection(int64_t collection_id, int64_t partition_id, const DBOptions& options);
 
@@ -78,7 +78,7 @@ class MemCollection {
     int64_t collection_id_;
     int64_t partition_id_;
 
-    SSMemCollectionFileList mem_segment_list_;
+    MemCollectionFileList mem_segment_list_;
 
     DBOptions options_;
 
@@ -89,7 +89,7 @@ class MemCollection {
     std::atomic<uint64_t> lsn_;
 };  // SSMemCollection
 
-using SSMemCollectionPtr = std::shared_ptr<MemCollection>;
+using MemCollectionPtr = std::shared_ptr<MemCollection>;
 
 }  // namespace engine
 }  // namespace milvus

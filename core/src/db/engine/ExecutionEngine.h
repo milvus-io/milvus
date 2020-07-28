@@ -45,7 +45,7 @@ class ExecutionEngine {
     BuildIndex() = 0;
 };
 
-using SSExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;
+using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;
 
 }  // namespace engine
 }  // namespace milvus

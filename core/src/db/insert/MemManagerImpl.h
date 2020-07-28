@@ -30,9 +30,9 @@ namespace engine {
 class MemManagerImpl : public MemManager {
  public:
     using Ptr = std::shared_ptr<MemManagerImpl>;
-    using MemPartitionMap = std::map<int64_t, SSMemCollectionPtr>;
+    using MemPartitionMap = std::map<int64_t, MemCollectionPtr>;
     using MemCollectionMap = std::map<int64_t, MemPartitionMap>;
-    using MemList = std::vector<SSMemCollectionPtr>;
+    using MemList = std::vector<MemCollectionPtr>;
 
     explicit MemManagerImpl(const DBOptions& options) : options_(options) {
     }
@@ -70,10 +70,10 @@ class MemManagerImpl : public MemManager {
     GetCurrentMem() override;
 
  private:
-    SSMemCollectionPtr
+    MemCollectionPtr
     GetMemByTable(int64_t collection_id, int64_t partition_id);
 
-    std::vector<SSMemCollectionPtr>
+    std::vector<MemCollectionPtr>
     GetMemByTable(int64_t collection_id);
 
     Status
