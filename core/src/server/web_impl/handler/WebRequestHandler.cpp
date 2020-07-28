@@ -188,17 +188,14 @@ Status
 WebRequestHandler::GetSegmentVectors(const std::string& collection_name, int64_t segment_id, int64_t page_size,
                                      int64_t offset, nlohmann::json& json_out) {
     engine::IDNumbers vector_ids;
-    auto status = req_handler_.ListIDInSegment(context_ptr_, 0, segment_id, vector_ids);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, 0, segment_id, vector_ids));
 
     auto ids_begin = std::min(vector_ids.size(), (size_t)offset);
     auto ids_end = std::min(vector_ids.size(), (size_t)(offset + page_size));
 
     auto new_ids = std::vector<int64_t>(vector_ids.begin() + ids_begin, vector_ids.begin() + ids_end);
     nlohmann::json vectors_json;
-    status = GetVectorsByIDs(collection_name, new_ids, vectors_json);
+    auto status = GetVectorsByIDs(collection_name, new_ids, vectors_json);
 
     nlohmann::json result_json;
     if (vectors_json.empty()) {

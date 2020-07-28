@@ -41,7 +41,7 @@ class DeleteEntityByIDReq : public BaseReq {
 
  private:
     const std::string collection_name_;
-    const std::vector<int64_t>& entity_ids_;
+    const engine::IDNumbers& entity_ids_;
 };
 
 }  // namespace server

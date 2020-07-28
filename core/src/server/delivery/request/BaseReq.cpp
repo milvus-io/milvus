@@ -21,47 +21,47 @@
 namespace milvus {
 namespace server {
 
-static const char* DQL_REQUEST_GROUP = "dql";
-static const char* DDL_DML_REQUEST_GROUP = "ddl_dml";
-static const char* INFO_REQUEST_GROUP = "info";
+static const char* DQL_REQ_GROUP = "dql";
+static const char* DDL_DML_REQ_GROUP = "ddl_dml";
+static const char* INFO_REQ_GROUP = "info";
 
 namespace {
 std::string
 ReqGroup(BaseReq::ReqType type) {
     static std::map<BaseReq::ReqType, std::string> s_map_type_group = {
         /* general operations */
-        {BaseReq::kCmd, INFO_REQUEST_GROUP},
+        {BaseReq::kCmd, INFO_REQ_GROUP},
 
         /* collection operations */
-        {BaseReq::kCreateCollection, DDL_DML_REQUEST_GROUP},
-        {BaseReq::kDropCollection, DDL_DML_REQUEST_GROUP},
-        {BaseReq::kHasCollection, INFO_REQUEST_GROUP},
-        {BaseReq::kListCollections, INFO_REQUEST_GROUP},
-        {BaseReq::kGetCollectionInfo, INFO_REQUEST_GROUP},
-        {BaseReq::kGetCollectionStats, INFO_REQUEST_GROUP},
-        {BaseReq::kCountEntities, INFO_REQUEST_GROUP},
+        {BaseReq::kCreateCollection, DDL_DML_REQ_GROUP},
+        {BaseReq::kDropCollection, DDL_DML_REQ_GROUP},
+        {BaseReq::kHasCollection, INFO_REQ_GROUP},
+        {BaseReq::kListCollections, INFO_REQ_GROUP},
+        {BaseReq::kGetCollectionInfo, INFO_REQ_GROUP},
+        {BaseReq::kGetCollectionStats, INFO_REQ_GROUP},
+        {BaseReq::kCountEntities, INFO_REQ_GROUP},
 
         /* partition operations */
-        {BaseReq::kCreatePartition, DDL_DML_REQUEST_GROUP},
-        {BaseReq::kDropPartition, DDL_DML_REQUEST_GROUP},
-        {BaseReq::kHasPartition, INFO_REQUEST_GROUP},
-        {BaseReq::kListPartitions, INFO_REQUEST_GROUP},
+        {BaseReq::kCreatePartition, DDL_DML_REQ_GROUP},
+        {BaseReq::kDropPartition, DDL_DML_REQ_GROUP},
+        {BaseReq::kHasPartition, INFO_REQ_GROUP},
+        {BaseReq::kListPartitions, INFO_REQ_GROUP},
 
         /* index operations */
-        {BaseReq::kCreateIndex, DDL_DML_REQUEST_GROUP},
-        {BaseReq::kDropIndex, DDL_DML_REQUEST_GROUP},
+        {BaseReq::kCreateIndex, DDL_DML_REQ_GROUP},
+        {BaseReq::kDropIndex, DDL_DML_REQ_GROUP},
 
         /* data operations */
-        {BaseReq::kInsert, DDL_DML_REQUEST_GROUP},
-        {BaseReq::kGetEntityByID, INFO_REQUEST_GROUP},
-        {BaseReq::kDeleteEntityByID, DDL_DML_REQUEST_GROUP},
-        {BaseReq::kSearch, DQL_REQUEST_GROUP},
-        {BaseReq::kListIDInSegment, DQL_REQUEST_GROUP},
+        {BaseReq::kInsert, DDL_DML_REQ_GROUP},
+        {BaseReq::kGetEntityByID, INFO_REQ_GROUP},
+        {BaseReq::kDeleteEntityByID, DDL_DML_REQ_GROUP},
+        {BaseReq::kSearch, DQL_REQ_GROUP},
+        {BaseReq::kListIDInSegment, DQL_REQ_GROUP},
 
         /* other operations */
-        {BaseReq::kLoadCollection, DQL_REQUEST_GROUP},
-        {BaseReq::kFlush, DDL_DML_REQUEST_GROUP},
-        {BaseReq::kCompact, DDL_DML_REQUEST_GROUP},
+        {BaseReq::kLoadCollection, DQL_REQ_GROUP},
+        {BaseReq::kFlush, DDL_DML_REQ_GROUP},
+        {BaseReq::kCompact, DDL_DML_REQ_GROUP},
     };
 
     auto iter = s_map_type_group.find(type);
