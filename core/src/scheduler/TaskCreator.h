@@ -39,10 +39,10 @@ class TaskCreator {
     Create(const DeleteJobPtr& job);
 
     static std::vector<TaskPtr>
-    Create(const SSSearchJobPtr& job);
+    Create(const SearchJobPtr& job);
 
     static std::vector<TaskPtr>
-    Create(const SSBuildIndexJobPtr& job);
+    Create(const BuildIndexJobPtr& job);
 };
 
 }  // namespace scheduler

@@ -77,7 +77,7 @@ class BuildIndexJob : public Job {
     std::condition_variable cv_;
 };
 
-using SSBuildIndexJobPtr = std::shared_ptr<BuildIndexJob>;
+using BuildIndexJobPtr = std::shared_ptr<BuildIndexJob>;
 
 }  // namespace scheduler
 }  // namespace milvus
