@@ -36,10 +36,20 @@ Codec::instance() {
 Codec::Codec() {
     block_format_ptr_ = std::make_shared<BlockFormat>();
     structured_index_format_ptr_ = std::make_shared<StructuredIndexFormat>();
+    suffix_set_.insert(structured_index_format_ptr_->FilePostfix());
     vector_index_format_ptr_ = std::make_shared<VectorIndexFormat>();
+    suffix_set_.insert(vector_index_format_ptr_->FilePostfix());
     deleted_docs_format_ptr_ = std::make_shared<DeletedDocsFormat>();
+    suffix_set_.insert(deleted_docs_format_ptr_->FilePostfix());
     id_bloom_filter_format_ptr_ = std::make_shared<IdBloomFilterFormat>();
+    suffix_set_.insert(id_bloom_filter_format_ptr_->FilePostfix());
     vector_compress_format_ptr_ = std::make_shared<VectorCompressFormat>();
+    suffix_set_.insert(vector_compress_format_ptr_->FilePostfix());
+}
+
+const std::set<std::string>&
+Codec::GetSuffixSet() const {
+    return suffix_set_;
 }
 
 BlockFormatPtr

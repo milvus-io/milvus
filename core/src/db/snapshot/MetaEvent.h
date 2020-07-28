@@ -11,34 +11,18 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseReq.h"
-#include "utils/BlockingQueue.h"
+#include "db/snapshot/Store.h"
 #include "utils/Status.h"
 
-#include <map>
-#include <memory>
-#include <string>
-#include <thread>
-#include <vector>
-
 namespace milvus {
-namespace server {
+namespace engine {
+namespace snapshot {
 
-using BlockingRequestQueue = BlockingQueue<BaseRequestPtr>;
-
-class RequestQueue : public BlockingRequestQueue {
+class MetaEvent {
  public:
-    RequestQueue();
-    virtual ~RequestQueue();
-
-    BaseRequestPtr
-    TakeRequest();
-
-    Status
-    PutRequest(const BaseRequestPtr& request_ptr);
+    virtual Status Process(StorePtr) = 0;
 };
 
-using RequestQueuePtr = std::shared_ptr<RequestQueue>;
-
-}  // namespace server
+}  // namespace snapshot
+}  // namespace engine
 }  // namespace milvus

@@ -15,7 +15,7 @@
 #include <memory>
 #include <string>
 
-#include "db/snapshot/Event.h"
+#include "db/snapshot/MetaEvent.h"
 
 namespace milvus {
 namespace engine {

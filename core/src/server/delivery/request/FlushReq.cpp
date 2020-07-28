@@ -27,20 +27,20 @@
 namespace milvus {
 namespace server {
 
-FlushRequest::FlushRequest(const std::shared_ptr<milvus::server::Context>& context,
-                           const std::vector<std::string>& collection_names)
-    : BaseRequest(context, BaseRequest::kFlush), collection_names_(collection_names) {
+FlushReq::FlushReq(const std::shared_ptr<milvus::server::Context>& context,
+                   const std::vector<std::string>& collection_names)
+    : BaseReq(context, BaseReq::kFlush), collection_names_(collection_names) {
 }
 
-BaseRequestPtr
-FlushRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                     const std::vector<std::string>& collection_names) {
-    return std::shared_ptr<BaseRequest>(new FlushRequest(context, collection_names));
+BaseReqPtr
+FlushReq::Create(const std::shared_ptr<milvus::server::Context>& context,
+                 const std::vector<std::string>& collection_names) {
+    return std::shared_ptr<BaseReq>(new FlushReq(context, collection_names));
 }
 
 Status
-FlushRequest::OnExecute() {
-    std::string hdr = "FlushRequest flush collections: ";
+FlushReq::OnExecute() {
+    std::string hdr = "FlushReq flush collections: ";
     for (auto& name : collection_names_) {
         hdr += name;
         hdr += ", ";

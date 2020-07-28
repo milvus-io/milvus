@@ -24,20 +24,18 @@
 namespace milvus {
 namespace server {
 
-CmdRequest::CmdRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& cmd,
-                       std::string& result)
-    : BaseRequest(context, BaseRequest::kCmd), origin_cmd_(cmd), cmd_(tolower(cmd)), result_(result) {
+CmdReq::CmdReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& cmd, std::string& result)
+    : BaseReq(context, BaseReq::kCmd), origin_cmd_(cmd), cmd_(tolower(cmd)), result_(result) {
 }
 
-BaseRequestPtr
-CmdRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& cmd,
-                   std::string& result) {
-    return std::shared_ptr<BaseRequest>(new CmdRequest(context, cmd, result));
+BaseReqPtr
+CmdReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& cmd, std::string& result) {
+    return std::shared_ptr<BaseReq>(new CmdReq(context, cmd, result));
 }
 
 Status
-CmdRequest::OnExecute() {
-    std::string hdr = "CmdRequest(cmd=" + cmd_ + ")";
+CmdReq::OnExecute() {
+    std::string hdr = "CmdReq(cmd=" + cmd_ + ")";
     TimeRecorderAuto rc(hdr);
     Status stat = Status::OK();
 
@@ -88,7 +86,7 @@ CmdRequest::OnExecute() {
 }
 
 std::vector<std::string>
-CmdRequest::split(const std::string& src, char delimiter) {
+CmdReq::split(const std::string& src, char delimiter) {
     std::stringstream ss(src);
     std::vector<std::string> words;
     std::string word;
@@ -99,7 +97,7 @@ CmdRequest::split(const std::string& src, char delimiter) {
 }
 
 std::string
-CmdRequest::tolower(std::string s) {
+CmdReq::tolower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
     return s;
 }

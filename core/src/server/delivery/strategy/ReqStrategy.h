@@ -9,25 +9,31 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "scheduler/task/DeleteTask.h"
+#pragma once
 
+#include "server/delivery/request/BaseReq.h"
+#include "utils/BlockingQueue.h"
+#include "utils/Status.h"
+
+#include <memory>
+#include <queue>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace milvus {
-namespace scheduler {
+namespace server {
 
-XDeleteTask::XDeleteTask(const scheduler::DeleteJobPtr& delete_job, TaskLabelPtr label)
-    : Task(TaskType::DeleteTask, std::move(label)), delete_job_(delete_job) {
-}
+class ReqStrategy {
+ protected:
+    ReqStrategy() = default;
 
-void
-XDeleteTask::Load(LoadType type, uint8_t device_id) {
-}
+ public:
+    virtual Status
+    ReScheduleQueue(const BaseReqPtr& req, std::queue<BaseReqPtr>& queue) = 0;
+};
 
-void
-XDeleteTask::Execute() {
-    delete_job_->ResourceDone();
-}
+using ReqStrategyPtr = std::shared_ptr<ReqStrategy>;
 
-}  // namespace scheduler
+}  // namespace server
 }  // namespace milvus
