@@ -26,7 +26,7 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-class InActiveResourcesGCEvent : public MetaEvent, public Operations {
+class InActiveResourcesGCEvent : public GCEvent, public Operations {
  public:
     using Ptr = std::shared_ptr<InActiveResourcesGCEvent>;
 
@@ -77,6 +77,7 @@ class InActiveResourcesGCEvent : public MetaEvent, public Operations {
                 auto ok = boost::filesystem::remove(res_path);
                 /* std::cout << "[GC] Remove file " << res_->ToString() << " " << res_path << " " << ok << std::endl; */
             } else {
+                RemoveWithSuffix<ResourceT>(res, res_path, store->GetSuffixSet());
                 std::cout << "[GC] Remove stale " << res_path << " for " << res->ToString() << std::endl;
             }
 

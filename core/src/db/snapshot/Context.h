@@ -63,7 +63,6 @@ struct OperationContext {
     CollectionCommitPtr new_collection_commit = nullptr;
     CollectionPtr new_collection = nullptr;
 
-    SegmentFilePtr stale_segment_file = nullptr;
     std::vector<SegmentPtr> stale_segments;
 
     FieldPtr prev_field = nullptr;
@@ -83,6 +82,7 @@ struct OperationContext {
     PartitionCommitPtr stale_partition_commit = nullptr;
 
     SegmentFile::VecT new_segment_files;
+    SegmentFile::VecT stale_segment_files;
     CollectionPtr collection = nullptr;
     LSN_TYPE lsn = 0;
 
