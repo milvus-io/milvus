@@ -47,15 +47,14 @@ class ExecutionEngineImpl : public ExecutionEngine {
     LoadForSearch(const query::QueryPtr& query_ptr);
 
     Status
-    LoadForIndex();
-
-    Status
-    Load(const std::vector<std::string>& field_names);
+    Load(const TargetFields& field_names);
 
  private:
     std::string root_path_;
     SegmentVisitorPtr segment_visitor_;
     segment::SegmentReaderPtr segment_reader_;
+
+    TargetFields target_fields_;
 
     int64_t gpu_num_ = 0;
     bool gpu_enable_ = false;

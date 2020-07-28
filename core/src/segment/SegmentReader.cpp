@@ -164,7 +164,7 @@ SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int
 
         codec::ReadRanges ranges;
         for (auto offset : offsets) {
-            ranges.push_back(codec::ReadRange(offset, field_width));
+            ranges.push_back(codec::ReadRange(offset * field_width, field_width));
         }
         auto& ss_codec = codec::Codec::instance();
         ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, ranges, raw);
@@ -489,7 +489,7 @@ SegmentReader::GetSegmentID(int64_t& id) {
         }
     }
 
-    return Status(DB_ERROR, "SSSegmentWriter::GetSegmentID: null pointer");
+    return Status(DB_ERROR, "SegmentWriter::GetSegmentID: null pointer");
 }
 
 std::string

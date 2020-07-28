@@ -33,10 +33,6 @@ set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
         )
 
-
-# Now no use of context
-aux_source_directory(${MILVUS_ENGINE_SRC}/context context_files)
-
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_files)
@@ -102,7 +98,6 @@ add_subdirectory(metrics)
 add_subdirectory(config)
 add_subdirectory(tracing)
 add_subdirectory(query)
-add_subdirectory(search)
 add_subdirectory(db) # target milvus_engine
 add_subdirectory(log)
 
@@ -122,7 +117,6 @@ set(server_libs
         log
         oatpp
         query
-        search
         utils
         )
 
