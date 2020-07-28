@@ -1707,7 +1707,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     query::GeneralQueryPtr general_query = std::make_shared<query::GeneralQuery>();
     query::GenBinaryQuery(boolean_query, general_query->bin);
-    query_ptr->root = general_query->bin;
+    query_ptr->root = general_query;
 
     if (!query::ValidateBinaryQuery(general_query->bin)) {
         status = Status{SERVER_INVALID_BINARY_QUERY, "Generate wrong binary query tree"};

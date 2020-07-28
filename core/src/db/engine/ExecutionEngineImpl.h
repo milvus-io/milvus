@@ -41,7 +41,11 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
  private:
     knowhere::VecIndexPtr
-    CreatetVecIndex(const std::string& index_name);
+    CreateVecIndex(const std::string& index_name);
+
+    Status
+    CreateStructuredIndex(const engine::meta::hybrid::DataType field_type, std::vector<uint8_t>& raw_data,
+                          knowhere::IndexPtr& index_ptr);
 
     Status
     LoadForSearch(const query::QueryPtr& query_ptr);
@@ -52,11 +56,36 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Status
     Load(const std::vector<std::string>& field_names);
 
+    Status
+    ExecBinaryQuery(const query::GeneralQueryPtr& general_query, faiss::ConcurrentBitsetPtr& bitset,
+                    std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                    std::string& vector_placeholder);
+
+    Status
+    ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, const query::TermQueryPtr& term_query,
+                     std::unordered_map<std::string, meta::hybrid::DataType>& attr_type);
+
+    Status
+    IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const std::string& field_name,
+                     const meta::hybrid::DataType& data_type, milvus::json& term_values_json);
+
+    Status
+    ProcessRangeQuery(const std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                      faiss::ConcurrentBitsetPtr& bitset, const query::RangeQueryPtr& range_query);
+
+    Status
+    IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const meta::hybrid::DataType& data_type,
+                      knowhere::IndexPtr& index_ptr, milvus::json& range_values_json);
+
  private:
     std::string root_path_;
     SegmentVisitorPtr segment_visitor_;
     segment::SegmentReaderPtr segment_reader_;
 
+    knowhere::VecIndexPtr vec_index_ptr_ = nullptr;
+    std::unordered_map<std::string, knowhere::IndexPtr> attr_index_;
+
+    int64_t entity_count_;
     int64_t gpu_num_ = 0;
     bool gpu_enable_ = false;
 };

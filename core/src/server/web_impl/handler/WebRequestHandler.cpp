@@ -733,7 +733,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         auto general_query = std::make_shared<query::GeneralQuery>();
         query::GenBinaryQuery(boolean_query, general_query->bin);
 
-        query_ptr_->root = general_query->bin;
+        query_ptr_->root = general_query;
 
         engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
         status = req_handler_.Search(context_ptr_, query_ptr_, extra_params, result);
