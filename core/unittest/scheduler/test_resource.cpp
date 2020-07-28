@@ -154,7 +154,7 @@ class ResourceAdvanceTest : public testing::Test {
 TEST_F(ResourceAdvanceTest, DISK_RESOURCE_TEST) {
     const uint64_t NUM = max_once_load;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    SegmentSchemaPtr dummy = nullptr;
+
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(disk_resource_);
         auto task = std::make_shared<TestTask>(label);
@@ -182,7 +182,7 @@ TEST_F(ResourceAdvanceTest, DISK_RESOURCE_TEST) {
 TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
     const uint64_t NUM = max_once_load;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    SegmentSchemaPtr dummy = nullptr;
+
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(cpu_resource_);
         auto task = std::make_shared<TestTask>(label);
@@ -216,7 +216,7 @@ TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
 TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
     const uint64_t NUM = max_once_load;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    SegmentSchemaPtr dummy = nullptr;
+
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(gpu_resource_);
         auto task = std::make_shared<TestTask>(label);
@@ -244,7 +244,7 @@ TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
 TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     const uint64_t NUM = max_once_load;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    SegmentSchemaPtr dummy = nullptr;
+
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(test_resource_);
         auto task = std::make_shared<TestTask>(label);
