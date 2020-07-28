@@ -29,7 +29,7 @@ ReqScheduler::~ReqScheduler() {
 }
 
 void
-ReqScheduler::ExecReq(BaseReqPtr& req_ptr) {
+ReqScheduler::ExecReq(const BaseReqPtr& req_ptr) {
     if (req_ptr == nullptr) {
         return;
     }

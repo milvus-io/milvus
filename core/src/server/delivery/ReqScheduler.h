@@ -43,7 +43,7 @@ class ReqScheduler {
     ExecuteReq(const BaseReqPtr& req_ptr);
 
     static void
-    ExecReq(BaseReqPtr& req_ptr);
+    ExecReq(const BaseReqPtr& req_ptr);
 
  protected:
     ReqScheduler();
