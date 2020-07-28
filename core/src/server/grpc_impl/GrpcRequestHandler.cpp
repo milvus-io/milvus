@@ -1255,6 +1255,11 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     auto valid_row_count = [&](int32_t& base, int32_t test) -> bool {
         if (base < 0) {
             base = test;
+            if (request->entity_id_array_size() > 0 && base != request->entity_id_array_size()) {
+                auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "ID size not matches entity size"};
+                SET_RESPONSE(response->mutable_status(), status, context);
+                return false;
+            }
         } else if (base != test) {
             auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "Field row count inconsist"};
             SET_RESPONSE(response->mutable_status(), status, context);
@@ -1707,7 +1712,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     query::GeneralQueryPtr general_query = std::make_shared<query::GeneralQuery>();
     query::GenBinaryQuery(boolean_query, general_query->bin);
-    query_ptr->root = general_query->bin;
+    query_ptr->root = general_query;
 
     if (!query::ValidateBinaryQuery(general_query->bin)) {
         status = Status{SERVER_INVALID_BINARY_QUERY, "Generate wrong binary query tree"};

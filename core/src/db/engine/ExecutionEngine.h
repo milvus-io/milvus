@@ -13,6 +13,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -25,10 +26,13 @@
 namespace milvus {
 namespace engine {
 
+using TargetFields = std::set<std::string>;
+using TargetFieldGroups = std::vector<TargetFields>;
+
 struct ExecutionEngineContext {
     query::QueryPtr query_ptr_;
     QueryResultPtr query_result_;
-    std::vector<std::string> target_fields_;  // for build index task, which field should be build
+    TargetFields target_fields_;  // for build index task, which field should be build
 };
 
 class ExecutionEngine {

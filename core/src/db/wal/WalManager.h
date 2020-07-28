@@ -33,14 +33,6 @@ class WalManager {
     explicit WalManager(const MXLogConfiguration& config);
     ~WalManager();
 
-    /*
-     * init
-     * @param meta
-     * @retval error_code
-     */
-    ErrorCode
-    Init(const meta::MetaPtr& meta);
-
     ErrorCode
     Init();
 
