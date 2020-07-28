@@ -24,6 +24,12 @@ class EngineFactory {
  public:
     static ExecutionEnginePtr
     Build(const std::string& dir_root, const std::string& collection_name, int64_t segment_id);
+
+    // this method distribute fields to multiple groups:
+    // put structured fields into one group
+    // each vector field as a group
+    static void
+    GroupFieldsForIndex(const std::string& collection_name, TargetFieldGroups& field_groups);
 };
 
 }  // namespace engine

@@ -81,7 +81,7 @@ StructuredIndexFormat::CreateStructuredIndex(const milvus::engine::meta::hybrid:
 void
 StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                             knowhere::IndexPtr& index) {
-    milvus::TimeRecorder recorder("SSStructuredIndexFormat::Read");
+    milvus::TimeRecorder recorder("StructuredIndexFormat::Read");
     knowhere::BinarySet load_data_list;
 
     std::string full_file_path = file_path + STRUCTURED_INDEX_POSTFIX;
@@ -133,7 +133,7 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "SSStructuredIndexFormat::read(" << full_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "StructuredIndexFormat::read(" << full_file_path << ") rate " << rate << "MB/s";
 
     auto attr_type = static_cast<engine::meta::hybrid::DataType>(data_type);
     index = CreateStructuredIndex(attr_type);
@@ -143,7 +143,7 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
 void
 StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                              engine::meta::hybrid::DataType data_type, const knowhere::IndexPtr& index) {
-    milvus::TimeRecorder recorder("SSStructuredIndexFormat::Write");
+    milvus::TimeRecorder recorder("StructuredIndexFormat::Write");
 
     std::string full_file_path = file_path + STRUCTURED_INDEX_POSTFIX;
     auto binaryset = index->Serialize(knowhere::Config());
@@ -170,7 +170,7 @@ StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const 
 
     double span = recorder.RecordSection("End");
     double rate = fs_ptr->writer_ptr_->length() * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "SSStructuredIndexFormat::write(" << full_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "StructuredIndexFormat::write(" << full_file_path << ") rate " << rate << "MB/s";
 }
 
 }  // namespace codec

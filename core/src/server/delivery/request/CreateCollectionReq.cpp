@@ -67,69 +67,42 @@ CreateCollectionReq::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        // step 2: construct collection schema and vector schema
-        engine::meta::CollectionSchema collection_schema;
-        engine::meta::hybrid::FieldsSchema fields_schema;
-
-        uint16_t dimension = 0;
-        milvus::json vector_param;
+        // step 2: create snapshot collection context
+        engine::snapshot::CreateCollectionContext create_collection_context;
+        auto ss_collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_, extra_params_);
+        create_collection_context.collection = ss_collection_schema;
         for (auto& field_type : field_types_) {
-            engine::meta::hybrid::FieldSchema schema;
-            auto field_name = field_type.first;
-            STATUS_CHECK(ValidateFieldName(field_name));
-
+            std::string field_name = field_type.first;
             auto index_params = field_index_params_.at(field_name);
-            schema.collection_id_ = collection_name_;
-            schema.field_name_ = field_name;
-            schema.field_type_ = (int32_t)field_type.second;
+            std::string index_name;
             if (index_params.contains("name")) {
-                schema.index_name_ = index_params["name"];
+                index_name = index_params["name"];
             }
-            schema.index_param_ = index_params.dump();
 
+            int64_t dimension = 0;
+            json field_params;
             if (!field_params_.at(field_name).empty()) {
-                auto field_param = field_params_.at(field_name);
-                schema.field_params_ = field_param;
+                field_params = field_params_.at(field_name);
                 if (field_type.second == engine::meta::hybrid::DataType::VECTOR_FLOAT ||
                     field_type.second == engine::meta::hybrid::DataType::VECTOR_BINARY) {
-                    vector_param = milvus::json::parse(field_param);
-                    if (vector_param.contains(engine::PARAM_COLLECTION_DIMENSION)) {
-                        dimension = vector_param[engine::PARAM_COLLECTION_DIMENSION].get<int64_t>();
+                    if (field_params.contains(engine::PARAM_COLLECTION_DIMENSION)) {
+                        dimension = field_params[engine::PARAM_COLLECTION_DIMENSION].get<int64_t>();
                     } else {
                         return Status{milvus::SERVER_INVALID_VECTOR_DIMENSION,
                                       "Dimension should be defined in vector field extra_params"};
                     }
                 }
             }
-            fields_schema.fields_schema_.emplace_back(schema);
-        }
 
-        collection_schema.collection_id_ = collection_name_;
-        collection_schema.dimension_ = dimension;
-        if (extra_params_.contains(engine::PARAM_SEGMENT_SIZE)) {
-            auto segment_size = extra_params_[engine::PARAM_SEGMENT_SIZE].get<int64_t>();
-            collection_schema.index_file_size_ = segment_size;
-            STATUS_CHECK(ValidateCollectionIndexFileSize(segment_size));
-        }
-
-        if (vector_param.contains(engine::PARAM_INDEX_METRIC_TYPE)) {
-            auto metric_type = engine::s_map_metric_type.at(vector_param[engine::PARAM_INDEX_METRIC_TYPE]);
-            collection_schema.metric_type_ = (int32_t)metric_type;
-        }
-
-        // step 3: create snapshot collection
-        engine::snapshot::CreateCollectionContext create_collection_context;
-        auto ss_collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_, extra_params_);
-        create_collection_context.collection = ss_collection_schema;
-        for (const auto& schema : fields_schema.fields_schema_) {
-            auto field = std::make_shared<engine::snapshot::Field>(
-                schema.field_name_, 0, (engine::FieldType)schema.field_type_, json::parse(schema.field_params_));
+            auto field = std::make_shared<engine::snapshot::Field>(field_name, 0, (engine::FieldType)field_type.second,
+                                                                   field_params);
 
             auto field_element = std::make_shared<engine::snapshot::FieldElement>(
-                0, 0, schema.index_name_, engine::FieldElementType::FET_INDEX, json::parse(schema.index_param_));
+                0, 0, index_name, engine::FieldElementType::FET_INDEX, index_params);
             create_collection_context.fields_schema[field] = {field_element};
         }
 
+        // step 3: create collection
         status = DBWrapper::DB()->CreateCollection(create_collection_context);
         fiu_do_on("CreateCollectionReq.OnExecute.invalid_db_execute",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
