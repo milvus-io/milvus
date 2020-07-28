@@ -31,6 +31,7 @@ class TestLoadCollection:
                 pytest.skip("sq8h not support in cpu mode")
         return request.param
 
+    @pytest.mark.skip(reason="create_index not support yet")
     def test_load_collection_after_index(self, connect, collection, get_simple_index):
         '''
         target: test load collection, after index created

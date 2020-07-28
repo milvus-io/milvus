@@ -173,6 +173,7 @@ class TestFlushBase:
         res = connect.count_entities(collection_new)
         assert res == nb_new
 
+    @pytest.mark.skip(reason="search not support yet")
     def test_add_flush_multiable_times(self, connect, collection):
         '''
         method: add entities, flush serveral times
@@ -233,6 +234,7 @@ class TestFlushBase:
         res = connect.count_entities(collection)
         assert res == nb
 
+    @pytest.mark.skip(reason="search not support yet")
     def test_delete_flush_multiable_times(self, connect, collection):
         '''
         method: delete entities, flush serveral times
