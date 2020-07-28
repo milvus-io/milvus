@@ -23,26 +23,25 @@
 namespace milvus {
 namespace server {
 
-DropIndexRequest::DropIndexRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                   const std::string& collection_name, const std::string& field_name,
-                                   const std::string& index_name)
-    : BaseRequest(context, BaseRequest::kDropIndex),
+DropIndexReq::DropIndexReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                           const std::string& field_name, const std::string& index_name)
+    : BaseReq(context, BaseReq::kDropIndex),
       collection_name_(collection_name),
       field_name_(field_name),
       index_name_(index_name) {
 }
 
-BaseRequestPtr
-DropIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         const std::string& field_name, const std::string& index_name) {
-    return std::shared_ptr<BaseRequest>(new DropIndexRequest(context, collection_name, field_name, index_name));
+BaseReqPtr
+DropIndexReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                     const std::string& field_name, const std::string& index_name) {
+    return std::shared_ptr<BaseReq>(new DropIndexReq(context, collection_name, field_name, index_name));
 }
 
 Status
-DropIndexRequest::OnExecute() {
+DropIndexReq::OnExecute() {
     try {
-        fiu_do_on("DropIndexRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "DropIndexRequest(collection=" + collection_name_ + ")";
+        fiu_do_on("DropIndexReq.OnExecute.throw_std_exception", throw std::exception());
+        std::string hdr = "DropIndexReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         bool exist = false;
@@ -53,7 +52,7 @@ DropIndexRequest::OnExecute() {
 
         // step 2: drop index
         status = DBWrapper::DB()->DropIndex(collection_name_, field_name_);
-        fiu_do_on("DropIndexRequest.OnExecute.drop_index_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("DropIndexReq.OnExecute.drop_index_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }

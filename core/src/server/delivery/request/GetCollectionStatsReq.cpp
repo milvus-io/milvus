@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "server/delivery/request/GetCollectionStatsReq.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
-#include "server/delivery/request/GetCollectionStatsRequest.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -28,22 +28,22 @@
 namespace milvus {
 namespace server {
 
-GetCollectionStatsRequest::GetCollectionStatsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                                     const std::string& collection_name, std::string& collection_stats)
-    : BaseRequest(context, BaseRequest::kGetCollectionStats),
+GetCollectionStatsReq::GetCollectionStatsReq(const std::shared_ptr<milvus::server::Context>& context,
+                                             const std::string& collection_name, std::string& collection_stats)
+    : BaseReq(context, BaseReq::kGetCollectionStats),
       collection_name_(collection_name),
       collection_stats_(collection_stats) {
 }
 
-BaseRequestPtr
-GetCollectionStatsRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                                  const std::string& collection_name, std::string& collection_stats) {
-    return std::shared_ptr<BaseRequest>(new GetCollectionStatsRequest(context, collection_name, collection_stats));
+BaseReqPtr
+GetCollectionStatsReq::Create(const std::shared_ptr<milvus::server::Context>& context,
+                              const std::string& collection_name, std::string& collection_stats) {
+    return std::shared_ptr<BaseReq>(new GetCollectionStatsReq(context, collection_name, collection_stats));
 }
 
 Status
-GetCollectionStatsRequest::OnExecute() {
-    std::string hdr = "GetCollectionStatsRequest(collection=" + collection_name_ + ")";
+GetCollectionStatsReq::OnExecute() {
+    std::string hdr = "GetCollectionStatsReq(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
     bool exist = false;

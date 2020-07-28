@@ -125,13 +125,12 @@ void
 ClientTest::GetCollectionInfo(const std::string& collection_name) {
     milvus::Mapping mapping;
     milvus::Status stat = conn_->GetCollectionInfo(collection_name, mapping);
-    std::cout << "GetCollectionInfo function call result: " << std::endl;
     milvus_sdk::Utils::PrintMapping(mapping);
     std::cout << "GetCollectionInfo function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::InsertEntities(const std::string& collection_name) {
+ClientTest::Insert(const std::string& collection_name) {
     for (int64_t i = 0; i < ADD_ENTITY_LOOP; i++) {
         milvus::FieldValue field_value;
         std::vector<int64_t> entity_ids;
@@ -167,9 +166,9 @@ ClientTest::Flush(const std::string& collection_name) {
 
 void
 ClientTest::GetCollectionStats(const std::string& collection_name) {
-    std::string collection_info;
-    milvus::Status stat = conn_->GetCollectionStats(collection_name, collection_info);
-    std::cout << "Collection info: " << collection_info << std::endl;
+    std::string collection_stats;
+    milvus::Status stat = conn_->GetCollectionStats(collection_name, collection_stats);
+    std::cout << "Collection stats: " << collection_stats << std::endl;
     std::cout << "GetCollectionStats function call status: " << stat.message() << std::endl;
 }
 
@@ -328,6 +327,7 @@ ClientTest::Test() {
 
     CreateCollection(collection_name);
     GetCollectionInfo(collection_name);
+    GetCollectionStats(collection_name);
 
     ListCollections(table_array);
     CountEntities(collection_name);

@@ -23,21 +23,20 @@
 namespace milvus {
 namespace server {
 
-LoadCollectionRequest::LoadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                             const std::string& collection_name)
-    : BaseRequest(context, BaseRequest::kLoadCollection), collection_name_(collection_name) {
+LoadCollectionReq::LoadCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
+                                     const std::string& collection_name)
+    : BaseReq(context, BaseReq::kLoadCollection), collection_name_(collection_name) {
 }
 
-BaseRequestPtr
-LoadCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                              const std::string& collection_name) {
-    return std::shared_ptr<BaseRequest>(new LoadCollectionRequest(context, collection_name));
+BaseReqPtr
+LoadCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+    return std::shared_ptr<BaseReq>(new LoadCollectionReq(context, collection_name));
 }
 
 Status
-LoadCollectionRequest::OnExecute() {
+LoadCollectionReq::OnExecute() {
     try {
-        std::string hdr = "LoadCollectionRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "LoadCollectionReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         engine::snapshot::CollectionPtr collection;
@@ -60,9 +59,9 @@ LoadCollectionRequest::OnExecute() {
         // step 2: force load collection data into cache
         // load each segment and insert into cache even cache capacity is not enough
         status = DBWrapper::DB()->LoadCollection(context_, collection_name_, field_names, true);
-        fiu_do_on("LoadCollectionRequest.OnExecute.preload_collection_fail",
+        fiu_do_on("LoadCollectionReq.OnExecute.preload_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        fiu_do_on("LoadCollectionRequest.OnExecute.throw_std_exception", throw std::exception());
+        fiu_do_on("LoadCollectionReq.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
             return status;
         }

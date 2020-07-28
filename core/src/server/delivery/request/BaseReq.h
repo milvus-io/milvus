@@ -83,9 +83,9 @@ struct IndexParam {
 
 class Context;
 
-class BaseRequest {
+class BaseReq {
  public:
-    enum RequestType {
+    enum ReqType {
         // general operations
         kCmd = 0,
 
@@ -122,12 +122,36 @@ class BaseRequest {
     };
 
  protected:
-    BaseRequest(const std::shared_ptr<milvus::server::Context>& context, BaseRequest::RequestType type,
-                bool async = false);
+    BaseReq(const std::shared_ptr<milvus::server::Context>& context, BaseReq::ReqType type, bool async = false);
 
-    virtual ~BaseRequest();
+    virtual ~BaseReq();
 
  public:
+    const std::shared_ptr<milvus::server::Context>&
+    context() const {
+        return context_;
+    }
+
+    ReqType
+    type() const {
+        return type_;
+    }
+
+    std::string
+    req_group() const {
+        return req_group_;
+    }
+
+    const Status&
+    status() const {
+        return status_;
+    }
+
+    bool
+    async() const {
+        return async_;
+    }
+
     Status
     PreExecute();
 
@@ -143,28 +167,8 @@ class BaseRequest {
     Status
     WaitToFinish();
 
-    RequestType
-    GetRequestType() const {
-        return type_;
-    }
-
-    std::string
-    RequestGroup() const {
-        return request_group_;
-    }
-
-    const Status&
-    status() const {
-        return status_;
-    }
-
     void
-    set_status(const Status& status);
-
-    bool
-    IsAsync() const {
-        return async_;
-    }
+    SetStatus(const Status& status);
 
  protected:
     virtual Status
@@ -181,9 +185,8 @@ class BaseRequest {
 
  protected:
     const std::shared_ptr<milvus::server::Context> context_;
-
-    RequestType type_;
-    std::string request_group_;
+    ReqType type_;
+    std::string req_group_;
     bool async_;
     Status status_;
 
@@ -191,15 +194,9 @@ class BaseRequest {
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
     bool done_;
-
- public:
-    const std::shared_ptr<milvus::server::Context>&
-    Context() const {
-        return context_;
-    }
 };
 
-using BaseRequestPtr = std::shared_ptr<BaseRequest>;
+using BaseReqPtr = std::shared_ptr<BaseReq>;
 
 }  // namespace server
 }  // namespace milvus
