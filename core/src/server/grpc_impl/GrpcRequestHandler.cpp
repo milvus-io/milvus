@@ -1274,7 +1274,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     auto valid_row_count = [&](int32_t& base, int32_t test) -> bool {
         if (base < 0) {
             base = test;
-            if (request->entity_id_array_size() >0 && base != request->entity_id_array_size()){
+            if (request->entity_id_array_size() > 0 && base != request->entity_id_array_size()) {
                 auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "ID size not matches entity size"};
                 SET_RESPONSE(response->mutable_status(), status, context);
                 return false;
@@ -1290,7 +1290,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     HybridCollectionSchema collectionSchema;
 
     Status status =
-            request_handler_.DescribeCollection(GetContext(context), request->collection_name(), collectionSchema);
+        request_handler_.DescribeCollection(GetContext(context), request->collection_name(), collectionSchema);
 
     // copy field data
     int32_t row_num = -1;
@@ -1347,8 +1347,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     std::string collection_name = request->collection_name();
     std::string partition_name = request->partition_tag();
-    status =
-        request_handler_.InsertEntity(GetContext(context), collection_name, partition_name, row_num, chunk_data);
+    status = request_handler_.InsertEntity(GetContext(context), collection_name, partition_name, row_num, chunk_data);
     if (!status.ok()) {
         SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
