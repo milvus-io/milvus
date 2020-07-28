@@ -205,8 +205,8 @@ SegmentCommit::Ptr
 SegmentCommitOperation::GetPrevResource() const {
     if (context_.new_segment_files.size() > 0) {
         return GetStartedSS()->GetSegmentCommitBySegmentId(context_.new_segment_files[0]->GetSegmentId());
-    } else if (context_.stale_segment_file != nullptr) {
-        return GetStartedSS()->GetSegmentCommitBySegmentId(context_.stale_segment_file->GetSegmentId());
+    } else if (context_.stale_segment_files.size() > 0) {
+        return GetStartedSS()->GetSegmentCommitBySegmentId(context_.stale_segment_files[0]->GetSegmentId());
     }
     return nullptr;
 }
@@ -220,9 +220,9 @@ SegmentCommitOperation::DoExecute(StorePtr store) {
         resource_->SetID(0);
         resource_->ResetStatus();
         size = resource_->GetSize();
-        if (context_.stale_segment_file) {
-            resource_->GetMappings().erase(context_.stale_segment_file->GetID());
-            size -= context_.stale_segment_file->GetSize();
+        for (auto& stale_segment_file : context_.stale_segment_files) {
+            resource_->GetMappings().erase(stale_segment_file->GetID());
+            size -= stale_segment_file->GetSize();
         }
     } else {
         resource_ = std::make_shared<SegmentCommit>(GetStartedSS()->GetLatestSchemaCommitId(),
@@ -240,13 +240,9 @@ SegmentCommitOperation::DoExecute(StorePtr store) {
 
 Status
 SegmentCommitOperation::PreCheck() {
-    if (context_.stale_segment_file == nullptr && context_.new_segment_files.size() == 0) {
+    if (context_.stale_segment_files.size() == 0 && context_.new_segment_files.size() == 0) {
         std::stringstream emsg;
         emsg << GetRepr() << ". new_segment_files should not be empty in context";
-        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
-    } else if (context_.stale_segment_file != nullptr && context_.new_segment_files.size() > 0) {
-        std::stringstream emsg;
-        emsg << GetRepr() << ". new_segment_files should be empty in context";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     return Status::OK();

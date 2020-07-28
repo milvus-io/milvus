@@ -58,12 +58,12 @@ class CompoundBaseOperation : public Operations {
     }
 };
 
-class AddSegmentFileOperation : public CompoundBaseOperation<AddSegmentFileOperation> {
+class ChangeSegmentFileOperation : public CompoundBaseOperation<ChangeSegmentFileOperation> {
  public:
-    using BaseT = CompoundBaseOperation<AddSegmentFileOperation>;
+    using BaseT = CompoundBaseOperation<ChangeSegmentFileOperation>;
     static constexpr const char* Name = "B";
 
-    AddSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+    ChangeSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
     Status DoExecute(StorePtr) override;
 

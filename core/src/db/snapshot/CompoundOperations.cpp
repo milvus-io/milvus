@@ -26,14 +26,23 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-AddSegmentFileOperation::AddSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+ChangeSegmentFileOperation::ChangeSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
 }
 
 Status
-AddSegmentFileOperation::DoExecute(StorePtr store) {
-    STATUS_CHECK(CheckStale(std::bind(&AddSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1,
+ChangeSegmentFileOperation::DoExecute(StorePtr store) {
+    STATUS_CHECK(CheckStale(std::bind(&ChangeSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1,
                                       context_.new_segment_files[0]->GetSegmentId())));
+
+    ID_TYPE segment_id = 0;
+    for (auto& stale_segment_file : context_.stale_segment_files) {
+        if (segment_id == 0) {
+            segment_id = stale_segment_file->GetSegmentId();
+        } else if (segment_id != stale_segment_file->GetSegmentId()) {
+            return Status(SS_INVALID_CONTEX_ERROR, "All segment files should be of same segment");
+        }
+    }
 
     auto update_size = [&](SegmentFilePtr& file) {
         auto update_ctx = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
@@ -42,6 +51,11 @@ AddSegmentFileOperation::DoExecute(StorePtr store) {
     };
 
     for (auto& new_file : context_.new_segment_files) {
+        if (segment_id == 0) {
+            segment_id = new_file->GetSegmentId();
+        } else if (segment_id != new_file->GetSegmentId()) {
+            return Status(SS_INVALID_CONTEX_ERROR, "All segment files should be of same segment");
+        }
         update_size(new_file);
     }
 
@@ -93,7 +107,7 @@ AddSegmentFileOperation::DoExecute(StorePtr store) {
 }
 
 Status
-AddSegmentFileOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const {
+ChangeSegmentFileOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const {
     auto segment = latest_snapshot->GetResource<Segment>(segment_id);
     if (!segment) {
         std::stringstream emsg;
@@ -104,16 +118,16 @@ AddSegmentFileOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_
 }
 
 Status
-AddSegmentFileOperation::CommitRowCountDelta(SIZE_TYPE delta, bool sub) {
+ChangeSegmentFileOperation::CommitRowCountDelta(SIZE_TYPE delta, bool sub) {
     delta_ = delta;
     sub_ = sub;
     return Status::OK();
 }
 
 Status
-AddSegmentFileOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
+ChangeSegmentFileOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
     STATUS_CHECK(CheckStale(
-        std::bind(&AddSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id)));
+        std::bind(&ChangeSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id)));
 
     auto segment = GetStartedSS()->GetResource<Segment>(context.segment_id);
     if (!segment || (context_.new_segment_files.size() > 0 &&
@@ -270,7 +284,7 @@ DropAllIndexOperation::DoExecute(StorePtr store) {
         }
 
         auto context = context_;
-        context.stale_segment_file = kv.second.Get();
+        context.stale_segment_files.push_back(kv.second.Get());
         SegmentCommitOperation sc_op(context, GetAdjustedSS());
         STATUS_CHECK(sc_op(store));
         STATUS_CHECK(sc_op.GetResource(context.new_segment_commit));
@@ -306,7 +320,7 @@ DropIndexOperation::DropIndexOperation(const OperationContext& context, ScopedSn
 
 Status
 DropIndexOperation::PreCheck() {
-    if (context_.stale_segment_file == nullptr) {
+    if (context_.stale_segment_files.size() == 0) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Stale segment is requried";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());

@@ -529,7 +529,7 @@ ExecutionEngineImpl::BuildIndex() {
         // add segment files
         snapshot::OperationContext context;
         context.prev_partition = snapshot->GetResource<snapshot::Partition>(segment->GetPartitionId());
-        auto build_op = std::make_shared<snapshot::AddSegmentFileOperation>(context, snapshot);
+        auto build_op = std::make_shared<snapshot::ChangeSegmentFileOperation>(context, snapshot);
 
         auto add_segment_file = [&](const std::string& element_name, snapshot::SegmentFilePtr& seg_file) -> Status {
             snapshot::SegmentFileContext sf_context;

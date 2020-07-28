@@ -479,7 +479,7 @@ TEST_F(SnapshotTest, IndexTest) {
     OperationContext context;
     context.lsn = next_lsn();
     context.prev_partition = ss->GetResource<Partition>(sf_context.partition_id);
-    auto build_op = std::make_shared<AddSegmentFileOperation>(context, ss);
+    auto build_op = std::make_shared<ChangeSegmentFileOperation>(context, ss);
     SegmentFilePtr seg_file;
     status = build_op->CommitNewSegmentFile(sf_context, seg_file);
     ASSERT_TRUE(status.ok());
@@ -510,7 +510,7 @@ TEST_F(SnapshotTest, IndexTest) {
 
     OperationContext drop_ctx;
     drop_ctx.lsn = next_lsn();
-    drop_ctx.stale_segment_file = seg_file;
+    drop_ctx.stale_segment_files.push_back(seg_file);
     auto drop_op = std::make_shared<DropIndexOperation>(drop_ctx, ss);
     status = drop_op->Push();
     ASSERT_TRUE(status.ok());
@@ -673,7 +673,7 @@ TEST_F(SnapshotTest, OperationTest) {
     {
         OperationContext context;
         context.lsn = ++lsn;
-        auto build_op = std::make_shared<AddSegmentFileOperation>(context, ss);
+        auto build_op = std::make_shared<ChangeSegmentFileOperation>(context, ss);
         SegmentFilePtr seg_file;
         status = build_op->CommitNewSegmentFile(sf_context, seg_file);
         std::cout << status.ToString() << std::endl;
@@ -841,7 +841,7 @@ TEST_F(SnapshotTest, OperationTest) {
     {
         OperationContext context;
         context.lsn = ++lsn;
-        auto build_op = std::make_shared<AddSegmentFileOperation>(context, new_ss);
+        auto build_op = std::make_shared<ChangeSegmentFileOperation>(context, new_ss);
         SegmentFilePtr seg_file;
         auto new_sf_context = sf_context;
         new_sf_context.segment_id = new_seg_id;
@@ -852,7 +852,7 @@ TEST_F(SnapshotTest, OperationTest) {
     {
         OperationContext context;
         context.lsn = ++lsn;
-        auto op = std::make_shared<AddSegmentFileOperation>(context, ss);
+        auto op = std::make_shared<ChangeSegmentFileOperation>(context, ss);
         SegmentFilePtr seg_file;
         auto new_sf_context = sf_context;
         new_sf_context.segment_id = merge_seg->GetID();
@@ -918,7 +918,7 @@ TEST_F(SnapshotTest, OperationTest) {
     {
         OperationContext context;
         context.lsn = ++lsn;
-        auto build_op = std::make_shared<AddSegmentFileOperation>(context, ss);
+        auto build_op = std::make_shared<ChangeSegmentFileOperation>(context, ss);
         SegmentFilePtr seg_file;
         auto new_sf_context = sf_context;
         new_sf_context.segment_id = merge_seg->GetID();
@@ -936,6 +936,77 @@ TEST_F(SnapshotTest, OperationTest) {
     }
 
     Snapshots::GetInstance().Reset();
+}
+
+TEST_F(SnapshotTest, ChangeSegmentFileOperationTest) {
+    LSN_TYPE lsn = 0;
+    std::string collection_name("c1");
+    auto ss = CreateCollection(collection_name, ++lsn);
+    ASSERT_TRUE(ss);
+
+    SegmentFileContext sf_context;
+    SFContextBuilder(sf_context, ss);
+
+    auto& partitions = ss->GetResources<Partition>();
+    auto total_row_cnt = 0;
+    for (auto& kv : partitions) {
+        auto num = RandomInt(2, 5);
+        for (auto i = 0; i < num; ++i) {
+            auto row_cnt = RandomInt(100, 200);
+            ASSERT_TRUE(CreateSegment(ss, kv.first, ++lsn, sf_context, row_cnt).ok());
+            total_row_cnt += row_cnt;
+        }
+    }
+
+    auto status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(total_row_cnt, ss->GetCollectionCommit()->GetRowCount());
+
+    auto total_size = ss->GetCollectionCommit()->GetSize();
+
+    auto target_segment = ss->GetResources<Segment>().begin()->second.Get();
+
+    auto sf_ids = ss->GetSegmentFileIds(target_segment->GetID());
+    ASSERT_GT(sf_ids.size(), 0);
+    auto stale_sf = ss->GetResource<SegmentFile>(*(sf_ids.begin()));
+    ASSERT_TRUE(stale_sf);
+
+    std::cout << stale_sf->GetSize() << std::endl;
+
+    OperationContext context;
+    context.lsn = ++lsn;
+    context.stale_segment_files.push_back(stale_sf);
+    auto op = std::make_shared<ChangeSegmentFileOperation>(context, ss);
+    SegmentFilePtr seg_file;
+    sf_context.field_name = "vector";
+    sf_context.field_element_name = "_raw";
+    sf_context.segment_id = stale_sf->GetSegmentId();
+    sf_context.partition_id = stale_sf->GetPartitionId();
+    sf_context.collection_id = stale_sf->GetCollectionId();
+    status = op->CommitNewSegmentFile(sf_context, seg_file);
+    /* std::cout << status.ToString() << std::endl; */
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(seg_file);
+
+    auto prev_segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
+    auto prev_segment_commit_mappings = prev_segment_commit->GetMappings();
+    ASSERT_FALSE(prev_segment_commit->ToString().empty());
+
+    auto new_size = RandomInt(1000, 20000);
+    seg_file->SetSize(new_size);
+    total_size += new_size;
+    total_size -= stale_sf->GetSize();
+
+    auto delta = prev_segment_commit->GetRowCount() / 2;
+    op->CommitRowCountDelta(delta);
+    total_row_cnt -= delta;
+
+    status = op->Push();
+    ASSERT_TRUE(status.ok()) << status.message();
+    status = op->GetSnapshot(ss);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
+    ASSERT_EQ(ss->GetCollectionCommit()->GetSize(), total_size);
 }
 
 TEST_F(SnapshotTest, CompoundTest1) {
@@ -988,7 +1059,7 @@ TEST_F(SnapshotTest, CompoundTest1) {
 
         OperationContext context;
         context.lsn = next_lsn();
-        auto build_op = std::make_shared<AddSegmentFileOperation>(context, latest_ss);
+        auto build_op = std::make_shared<ChangeSegmentFileOperation>(context, latest_ss);
         SegmentFilePtr seg_file;
         build_sf_context.segment_id = seg_id;
         status = build_op->CommitNewSegmentFile(build_sf_context, seg_file);
@@ -1332,7 +1403,7 @@ TEST_F(SnapshotTest, CompoundTest2) {
 
         OperationContext context;
         context.lsn = next_lsn();
-        auto build_op = std::make_shared<AddSegmentFileOperation>(context, latest_ss);
+        auto build_op = std::make_shared<ChangeSegmentFileOperation>(context, latest_ss);
         SegmentFilePtr seg_file;
         build_sf_context.segment_id = seg_id;
         status = build_op->CommitNewSegmentFile(build_sf_context, seg_file);
