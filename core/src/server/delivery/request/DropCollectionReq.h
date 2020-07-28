@@ -19,13 +19,13 @@
 namespace milvus {
 namespace server {
 
-class DropCollectionRequest : public BaseRequest {
+class DropCollectionReq : public BaseReq {
  public:
-    static BaseRequestPtr
+    static BaseReqPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
 
  protected:
-    DropCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
+    DropCollectionReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
 
     Status
     OnExecute() override;

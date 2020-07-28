@@ -22,20 +22,20 @@
 namespace milvus {
 namespace server {
 
-DropPartitionRequest::DropPartitionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, const std::string& tag)
-    : BaseRequest(context, BaseRequest::kDropPartition), collection_name_(collection_name), tag_(tag) {
+DropPartitionReq::DropPartitionReq(const std::shared_ptr<milvus::server::Context>& context,
+                                   const std::string& collection_name, const std::string& tag)
+    : BaseReq(context, BaseReq::kDropPartition), collection_name_(collection_name), tag_(tag) {
 }
 
-BaseRequestPtr
-DropPartitionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, const std::string& tag) {
-    return std::shared_ptr<BaseRequest>(new DropPartitionRequest(context, collection_name, tag));
+BaseReqPtr
+DropPartitionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         const std::string& tag) {
+    return std::shared_ptr<BaseReq>(new DropPartitionReq(context, collection_name, tag));
 }
 
 Status
-DropPartitionRequest::OnExecute() {
-    std::string hdr = "DropPartitionRequest(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
+DropPartitionReq::OnExecute() {
+    std::string hdr = "DropPartitionReq(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
     /* check partition tag */

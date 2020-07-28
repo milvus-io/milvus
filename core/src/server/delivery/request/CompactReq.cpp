@@ -28,23 +28,21 @@
 namespace milvus {
 namespace server {
 
-CompactRequest::CompactRequest(const std::shared_ptr<milvus::server::Context>& context,
-                               const std::string& collection_name, double compact_threshold)
-    : BaseRequest(context, BaseRequest::kCompact),
-      collection_name_(collection_name),
-      compact_threshold_(compact_threshold) {
+CompactReq::CompactReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                       double compact_threshold)
+    : BaseReq(context, BaseReq::kCompact), collection_name_(collection_name), compact_threshold_(compact_threshold) {
 }
 
-BaseRequestPtr
-CompactRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                       double compact_threshold) {
-    return std::shared_ptr<BaseRequest>(new CompactRequest(context, collection_name, compact_threshold));
+BaseReqPtr
+CompactReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                   double compact_threshold) {
+    return std::shared_ptr<BaseReq>(new CompactReq(context, collection_name, compact_threshold));
 }
 
 Status
-CompactRequest::OnExecute() {
+CompactReq::OnExecute() {
     try {
-        std::string hdr = "CompactRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "CompactReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         bool exist = false;

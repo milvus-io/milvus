@@ -24,21 +24,21 @@
 namespace milvus {
 namespace server {
 
-CountEntitiesRequest::CountEntitiesRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, int64_t& row_count)
-    : BaseRequest(context, BaseRequest::kCountEntities), collection_name_(collection_name), row_count_(row_count) {
+CountEntitiesReq::CountEntitiesReq(const std::shared_ptr<milvus::server::Context>& context,
+                                   const std::string& collection_name, int64_t& row_count)
+    : BaseReq(context, BaseReq::kCountEntities), collection_name_(collection_name), row_count_(row_count) {
 }
 
-BaseRequestPtr
-CountEntitiesRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, int64_t& row_count) {
-    return std::shared_ptr<BaseRequest>(new CountEntitiesRequest(context, collection_name, row_count));
+BaseReqPtr
+CountEntitiesReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         int64_t& row_count) {
+    return std::shared_ptr<BaseReq>(new CountEntitiesReq(context, collection_name, row_count));
 }
 
 Status
-CountEntitiesRequest::OnExecute() {
+CountEntitiesReq::OnExecute() {
     try {
-        std::string hdr = "CountEntitiesRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "CountEntitiesReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         bool exist = false;

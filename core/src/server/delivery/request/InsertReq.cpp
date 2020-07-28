@@ -32,30 +32,28 @@
 namespace milvus {
 namespace server {
 
-InsertRequest::InsertRequest(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, const std::string& partition_name,
-                             const int64_t& row_count,
-                             std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data)
-    : BaseRequest(context, BaseRequest::kInsert),
+InsertReq::InsertReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                     const std::string& partition_name, const int64_t& row_count,
+                     std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data)
+    : BaseReq(context, BaseReq::kInsert),
       collection_name_(collection_name),
       partition_name_(partition_name),
       row_count_(row_count),
       chunk_data_(chunk_data) {
 }
 
-BaseRequestPtr
-InsertRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                      const std::string& partition_name, const int64_t& row_count,
-                      std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
-    return std::shared_ptr<BaseRequest>(
-        new InsertRequest(context, collection_name, partition_name, row_count, chunk_data));
+BaseReqPtr
+InsertReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                  const std::string& partition_name, const int64_t& row_count,
+                  std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
+    return std::shared_ptr<BaseReq>(new InsertReq(context, collection_name, partition_name, row_count, chunk_data));
 }
 
 Status
-InsertRequest::OnExecute() {
-    LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute insert request.";
+InsertReq::OnExecute() {
+    LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute InsertReq.";
     try {
-        std::string hdr = "InsertRequest(table=" + collection_name_ + ", partition_name=" + partition_name_ + ")";
+        std::string hdr = "InsertReq(table=" + collection_name_ + ", partition_name=" + partition_name_ + ")";
         TimeRecorder rc(hdr);
 
         if (chunk_data_.empty()) {

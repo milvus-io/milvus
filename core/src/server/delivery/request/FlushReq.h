@@ -26,14 +26,13 @@
 namespace milvus {
 namespace server {
 
-class FlushRequest : public BaseRequest {
+class FlushReq : public BaseReq {
  public:
-    static BaseRequestPtr
+    static BaseReqPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::vector<std::string>& collection_names);
 
  protected:
-    FlushRequest(const std::shared_ptr<milvus::server::Context>& context,
-                 const std::vector<std::string>& collection_names);
+    FlushReq(const std::shared_ptr<milvus::server::Context>& context, const std::vector<std::string>& collection_names);
 
     Status
     OnExecute() override;

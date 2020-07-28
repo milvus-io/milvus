@@ -29,12 +29,12 @@ namespace server {
 
 constexpr uint64_t MAX_COUNT_RETURNED = 1000;
 
-GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, const engine::IDNumbers& id_array,
-                                           std::vector<std::string>& field_names,
-                                           engine::snapshot::CollectionMappings& field_mappings,
-                                           engine::DataChunkPtr& data_chunk)
-    : BaseRequest(context, BaseRequest::kGetEntityByID),
+GetEntityByIDReq::GetEntityByIDReq(const std::shared_ptr<milvus::server::Context>& context,
+                                   const std::string& collection_name, const engine::IDNumbers& id_array,
+                                   std::vector<std::string>& field_names,
+                                   engine::snapshot::CollectionMappings& field_mappings,
+                                   engine::DataChunkPtr& data_chunk)
+    : BaseReq(context, BaseReq::kGetEntityByID),
       collection_name_(collection_name),
       id_array_(id_array),
       field_names_(field_names),
@@ -42,19 +42,18 @@ GetEntityByIDRequest::GetEntityByIDRequest(const std::shared_ptr<milvus::server:
       data_chunk_(data_chunk) {
 }
 
-BaseRequestPtr
-GetEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, const engine::IDNumbers& id_array,
-                             std::vector<std::string>& field_names_,
-                             engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
-    return std::shared_ptr<BaseRequest>(
-        new GetEntityByIDRequest(context, collection_name, id_array, field_names_, field_mappings, data_chunk));
+BaseReqPtr
+GetEntityByIDReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
+                         engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
+    return std::shared_ptr<BaseReq>(
+        new GetEntityByIDReq(context, collection_name, id_array, field_names_, field_mappings, data_chunk));
 }
 
 Status
-GetEntityByIDRequest::OnExecute() {
+GetEntityByIDReq::OnExecute() {
     try {
-        std::string hdr = "GetEntityByIDRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "GetEntityByIDReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments

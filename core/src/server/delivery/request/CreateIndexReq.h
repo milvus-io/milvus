@@ -18,15 +18,15 @@
 namespace milvus {
 namespace server {
 
-class CreateIndexRequest : public BaseRequest {
+class CreateIndexReq : public BaseReq {
  public:
-    static BaseRequestPtr
+    static BaseReqPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
 
  protected:
-    CreateIndexRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                       const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
+    CreateIndexReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                   const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
 
     Status
     OnExecute() override;

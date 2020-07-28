@@ -27,26 +27,25 @@
 namespace milvus {
 namespace server {
 
-ListIDInSegmentRequest::ListIDInSegmentRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                               const std::string& collection_name, int64_t segment_id,
-                                               engine::IDNumbers& ids)
-    : BaseRequest(context, BaseRequest::kListIDInSegment),
+ListIDInSegmentReq::ListIDInSegmentReq(const std::shared_ptr<milvus::server::Context>& context,
+                                       const std::string& collection_name, int64_t segment_id, engine::IDNumbers& ids)
+    : BaseReq(context, BaseReq::kListIDInSegment),
       collection_name_(collection_name),
       segment_id_(segment_id),
       ids_(ids) {
 }
 
-BaseRequestPtr
-ListIDInSegmentRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                               const std::string& collection_name, int64_t segment_id, engine::IDNumbers& ids) {
-    return std::shared_ptr<BaseRequest>(new ListIDInSegmentRequest(context, collection_name, segment_id, ids));
+BaseReqPtr
+ListIDInSegmentReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                           int64_t segment_id, engine::IDNumbers& ids) {
+    return std::shared_ptr<BaseReq>(new ListIDInSegmentReq(context, collection_name, segment_id, ids));
 }
 
 Status
-ListIDInSegmentRequest::OnExecute() {
+ListIDInSegmentReq::OnExecute() {
     try {
         std::string hdr =
-            "ListIDInSegmentRequest(collection=" + collection_name_ + " segment=" + std::to_string(segment_id_) + ")";
+            "ListIDInSegmentReq(collection=" + collection_name_ + " segment=" + std::to_string(segment_id_) + ")";
         TimeRecorderAuto rc(hdr);
 
         bool exist = false;

@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "server/delivery/RequestQueue.h"
+#include "server/delivery/ReqQueue.h"
 #include "utils/Status.h"
 
 #include <map>
@@ -25,11 +25,11 @@ namespace server {
 
 using ThreadPtr = std::shared_ptr<std::thread>;
 
-class RequestScheduler {
+class ReqScheduler {
  public:
-    static RequestScheduler&
+    static ReqScheduler&
     GetInstance() {
-        static RequestScheduler scheduler;
+        static ReqScheduler scheduler;
         return scheduler;
     }
 
@@ -40,26 +40,26 @@ class RequestScheduler {
     Stop();
 
     Status
-    ExecuteRequest(const BaseRequestPtr& request_ptr);
+    ExecuteReq(const BaseReqPtr& req_ptr);
 
     static void
-    ExecRequest(BaseRequestPtr& request_ptr);
+    ExecReq(const BaseReqPtr& req_ptr);
 
  protected:
-    RequestScheduler();
+    ReqScheduler();
 
-    virtual ~RequestScheduler();
+    virtual ~ReqScheduler();
 
     void
-    TakeToExecute(RequestQueuePtr request_queue);
+    TakeToExecute(ReqQueuePtr req_queue);
 
     Status
-    PutToQueue(const BaseRequestPtr& request_ptr);
+    PutToQueue(const BaseReqPtr& req_ptr);
 
  private:
     mutable std::mutex queue_mtx_;
 
-    std::map<std::string, RequestQueuePtr> request_groups_;
+    std::map<std::string, ReqQueuePtr> req_groups_;
 
     std::vector<ThreadPtr> execute_threads_;
 

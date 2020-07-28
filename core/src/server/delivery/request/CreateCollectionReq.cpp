@@ -28,12 +28,13 @@
 namespace milvus {
 namespace server {
 
-CreateCollectionRequest::CreateCollectionRequest(
-    const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-    std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-    std::unordered_map<std::string, milvus::json>& field_index_params,
-    std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params)
-    : BaseRequest(context, BaseRequest::kCreateCollection),
+CreateCollectionReq::CreateCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
+                                         const std::string& collection_name,
+                                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                                         std::unordered_map<std::string, milvus::json>& field_index_params,
+                                         std::unordered_map<std::string, std::string>& field_params,
+                                         milvus::json& extra_params)
+    : BaseReq(context, BaseReq::kCreateCollection),
       collection_name_(collection_name),
       field_types_(field_types),
       field_index_params_(field_index_params),
@@ -41,26 +42,24 @@ CreateCollectionRequest::CreateCollectionRequest(
       extra_params_(extra_params) {
 }
 
-BaseRequestPtr
-CreateCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                                const std::string& collection_name,
-                                std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-                                std::unordered_map<std::string, milvus::json>& field_index_params,
-                                std::unordered_map<std::string, std::string>& field_params,
-                                milvus::json& extra_params) {
-    return std::shared_ptr<BaseRequest>(new CreateCollectionRequest(context, collection_name, field_types,
-                                                                    field_index_params, field_params, extra_params));
+BaseReqPtr
+CreateCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                            std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                            std::unordered_map<std::string, milvus::json>& field_index_params,
+                            std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params) {
+    return std::shared_ptr<BaseReq>(
+        new CreateCollectionReq(context, collection_name, field_types, field_index_params, field_params, extra_params));
 }
 
 Status
-CreateCollectionRequest::OnExecute() {
-    std::string hdr = "CreateCollectionRequest(collection=" + collection_name_ + ")";
+CreateCollectionReq::OnExecute() {
+    std::string hdr = "CreateCollectionReq(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
         // step 1: check arguments
         auto status = ValidateCollectionName(collection_name_);
-        fiu_do_on("CreateCollectionRequest.OnExecute.invalid_collection_name",
+        fiu_do_on("CreateCollectionReq.OnExecute.invalid_collection_name",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -69,7 +68,7 @@ CreateCollectionRequest::OnExecute() {
         rc.RecordSection("check validation");
 
         // step 2: construct collection schema and vector schema
-        engine::meta::CollectionSchema collection_info;
+        engine::meta::CollectionSchema collection_schema;
         engine::meta::hybrid::FieldsSchema fields_schema;
 
         uint16_t dimension = 0;
@@ -77,10 +76,7 @@ CreateCollectionRequest::OnExecute() {
         for (auto& field_type : field_types_) {
             engine::meta::hybrid::FieldSchema schema;
             auto field_name = field_type.first;
-            status = ValidateFieldName(field_name);
-            if (!status.ok()) {
-                return status;
-            }
+            STATUS_CHECK(ValidateFieldName(field_name));
 
             auto index_params = field_index_params_.at(field_name);
             schema.collection_id_ = collection_name_;
@@ -98,7 +94,7 @@ CreateCollectionRequest::OnExecute() {
                     field_type.second == engine::meta::hybrid::DataType::VECTOR_BINARY) {
                     vector_param = milvus::json::parse(field_param);
                     if (vector_param.contains(engine::PARAM_COLLECTION_DIMENSION)) {
-                        dimension = vector_param[engine::PARAM_COLLECTION_DIMENSION].get<uint16_t>();
+                        dimension = vector_param[engine::PARAM_COLLECTION_DIMENSION].get<int64_t>();
                     } else {
                         return Status{milvus::SERVER_INVALID_VECTOR_DIMENSION,
                                       "Dimension should be defined in vector field extra_params"};
@@ -108,17 +104,17 @@ CreateCollectionRequest::OnExecute() {
             fields_schema.fields_schema_.emplace_back(schema);
         }
 
-        collection_info.collection_id_ = collection_name_;
-        collection_info.dimension_ = dimension;
+        collection_schema.collection_id_ = collection_name_;
+        collection_schema.dimension_ = dimension;
         if (extra_params_.contains(engine::PARAM_SEGMENT_SIZE)) {
             auto segment_size = extra_params_[engine::PARAM_SEGMENT_SIZE].get<int64_t>();
-            collection_info.index_file_size_ = segment_size;
+            collection_schema.index_file_size_ = segment_size;
             STATUS_CHECK(ValidateCollectionIndexFileSize(segment_size));
         }
 
         if (vector_param.contains(engine::PARAM_INDEX_METRIC_TYPE)) {
             auto metric_type = engine::s_map_metric_type.at(vector_param[engine::PARAM_INDEX_METRIC_TYPE]);
-            collection_info.metric_type_ = (int32_t)metric_type;
+            collection_schema.metric_type_ = (int32_t)metric_type;
         }
 
         // step 3: create snapshot collection
@@ -135,7 +131,7 @@ CreateCollectionRequest::OnExecute() {
         }
 
         status = DBWrapper::DB()->CreateCollection(create_collection_context);
-        fiu_do_on("CreateCollectionRequest.OnExecute.invalid_db_execute",
+        fiu_do_on("CreateCollectionReq.OnExecute.invalid_db_execute",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             // collection could exist

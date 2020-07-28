@@ -30,22 +30,21 @@
 namespace milvus {
 namespace server {
 
-DeleteEntityByIDRequest::DeleteEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                                 const std::string& collection_name,
-                                                 const engine::IDNumbers& entity_ids)
-    : BaseRequest(context, BaseRequest::kDeleteEntityByID), collection_name_(collection_name), entity_ids_(entity_ids) {
+DeleteEntityByIDReq::DeleteEntityByIDReq(const std::shared_ptr<milvus::server::Context>& context,
+                                         const std::string& collection_name, const engine::IDNumbers& entity_ids)
+    : BaseReq(context, BaseReq::kDeleteEntityByID), collection_name_(collection_name), entity_ids_(entity_ids) {
 }
 
-BaseRequestPtr
-DeleteEntityByIDRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                                const std::string& collection_name, const engine::IDNumbers& entity_ids) {
-    return std::shared_ptr<BaseRequest>(new DeleteEntityByIDRequest(context, collection_name, entity_ids));
+BaseReqPtr
+DeleteEntityByIDReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                            const engine::IDNumbers& entity_ids) {
+    return std::shared_ptr<BaseReq>(new DeleteEntityByIDReq(context, collection_name, entity_ids));
 }
 
 Status
-DeleteEntityByIDRequest::OnExecute() {
+DeleteEntityByIDReq::OnExecute() {
     try {
-        TimeRecorderAuto rc("DeleteEntityByIDRequest");
+        TimeRecorderAuto rc("DeleteEntityByIDReq");
 
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);

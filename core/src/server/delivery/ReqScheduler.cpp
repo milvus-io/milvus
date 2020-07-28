@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/RequestScheduler.h"
+#include "server/delivery/ReqScheduler.h"
 #include "utils/Log.h"
 
 #include <fiu-local.h>
@@ -20,26 +20,26 @@ namespace milvus {
 namespace server {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-RequestScheduler::RequestScheduler() : stopped_(false) {
+ReqScheduler::ReqScheduler() : stopped_(false) {
     Start();
 }
 
-RequestScheduler::~RequestScheduler() {
+ReqScheduler::~ReqScheduler() {
     Stop();
 }
 
 void
-RequestScheduler::ExecRequest(BaseRequestPtr& request_ptr) {
-    if (request_ptr == nullptr) {
+ReqScheduler::ExecReq(const BaseReqPtr& req_ptr) {
+    if (req_ptr == nullptr) {
         return;
     }
 
-    RequestScheduler& scheduler = RequestScheduler::GetInstance();
-    scheduler.ExecuteRequest(request_ptr);
+    ReqScheduler& scheduler = ReqScheduler::GetInstance();
+    scheduler.ExecuteReq(req_ptr);
 }
 
 void
-RequestScheduler::Start() {
+ReqScheduler::Start() {
     if (!stopped_) {
         return;
     }
@@ -48,15 +48,15 @@ RequestScheduler::Start() {
 }
 
 void
-RequestScheduler::Stop() {
-    if (stopped_ && request_groups_.empty() && execute_threads_.empty()) {
+ReqScheduler::Stop() {
+    if (stopped_ && req_groups_.empty() && execute_threads_.empty()) {
         return;
     }
 
     LOG_SERVER_INFO_ << "Scheduler gonna stop...";
     {
         std::lock_guard<std::mutex> lock(queue_mtx_);
-        for (auto& iter : request_groups_) {
+        for (auto& iter : req_groups_) {
             if (iter.second != nullptr) {
                 iter.second->Put(nullptr);
             }
@@ -68,90 +68,90 @@ RequestScheduler::Stop() {
             continue;
         iter->join();
     }
-    request_groups_.clear();
+    req_groups_.clear();
     execute_threads_.clear();
     stopped_ = true;
     LOG_SERVER_INFO_ << "Scheduler stopped";
 }
 
 Status
-RequestScheduler::ExecuteRequest(const BaseRequestPtr& request_ptr) {
-    if (request_ptr == nullptr) {
+ReqScheduler::ExecuteReq(const BaseReqPtr& req_ptr) {
+    if (req_ptr == nullptr) {
         return Status::OK();
     }
 
-    auto status = request_ptr->PreExecute();
+    auto status = req_ptr->PreExecute();
     if (!status.ok()) {
-        request_ptr->Done();
+        req_ptr->Done();
         return status;
     }
 
-    status = PutToQueue(request_ptr);
-    fiu_do_on("RequestScheduler.ExecuteRequest.push_queue_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
+    status = PutToQueue(req_ptr);
+    fiu_do_on("ReqScheduler.ExecuteReq.push_queue_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
 
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << "Put request to queue failed with code: " << status.ToString();
-        request_ptr->Done();
+        req_ptr->Done();
         return status;
     }
 
-    if (request_ptr->IsAsync()) {
+    if (req_ptr->async()) {
         return Status::OK();  // async execution, caller need to call WaitToFinish at somewhere
     }
 
-    status = request_ptr->WaitToFinish();  // sync execution
+    status = req_ptr->WaitToFinish();  // sync execution
     if (!status.ok()) {
         return status;
     }
 
-    return request_ptr->PostExecute();
+    return req_ptr->PostExecute();
 }
 
 void
-RequestScheduler::TakeToExecute(RequestQueuePtr request_queue) {
+ReqScheduler::TakeToExecute(ReqQueuePtr req_queue) {
     SetThreadName("reqsched_thread");
-    if (request_queue == nullptr) {
+    if (req_queue == nullptr) {
         return;
     }
 
     while (true) {
-        BaseRequestPtr request = request_queue->TakeRequest();
-        if (request == nullptr) {
+        BaseReqPtr req = req_queue->TakeReq();
+        if (req == nullptr) {
             LOG_SERVER_ERROR_ << "Take null from request queue, stop thread";
             break;  // stop the thread
         }
 
         try {
-            fiu_do_on("RequestScheduler.TakeToExecute.throw_std_exception1", throw std::exception());
-            auto status = request->Execute();
-            fiu_do_on("RequestScheduler.TakeToExecute.throw_std_exception", throw std::exception());
-            fiu_do_on("RequestScheduler.TakeToExecute.execute_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
+            fiu_do_on("ReqScheduler.TakeToExecute.throw_std_exception1", throw std::exception());
+            auto status = req->Execute();
+            fiu_do_on("ReqScheduler.TakeToExecute.throw_std_exception", throw std::exception());
+            fiu_do_on("ReqScheduler.TakeToExecute.execute_fail", status = Status(SERVER_INVALID_ARGUMENT, ""));
             if (!status.ok()) {
-                LOG_SERVER_ERROR_ << "Request failed with code: " << status.ToString();
+                LOG_SERVER_ERROR_ << "Req failed with code: " << status.ToString();
             }
         } catch (std::exception& ex) {
-            LOG_SERVER_ERROR_ << "Request failed to execute: " << ex.what();
+            LOG_SERVER_ERROR_ << "Req failed to execute: " << ex.what();
         }
     }
 }
 
 Status
-RequestScheduler::PutToQueue(const BaseRequestPtr& request_ptr) {
+ReqScheduler::PutToQueue(const BaseReqPtr& req_ptr) {
     std::lock_guard<std::mutex> lock(queue_mtx_);
 
-    std::string group_name = request_ptr->RequestGroup();
-    if (request_groups_.count(group_name) > 0) {
-        request_groups_[group_name]->PutRequest(request_ptr);
+    std::string group_name = req_ptr->req_group();
+    if (req_groups_.count(group_name) > 0) {
+        req_groups_[group_name]->PutReq(req_ptr);
     } else {
-        RequestQueuePtr queue = std::make_shared<RequestQueue>();
-        queue->PutRequest(request_ptr);
-        request_groups_.insert(std::make_pair(group_name, queue));
-        fiu_do_on("RequestScheduler.PutToQueue.null_queue", queue = nullptr);
+        ReqQueuePtr queue = std::make_shared<ReqQueue>();
+        queue->PutReq(req_ptr);
+        req_groups_.insert(std::make_pair(group_name, queue));
+        fiu_do_on("ReqScheduler.PutToQueue.null_queue", queue = nullptr);
 
         // start a thread
-        ThreadPtr thread = std::make_shared<std::thread>(&RequestScheduler::TakeToExecute, this, queue);
+        ThreadPtr thread = std::make_shared<std::thread>(&ReqScheduler::TakeToExecute, this, queue);
 
-        fiu_do_on("RequestScheduler.PutToQueue.push_null_thread", execute_threads_.push_back(nullptr));
+        fiu_do_on("ReqScheduler.PutToQueue.push_null_thread", execute_threads_.push_back(nullptr));
         execute_threads_.push_back(thread);
         LOG_SERVER_INFO_ << "Create new thread for request group: " << group_name;
     }

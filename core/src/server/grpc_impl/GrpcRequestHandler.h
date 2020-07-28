@@ -24,7 +24,7 @@
 #include "grpc/gen-status/status.pb.h"
 #include "opentracing/tracer.h"
 #include "server/context/Context.h"
-#include "server/delivery/RequestHandler.h"
+#include "server/delivery/ReqHandler.h"
 #include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
 #include "src/utils/Status.h"
 
@@ -314,8 +314,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
              ::milvus::grpc::QueryResult* response) override;
 
     void
-    RegisterRequestHandler(const RequestHandler& handler) {
-        request_handler_ = handler;
+    RegisterRequestHandler(const ReqHandler& handler) {
+        req_handler_ = handler;
     }
 
     Status
@@ -330,7 +330,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query);
 
  private:
-    RequestHandler request_handler_;
+    ReqHandler req_handler_;
 
     // std::unordered_map<::grpc::ServerContext*, std::shared_ptr<Context>> context_map_;
     std::unordered_map<std::string, std::shared_ptr<Context>> context_map_;

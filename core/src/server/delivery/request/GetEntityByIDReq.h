@@ -29,17 +29,17 @@
 namespace milvus {
 namespace server {
 
-class GetEntityByIDRequest : public BaseRequest {
+class GetEntityByIDReq : public BaseReq {
  public:
-    static BaseRequestPtr
+    static BaseReqPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
            engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
  protected:
-    GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         const engine::IDNumbers& id_array, std::vector<std::string>& field_names,
-                         engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
+    GetEntityByIDReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                     const engine::IDNumbers& id_array, std::vector<std::string>& field_names,
+                     engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
     Status
     OnExecute() override;

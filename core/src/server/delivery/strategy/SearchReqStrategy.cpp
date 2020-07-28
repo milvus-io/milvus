@@ -31,14 +31,14 @@ SearchReqStrategy::~SearchReqStrategy() {
 }
 
 Status
-SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) {
-    if (request->GetRequestType() != BaseRequest::kSearch) {
+SearchReqStrategy::ReScheduleQueue(const BaseReqPtr& req, std::queue<BaseReqPtr>& queue) {
+    if (req->type() != BaseReq::kSearch) {
         std::string msg = "search strategy can only handle search request";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_UNSUPPORTED_ERROR, msg);
     }
 
-    queue.push(request);
+    queue.push(req);
 
     return Status::OK();
 }

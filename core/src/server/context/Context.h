@@ -29,8 +29,8 @@ class Context {
     explicit Context(const std::string& request_id);
 
     inline std::string
-    RequestID() const {
-        return request_id_;
+    ReqID() const {
+        return req_id_;
     }
 
     std::shared_ptr<Context>
@@ -51,15 +51,15 @@ class Context {
     bool
     IsConnectionBroken() const;
 
-    BaseRequest::RequestType
-    GetRequestType() const;
+    BaseReq::ReqType
+    GetReqType() const;
 
     void
-    SetRequestType(BaseRequest::RequestType type);
+    SetReqType(BaseReq::ReqType type);
 
  private:
-    std::string request_id_;
-    BaseRequest::RequestType request_type_;
+    std::string req_id_;
+    BaseReq::ReqType req_type_;
     std::shared_ptr<tracing::TraceContext> trace_context_;
     ConnectionContextPtr context_;
 };

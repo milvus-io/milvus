@@ -21,47 +21,47 @@
 namespace milvus {
 namespace server {
 
-static const char* DQL_REQUEST_GROUP = "dql";
-static const char* DDL_DML_REQUEST_GROUP = "ddl_dml";
-static const char* INFO_REQUEST_GROUP = "info";
+static const char* DQL_REQ_GROUP = "dql";
+static const char* DDL_DML_REQ_GROUP = "ddl_dml";
+static const char* INFO_REQ_GROUP = "info";
 
 namespace {
 std::string
-RequestGroup(BaseRequest::RequestType type) {
-    static std::map<BaseRequest::RequestType, std::string> s_map_type_group = {
+ReqGroup(BaseReq::ReqType type) {
+    static std::map<BaseReq::ReqType, std::string> s_map_type_group = {
         /* general operations */
-        {BaseRequest::kCmd, INFO_REQUEST_GROUP},
+        {BaseReq::kCmd, INFO_REQ_GROUP},
 
         /* collection operations */
-        {BaseRequest::kCreateCollection, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kDropCollection, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kHasCollection, INFO_REQUEST_GROUP},
-        {BaseRequest::kListCollections, INFO_REQUEST_GROUP},
-        {BaseRequest::kGetCollectionInfo, INFO_REQUEST_GROUP},
-        {BaseRequest::kGetCollectionStats, INFO_REQUEST_GROUP},
-        {BaseRequest::kCountEntities, INFO_REQUEST_GROUP},
+        {BaseReq::kCreateCollection, DDL_DML_REQ_GROUP},
+        {BaseReq::kDropCollection, DDL_DML_REQ_GROUP},
+        {BaseReq::kHasCollection, INFO_REQ_GROUP},
+        {BaseReq::kListCollections, INFO_REQ_GROUP},
+        {BaseReq::kGetCollectionInfo, INFO_REQ_GROUP},
+        {BaseReq::kGetCollectionStats, INFO_REQ_GROUP},
+        {BaseReq::kCountEntities, INFO_REQ_GROUP},
 
         /* partition operations */
-        {BaseRequest::kCreatePartition, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kDropPartition, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kHasPartition, INFO_REQUEST_GROUP},
-        {BaseRequest::kListPartitions, INFO_REQUEST_GROUP},
+        {BaseReq::kCreatePartition, DDL_DML_REQ_GROUP},
+        {BaseReq::kDropPartition, DDL_DML_REQ_GROUP},
+        {BaseReq::kHasPartition, INFO_REQ_GROUP},
+        {BaseReq::kListPartitions, INFO_REQ_GROUP},
 
         /* index operations */
-        {BaseRequest::kCreateIndex, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kDropIndex, DDL_DML_REQUEST_GROUP},
+        {BaseReq::kCreateIndex, DDL_DML_REQ_GROUP},
+        {BaseReq::kDropIndex, DDL_DML_REQ_GROUP},
 
         /* data operations */
-        {BaseRequest::kInsert, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kGetEntityByID, INFO_REQUEST_GROUP},
-        {BaseRequest::kDeleteEntityByID, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kSearch, DQL_REQUEST_GROUP},
-        {BaseRequest::kListIDInSegment, DQL_REQUEST_GROUP},
+        {BaseReq::kInsert, DDL_DML_REQ_GROUP},
+        {BaseReq::kGetEntityByID, INFO_REQ_GROUP},
+        {BaseReq::kDeleteEntityByID, DDL_DML_REQ_GROUP},
+        {BaseReq::kSearch, DQL_REQ_GROUP},
+        {BaseReq::kListIDInSegment, DQL_REQ_GROUP},
 
         /* other operations */
-        {BaseRequest::kLoadCollection, DQL_REQUEST_GROUP},
-        {BaseRequest::kFlush, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kCompact, DDL_DML_REQUEST_GROUP},
+        {BaseReq::kLoadCollection, DQL_REQ_GROUP},
+        {BaseReq::kFlush, DDL_DML_REQ_GROUP},
+        {BaseReq::kCompact, DDL_DML_REQ_GROUP},
     };
 
     auto iter = s_map_type_group.find(type);
@@ -73,21 +73,20 @@ RequestGroup(BaseRequest::RequestType type) {
 }
 }  // namespace
 
-BaseRequest::BaseRequest(const std::shared_ptr<milvus::server::Context>& context, BaseRequest::RequestType type,
-                         bool async)
+BaseReq::BaseReq(const std::shared_ptr<milvus::server::Context>& context, BaseReq::ReqType type, bool async)
     : context_(context), type_(type), async_(async), done_(false) {
-    request_group_ = milvus::server::RequestGroup(type);
+    req_group_ = milvus::server::ReqGroup(type);
     if (nullptr != context_) {
-        context_->SetRequestType(type_);
+        context_->SetReqType(type_);
     }
 }
 
-BaseRequest::~BaseRequest() {
+BaseReq::~BaseReq() {
     WaitToFinish();
 }
 
 Status
-BaseRequest::PreExecute() {
+BaseReq::PreExecute() {
     status_ = OnPreExecute();
     if (!status_.ok()) {
         Done();
@@ -96,37 +95,37 @@ BaseRequest::PreExecute() {
 }
 
 Status
-BaseRequest::Execute() {
+BaseReq::Execute() {
     status_ = OnExecute();
     Done();
     return status_;
 }
 
 Status
-BaseRequest::PostExecute() {
+BaseReq::PostExecute() {
     status_ = OnPostExecute();
     return status_;
 }
 
 Status
-BaseRequest::OnPreExecute() {
+BaseReq::OnPreExecute() {
     return Status::OK();
 }
 
 Status
-BaseRequest::OnPostExecute() {
+BaseReq::OnPostExecute() {
     return Status::OK();
 }
 
 void
-BaseRequest::Done() {
+BaseReq::Done() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     done_ = true;
     finish_cond_.notify_all();
 }
 
 void
-BaseRequest::set_status(const Status& status) {
+BaseReq::SetStatus(const Status& status) {
     status_ = status;
     if (!status_.ok()) {
         LOG_SERVER_ERROR_ << status_.message();
@@ -134,14 +133,14 @@ BaseRequest::set_status(const Status& status) {
 }
 
 std::string
-BaseRequest::CollectionNotExistMsg(const std::string& collection_name) {
+BaseReq::CollectionNotExistMsg(const std::string& collection_name) {
     return "Collection " + collection_name +
            " does not exist. Use milvus.has_collection to verify whether the collection exists. "
            "You also can check whether the collection name exists.";
 }
 
 Status
-BaseRequest::WaitToFinish() {
+BaseReq::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     finish_cond_.wait(lock, [this] { return done_; });
     return status_;
