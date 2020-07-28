@@ -31,6 +31,7 @@
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
 #include "utils/Log.h"
+#include "utils/SignalHandler.h"
 #include "utils/TimeRecorder.h"
 
 namespace milvus {
