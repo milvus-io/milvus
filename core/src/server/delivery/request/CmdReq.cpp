@@ -16,6 +16,8 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
+#include <algorithm>
+#include <cctype>
 #include <memory>
 #include <vector>
 
@@ -23,7 +25,7 @@ namespace milvus {
 namespace server {
 
 CmdReq::CmdReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& cmd, std::string& result)
-    : BaseReq(context, BaseReq::kCmd), cmd_(cmd), result_(result) {
+    : BaseReq(context, BaseReq::kCmd), origin_cmd_(cmd), cmd_(tolower(cmd)), result_(result) {
 }
 
 BaseReqPtr
@@ -54,14 +56,9 @@ CmdReq::OnExecute() {
         sys_info_inst.GetSysInfoJsonStr(result_);
     } else if (cmd_ == "build_commit_id") {
         result_ = LAST_COMMIT_ID;
-    } else if (cmd_.substr(0, 3) == "GET") {
+    } else if (cmd_.substr(0, 3) == "get") {
         try {
-            std::stringstream ss(cmd_);
-            std::vector<std::string> words;
-            std::string word;
-            while (std::getline(ss, word, ' ')) {
-                words.push_back(word);
-            }
+            auto words = split(cmd_, ' ');
             if (words.size() == 2) {
                 result_ = ConfigMgr::GetInstance().Get(words[1]);
             }
@@ -70,14 +67,9 @@ CmdReq::OnExecute() {
         } catch (...) {
             stat = Status(SERVER_UNEXPECTED_ERROR, "Unknown exception happened on GET command.");
         }
-    } else if (cmd_.substr(0, 3) == "SET") {
+    } else if (cmd_.substr(0, 3) == "set") {
         try {
-            std::stringstream ss(cmd_);
-            std::vector<std::string> words;
-            std::string word;
-            while (std::getline(ss, word, ' ')) {
-                words.push_back(word);
-            }
+            auto words = split(cmd_, ' ');
             if (words.size() == 3) {
                 ConfigMgr::GetInstance().Set(words[1], words[2]);
             }
@@ -91,6 +83,23 @@ CmdReq::OnExecute() {
     }
 
     return stat;
+}
+
+std::vector<std::string>
+CmdReq::split(const std::string& src, char delimiter) {
+    std::stringstream ss(src);
+    std::vector<std::string> words;
+    std::string word;
+    while (std::getline(ss, word, delimiter)) {
+        words.push_back(word);
+    }
+    return words;
+}
+
+std::string
+CmdReq::tolower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+    return s;
 }
 
 }  // namespace server

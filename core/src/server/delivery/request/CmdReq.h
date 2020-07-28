@@ -15,6 +15,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -31,6 +32,14 @@ class CmdReq : public BaseReq {
     OnExecute() override;
 
  private:
+    static std::vector<std::string>
+    split(const std::string& src, char delimiter);
+
+    static std::string
+    tolower(std::string s);
+
+ private:
+    const std::string origin_cmd_;
     const std::string cmd_;
     std::string& result_;
 };

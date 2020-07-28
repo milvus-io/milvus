@@ -13,3 +13,4 @@
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 add_library(utils STATIC ${utils_files})
+add_dependencies(utils fiu)
