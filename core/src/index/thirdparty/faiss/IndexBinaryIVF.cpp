@@ -425,6 +425,7 @@ struct IVFBinaryScannerJaccard: BinaryInvertedListScanner {
     }
 
     uint32_t distance_to_code (const uint8_t *code) const override {
+        return 0;
     }
 
     size_t scan_codes (size_t n,
