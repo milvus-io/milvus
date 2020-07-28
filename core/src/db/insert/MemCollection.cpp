@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include "db/insert/MemCollection.h"
+
 #include <algorithm>
 #include <chrono>
 #include <memory>
@@ -18,7 +20,7 @@
 #include "cache/CpuCacheMgr.h"
 #include "config/ServerConfig.h"
 #include "db/Utils.h"
-#include "db/insert/MemCollection.h"
+#include "db/snapshot/Snapshots.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -147,6 +149,74 @@ MemCollection::GetCurrentMem() {
 Status
 MemCollection::ApplyDeletes() {
 
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_));
+
+//    std::
+    std::unordered_map<int64_t, std::vector<segment::doc_id_t>> delete_ids_map;
+    for (auto & m : mem_segment_list_) {
+        auto seg_visitor = engine::SegmentVisitor::Build(ss, m->GetSegmentId());
+        segment::SegmentReaderPtr segment_reader =
+            std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
+        segment::IdBloomFilterPtr bloom_filter;
+        STATUS_CHECK(segment_reader->LoadBloomFilter(bloom_filter));
+
+        segment::DeletedDocsPtr prev_del_docs;
+        STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
+
+        for (auto & id: doc_ids_to_delete_) {
+            if (bloom_filter->Check(id)) {
+                delete_ids_map[m->GetSegmentId()].push_back(id);
+            }
+        }
+
+        auto& pre_del_ids = prev_del_docs->GetDeletedDocs();
+        auto & m_del_ids = delete_ids_map[m->GetSegmentId()];
+        m_del_ids.insert(m_del_ids.end(), pre_del_ids.begin(), pre_del_ids.end());
+
+        // TODO(yhz): Update blacklist in cache
+//        std::vector<knowhere::VecIndexPtr> indexes;
+//        std::vector<faiss::ConcurrentBitsetPtr> blacklists;
+
+        auto delete_docs = std::make_shared<segment::DeletedDocs>();
+
+        auto& ids_to_check = delete_ids_map[m->GetSegmentId()];
+        std::sort(ids_to_check.begin(), ids_to_check.end());
+
+        std::vector<segment::doc_id_t> uids;
+        STATUS_CHECK(segment_reader->LoadUids(uids));
+        for (size_t i = 0; i < uids.size(); i++) {
+            if (!std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i])) {
+                continue;
+            }
+
+            delete_docs->AddDeletedDoc(i);
+
+            if (bloom_filter->Check(uids[i])) {
+                bloom_filter->Remove(uids[i]);
+            }
+//        m->Serialize(lsn_);
+        }
+
+        auto& field_visitors_map = seg_visitor->GetFieldVisitors();
+        auto uid_field_visitor = seg_visitor->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto del_doc_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
+        // TODO(yhz): Create a new delete doc file in snapshot and obtain a new SegmentFile Res
+        auto segment_writer = std::make_shared<segment::SegmentWriter>(options_.meta_.path_, seg_visitor);
+
+        engine::snapshot::SegmentFile::Ptr del_docs_file;
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(options_.meta_.path_, del_docs_file);
+        segment_writer->WriteDeletedDocs(segment_reader->GetSegmentPath(), delete_docs);
+        segment_writer->WriteDeletedDocs(file_path, delete_docs);
+
+        engine::snapshot::SegmentFile::Ptr bloom_filter_file;
+        std::string bloom_filter_file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(options_.meta_.path_, bloom_filter_file);
+        segment_writer->WriteBloomFilter(bloom_filter_file_path, bloom_filter);
+    }
+
+    // Get all index that contains blacklist in cache
 
     // Applying deletes to other segments on disk and their corresponding cache:
     // For each segment in collection:
