@@ -61,9 +61,8 @@ MetaFactory::Build(const DBMetaOptions& meta_options) {
         return std::make_shared<meta::MetaAdapter>(engine);
     } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
         LOG_ENGINE_INFO_ << "Using Sqlite";
-        DBMetaOptions options;
         /* options.backend_uri_ = "mock://:@:/"; */
-        auto engine = std::make_shared<meta::SqliteEngine>(options);
+        auto engine = std::make_shared<meta::SqliteEngine>(meta_options);
         return std::make_shared<meta::MetaAdapter>(engine);
     } else {
         LOG_ENGINE_ERROR_ << "Invalid dialect in URI: dialect = " << uri_info.dialect_;

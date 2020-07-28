@@ -329,9 +329,9 @@ Index *ToGpuCloner::clone_Index_Without_Codes(const Index *index, const uint8_t 
 
         res->copyFromWithoutCodes(ifl, arranged_data);
         return res;
-    } else {
-        return Cloner::clone_Index(index);
     }
+
+    return Cloner::clone_Index(index);
 }
 
 

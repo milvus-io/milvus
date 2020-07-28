@@ -115,7 +115,9 @@ size_t InvertedLists::add_entry_without_codes (size_t list_no, idx_t theid)
 
 size_t InvertedLists::add_entries_without_codes (size_t list_no, size_t n_entry,
                                                  const idx_t* ids) 
-{}
+{
+    return 0;
+}
 
 void InvertedLists::update_entry (size_t list_no, size_t offset,
                                         idx_t id, const uint8_t *code)
