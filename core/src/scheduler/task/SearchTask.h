@@ -29,14 +29,23 @@ class SearchTask : public Task {
     explicit SearchTask(const server::ContextPtr& context, const engine::DBOptions& options,
                         const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
 
-    void
-    Load(LoadType type, uint8_t device_id) override;
+    inline json
+    Dump() const override {
+        json ret{
+            {"type", type_},
+            {"segment_id", segment_id_},
+        };
+        return ret;
+    }
 
-    void
-    Execute() override;
+    Status
+    OnLoad(LoadType type, uint8_t device_id) override;
 
-    std::string
-    IndexName();
+    Status
+    OnExecute() override;
+
+    int64_t
+    nq();
 
  private:
     void
@@ -49,7 +58,7 @@ class SearchTask : public Task {
     query::QueryPtr query_ptr_;
     engine::snapshot::ID_TYPE segment_id_;
 
-    engine::SSExecutionEnginePtr execution_engine_;
+    engine::ExecutionEnginePtr execution_engine_;
 };
 
 }  // namespace scheduler

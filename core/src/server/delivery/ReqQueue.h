@@ -15,25 +15,30 @@
 #include "utils/BlockingQueue.h"
 #include "utils/Status.h"
 
+#include <map>
 #include <memory>
-#include <queue>
 #include <string>
-#include <utility>
+#include <thread>
 #include <vector>
 
 namespace milvus {
 namespace server {
 
-class RequestStrategy {
- protected:
-    RequestStrategy() = default;
+using BlockingReqQueue = BlockingQueue<BaseReqPtr>;
 
+class ReqQueue : public BlockingReqQueue {
  public:
-    virtual Status
-    ReScheduleQueue(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) = 0;
+    ReqQueue();
+    virtual ~ReqQueue();
+
+    BaseReqPtr
+    TakeReq();
+
+    Status
+    PutReq(const BaseReqPtr& req_ptr);
 };
 
-using RequestStrategyPtr = std::shared_ptr<RequestStrategy>;
+using ReqQueuePtr = std::shared_ptr<ReqQueue>;
 
 }  // namespace server
 }  // namespace milvus

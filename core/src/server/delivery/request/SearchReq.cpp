@@ -30,22 +30,22 @@
 namespace milvus {
 namespace server {
 
-SearchRequest::SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                             const milvus::json& json_params, engine::QueryResultPtr& result)
-    : BaseRequest(context, BaseRequest::kSearch), query_ptr_(query_ptr), json_params_(json_params), result_(result) {
+SearchReq::SearchReq(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                     const milvus::json& json_params, engine::QueryResultPtr& result)
+    : BaseReq(context, BaseReq::kSearch), query_ptr_(query_ptr), json_params_(json_params), result_(result) {
 }
 
-BaseRequestPtr
-SearchRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                      const milvus::json& json_params, engine::QueryResultPtr& result) {
-    return std::shared_ptr<BaseRequest>(new SearchRequest(context, query_ptr, json_params, result));
+BaseReqPtr
+SearchReq::Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                  const milvus::json& json_params, engine::QueryResultPtr& result) {
+    return std::shared_ptr<BaseReq>(new SearchReq(context, query_ptr, json_params, result));
 }
 
 Status
-SearchRequest::OnExecute() {
+SearchReq::OnExecute() {
     try {
-        fiu_do_on("SearchRequest.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "SearchRequest(table=" + query_ptr_->collection_id;
+        fiu_do_on("SearchReq.OnExecute.throw_std_exception", throw std::exception());
+        std::string hdr = "SearchReq(table=" + query_ptr_->collection_id;
 
         TimeRecorder rc(hdr);
 
@@ -54,7 +54,7 @@ SearchRequest::OnExecute() {
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings fields_schema;
         auto status = DBWrapper::DB()->GetCollectionInfo(query_ptr_->collection_id, collection, fields_schema);
-        fiu_do_on("SearchRequest.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("SearchReq.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(query_ptr_->collection_id));
@@ -102,11 +102,11 @@ SearchRequest::OnExecute() {
         ProfilerStop();
 #endif
 
-        fiu_do_on("SearchRequest.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        fiu_do_on("SearchReq.OnExecute.query_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
         }
-        fiu_do_on("SearchRequest.OnExecute.empty_result_ids", result_->result_ids_.clear());
+        fiu_do_on("SearchReq.OnExecute.empty_result_ids", result_->result_ids_.clear());
         if (result_->result_ids_.empty()) {
             auto vector_query = query_ptr_->vectors.begin()->second;
             if (!vector_query->query_vector.binary_data.empty()) {

@@ -6,6 +6,7 @@
 - [ ] Documentation
 - [ ] Feature
 - [ ] Test and CI
+- [ ] Code Refactoring
 
 **Which branch you want to cherry-pick to?**
 

@@ -15,7 +15,7 @@
 #include <mutex>
 #include <thread>
 
-#include "db/snapshot/Event.h"
+#include "db/snapshot/MetaEvent.h"
 #include "utils/BlockingQueue.h"
 
 namespace milvus {

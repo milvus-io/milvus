@@ -13,7 +13,6 @@
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/attr db_attr_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/merge db_merge_files)
@@ -54,7 +53,6 @@ set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/../main.cpp
         ${cache_files}
         ${db_main_files}
-        ${db_attr_files}
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}

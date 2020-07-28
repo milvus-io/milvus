@@ -77,20 +77,16 @@ ErrorMap(ErrorCode code) {
 }
 
 std::string
-RequestMap(BaseRequest::RequestType request_type) {
-    static const std::unordered_map<BaseRequest::RequestType, std::string> request_map = {
-        {BaseRequest::kInsert, "Insert"},
-        {BaseRequest::kCreateIndex, "CreateIndex"},
-        {BaseRequest::kSearch, "Search"},
-        {BaseRequest::kFlush, "Flush"},
-        {BaseRequest::kGetEntityByID, "GetEntityByID"},
-        {BaseRequest::kCompact, "Compact"},
+RequestMap(BaseReq::ReqType req_type) {
+    static const std::unordered_map<BaseReq::ReqType, std::string> req_map = {
+        {BaseReq::kInsert, "Insert"}, {BaseReq::kCreateIndex, "CreateIndex"},     {BaseReq::kSearch, "Search"},
+        {BaseReq::kFlush, "Flush"},   {BaseReq::kGetEntityByID, "GetEntityByID"}, {BaseReq::kCompact, "Compact"},
     };
 
-    if (request_map.find(request_type) != request_map.end()) {
-        return request_map.at(request_type);
+    if (req_map.find(req_type) != req_map.end()) {
+        return req_map.at(req_type);
     } else {
-        return "OtherRequest";
+        return "OtherReq";
     }
 }
 
@@ -628,14 +624,14 @@ GrpcRequestHandler::random_id() const {
 GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::milvus::grpc::Mapping* request,
                                      ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
     std::unordered_map<std::string, milvus::json> field_index_params;
     std::unordered_map<std::string, std::string> field_params;
     if (request->fields_size() > MAXIMUM_FIELD_NUM) {
         Status status = Status{SERVER_INVALID_FIELD_NUM, "Maximum field's number should be limited to 64"};
-        LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+        LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
         SET_RESPONSE(response, status, context);
         return ::grpc::Status::OK;
     }
@@ -668,10 +664,10 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
         }
     }
 
-    Status status = request_handler_.CreateCollection(GetContext(context), request->collection_name(), field_types,
-                                                      field_index_params, field_params, json_params);
+    Status status = req_handler_.CreateCollection(GetContext(context), request->collection_name(), field_types,
+                                                  field_index_params, field_params, json_params);
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context)
 
     return ::grpc::Status::OK;
@@ -681,14 +677,14 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
 GrpcRequestHandler::HasCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                   ::milvus::grpc::BoolReply* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     bool has_collection = false;
 
-    Status status = request_handler_.HasCollection(GetContext(context), request->collection_name(), has_collection);
+    Status status = req_handler_.HasCollection(GetContext(context), request->collection_name(), has_collection);
     response->set_bool_reply(has_collection);
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -698,11 +694,11 @@ GrpcRequestHandler::HasCollection(::grpc::ServerContext* context, const ::milvus
 GrpcRequestHandler::DropCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                    ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-    Status status = request_handler_.DropCollection(GetContext(context), request->collection_name());
+    Status status = req_handler_.DropCollection(GetContext(context), request->collection_name());
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
     return ::grpc::Status::OK;
 }
@@ -711,7 +707,7 @@ GrpcRequestHandler::DropCollection(::grpc::ServerContext* context, const ::milvu
 GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
                                 ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request)
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     milvus::json json_params;
     for (int i = 0; i < request->extra_params_size(); i++) {
@@ -721,10 +717,10 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
         }
     }
 
-    Status status = request_handler_.CreateIndex(GetContext(context), request->collection_name(), request->field_name(),
-                                                 request->index_name(), json_params);
+    Status status = req_handler_.CreateIndex(GetContext(context), request->collection_name(), request->field_name(),
+                                             request->index_name(), json_params);
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
     return ::grpc::Status::OK;
 }
@@ -733,7 +729,7 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
 GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus::grpc::EntityIdentity* request,
                                   ::milvus::grpc::Entities* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     engine::IDNumbers vector_ids;
     vector_ids.reserve(request->id_array_size());
@@ -752,8 +748,8 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     std::vector<engine::AttrsData> attrs;
     std::vector<engine::VectorsData> vectors;
 
-    Status status = request_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids,
-                                                   field_names, field_mappings, data_chunk);
+    Status status = req_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, field_names,
+                                               field_mappings, data_chunk);
 
     auto id_size = vector_ids.size();
     for (const auto& it : field_mappings) {
@@ -843,7 +839,7 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
         }
     }
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -853,11 +849,11 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
 GrpcRequestHandler::GetEntityIDs(::grpc::ServerContext* context, const ::milvus::grpc::GetEntityIDsParam* request,
                                  ::milvus::grpc::EntityIds* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     std::vector<int64_t> vector_ids;
-    Status status = request_handler_.ListIDInSegment(GetContext(context), request->collection_name(),
-                                                     request->segment_id(), vector_ids);
+    Status status = req_handler_.ListIDInSegment(GetContext(context), request->collection_name(), request->segment_id(),
+                                                 vector_ids);
 
     if (!vector_ids.empty()) {
         response->mutable_entity_id_array()->Resize(vector_ids.size(), -1);
@@ -865,7 +861,7 @@ GrpcRequestHandler::GetEntityIDs(::grpc::ServerContext* context, const ::milvus:
                vector_ids.size() * sizeof(int64_t));
     }
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -875,7 +871,7 @@ GrpcRequestHandler::GetEntityIDs(::grpc::ServerContext* context, const ::milvus:
 // GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
 //                           ::milvus::grpc::QueryResult* response) {
 //    CHECK_NULLPTR_RETURN(request);
-//    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+//    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 //
 //    // step 1: copy vector data
 //    engine::VectorsData vectors;
@@ -901,13 +897,13 @@ GrpcRequestHandler::GetEntityIDs(::grpc::ServerContext* context, const ::milvus:
 //    TopKQueryResult result;
 //    fiu_do_on("GrpcRequestHandler.Search.not_empty_file_ids", file_ids.emplace_back("test_file_id"));
 //
-//    Status status = request_handler_.Search(GetContext(context), request->collection_name(), vectors, request->topk(),
+//    Status status = req_handler_.Search(GetContext(context), request->collection_name(), vectors, request->topk(),
 //                                            json_params, partitions, file_ids, result);
 //
 //    // step 5: construct and return result
 //    ConstructResults(result, response);
 //
-//    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+//    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
 //    SET_RESPONSE(response->mutable_status(), status, context);
 //
 //    return ::grpc::Status::OK;
@@ -917,7 +913,7 @@ GrpcRequestHandler::GetEntityIDs(::grpc::ServerContext* context, const ::milvus:
 GrpcRequestHandler::SearchInSegment(::grpc::ServerContext* context, const ::milvus::grpc::SearchInSegmentParam* request,
                                     ::milvus::grpc::QueryResult* response) {
     //    CHECK_NULLPTR_RETURN(request);
-    //    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    //    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
     //
     //    auto* search_request = &request->search_param();
     //
@@ -947,13 +943,13 @@ GrpcRequestHandler::SearchInSegment(::grpc::ServerContext* context, const ::milv
     //
     //    // step 5: search vectors
     //    TopKQueryResult result;
-    //    Status status = request_handler_.Search(GetContext(context), search_request->collection_name(), vectors,
+    //    Status status = req_handler_.Search(GetContext(context), search_request->collection_name(), vectors,
     //                                            search_request->topk(), json_params, partitions, file_ids, result);
     //
     //    // step 6: construct and return result
     //    ConstructResults(result, response);
     //
-    //    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    //    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     //    SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -962,12 +958,12 @@ GrpcRequestHandler::SearchInSegment(::grpc::ServerContext* context, const ::milv
 ::grpc::Status
 GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                        ::milvus::grpc::Mapping* response) {
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
     CHECK_NULLPTR_RETURN(request);
     try {
         milvus::server::CollectionSchema collection_schema;
         Status status =
-            request_handler_.GetCollectionInfo(GetContext(context), request->collection_name(), collection_schema);
+            req_handler_.GetCollectionInfo(GetContext(context), request->collection_name(), collection_schema);
         if (!status.ok()) {
             SET_RESPONSE(response->mutable_status(), status, context);
             return ::grpc::Status::OK;
@@ -991,7 +987,7 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
         auto grpc_extra_param = response->add_extra_params();
         grpc_extra_param->set_key(EXTRA_PARAM_KEY);
         grpc_extra_param->set_value(collection_schema.extra_params_.dump());
-        LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+        LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
         SET_RESPONSE(response->mutable_status(), status, context);
     } catch (std::exception& ex) {
         Status status = Status{SERVER_UNEXPECTED_ERROR, "Parsing json string wrong"};
@@ -1004,13 +1000,13 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
 GrpcRequestHandler::CountCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                     ::milvus::grpc::CollectionRowCount* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     int64_t row_count = 0;
-    Status status = request_handler_.CountEntities(GetContext(context), request->collection_name(), row_count);
+    Status status = req_handler_.CountEntities(GetContext(context), request->collection_name(), row_count);
     response->set_collection_row_count(row_count);
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -1020,15 +1016,15 @@ GrpcRequestHandler::CountCollection(::grpc::ServerContext* context, const ::milv
 GrpcRequestHandler::ShowCollections(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
                                     ::milvus::grpc::CollectionNameList* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     std::vector<std::string> collections;
-    Status status = request_handler_.ListCollections(GetContext(context), collections);
+    Status status = req_handler_.ListCollections(GetContext(context), collections);
     for (auto& collection : collections) {
         response->add_collection_names(collection);
     }
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -1038,14 +1034,13 @@ GrpcRequestHandler::ShowCollections(::grpc::ServerContext* context, const ::milv
 GrpcRequestHandler::ShowCollectionInfo(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                        ::milvus::grpc::CollectionInfo* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     std::string collection_stats;
-    Status status =
-        request_handler_.GetCollectionStats(GetContext(context), request->collection_name(), collection_stats);
+    Status status = req_handler_.GetCollectionStats(GetContext(context), request->collection_name(), collection_stats);
     response->set_json_info(collection_stats);
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -1055,7 +1050,7 @@ GrpcRequestHandler::ShowCollectionInfo(::grpc::ServerContext* context, const ::m
 GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
                         ::milvus::grpc::StringReply* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     std::string reply;
     Status status;
@@ -1068,10 +1063,10 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
             if (nullptr == iter.second) {
                 continue;
             }
-            if (iter.second->RequestID() == get_request_id(context)) {
+            if (iter.second->ReqID() == get_request_id(context)) {
                 continue;
             }
-            auto request_str = RequestMap(iter.second->GetRequestType()) + "-" + iter.second->RequestID();
+            auto request_str = RequestMap(iter.second->GetReqType()) + "-" + iter.second->ReqID();
             requests.emplace_back(request_str);
         }
         nlohmann::json reply_json;
@@ -1079,11 +1074,11 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
         reply = reply_json.dump();
         response->set_string_reply(reply);
     } else {
-        status = request_handler_.Cmd(GetContext(context), cmd, reply);
+        status = req_handler_.Cmd(GetContext(context), cmd, reply);
         response->set_string_reply(reply);
     }
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -1093,7 +1088,7 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
 GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByIDParam* request,
                                ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     // step 1: prepare id array
     engine::IDNumbers ids;
@@ -1102,9 +1097,9 @@ GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context, const ::milvus::g
     }
 
     // step 2: delete vector
-    Status status = request_handler_.DeleteEntityByID(GetContext(context), request->collection_name(), ids);
+    Status status = req_handler_.DeleteEntityByID(GetContext(context), request->collection_name(), ids);
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -1114,11 +1109,11 @@ GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context, const ::milvus::g
 GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                       ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-    Status status = request_handler_.LoadCollection(GetContext(context), request->collection_name());
+    Status status = req_handler_.LoadCollection(GetContext(context), request->collection_name());
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -1134,12 +1129,12 @@ GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus
 GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
                               ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-    Status status = request_handler_.DropIndex(GetContext(context), request->collection_name(), request->field_name(),
-                                               request->index_name());
+    Status status = req_handler_.DropIndex(GetContext(context), request->collection_name(), request->field_name(),
+                                           request->index_name());
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -1149,11 +1144,11 @@ GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::gr
 GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
                                     ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-    Status status = request_handler_.CreatePartition(GetContext(context), request->collection_name(), request->tag());
+    Status status = req_handler_.CreatePartition(GetContext(context), request->collection_name(), request->tag());
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -1163,15 +1158,15 @@ GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milv
 GrpcRequestHandler::HasPartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
                                  ::milvus::grpc::BoolReply* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     bool has_collection = false;
 
     Status status =
-        request_handler_.HasPartition(GetContext(context), request->collection_name(), request->tag(), has_collection);
+        req_handler_.HasPartition(GetContext(context), request->collection_name(), request->tag(), has_collection);
     response->set_bool_reply(has_collection);
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -1181,15 +1176,15 @@ GrpcRequestHandler::HasPartition(::grpc::ServerContext* context, const ::milvus:
 GrpcRequestHandler::ShowPartitions(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                    ::milvus::grpc::PartitionList* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     std::vector<std::string> partition_names;
-    Status status = request_handler_.ListPartitions(GetContext(context), request->collection_name(), partition_names);
+    Status status = req_handler_.ListPartitions(GetContext(context), request->collection_name(), partition_names);
     for (auto& pn : partition_names) {
         response->add_partition_tag_array(pn);
     }
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -1199,11 +1194,11 @@ GrpcRequestHandler::ShowPartitions(::grpc::ServerContext* context, const ::milvu
 GrpcRequestHandler::DropPartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
                                   ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-    Status status = request_handler_.DropPartition(GetContext(context), request->collection_name(), request->tag());
+    Status status = req_handler_.DropPartition(GetContext(context), request->collection_name(), request->tag());
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -1213,15 +1208,15 @@ GrpcRequestHandler::DropPartition(::grpc::ServerContext* context, const ::milvus
 GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::FlushParam* request,
                           ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     std::vector<std::string> collection_names;
     for (int32_t i = 0; i < request->collection_name_array().size(); i++) {
         collection_names.push_back(request->collection_name_array(i));
     }
-    Status status = request_handler_.Flush(GetContext(context), collection_names);
+    Status status = req_handler_.Flush(GetContext(context), collection_names);
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -1231,12 +1226,12 @@ GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::
 GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                             ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     double compact_threshold = 0.1;  // compact trigger threshold: delete_counts/segment_counts
-    Status status = request_handler_.Compact(GetContext(context), request->collection_name(), compact_threshold);
+    Status status = req_handler_.Compact(GetContext(context), request->collection_name(), compact_threshold);
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
 
     return ::grpc::Status::OK;
@@ -1251,7 +1246,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     //    CopyRowRecords(request->entity().vector_data(0).value(), request->entity_id_array(), vectors);
 
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     auto field_size = request->fields_size();
 
@@ -1323,7 +1318,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     std::string collection_name = request->collection_name();
     std::string partition_name = request->partition_tag();
-    Status status = request_handler_.Insert(GetContext(context), collection_name, partition_name, row_num, chunk_data);
+    Status status = req_handler_.Insert(GetContext(context), collection_name, partition_name, row_num, chunk_data);
     if (!status.ok()) {
         SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
@@ -1336,7 +1331,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         memcpy(response->mutable_entity_id_array()->mutable_data(), pair->second.data(), pair->second.size());
     }
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -1346,7 +1341,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grpc::SearchParamPB* request,
                              ::milvus::grpc::QueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     auto boolean_query = std::make_shared<query::BooleanQuery>();
     auto query_ptr = std::make_shared<query::Query>();
@@ -1379,7 +1374,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
     std::vector<std::string> field_names;
-    status = request_handler_.Search(GetContext(context), query_ptr, json_params, result);
+    status = req_handler_.Search(GetContext(context), query_ptr, json_params, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
@@ -1393,7 +1388,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
     memcpy(response->mutable_distances()->mutable_data(), result->result_distances_.data(),
            result->result_distances_.size() * sizeof(float));
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -1675,12 +1670,12 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
 GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
                            ::milvus::grpc::QueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     Status status;
 
     CollectionSchema collection_schema;
-    status = request_handler_.GetCollectionInfo(GetContext(context), request->collection_name(), collection_schema);
+    status = req_handler_.GetCollectionInfo(GetContext(context), request->collection_name(), collection_schema);
 
     field_type_ = collection_schema.field_types_;
 
@@ -1737,7 +1732,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     }
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-    status = request_handler_.Search(GetContext(context), query_ptr, json_params, result);
+    status = req_handler_.Search(GetContext(context), query_ptr, json_params, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
@@ -1751,7 +1746,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     memcpy(response->mutable_distances()->mutable_data(), result->result_distances_.data(),
            result->result_distances_.size() * sizeof(float));
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;

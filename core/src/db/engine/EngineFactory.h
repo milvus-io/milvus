@@ -22,7 +22,7 @@ namespace engine {
 
 class EngineFactory {
  public:
-    static SSExecutionEnginePtr
+    static ExecutionEnginePtr
     Build(const std::string& dir_root, const std::string& collection_name, int64_t segment_id);
 };
 

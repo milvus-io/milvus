@@ -91,6 +91,7 @@ append_flags(CMAKE_CXX_FLAGS
     "-fPIC"
     "-DELPP_THREAD_SAFE"
     "-fopenmp"
+    "-Werror=return-type"
     )
 
 # **************************** Source files ****************************
