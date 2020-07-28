@@ -146,6 +146,8 @@ MemCollection::GetCurrentMem() {
 
 Status
 MemCollection::ApplyDeletes() {
+
+
     // Applying deletes to other segments on disk and their corresponding cache:
     // For each segment in collection:
     //     Load its bloom filter
