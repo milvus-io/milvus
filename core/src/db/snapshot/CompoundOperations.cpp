@@ -26,6 +26,67 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+CompoundSegmentsOperation::CompoundSegmentsOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+    for (auto& stale_segment_file : context_.stale_segment_files) {
+        stale_segment_files_[stale_segment_file->GetSegmentId()].push_back(stale_segment_file);
+        modified_segments_.insert(stale_segment_file->GetSegmentId());
+    }
+    for (auto& new_segment_file : context_.new_segment_files) {
+        new_segment_files_[new_segment_file->GetSegmentId()].push_back(new_segment_file);
+        modified_segments_.insert(new_segment_file->GetSegmentId());
+    }
+}
+
+Status
+CompoundSegmentsOperation::CommitNewSegment(SegmentPtr& created) {
+    if (context_.new_segment) {
+        return Status(SS_DUPLICATED_ERROR, "Only one new segment could be created");
+    }
+    auto op = std::make_shared<SegmentOperation>(context_, GetStartedSS());
+    STATUS_CHECK(op->Push());
+    STATUS_CHECK(op->GetResource(context_.new_segment));
+    created = context_.new_segment;
+    auto s_ctx_p = ResourceContextBuilder<Segment>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, s_ctx_p);
+    return Status::OK();
+}
+
+Status
+CompoundSegmentsOperation::DoExecute(StorePtr store) {
+    if (!context_.new_segment && stale_segment_files_.size() == 0 && new_segment_files_.size() == 0) {
+        return Status(SS_INVALID_CONTEX_ERROR, "Nothing to do");
+    }
+    if (context_.new_segment && context_.new_segment->IsActive()) {
+        return Status(SS_INVALID_CONTEX_ERROR, "New segment should not be active");
+    }
+
+    std::map<ID_TYPE, SegmentCommit::VecT> new_sc_map;
+    for (auto& m_seg_id : modified_segments_) {
+        OperationContext context;
+        context.lsn = context_.lsn;
+        /* context. */
+        auto itstale = stale_segment_files_.find(m_seg_id);
+        if (itstale != stale_segment_files_.end()) {
+            context.stale_segment_files = std::move(itstale.second);
+            stale_segment_files_.erase(itstale);
+        }
+        auto itnew = new_segment_files_.find(m_seg_id);
+        if (itnew != new_segment_files_.end()) {
+            context.new_segment_files = std::move(itnew.second);
+            new_segment_files_.erase(itnew);
+        }
+
+        SegmentCommitOperation sc_op(context, GetAdjustedSS());
+        STATUS_CHECK(sc_op(store));
+        SegmentCommitPtr new_sc;
+        STATUS_CHECK(sc_op.GetResource(new_sc));
+        new_sc_map[new_sc->GetPartitionId()].push_back(new_sc);
+    }
+
+    return Status::OK();
+}
+
 ChangeSegmentFileOperation::ChangeSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
 }
