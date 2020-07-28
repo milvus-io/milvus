@@ -537,9 +537,10 @@ TEST_F(DBTest, MergeTest) {
 
     std::set<std::string> expect_file_paths;
     boost::filesystem::recursive_directory_iterator iter(root_path);
-    for (auto& entry : iter) {
-        if (boost::filesystem::is_regular_file(entry.path())) {
-            expect_file_paths.insert(entry.path().filename().string());
+    boost::filesystem::recursive_directory_iterator end;
+    for (; iter != end ; ++iter) {
+        if (boost::filesystem::is_regular_file((*iter).path())) {
+            expect_file_paths.insert((*iter).path().filename().string());
         }
     }
 
