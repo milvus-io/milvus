@@ -42,7 +42,7 @@ MemSegment::CreateSegment() {
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
     if (!status.ok()) {
-        std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+        std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
@@ -53,7 +53,7 @@ MemSegment::CreateSegment() {
     operation_ = std::make_shared<snapshot::NewSegmentOperation>(context, ss);
     status = operation_->CommitNewSegment(segment_);
     if (!status.ok()) {
-        std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+        std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
@@ -71,7 +71,7 @@ MemSegment::CreateSegment() {
         snapshot::SegmentFilePtr seg_file;
         status = operation_->CommitNewSegmentFile(sf_context, seg_file);
         if (!status.ok()) {
-            std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+            std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
@@ -89,7 +89,7 @@ MemSegment::CreateSegment() {
         snapshot::SegmentFilePtr delete_doc_file, bloom_filter_file;
         status = operation_->CommitNewSegmentFile(sf_context, delete_doc_file);
         if (!status.ok()) {
-            std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+            std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
@@ -97,7 +97,7 @@ MemSegment::CreateSegment() {
         sf_context.field_element_name = engine::DEFAULT_BLOOM_FILTER_NAME;
         status = operation_->CommitNewSegmentFile(sf_context, bloom_filter_file);
         if (!status.ok()) {
-            std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+            std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
@@ -117,7 +117,7 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
     if (!status.ok()) {
-        std::string err_msg = "SSMemSegment::SingleEntitySize failed: " + status.ToString();
+        std::string err_msg = "MemSegment::SingleEntitySize failed: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
