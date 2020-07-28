@@ -16,9 +16,9 @@
 
 #include "config/ServerConfig.h"
 #include "db/Utils.h"
-#include "db/snapshot/Event.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/ResourceGCEvent.h"
 #include "db/snapshot/Snapshots.h"
 
 namespace milvus {

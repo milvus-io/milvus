@@ -21,21 +21,21 @@
 namespace milvus {
 namespace server {
 
-HasCollectionRequest::HasCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, bool& exist)
-    : BaseRequest(context, BaseRequest::kHasCollection), collection_name_(collection_name), exist_(exist) {
+HasCollectionReq::HasCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
+                                   const std::string& collection_name, bool& exist)
+    : BaseReq(context, BaseReq::kHasCollection), collection_name_(collection_name), exist_(exist) {
 }
 
-BaseRequestPtr
-HasCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, bool& exist) {
-    return std::shared_ptr<BaseRequest>(new HasCollectionRequest(context, collection_name, exist));
+BaseReqPtr
+HasCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                         bool& exist) {
+    return std::shared_ptr<BaseReq>(new HasCollectionReq(context, collection_name, exist));
 }
 
 Status
-HasCollectionRequest::OnExecute() {
+HasCollectionReq::OnExecute() {
     try {
-        std::string hdr = "HasCollectionRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "HasCollectionReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist_));

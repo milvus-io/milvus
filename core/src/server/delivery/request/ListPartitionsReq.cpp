@@ -22,23 +22,20 @@
 namespace milvus {
 namespace server {
 
-ListPartitionsRequest::ListPartitionsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                             const std::string& collection_name,
-                                             std::vector<std::string>& partition_list)
-    : BaseRequest(context, BaseRequest::kListPartitions),
-      collection_name_(collection_name),
-      partition_list_(partition_list) {
+ListPartitionsReq::ListPartitionsReq(const std::shared_ptr<milvus::server::Context>& context,
+                                     const std::string& collection_name, std::vector<std::string>& partition_list)
+    : BaseReq(context, BaseReq::kListPartitions), collection_name_(collection_name), partition_list_(partition_list) {
 }
 
-BaseRequestPtr
-ListPartitionsRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                              const std::string& collection_name, std::vector<std::string>& partition_list) {
-    return std::shared_ptr<BaseRequest>(new ListPartitionsRequest(context, collection_name, partition_list));
+BaseReqPtr
+ListPartitionsReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                          std::vector<std::string>& partition_list) {
+    return std::shared_ptr<BaseReq>(new ListPartitionsReq(context, collection_name, partition_list));
 }
 
 Status
-ListPartitionsRequest::OnExecute() {
-    std::string hdr = "ListPartitionsRequest(collection=" + collection_name_ + ")";
+ListPartitionsReq::OnExecute() {
+    std::string hdr = "ListPartitionsReq(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
     /* check collection existence */

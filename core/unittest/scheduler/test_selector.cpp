@@ -29,13 +29,16 @@ namespace scheduler {
 
 #ifdef MILVUS_GPU_VERSION
 TEST(OptimizerTest, TEST_OPTIMIZER) {
+    auto dummy_context = std::make_shared<milvus::server::Context>("dummy_request_id");
+
     BuildIndexPass build_index_pass;
     fiu_init(0);
     fiu_enable("BuildIndexPass.Init.get_config_fail", 1, NULL, 0);
     ASSERT_ANY_THROW(build_index_pass.Init(););
     fiu_disable("BuildIndexPass.Init.get_config_fail");
 
-    auto build_index_task = std::make_shared<XBuildIndexTask>(nullptr, nullptr);
+    milvus::engine::DBOptions options;
+    auto build_index_task = std::make_shared<BuildIndexTask>(options, "", 0, nullptr);
     fiu_enable("BuildIndexPass.Run.empty_gpu_ids", 1, NULL, 0);
     ASSERT_FALSE(build_index_pass.Run(build_index_task));
     fiu_disable("BuildIndexPass.Run.empty_gpu_ids");
@@ -61,11 +64,7 @@ TEST(OptimizerTest, TEST_OPTIMIZER) {
     fiu_disable("get_gpu_config_search_resources.disable_gpu_resource_fail");
     fiu_disable("check_config_gpu_search_threshold_fail");
 
-    auto file = std::make_shared<SegmentSchema>();
-    file->engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
-    file->index_params_ = "{ \"nlist\": 100 }";
-    file->dimension_ = 64;
-    auto search_task = std::make_shared<XSearchTask>(nullptr, file, nullptr);
+    auto search_task = std::make_shared<SearchTask>(dummy_context, options, nullptr, 0, nullptr);
     ASSERT_FALSE(faiss_ivf_pq_pass.Run(search_task));
 
     FaissIVFSQ8HPass faiss_ivf_q8h_pass;
@@ -73,7 +72,7 @@ TEST(OptimizerTest, TEST_OPTIMIZER) {
     faiss_ivf_q8h_pass.Init();
     fiu_disable("check_config_gpu_search_threshold_fail");
 
-    auto search_task2 = std::make_shared<XSearchTask>(nullptr, file, nullptr);
+    auto search_task2 = std::make_shared<SearchTask>(dummy_context, options, nullptr, 0, nullptr);
     ASSERT_FALSE(faiss_ivf_q8h_pass.Run(build_index_task));
     ASSERT_FALSE(faiss_ivf_q8h_pass.Run(search_task2));
 
@@ -86,7 +85,7 @@ TEST(OptimizerTest, TEST_OPTIMIZER) {
 
     FallbackPass fall_back_pass;
     fall_back_pass.Init();
-    auto task = std::make_shared<XBuildIndexTask>(nullptr, nullptr);
+    auto task = std::make_shared<BuildIndexTask>(options, "", 0, nullptr);
     ResMgrInst::GetInstance()->Add(std::make_shared<CpuResource>("name1", 1, true));
     fall_back_pass.Run(task);
 }

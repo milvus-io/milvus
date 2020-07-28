@@ -17,6 +17,9 @@
 
 #pragma once
 
+#include <set>
+#include <string>
+
 #include "codecs/BlockFormat.h"
 #include "codecs/DeletedDocsFormat.h"
 #include "codecs/IdBloomFilterFormat.h"
@@ -50,6 +53,9 @@ class Codec {
     VectorCompressFormatPtr
     GetVectorCompressFormat();
 
+    const std::set<std::string>&
+    GetSuffixSet() const;
+
  private:
     Codec();
 
@@ -60,6 +66,8 @@ class Codec {
     DeletedDocsFormatPtr deleted_docs_format_ptr_;
     IdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
     VectorCompressFormatPtr vector_compress_format_ptr_;
+
+    std::set<std::string> suffix_set_;
 };
 
 }  // namespace codec

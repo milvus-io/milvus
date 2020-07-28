@@ -8,61 +8,38 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <list>
 #include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
 
-#include "Job.h"
-#include "db/meta/Meta.h"
+#include "scheduler/task/Task.h"
 
 namespace milvus {
 namespace scheduler {
 
-class DeleteJob : public Job {
+class TestTask : public Task {
  public:
-    DeleteJob(std::string collection_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource);
+    explicit TestTask(TaskLabelPtr label = nullptr);
 
  public:
+    Status
+    OnLoad(LoadType type, uint8_t device_id) override;
+
+    Status
+    OnExecute() override;
+
     void
-    WaitAndDelete();
-
-    void
-    ResourceDone();
-
-    json
-    Dump() const override;
+    Wait();
 
  public:
-    std::string
-    collection_id() const {
-        return collection_id_;
-    }
+    uint64_t load_count_ = 0;
+    uint64_t exec_count_ = 0;
 
-    engine::meta::MetaPtr
-    meta() const {
-        return meta_ptr_;
-    }
-
- private:
-    std::string collection_id_;
-    engine::meta::MetaPtr meta_ptr_;
-
-    uint64_t num_resource_ = 0;
-    uint64_t done_resource = 0;
+    bool done_ = false;
     std::mutex mutex_;
     std::condition_variable cv_;
 };
-
-using DeleteJobPtr = std::shared_ptr<DeleteJob>;
 
 }  // namespace scheduler
 }  // namespace milvus

@@ -23,6 +23,7 @@ set(test_files
         )
 
 add_executable(test_db
+<<<<<<< HEAD
         ${scheduler_files}
         ${server_context_files}
         ${test_files}

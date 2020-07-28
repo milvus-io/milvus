@@ -66,10 +66,5 @@ extern const char* INDEX_HNSW_SQ8NM;
 
 enum class IndexMode { MODE_CPU = 0, MODE_GPU = 1 };
 
-extern std::string
-OldIndexTypeToStr(const int32_t type);
-
-extern int32_t
-StrToOldIndexType(const std::string& str);
 }  // namespace knowhere
 }  // namespace milvus

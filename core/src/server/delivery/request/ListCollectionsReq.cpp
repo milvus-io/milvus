@@ -22,32 +22,27 @@
 namespace milvus {
 namespace server {
 
-ListCollectionsRequest::ListCollectionsRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                               std::vector<std::string>& collection_list)
-    : BaseRequest(context, BaseRequest::kListCollections), collection_list_(collection_list) {
+ListCollectionsReq::ListCollectionsReq(const std::shared_ptr<milvus::server::Context>& context,
+                                       std::vector<std::string>& collection_list)
+    : BaseReq(context, BaseReq::kListCollections), collection_list_(collection_list) {
 }
 
-BaseRequestPtr
-ListCollectionsRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                               std::vector<std::string>& collection_name_list) {
-    return std::shared_ptr<BaseRequest>(new ListCollectionsRequest(context, collection_name_list));
+BaseReqPtr
+ListCollectionsReq::Create(const std::shared_ptr<milvus::server::Context>& context,
+                           std::vector<std::string>& collection_name_list) {
+    return std::shared_ptr<BaseReq>(new ListCollectionsReq(context, collection_name_list));
 }
 
 Status
-ListCollectionsRequest::OnExecute() {
-    TimeRecorderAuto rc("ListCollectionsRequest");
-
-    std::vector<std::string> names;
-    auto status = DBWrapper::DB()->ListCollections(names);
-    fiu_do_on("ListCollectionsRequest.OnExecute.show_collections_fail",
+ListCollectionsReq::OnExecute() {
+    TimeRecorderAuto rc("ListCollectionsReq");
+    auto status = DBWrapper::DB()->ListCollections(collection_list_);
+    fiu_do_on("ListCollectionsReq.OnExecute.show_collections_fail",
               status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         return status;
     }
-
-    for (auto& name : names) {
-        collection_list_.push_back(name);
-    }
+    rc.ElapseFromBegin("done");
     return Status::OK();
 }
 

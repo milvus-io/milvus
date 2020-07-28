@@ -9,27 +9,41 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include "scheduler/task/TestTask.h"
 
-#include "Task.h"
-#include "scheduler/job/DeleteJob.h"
+#include <utility>
+
+#include "cache/GpuCacheMgr.h"
 
 namespace milvus {
 namespace scheduler {
 
-class XDeleteTask : public Task {
- public:
-    explicit XDeleteTask(const scheduler::DeleteJobPtr& delete_job, TaskLabelPtr label);
+TestTask::TestTask(TaskLabelPtr label) : Task(TaskType::SearchTask, std::move(label)) {
+}
 
-    void
-    Load(LoadType type, uint8_t device_id) override;
+Status
+TestTask::OnLoad(LoadType type, uint8_t device_id) {
+    load_count_++;
+    return Status::OK();
+}
 
-    void
-    Execute() override;
+Status
+TestTask::OnExecute() {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        exec_count_++;
+        done_ = true;
+    }
+    cv_.notify_one();
 
- public:
-    scheduler::DeleteJobPtr delete_job_;
-};
+    return Status::OK();
+}
+
+void
+TestTask::Wait() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    cv_.wait(lock, [&] { return done_; });
+}
 
 }  // namespace scheduler
 }  // namespace milvus

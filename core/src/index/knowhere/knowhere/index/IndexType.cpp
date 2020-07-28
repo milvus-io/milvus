@@ -17,53 +17,6 @@
 namespace milvus {
 namespace knowhere {
 
-/* for compatible with 0.7.0 */
-static std::unordered_map<int32_t, std::string> old_index_type_str_map = {
-    {(int32_t)OldIndexType::INVALID, "INVALID"},
-    {(int32_t)OldIndexType::FAISS_IDMAP, IndexEnum::INDEX_FAISS_IDMAP},
-    {(int32_t)OldIndexType::FAISS_IVFFLAT_CPU, IndexEnum::INDEX_FAISS_IVFFLAT},
-    {(int32_t)OldIndexType::FAISS_IVFFLAT_GPU, IndexEnum::INDEX_FAISS_IVFFLAT},
-    {(int32_t)OldIndexType::FAISS_IVFFLAT_MIX, IndexEnum::INDEX_FAISS_IVFFLAT},
-    {(int32_t)OldIndexType::FAISS_IVFPQ_CPU, IndexEnum::INDEX_FAISS_IVFPQ},
-    {(int32_t)OldIndexType::FAISS_IVFPQ_GPU, IndexEnum::INDEX_FAISS_IVFPQ},
-    {(int32_t)OldIndexType::FAISS_IVFPQ_MIX, IndexEnum::INDEX_FAISS_IVFPQ},
-    {(int32_t)OldIndexType::FAISS_IVFSQ8_MIX, IndexEnum::INDEX_FAISS_IVFSQ8},
-    {(int32_t)OldIndexType::FAISS_IVFSQ8_CPU, IndexEnum::INDEX_FAISS_IVFSQ8},
-    {(int32_t)OldIndexType::FAISS_IVFSQ8_GPU, IndexEnum::INDEX_FAISS_IVFSQ8},
-    {(int32_t)OldIndexType::FAISS_IVFSQ8_HYBRID, IndexEnum::INDEX_FAISS_IVFSQ8H},
-    {(int32_t)OldIndexType::NSG_MIX, IndexEnum::INDEX_NSG},
-#ifdef MILVUS_SUPPORT_SPTAG
-    {(int32_t)OldIndexType::SPTAG_KDT_RNT_CPU, IndexEnum::INDEX_SPTAG_KDT_RNT},
-    {(int32_t)OldIndexType::SPTAG_BKT_RNT_CPU, IndexEnum::INDEX_SPTAG_BKT_RNT},
-#endif
-    {(int32_t)OldIndexType::HNSW, IndexEnum::INDEX_HNSW},
-    {(int32_t)OldIndexType::ANNOY, IndexEnum::INDEX_ANNOY},
-    {(int32_t)OldIndexType::HNSW_SQ8NM, IndexEnum::INDEX_HNSW_SQ8NM},
-    {(int32_t)OldIndexType::FAISS_IVFSQ8NR, IndexEnum::INDEX_FAISS_IVFSQ8NR},
-    {(int32_t)OldIndexType::FAISS_BIN_IDMAP, IndexEnum::INDEX_FAISS_BIN_IDMAP},
-    {(int32_t)OldIndexType::FAISS_BIN_IVFLAT_CPU, IndexEnum::INDEX_FAISS_BIN_IVFFLAT},
-};
-
-static std::unordered_map<std::string, int32_t> str_old_index_type_map = {
-    {"", (int32_t)OldIndexType::INVALID},
-    {IndexEnum::INDEX_FAISS_IDMAP, (int32_t)OldIndexType::FAISS_IDMAP},
-    {IndexEnum::INDEX_FAISS_IVFFLAT, (int32_t)OldIndexType::FAISS_IVFFLAT_CPU},
-    {IndexEnum::INDEX_FAISS_IVFPQ, (int32_t)OldIndexType::FAISS_IVFPQ_CPU},
-    {IndexEnum::INDEX_FAISS_IVFSQ8, (int32_t)OldIndexType::FAISS_IVFSQ8_CPU},
-    {IndexEnum::INDEX_FAISS_IVFSQ8H, (int32_t)OldIndexType::FAISS_IVFSQ8_HYBRID},
-    {IndexEnum::INDEX_NSG, (int32_t)OldIndexType::NSG_MIX},
-#ifdef MILVUS_SUPPORT_SPTAG
-    {IndexEnum::INDEX_SPTAG_KDT_RNT, (int32_t)OldIndexType::SPTAG_KDT_RNT_CPU},
-    {IndexEnum::INDEX_SPTAG_BKT_RNT, (int32_t)OldIndexType::SPTAG_BKT_RNT_CPU},
-#endif
-    {IndexEnum::INDEX_HNSW, (int32_t)OldIndexType::HNSW},
-    {IndexEnum::INDEX_ANNOY, (int32_t)OldIndexType::ANNOY},
-    {IndexEnum::INDEX_FAISS_IVFSQ8NR, (int32_t)OldIndexType::FAISS_IVFSQ8NR},
-    {IndexEnum::INDEX_HNSW_SQ8NM, (int32_t)OldIndexType::HNSW_SQ8NM},
-    {IndexEnum::INDEX_FAISS_BIN_IDMAP, (int32_t)OldIndexType::FAISS_BIN_IDMAP},
-    {IndexEnum::INDEX_FAISS_BIN_IVFFLAT, (int32_t)OldIndexType::FAISS_BIN_IVFLAT_CPU},
-};
-
 /* used in 0.8.0 */
 namespace IndexEnum {
 const char* INVALID = "";
@@ -84,24 +37,6 @@ const char* INDEX_HNSW = "HNSW";
 const char* INDEX_ANNOY = "ANNOY";
 const char* INDEX_HNSW_SQ8NM = "HNSW_SQ8NM";
 }  // namespace IndexEnum
-
-std::string
-OldIndexTypeToStr(const int32_t type) {
-    try {
-        return old_index_type_str_map.at(type);
-    } catch (...) {
-        KNOWHERE_THROW_MSG("Invalid index type " + std::to_string(type));
-    }
-}
-
-int32_t
-StrToOldIndexType(const std::string& str) {
-    try {
-        return str_old_index_type_map.at(str);
-    } catch (...) {
-        KNOWHERE_THROW_MSG("Invalid index str " + str);
-    }
-}
 
 }  // namespace knowhere
 }  // namespace milvus

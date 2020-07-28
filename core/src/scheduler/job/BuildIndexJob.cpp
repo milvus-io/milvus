@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/job/BuildIndexJob.h"
+#include "scheduler/task/BuildIndexTask.h"
 
 #include <utility>
 
@@ -20,32 +21,18 @@ namespace scheduler {
 
 BuildIndexJob::BuildIndexJob(engine::DBOptions options, const std::string& collection_name,
                              const engine::snapshot::IDS_TYPE& segment_ids)
-    : Job(JobType::SS_BUILD),
-      options_(std::move(options)),
-      collection_name_(collection_name),
-      segment_ids_(segment_ids) {
+    : Job(JobType::BUILD), options_(std::move(options)), collection_name_(collection_name), segment_ids_(segment_ids) {
 }
 
-void
-BuildIndexJob::WaitFinish() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return segment_ids_.empty(); });
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] BuildIndexJob %ld all done", "build index", 0, id());
-}
-
-void
-BuildIndexJob::BuildIndexDone(const engine::snapshot::ID_TYPE seg_id) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    for (engine::snapshot::IDS_TYPE::iterator iter = segment_ids_.begin(); iter != segment_ids_.end(); ++iter) {
-        if (*iter == seg_id) {
-            segment_ids_.erase(iter);
-            break;
-        }
+JobTasks
+BuildIndexJob::CreateTasks() {
+    std::vector<TaskPtr> tasks;
+    for (auto& id : segment_ids_) {
+        auto task = std::make_shared<BuildIndexTask>(options_, collection_name_, id, nullptr);
+        task->job_ = this;
+        tasks.emplace_back(task);
     }
-    if (segment_ids_.empty()) {
-        cv_.notify_all();
-    }
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] BuildIndexJob %ld finish segment: %ld", "build index", 0, id(), seg_id);
+    return tasks;
 }
 
 json

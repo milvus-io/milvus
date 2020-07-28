@@ -8,42 +8,32 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <list>
+#include "server/delivery/request/BaseReq.h"
+#include "utils/BlockingQueue.h"
+#include "utils/Status.h"
+
 #include <memory>
-#include <mutex>
 #include <queue>
 #include <string>
-#include <thread>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
-#include "job/DeleteJob.h"
-#include "src/scheduler/job/BuildIndexJob.h"
-#include "src/scheduler/job/SearchJob.h"
-#include "task/Task.h"
-
 namespace milvus {
-namespace scheduler {
+namespace server {
 
-class TaskCreator {
+class ReqStrategy {
+ protected:
+    ReqStrategy() = default;
+
  public:
-    static std::vector<TaskPtr>
-    Create(const JobPtr& job);
-
- public:
-    static std::vector<TaskPtr>
-    Create(const DeleteJobPtr& job);
-
-    static std::vector<TaskPtr>
-    Create(const SSSearchJobPtr& job);
-
-    static std::vector<TaskPtr>
-    Create(const SSBuildIndexJobPtr& job);
+    virtual Status
+    ReScheduleQueue(const BaseReqPtr& req, std::queue<BaseReqPtr>& queue) = 0;
 };
 
-}  // namespace scheduler
+using ReqStrategyPtr = std::shared_ptr<ReqStrategy>;
+
+}  // namespace server
 }  // namespace milvus
