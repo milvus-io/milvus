@@ -9,8 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "server/delivery/RequestQueue.h"
-#include "server/delivery/strategy/RequestStrategy.h"
+#include "server/delivery/ReqQueue.h"
+#include "server/delivery/strategy/ReqStrategy.h"
 #include "server/delivery/strategy/SearchReqStrategy.h"
 #include "utils/Log.h"
 
@@ -24,25 +24,25 @@ namespace server {
 
 namespace {
 Status
-ScheduleRequest(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) {
+ScheduleReq(const BaseReqPtr& req, std::queue<BaseReqPtr>& queue) {
 #if 1
-    if (request == nullptr) {
+    if (req == nullptr) {
         return Status(SERVER_NULL_POINTER, "request schedule cannot handle null object");
     }
 
     if (queue.empty()) {
-        queue.push(request);
+        queue.push(req);
         return Status::OK();
     }
 
-    static std::map<BaseRequest::RequestType, RequestStrategyPtr> s_schedulers = {
-        {BaseRequest::kSearch, std::make_shared<SearchReqStrategy>()}};
+    static std::map<BaseReq::ReqType, ReqStrategyPtr> s_schedulers = {
+        {BaseReq::kSearch, std::make_shared<SearchReqStrategy>()}};
 
-    auto iter = s_schedulers.find(request->GetRequestType());
+    auto iter = s_schedulers.find(req->type());
     if (iter == s_schedulers.end() || iter->second == nullptr) {
-        queue.push(request);
+        queue.push(req);
     } else {
-        iter->second->ReScheduleQueue(request, queue);
+        iter->second->ReScheduleQueue(req, queue);
     }
 #else
     queue.push(request);
@@ -53,22 +53,22 @@ ScheduleRequest(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-RequestQueue::RequestQueue() {
+ReqQueue::ReqQueue() {
 }
 
-RequestQueue::~RequestQueue() {
+ReqQueue::~ReqQueue() {
 }
 
-BaseRequestPtr
-RequestQueue::TakeRequest() {
+BaseReqPtr
+ReqQueue::TakeReq() {
     return Take();
 }
 
 Status
-RequestQueue::PutRequest(const BaseRequestPtr& request_ptr) {
+ReqQueue::PutReq(const BaseReqPtr& req_ptr) {
     std::unique_lock<std::mutex> lock(mtx);
     full_.wait(lock, [this] { return (queue_.size() < capacity_); });
-    auto status = ScheduleRequest(request_ptr, queue_);
+    auto status = ScheduleReq(req_ptr, queue_);
     empty_.notify_all();
     return status;
 }

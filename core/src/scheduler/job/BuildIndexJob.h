@@ -37,11 +37,8 @@ class BuildIndexJob : public Job {
     ~BuildIndexJob() = default;
 
  public:
-    void
-    WaitFinish();
-
-    void
-    BuildIndexDone(const engine::snapshot::ID_TYPE seg_id);
+    JobTasks
+    CreateTasks() override;
 
     json
     Dump() const override;
@@ -62,22 +59,13 @@ class BuildIndexJob : public Job {
         return segment_ids_;
     }
 
-    Status&
-    status() {
-        return status_;
-    }
-
  private:
     engine::DBOptions options_;
     std::string collection_name_;
     engine::snapshot::IDS_TYPE segment_ids_;
-
-    Status status_;
-    std::mutex mutex_;
-    std::condition_variable cv_;
 };
 
-using SSBuildIndexJobPtr = std::shared_ptr<BuildIndexJob>;
+using BuildIndexJobPtr = std::shared_ptr<BuildIndexJob>;
 
 }  // namespace scheduler
 }  // namespace milvus

@@ -66,12 +66,12 @@ DBImpl::DBImpl(const DBOptions& options)
     merge_mgr_ptr_ = MergeManagerFactory::SSBuild(options_);
 
     if (options_.wal_enable_) {
-        wal::MXLogConfiguration mxlog_config;
-        mxlog_config.recovery_error_ignore = options_.recovery_error_ignore_;
-        // 2 buffers in the WAL
-        mxlog_config.buffer_size = options_.buffer_size_ / 2;
-        mxlog_config.mxlog_path = options_.mxlog_path_;
-        wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
+        //        wal::MXLogConfiguration mxlog_config;
+        //        mxlog_config.recovery_error_ignore = options_.recovery_error_ignore_;
+        //        // 2 buffers in the WAL
+        //        mxlog_config.buffer_size = options_.buffer_size_ / 2;
+        //        mxlog_config.mxlog_path = options_.mxlog_path_;
+        //        wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
     }
     Start();
 }
@@ -234,7 +234,7 @@ Status
 DBImpl::DropCollection(const std::string& name) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Prepare to delete collection " << name;
+    LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << name;
 
     snapshot::ScopedSnapshotT ss;
     auto& snapshots = snapshot::Snapshots::GetInstance();
@@ -568,7 +568,7 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
     TimeRecorder rc("SSDBImpl::Query");
 
-    scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr);
 
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);
@@ -618,7 +618,7 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     //    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
     //
     //    VectorsData vectors;
-    //    scheduler::SSSearchJobPtr job =
+    //    scheduler::SearchJobPtr job =
     //        std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
     //    for (auto& sv : segment_visitors) {
     //        job->AddSegmentVisitor(sv);
@@ -945,7 +945,7 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
         snapshot::IDS_TYPE segment_ids;
         ss_visitor.SegmentsToIndex("", segment_ids);
 
-        scheduler::SSBuildIndexJobPtr job =
+        scheduler::BuildIndexJobPtr job =
             std::make_shared<scheduler::BuildIndexJob>(options_, collection_name, segment_ids);
 
         scheduler::JobMgrInst::GetInstance()->Put(job);
@@ -992,63 +992,63 @@ DBImpl::WaitBuildIndexFinish() {
 
 void
 DBImpl::TimingWalThread() {
-    SetThreadName("wal_thread");
-    server::SystemInfo::GetInstance().Init();
-
-    std::chrono::system_clock::time_point next_auto_flush_time;
-    auto get_next_auto_flush_time = [&]() {
-        return std::chrono::system_clock::now() + std::chrono::seconds(options_.auto_flush_interval_);
-    };
-    if (options_.auto_flush_interval_ > 0) {
-        next_auto_flush_time = get_next_auto_flush_time();
-    }
-
-    InternalFlush();
-    while (true) {
-        if (options_.auto_flush_interval_ > 0) {
-            if (std::chrono::system_clock::now() >= next_auto_flush_time) {
-                InternalFlush();
-                next_auto_flush_time = get_next_auto_flush_time();
-            }
-        }
-
-        wal::MXLogRecord record;
-        auto error_code = wal_mgr_->GetNextRecord(record);
-        if (error_code != WAL_SUCCESS) {
-            LOG_ENGINE_ERROR_ << "WAL background GetNextRecord error";
-            break;
-        }
-
-        if (record.type != wal::MXLogType::None) {
-            ExecWalRecord(record);
-            if (record.type == wal::MXLogType::Flush) {
-                // notify flush request to return
-                flush_req_swn_.Notify();
-
-                // if user flush all manually, update auto flush also
-                if (record.collection_id.empty() && options_.auto_flush_interval_ > 0) {
-                    next_auto_flush_time = get_next_auto_flush_time();
-                }
-            }
-
-        } else {
-            if (!initialized_.load(std::memory_order_acquire)) {
-                InternalFlush();
-                flush_req_swn_.Notify();
-                // SS TODO
-                // WaitMergeFileFinish();
-                // WaitBuildIndexFinish();
-                LOG_ENGINE_DEBUG_ << "WAL background thread exit";
-                break;
-            }
-
-            if (options_.auto_flush_interval_ > 0) {
-                swn_wal_.Wait_Until(next_auto_flush_time);
-            } else {
-                swn_wal_.Wait();
-            }
-        }
-    }
+    //    SetThreadName("wal_thread");
+    //    server::SystemInfo::GetInstance().Init();
+    //
+    //    std::chrono::system_clock::time_point next_auto_flush_time;
+    //    auto get_next_auto_flush_time = [&]() {
+    //        return std::chrono::system_clock::now() + std::chrono::seconds(options_.auto_flush_interval_);
+    //    };
+    //    if (options_.auto_flush_interval_ > 0) {
+    //        next_auto_flush_time = get_next_auto_flush_time();
+    //    }
+    //
+    //    InternalFlush();
+    //    while (true) {
+    //        if (options_.auto_flush_interval_ > 0) {
+    //            if (std::chrono::system_clock::now() >= next_auto_flush_time) {
+    //                InternalFlush();
+    //                next_auto_flush_time = get_next_auto_flush_time();
+    //            }
+    //        }
+    //
+    //        wal::MXLogRecord record;
+    //        auto error_code = wal_mgr_->GetNextRecord(record);
+    //        if (error_code != WAL_SUCCESS) {
+    //            LOG_ENGINE_ERROR_ << "WAL background GetNextRecord error";
+    //            break;
+    //        }
+    //
+    //        if (record.type != wal::MXLogType::None) {
+    //            ExecWalRecord(record);
+    //            if (record.type == wal::MXLogType::Flush) {
+    //                // notify flush request to return
+    //                flush_req_swn_.Notify();
+    //
+    //                // if user flush all manually, update auto flush also
+    //                if (record.collection_id.empty() && options_.auto_flush_interval_ > 0) {
+    //                    next_auto_flush_time = get_next_auto_flush_time();
+    //                }
+    //            }
+    //
+    //        } else {
+    //            if (!initialized_.load(std::memory_order_acquire)) {
+    //                InternalFlush();
+    //                flush_req_swn_.Notify();
+    //                // SS TODO
+    //                // WaitMergeFileFinish();
+    //                // WaitBuildIndexFinish();
+    //                LOG_ENGINE_DEBUG_ << "WAL background thread exit";
+    //                break;
+    //            }
+    //
+    //            if (options_.auto_flush_interval_ > 0) {
+    //                swn_wal_.Wait_Until(next_auto_flush_time);
+    //            } else {
+    //                swn_wal_.Wait();
+    //            }
+    //        }
+    //    }
 }
 
 Status

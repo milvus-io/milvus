@@ -23,21 +23,20 @@
 namespace milvus {
 namespace server {
 
-DropCollectionRequest::DropCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                             const std::string& collection_name)
-    : BaseRequest(context, BaseRequest::kDropCollection), collection_name_(collection_name) {
+DropCollectionReq::DropCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
+                                     const std::string& collection_name)
+    : BaseReq(context, BaseReq::kDropCollection), collection_name_(collection_name) {
 }
 
-BaseRequestPtr
-DropCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                              const std::string& collection_name) {
-    return std::shared_ptr<BaseRequest>(new DropCollectionRequest(context, collection_name));
+BaseReqPtr
+DropCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+    return std::shared_ptr<BaseReq>(new DropCollectionReq(context, collection_name));
 }
 
 Status
-DropCollectionRequest::OnExecute() {
+DropCollectionReq::OnExecute() {
     try {
-        std::string hdr = "DropCollectionRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "DropCollectionReq(collection=" + collection_name_ + ")";
         TimeRecorder rc(hdr);
 
         bool exist = false;

@@ -22,19 +22,19 @@
 namespace milvus {
 namespace server {
 
-class CreateCollectionRequest : public BaseRequest {
+class CreateCollectionReq : public BaseReq {
  public:
-    static BaseRequestPtr
+    static BaseReqPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
            std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
            std::unordered_map<std::string, milvus::json>& field_index_params,
            std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params);
 
  protected:
-    CreateCollectionRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                            std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-                            std::unordered_map<std::string, milvus::json>& field_index_params,
-                            std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params);
+    CreateCollectionReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                        std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                        std::unordered_map<std::string, milvus::json>& field_index_params,
+                        std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params);
 
     Status
     OnExecute() override;

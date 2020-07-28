@@ -22,25 +22,24 @@
 namespace milvus {
 namespace server {
 
-HasPartitionRequest::HasPartitionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name, const std::string& tag,
-                                         bool& has_partition)
-    : BaseRequest(context, BaseRequest::kHasCollection),
+HasPartitionReq::HasPartitionReq(const std::shared_ptr<milvus::server::Context>& context,
+                                 const std::string& collection_name, const std::string& tag, bool& has_partition)
+    : BaseReq(context, BaseReq::kHasCollection),
       collection_name_(collection_name),
       partition_tag_(tag),
       has_partition_(has_partition) {
 }
 
-BaseRequestPtr
-HasPartitionRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                            const std::string& tag, bool& has_partition) {
-    return std::shared_ptr<BaseRequest>(new HasPartitionRequest(context, collection_name, tag, has_partition));
+BaseReqPtr
+HasPartitionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                        const std::string& tag, bool& has_partition) {
+    return std::shared_ptr<BaseReq>(new HasPartitionReq(context, collection_name, tag, has_partition));
 }
 
 Status
-HasPartitionRequest::OnExecute() {
+HasPartitionReq::OnExecute() {
     try {
-        std::string hdr = "HasPartitionRequest(collection=" + collection_name_ + " tag=" + partition_tag_ + ")";
+        std::string hdr = "HasPartitionReq(collection=" + collection_name_ + " tag=" + partition_tag_ + ")";
         TimeRecorderAuto rc(hdr);
 
         has_partition_ = false;

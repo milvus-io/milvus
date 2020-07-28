@@ -25,20 +25,20 @@ namespace server {
 
 constexpr uint64_t MAX_PARTITION_LIMIT = 4096;
 
-CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                               const std::string& collection_name, const std::string& tag)
-    : BaseRequest(context, BaseRequest::kCreatePartition), collection_name_(collection_name), tag_(tag) {
+CreatePartitionReq::CreatePartitionReq(const std::shared_ptr<milvus::server::Context>& context,
+                                       const std::string& collection_name, const std::string& tag)
+    : BaseReq(context, BaseReq::kCreatePartition), collection_name_(collection_name), tag_(tag) {
 }
 
-BaseRequestPtr
-CreatePartitionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                               const std::string& collection_name, const std::string& tag) {
-    return std::shared_ptr<BaseRequest>(new CreatePartitionRequest(context, collection_name, tag));
+BaseReqPtr
+CreatePartitionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                           const std::string& tag) {
+    return std::shared_ptr<BaseReq>(new CreatePartitionReq(context, collection_name, tag));
 }
 
 Status
-CreatePartitionRequest::OnExecute() {
-    std::string hdr = "CreatePartitionRequest(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
+CreatePartitionReq::OnExecute() {
+    std::string hdr = "CreatePartitionReq(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
     TimeRecorderAuto rc(hdr);
 
     try {
@@ -48,7 +48,7 @@ CreatePartitionRequest::OnExecute() {
         }
 
         auto status = ValidatePartitionTags({tag_});
-        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_tags",
+        fiu_do_on("CreatePartitionReq.OnExecute.invalid_partition_tags",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
@@ -73,7 +73,7 @@ CreatePartitionRequest::OnExecute() {
 
         // step 2: create partition
         status = DBWrapper::DB()->CreatePartition(collection_name_, tag_);
-        fiu_do_on("CreatePartitionRequest.OnExecute.create_partition_fail",
+        fiu_do_on("CreatePartitionReq.OnExecute.create_partition_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreatePartitionRequest.OnExecute.throw_std_exception", throw std::exception());
         return status;
