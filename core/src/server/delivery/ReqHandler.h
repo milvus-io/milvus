@@ -26,9 +26,9 @@
 namespace milvus {
 namespace server {
 
-class RequestHandler {
+class ReqHandler {
  public:
-    RequestHandler() = default;
+    ReqHandler() = default;
 
     Status
     CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,

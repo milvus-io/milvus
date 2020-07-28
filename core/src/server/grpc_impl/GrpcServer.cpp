@@ -91,7 +91,7 @@ GrpcServer::StartService() {
     builder.SetDefaultCompressionLevel(GRPC_COMPRESS_LEVEL_NONE);
 
     GrpcRequestHandler service(opentracing::Tracer::Global());
-    service.RegisterRequestHandler(RequestHandler());
+    service.RegisterRequestHandler(ReqHandler());
 
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);

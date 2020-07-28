@@ -866,7 +866,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         tr.RecordSection("Received request.");
 
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+        handler.RegisterRequestHandler(::milvus::server::ReqHandler());
 
         String response_str;
         auto status_dto = handler.SystemOp(op, body_str, response_str);

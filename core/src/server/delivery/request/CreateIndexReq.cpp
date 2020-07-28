@@ -26,28 +26,26 @@
 namespace milvus {
 namespace server {
 
-CreateIndexRequest::CreateIndexRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                       const std::string& collection_name, const std::string& field_name,
-                                       const std::string& index_name, const milvus::json& json_params)
-    : BaseRequest(context, BaseRequest::kCreateIndex),
+CreateIndexReq::CreateIndexReq(const std::shared_ptr<milvus::server::Context>& context,
+                               const std::string& collection_name, const std::string& field_name,
+                               const std::string& index_name, const milvus::json& json_params)
+    : BaseReq(context, BaseReq::kCreateIndex),
       collection_name_(collection_name),
       field_name_(field_name),
       index_name_(index_name),
       json_params_(json_params) {
 }
 
-BaseRequestPtr
-CreateIndexRequest::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                           const std::string& field_name, const std::string& index_name,
-                           const milvus::json& json_params) {
-    return std::shared_ptr<BaseRequest>(
-        new CreateIndexRequest(context, collection_name, field_name, index_name, json_params));
+BaseReqPtr
+CreateIndexReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                       const std::string& field_name, const std::string& index_name, const milvus::json& json_params) {
+    return std::shared_ptr<BaseReq>(new CreateIndexReq(context, collection_name, field_name, index_name, json_params));
 }
 
 Status
-CreateIndexRequest::OnExecute() {
+CreateIndexReq::OnExecute() {
     try {
-        std::string hdr = "CreateIndexRequest(collection=" + collection_name_ + ")";
+        std::string hdr = "CreateIndexReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
