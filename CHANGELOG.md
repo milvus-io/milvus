@@ -67,6 +67,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2612 Move all APIs in utils into namespace milvus 
 -   \#2653 Improve IVF search performance when NQ and nProbe are both large
 -   \#2675 Print out system memory size when report invalid cpu cache size 
+-   \#2686 Remove dependency on sqlite_orm
 -   \#2828 Let Faiss not compile half float by default
 -   \#2841 Replace IndexType/EngineType/MetricType
 -   \#2858 Unify index name in db

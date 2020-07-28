@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "server/delivery/request/BaseRequest.h"
+#include "server/delivery/request/BaseReq.h"
 #include "utils/BlockingQueue.h"
 #include "utils/Status.h"
 
