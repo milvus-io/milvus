@@ -636,7 +636,7 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
         return ::grpc::Status::OK;
     }
     for (int i = 0; i < request->fields_size(); ++i) {
-        auto field = request->fields(i);
+        const auto& field = request->fields(i);
         auto field_name = field.name();
         field_types.insert(std::make_pair(field_name, (engine::meta::hybrid::DataType)field.type()));
 
@@ -1569,7 +1569,9 @@ GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, qu
                 } else {
                     std::string field_name;
                     STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name));
-                    query_ptr->index_fields.emplace_back(field_name);
+                    if (!field_name.empty()) {
+                        query_ptr->index_fields.insert(field_name);
+                    }
                 }
             }
         } else if (el.key() == "should") {
@@ -1588,7 +1590,9 @@ GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, qu
                 } else {
                     std::string field_name;
                     STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name));
-                    query_ptr->index_fields.emplace_back(field_name);
+                    if (!field_name.empty()) {
+                        query_ptr->index_fields.insert(field_name);
+                    }
                 }
             }
         } else if (el.key() == "must_not") {
@@ -1607,7 +1611,9 @@ GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, qu
                 } else {
                     std::string field_name;
                     STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name));
-                    query_ptr->index_fields.emplace_back(field_name);
+                    if (!field_name.empty()) {
+                        query_ptr->index_fields.insert(field_name);
+                    }
                 }
             }
         } else {
@@ -1647,7 +1653,7 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
                 if (!vector_param_it.value()["params"].empty()) {
                     vector_query->extra_params = vector_param_it.value()["params"];
                 }
-                query_ptr->index_fields.emplace_back(field_name);
+                query_ptr->index_fields.insert(field_name);
             }
 
             engine::VectorsData vector_data;

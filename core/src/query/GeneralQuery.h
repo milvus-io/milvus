@@ -114,7 +114,7 @@ struct Query {
     std::string collection_id;
     std::vector<std::string> partitions;
     std::vector<std::string> field_names;
-    std::vector<std::string> index_fields;
+    std::set<std::string> index_fields;
 };
 using QueryPtr = std::shared_ptr<Query>;
 

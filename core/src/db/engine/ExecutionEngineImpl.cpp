@@ -53,13 +53,6 @@ namespace milvus {
 namespace engine {
 
 namespace {
-Status
-GetRequiredIndexFields(const query::QueryPtr& query_ptr, TargetFields& field_names) {
-    for (const auto& name : query_ptr->index_fields) {
-        field_names.insert(name);
-    }
-    return Status::OK();
-}
 
 Status
 MappingMetricType(MetricType metric_type, milvus::json& conf) {
@@ -128,10 +121,7 @@ ExecutionEngineImpl::Load(ExecutionEngineContext& context) {
 
 Status
 ExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
-    TargetFields field_names;
-    STATUS_CHECK(GetRequiredIndexFields(query_ptr, field_names));
-
-    return Load(field_names);
+    return Load(query_ptr->index_fields);
 }
 
 Status
