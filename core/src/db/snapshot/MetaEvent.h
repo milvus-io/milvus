@@ -11,6 +11,11 @@
 
 #pragma once
 
+#include <set>
+#include <string>
+
+#include <boost/filesystem.hpp>
+
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
 
@@ -21,6 +26,26 @@ namespace snapshot {
 class MetaEvent {
  public:
     virtual Status Process(StorePtr) = 0;
+};
+
+class GCEvent : virtual public MetaEvent {
+ protected:
+    template <class ResourceT>
+    void
+    RemoveWithSuffix(typename ResourceT::Ptr res, const std::string& path, const std::set<std::string>& suffix_set) {
+        for (auto& suffix : suffix_set) {
+            if (suffix.empty()) {
+                continue;
+            }
+            auto adjusted = path + suffix;
+            if (boost::filesystem::is_regular_file(adjusted)) {
+                auto ok = boost::filesystem::remove(adjusted);
+                std::cout << "[GC] Remove FILE " << res->ToString() << " " << adjusted << " " << ok << std::endl;
+                return;
+            }
+        }
+        std::cout << "[GC] Remove STALE OBJECT " << path << " for " << res->ToString() << std::endl;
+    }
 };
 
 }  // namespace snapshot
