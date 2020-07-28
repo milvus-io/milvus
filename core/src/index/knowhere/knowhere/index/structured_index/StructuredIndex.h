@@ -42,6 +42,18 @@ struct IndexStructure {
         return a_ < b.a_;
     }
     bool
+    operator<=(const IndexStructure& b) const {
+        return a_ <= b.a_;
+    }
+    bool
+    operator>(const IndexStructure& b) const {
+        return a_ > b.a_;
+    }
+    bool
+    operator>=(const IndexStructure& b) const {
+        return a_ >= b.a_;
+    }
+    bool
     operator==(const IndexStructure& b) const {
         return a_ == b.a_;
     }

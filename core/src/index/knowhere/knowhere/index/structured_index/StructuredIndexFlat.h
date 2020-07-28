@@ -76,6 +76,5 @@ template <typename T>
 using StructuredIndexFlatPtr = std::shared_ptr<StructuredIndexFlat<T>>;
 }  // namespace knowhere
 }  // namespace milvus
-}  // namespace milvus
 
 #include "knowhere/index/structured_index/StructuredIndexFlat-inl.h"

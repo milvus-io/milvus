@@ -43,44 +43,6 @@ StructuredIndexFlat<T>::Build(const size_t n, const T* values) {
 }
 
 template <typename T>
-BinarySet
-StructuredIndexFlat<T>::Serialize(const milvus::knowhere::Config& config) {
-    if (!is_built_) {
-        return;
-    }
-
-    auto index_data_size = data_.size() * sizeof(IndexStructure<T>);
-    std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
-    memcpy(index_data.get(), data_.data(), index_data_size);
-
-    std::shared_ptr<uint8_t[]> index_length(new uint8_t[sizeof(size_t)]);
-    auto index_size = data_.size();
-    memcpy(index_length.get(), &index_size, sizeof(size_t));
-
-    BinarySet res_set;
-    res_set.Append("index_data", index_data, index_data_size);
-    res_set.Append("index_length", index_length, sizeof(size_t));
-    return res_set;
-}
-
-template <typename T>
-void
-StructuredIndexFlat<T>::Load(const milvus::knowhere::BinarySet& index_binary) {
-    try {
-        size_t index_size;
-        auto index_length = index_binary.GetByName("index_length");
-        memcpy(&index_size, index_length->data.get(), (size_t)index_length->size);
-
-        auto index_data = index_binary.GetByName("index_data");
-        data_.resize(index_size);
-        memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
-        is_built_ = true;
-    } catch (...) {
-        KNOHWERE_ERROR_MSG("StructuredIndexFlat Load failed!");
-    }
-}
-
-template <typename T>
 const faiss::ConcurrentBitsetPtr
 StructuredIndexFlat<T>::In(const size_t n, const T* values) {
     if (!is_built_) {
@@ -137,12 +99,12 @@ StructuredIndexFlat<T>::Range(const T value, const OperatorType op) {
                 break;
             case OperatorType::GT:
                 if (lb > IndexStructure<T>(value)) {
-                    bitset->(lb->idx_);
+                    bitset->set(lb->idx_);
                 }
                 break;
             case OperatorType::GE:
                 if (lb >= IndexStructure<T>(value)) {
-                    bitset->(lb->idx_);
+                    bitset->set(lb->idx_);
                 }
                 break;
             default:

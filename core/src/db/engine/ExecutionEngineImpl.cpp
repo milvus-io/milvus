@@ -97,7 +97,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const Segm
 }
 
 knowhere::VecIndexPtr
-ExecutionEngineImpl::CreatetVecIndex(const std::string& index_name) {
+ExecutionEngineImpl::CreateVecIndex(const std::string& index_name) {
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
     knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
 #ifdef MILVUS_GPU_VERSION
@@ -152,6 +152,39 @@ ExecutionEngineImpl::LoadForIndex() {
 }
 
 Status
+ExecutionEngineImpl::CreateStructuredIndex(const milvus::engine::meta::hybrid::DataType field_type,
+                                           std::vector<uint8_t>& raw_data, knowhere::IndexPtr& index_ptr) {
+    switch (field_type) {
+        case engine::meta::hybrid::DataType::INT32: {
+            auto size = raw_data.size() / sizeof(int32_t);
+            std::vector<int32_t> int32_data(size, 0);
+            memcpy(int32_data.data(), raw_data.data(), size);
+            auto int32_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int32_t>>(
+                raw_data.size(), reinterpret_cast<const int32_t*>(raw_data.data()));
+            index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
+            break;
+        }
+        case engine::meta::hybrid::DataType::INT64: {
+            auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
+                raw_data.size(), reinterpret_cast<const int64_t*>(raw_data.data()));
+            index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
+        }
+        case engine::meta::hybrid::DataType::FLOAT: {
+            auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
+                raw_data.size(), reinterpret_cast<const float*>(raw_data.data()));
+            index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
+        }
+        case engine::meta::hybrid::DataType::DOUBLE: {
+            auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
+                raw_data.size(), reinterpret_cast<const double*>(raw_data.data()));
+            index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
+        }
+        default: { return Status(DB_ERROR, "Field is not structured type"); }
+    }
+    return Status::OK();
+}
+
+Status
 ExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
     TimeRecorderAuto rc("SSExecutionEngineImpl::Load");
     SegmentPtr segment_ptr;
@@ -170,6 +203,11 @@ ExecutionEngineImpl::Load(const std::vector<std::string>& field_names) {
             knowhere::IndexPtr index_ptr;
             segment_reader_->LoadStructuredIndex(name, index_ptr);
             index_exist = (index_ptr != nullptr);
+            if (!index_exist) {
+                std::vector<uint8_t> raw_data;
+                segment_reader_->LoadField(name, raw_data);
+                auto status = CreateStructuredIndex(field_type, raw_data, index_ptr);
+            }
             attr_index_.insert(std::make_pair(name, index_ptr));
         }
 
@@ -546,7 +584,7 @@ ExecutionEngineImpl::BuildIndex() {
         }
 
         // build index by knowhere
-        auto to_index = CreatetVecIndex(index_name);
+        auto to_index = CreateVecIndex(index_name);
         if (!to_index) {
             throw Exception(DB_ERROR, "Unsupported index type");
         }
