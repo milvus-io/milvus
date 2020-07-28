@@ -11,10 +11,10 @@
 
 #pragma once
 
-#include "Meta.h"
-#include "db/Options.h"
-
 #include <string>
+
+#include "db/Options.h"
+#include "db/meta/MetaAdapter.h"
 
 namespace milvus {
 namespace engine {
@@ -24,8 +24,8 @@ class MetaFactory {
     static DBMetaOptions
     BuildOption(const std::string& path = "");
 
-    static meta::MetaPtr
-    Build(const DBMetaOptions& meta_options, const int& mode);
+    static meta::MetaAdapterPtr
+    Build(const DBMetaOptions& meta_options);
 };
 
 }  // namespace engine

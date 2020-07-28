@@ -24,6 +24,7 @@
 #include "db/SnapshotVisitor.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "scheduler/interface/interfaces.h"
+#include "scheduler/task/Task.h"
 #include "server/context/Context.h"
 
 namespace milvus {
@@ -32,15 +33,12 @@ namespace scheduler {
 enum class JobType {
     INVALID = -1,
     SEARCH = 0,
-    DELETE = 1,
     BUILD = 2,
-
-    SS_SEARCH = 10,
-    SS_BUILD = 11,
 };
 
 using JobId = std::uint64_t;
 using SegmentVisitorMap = std::unordered_map<engine::snapshot::ID_TYPE, engine::SegmentVisitorPtr>;
+using JobTasks = std::vector<TaskPtr>;
 
 class Job : public interface::dumpable {
  public:
@@ -57,12 +55,33 @@ class Job : public interface::dumpable {
     json
     Dump() const override;
 
+    virtual JobTasks
+    CreateTasks() = 0;
+
+    void
+    TaskDone(Task* task);
+
+    void
+    WaitFinish();
+
+    Status&
+    status() {
+        return status_;
+    }
+
  protected:
     explicit Job(JobType type);
+
+ protected:
+    Status status_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
 
  private:
     JobId id_ = 0;
     JobType type_;
+
+    JobTasks tasks_;
 };
 
 using JobPtr = std::shared_ptr<Job>;

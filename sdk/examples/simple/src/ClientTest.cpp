@@ -67,26 +67,14 @@ ClientTest::~ClientTest() {
 }
 
 void
-ClientTest::ShowServerVersion() {
-    std::string version = conn_->ServerVersion();
-    std::cout << "Server version: " << version << std::endl;
-}
-
-void
-ClientTest::ShowSdkVersion() {
-    std::string version = conn_->ClientVersion();
-    std::cout << "SDK version: " << version << std::endl;
-}
-
-void
-ClientTest::ShowCollections(std::vector<std::string>& collection_array) {
+ClientTest::ListCollections(std::vector<std::string>& collection_array) {
     milvus::Status stat = conn_->ListCollections(collection_array);
-    std::cout << "ShowCollections function call status: " << stat.message() << std::endl;
-    std::cout << "All collections: " << std::endl;
+    std::cout << "ListCollections function call status: " << stat.message() << std::endl;
+    std::cout << "Collection list: " << std::endl;
     for (auto& collection : collection_array) {
         int64_t entity_count = 0;
         stat = conn_->CountEntities(collection, entity_count);
-        std::cout << "\t" << collection << "(" << entity_count << " entities)" << std::endl;
+        std::cout << "\t" << collection << " (" << entity_count << " entities)" << std::endl;
     }
 }
 
@@ -137,13 +125,12 @@ void
 ClientTest::GetCollectionInfo(const std::string& collection_name) {
     milvus::Mapping mapping;
     milvus::Status stat = conn_->GetCollectionInfo(collection_name, mapping);
-    std::cout << "GetCollectionInfo function call result: " << std::endl;
     milvus_sdk::Utils::PrintMapping(mapping);
     std::cout << "GetCollectionInfo function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::InsertEntities(const std::string& collection_name) {
+ClientTest::Insert(const std::string& collection_name) {
     for (int64_t i = 0; i < ADD_ENTITY_LOOP; i++) {
         milvus::FieldValue field_value;
         std::vector<int64_t> entity_ids;
@@ -179,9 +166,9 @@ ClientTest::Flush(const std::string& collection_name) {
 
 void
 ClientTest::GetCollectionStats(const std::string& collection_name) {
-    std::string collection_info;
-    milvus::Status stat = conn_->GetCollectionStats(collection_name, collection_info);
-    std::cout << "Collection info: " << collection_info << std::endl;
+    std::string collection_stats;
+    milvus::Status stat = conn_->GetCollectionStats(collection_name, collection_stats);
+    std::cout << "Collection stats: " << collection_stats << std::endl;
     std::cout << "GetCollectionStats function call status: " << stat.message() << std::endl;
 }
 
@@ -281,11 +268,7 @@ ClientTest::CreateIndex(const std::string& collection_name, int64_t nlist) {
     milvus_sdk::Utils::PrintIndexParam(index1);
     milvus::Status stat = conn_->CreateIndex(index1);
     std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
-
-    milvus::IndexParam index2;
-    stat = conn_->GetIndexInfo(collection_name, index2);
-    std::cout << "GetIndexInfo function call status: " << stat.message() << std::endl;
-    milvus_sdk::Utils::PrintIndexParam(index2);
+    milvus_sdk::Utils::PrintIndexParam(index1);
 }
 
 void
@@ -339,18 +322,19 @@ ClientTest::Test() {
     int64_t dim = COLLECTION_DIMENSION;
     milvus::MetricType metric_type = COLLECTION_METRIC_TYPE;
 
-    ShowServerVersion();
-    ShowSdkVersion();
-
     std::vector<std::string> table_array;
-//    ShowCollections(table_array);
+    ListCollections(table_array);
 
     CreateCollection(collection_name);
     GetCollectionInfo(collection_name);
+    GetCollectionStats(collection_name);
 
-    InsertEntities(collection_name);
-    Flush(collection_name);
+    ListCollections(table_array);
     CountEntities(collection_name);
+
+//    InsertEntities(collection_name);
+//    Flush(collection_name);
+//    CountEntities(collection_name);
 //    GetCollectionStats(collection_name);
 //
 //    BuildVectors(NQ, COLLECTION_DIMENSION);
@@ -367,5 +351,5 @@ ClientTest::Test() {
 //    SearchEntities(collection_name, TOP_K, NPROBE);  // this line get two search error since we delete two entities
 //
 //    DropIndex(collection_name, "field_vec", "index_3");
-//    DropCollection(collection_name);
+    DropCollection(collection_name);
 }

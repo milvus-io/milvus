@@ -11,12 +11,14 @@
 
 #pragma once
 
+#include "codecs/Codec.h"
 #include "db/Utils.h"
-#include "db/meta/MetaAdapter.h"
+#include "db/meta/MetaFactory.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Utils.h"
+#include "segment/Segment.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/Status.h"
@@ -49,51 +51,29 @@ class Store : public std::enable_shared_from_this<Store> {
  public:
     using Ptr = typename std::shared_ptr<Store>;
 
-    explicit Store(meta::MetaAdapterPtr adapter, const std::string& root_path)
-        : adapter_(adapter), root_path_(root_path) {
+    explicit Store(meta::MetaAdapterPtr adapter, const std::string& root_path,
+                   const std::set<std::string>& suffix_set = {})
+        : adapter_(adapter), root_path_(root_path + engine::COLLECTIONS_FOLDER), suffix_set_(suffix_set) {
     }
 
     static Store::Ptr
-    Build(const std::string& uri, const std::string& root_path) {
-        utils::MetaUriInfo uri_info;
-        LOG_ENGINE_DEBUG_ << "MetaUri: " << uri << std::endl;
-        auto status = utils::ParseMetaUri(uri, uri_info);
-        if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Wrong URI format: URI = " << uri;
-            throw InvalidArgumentException("Wrong URI format ");
-        }
+    Build(const std::string& uri, const std::string& root_path, const std::set<std::string> suffix_set = {}) {
+        DBMetaOptions options;
+        options.backend_uri_ = uri;
+        options.path_ = root_path;
 
-        if (strcasecmp(uri_info.dialect_.c_str(), "mysql") == 0) {
-            LOG_ENGINE_INFO_ << "Using MySQL";
-            DBMetaOptions options;
-            /* options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
-            options.backend_uri_ = uri;
-            auto engine = std::make_shared<meta::MySqlEngine>(options);
-            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
-            return std::make_shared<Store>(adapter, root_path);
-        } else if (strcasecmp(uri_info.dialect_.c_str(), "mock") == 0) {
-            LOG_ENGINE_INFO_ << "Using Mock. Should only be used in test environment";
-            auto engine = std::make_shared<meta::MockEngine>();
-            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
-            return std::make_shared<Store>(adapter, root_path);
-        } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
-            LOG_ENGINE_INFO_ << "Using Sqlite";
-            DBMetaOptions options;
-            /* options.backend_uri_ = "mock://:@:/"; */
-            options.backend_uri_ = uri;
-            options.path_ = root_path;
-            auto engine = std::make_shared<meta::SqliteEngine>(options);
-            auto adapter = std::make_shared<meta::MetaAdapter>(engine);
-            return std::make_shared<Store>(adapter, root_path);
-        } else {
-            LOG_ENGINE_ERROR_ << "Invalid dialect in URI: dialect = " << uri_info.dialect_;
-            throw InvalidArgumentException("URI dialect is not mysql / sqlite / mock");
-        }
+        auto adapter = MetaFactory::Build(options);
+        return std::make_shared<Store>(adapter, root_path, suffix_set);
     }
 
-    std::string
+    const std::string&
     GetRootPath() const {
         return root_path_;
+    }
+
+    const std::set<std::string>&
+    GetSuffixSet() const {
+        return suffix_set_;
     }
 
     template <typename OpT>
@@ -335,8 +315,11 @@ class Store : public std::enable_shared_from_this<Store> {
                         auto& f_c_m = field_commit->GetMappings();
                         for (auto& field_element_id : f_c_m) {
                             SegmentFilePtr sf;
+                            FieldElementPtr fe_p;
+                            GetResource<FieldElement>(field_element_id, fe_p);
                             CreateResource<SegmentFile>(
-                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_element_id, 0, 0, 0, 0, ACTIVE),
+                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_element_id, fe_p->GetFtype(), 0,
+                                            0, 0, 0, ACTIVE),
                                 sf);
                             all_records.push_back(sf);
 
@@ -387,6 +370,7 @@ class Store : public std::enable_shared_from_this<Store> {
 
     meta::MetaAdapterPtr adapter_;
     std::string root_path_;
+    std::set<std::string> suffix_set_;
 };
 
 using StorePtr = Store::Ptr;

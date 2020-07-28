@@ -17,9 +17,11 @@
 #include <set>
 #include <algorithm>
 
+#include "segment/Segment.h"
 #include "db/utils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/snapshot/IterateHandler.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
@@ -150,13 +152,13 @@ TEST_F(DBTest, CollectionTest) {
     ASSERT_TRUE(status.ok());
 
     ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), 0);
-    milvus::engine::snapshot::SIZE_TYPE row_cnt = 0;
-    status = db_->GetCollectionRowCount(c1, row_cnt);
+    int64_t row_cnt = 0;
+    status = db_->CountEntities(c1, row_cnt);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(row_cnt, 0);
 
     std::vector<std::string> names;
-    status = db_->AllCollections(names);
+    status = db_->ListCollections(names);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(names.size(), 1);
     ASSERT_EQ(names[0], c1);
@@ -169,14 +171,14 @@ TEST_F(DBTest, CollectionTest) {
     status = CreateCollection(db_, c2, next_lsn());
     ASSERT_TRUE(status.ok());
 
-    status = db_->AllCollections(names);
+    status = db_->ListCollections(names);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(names.size(), 2);
 
     status = db_->DropCollection(c1);
     ASSERT_TRUE(status.ok());
 
-    status = db_->AllCollections(names);
+    status = db_->ListCollections(names);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(names.size(), 1);
     ASSERT_EQ(names[0], c2);
@@ -195,7 +197,7 @@ TEST_F(DBTest, PartitionTest) {
     ASSERT_TRUE(status.ok());
 
     std::vector<std::string> partition_names;
-    status = db_->ShowPartitions(c1, partition_names);
+    status = db_->ListPartitions(c1, partition_names);
     ASSERT_EQ(partition_names.size(), 1);
     ASSERT_EQ(partition_names[0], "_default");
 
@@ -207,7 +209,7 @@ TEST_F(DBTest, PartitionTest) {
     status = db_->CreatePartition(c1, p1);
     ASSERT_TRUE(status.ok());
 
-    status = db_->ShowPartitions(c1, partition_names);
+    status = db_->ListPartitions(c1, partition_names);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(partition_names.size(), 2);
 
@@ -219,7 +221,7 @@ TEST_F(DBTest, PartitionTest) {
 
     status = db_->DropPartition(c1, p1);
     ASSERT_TRUE(status.ok());
-    status = db_->ShowPartitions(c1, partition_names);
+    status = db_->ListPartitions(c1, partition_names);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(partition_names.size(), 1);
 }
@@ -461,14 +463,14 @@ TEST_F(DBTest, InsertTest) {
     milvus::engine::DataChunkPtr data_chunk;
     BuildEntities(entity_count, 0, data_chunk);
 
-    status = db_->InsertEntities(collection_name, "", data_chunk);
+    status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
     status = db_->Flush();
     ASSERT_TRUE(status.ok());
 
-    uint64_t row_count = 0;
-    status = db_->GetCollectionRowCount(collection_name, row_count);
+    int64_t row_count = 0;
+    status = db_->CountEntities(collection_name, row_count);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(row_count, entity_count);
 }
@@ -484,7 +486,7 @@ TEST_F(DBTest, MergeTest) {
 
     int64_t repeat = 2;
     for (int32_t i = 0; i < repeat; i++) {
-        status = db_->InsertEntities(collection_name, "", data_chunk);
+        status = db_->Insert(collection_name, "", data_chunk);
         ASSERT_TRUE(status.ok());
 
         status = db_->Flush();
@@ -493,8 +495,55 @@ TEST_F(DBTest, MergeTest) {
 
     sleep(2); // wait to merge
 
-    uint64_t row_count = 0;
-    status = db_->GetCollectionRowCount(collection_name, row_count);
+    int64_t row_count = 0;
+    status = db_->CountEntities(collection_name, row_count);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(row_count, entity_count * repeat);
+
+    ScopedSnapshotT ss;
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    ASSERT_TRUE(status.ok());
+    std::cout << ss->ToString() << std::endl;
+
+    auto root_path = GetOptions().meta_.path_ + milvus::engine::COLLECTIONS_FOLDER;
+    std::vector<std::string> segment_paths;
+
+    auto seg_executor = [&] (const SegmentPtr& segment, SegmentIterator* handler) -> Status {
+        std::string res_path = milvus::engine::snapshot::GetResPath<Segment>(root_path, segment);
+        std::cout << res_path << std::endl;
+        if (!boost::filesystem::is_directory(res_path)) {
+            return Status(milvus::SS_ERROR, res_path + " not exist");
+        }
+        segment_paths.push_back(res_path);
+        return Status::OK();
+    };
+    auto segment_iter = std::make_shared<SegmentIterator>(ss, seg_executor);
+    segment_iter->Iterate();
+    status = segment_iter->GetStatus();
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    std::set<std::string> segment_file_paths;
+    auto sf_executor = [&] (const SegmentFilePtr& segment_file, SegmentFileIterator* handler) -> Status {
+        std::string res_path = milvus::engine::snapshot::GetResPath<SegmentFile>(root_path, segment_file);
+        if (boost::filesystem::is_regular_file(res_path) ||
+                boost::filesystem::is_regular_file(res_path + ".bf")) {
+            segment_file_paths.insert(res_path);
+            std::cout << res_path << std::endl;
+        }
+        return Status::OK();
+    };
+    auto sf_iterator = std::make_shared<SegmentFileIterator>(ss, sf_executor);
+    sf_iterator->Iterate();
+
+    std::set<std::string> expect_file_paths;
+    boost::filesystem::recursive_directory_iterator iter(root_path);
+    boost::filesystem::recursive_directory_iterator end;
+    for (; iter != end ; ++iter) {
+        if (boost::filesystem::is_regular_file((*iter).path())) {
+            expect_file_paths.insert((*iter).path().filename().string());
+        }
+    }
+
+    // TODO: Fix segment file suffix issue.
+    ASSERT_EQ(expect_file_paths.size(), segment_file_paths.size());
 }

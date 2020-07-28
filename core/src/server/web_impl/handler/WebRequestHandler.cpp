@@ -22,7 +22,7 @@
 #include "config/ServerConfig.h"
 #include "metrics/SystemInfo.h"
 #include "query/BinaryQuery.h"
-#include "server/delivery/request/BaseRequest.h"
+#include "server/delivery/request/BaseReq.h"
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/PartitionDto.hpp"
@@ -106,13 +106,12 @@ WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std
 Status
 WebRequestHandler::IsBinaryCollection(const std::string& collection_name, bool& bin) {
     CollectionSchema schema;
-    auto status = Status::OK();
-    // status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
+    auto status = req_handler_.GetCollectionInfo(context_ptr_, collection_name, schema);
     if (status.ok()) {
-        auto metric = engine::MetricType(schema.metric_type_);
-        bin = engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
-              engine::MetricType::TANIMOTO == metric || engine::MetricType::SUPERSTRUCTURE == metric ||
-              engine::MetricType::SUBSTRUCTURE == metric;
+        auto metric = engine::MetricType(schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE].get<int64_t>());
+        bin = (metric == engine::MetricType::HAMMING || metric == engine::MetricType::JACCARD ||
+               metric == engine::MetricType::TANIMOTO || metric == engine::MetricType::SUPERSTRUCTURE ||
+               metric == engine::MetricType::SUBSTRUCTURE);
     }
 
     return status;
@@ -153,30 +152,16 @@ WebRequestHandler::CopyRecordsFromJson(const nlohmann::json& json, engine::Vecto
 Status
 WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlohmann::json& json_out) {
     CollectionSchema schema;
-    auto status = Status::OK();
-    // status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(req_handler_.GetCollectionInfo(context_ptr_, collection_name, schema));
 
     int64_t count;
-    status = request_handler_.CountCollection(context_ptr_, collection_name, count);
-    if (!status.ok()) {
-        return status;
-    }
-
-    IndexParam index_param;
-    status = request_handler_.DescribeIndex(context_ptr_, collection_name, index_param);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(req_handler_.CountEntities(context_ptr_, collection_name, count));
 
     json_out["collection_name"] = schema.collection_name_;
-    json_out["dimension"] = schema.dimension_;
-    json_out["index_file_size"] = schema.index_file_size_;
-    json_out["index"] = index_param.index_type_;
-    json_out["index_params"] = index_param.extra_params_;
-    json_out["metric_type"] = schema.metric_type_;
+    json_out["dimension"] = schema.extra_params_[engine::PARAM_COLLECTION_DIMENSION].get<int64_t>();
+    json_out["index_file_size"] = schema.extra_params_[engine::PARAM_SEGMENT_SIZE].get<int64_t>();
+    json_out["metric_type"] = schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE].get<int64_t>();
+    json_out["index_params"] = schema.extra_params_[engine::PARAM_INDEX_EXTRA_PARAMS].get<std::string>();
     json_out["count"] = count;
 
     return Status::OK();
@@ -184,12 +169,12 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
 
 Status
 WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohmann::json& json_out) {
-    std::string collection_info;
-    auto status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name, collection_info);
+    std::string collection_stats;
+    auto status = req_handler_.GetCollectionStats(context_ptr_, collection_name, collection_stats);
 
     if (status.ok()) {
         try {
-            json_out = nlohmann::json::parse(collection_info);
+            json_out = nlohmann::json::parse(collection_stats);
         } catch (std::exception& e) {
             return Status(SERVER_UNEXPECTED_ERROR,
                           "Error occurred when parsing collection stat information: " + std::string(e.what()));
@@ -202,18 +187,15 @@ WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohman
 Status
 WebRequestHandler::GetSegmentVectors(const std::string& collection_name, int64_t segment_id, int64_t page_size,
                                      int64_t offset, nlohmann::json& json_out) {
-    std::vector<int64_t> vector_ids;
-    auto status = request_handler_.GetEntityIDs(context_ptr_, 0, segment_id, vector_ids);
-    if (!status.ok()) {
-        return status;
-    }
+    engine::IDNumbers vector_ids;
+    STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, 0, segment_id, vector_ids));
 
     auto ids_begin = std::min(vector_ids.size(), (size_t)offset);
     auto ids_end = std::min(vector_ids.size(), (size_t)(offset + page_size));
 
-    auto ids = std::vector<int64_t>(vector_ids.begin() + ids_begin, vector_ids.begin() + ids_end);
+    auto new_ids = std::vector<int64_t>(vector_ids.begin() + ids_begin, vector_ids.begin() + ids_end);
     nlohmann::json vectors_json;
-    status = GetVectorsByIDs(collection_name, ids, vectors_json);
+    auto status = GetVectorsByIDs(collection_name, new_ids, vectors_json);
 
     nlohmann::json result_json;
     if (vectors_json.empty()) {
@@ -231,20 +213,20 @@ WebRequestHandler::GetSegmentVectors(const std::string& collection_name, int64_t
 Status
 WebRequestHandler::GetSegmentIds(const std::string& collection_name, int64_t segment_id, int64_t page_size,
                                  int64_t offset, nlohmann::json& json_out) {
-    std::vector<int64_t> vector_ids;
-    auto status = request_handler_.GetEntityIDs(context_ptr_, collection_name, segment_id, vector_ids);
+    std::vector<int64_t> ids;
+    auto status = req_handler_.ListIDInSegment(context_ptr_, collection_name, segment_id, ids);
     if (status.ok()) {
-        auto ids_begin = std::min(vector_ids.size(), (size_t)offset);
-        auto ids_end = std::min(vector_ids.size(), (size_t)(offset + page_size));
+        auto ids_begin = std::min(ids.size(), (size_t)offset);
+        auto ids_end = std::min(ids.size(), (size_t)(offset + page_size));
 
         if (ids_begin >= ids_end) {
             json_out["ids"] = std::vector<int64_t>();
         } else {
             for (size_t i = ids_begin; i < ids_end; i++) {
-                json_out["ids"].push_back(std::to_string(vector_ids.at(i)));
+                json_out["ids"].push_back(std::to_string(ids.at(i)));
             }
         }
-        json_out["count"] = vector_ids.size();
+        json_out["count"] = ids.size();
     }
 
     return status;
@@ -252,7 +234,7 @@ WebRequestHandler::GetSegmentIds(const std::string& collection_name, int64_t seg
 
 Status
 WebRequestHandler::CommandLine(const std::string& cmd, std::string& reply) {
-    return request_handler_.Cmd(context_ptr_, cmd, reply);
+    return req_handler_.Cmd(context_ptr_, cmd, reply);
 }
 
 Status
@@ -277,7 +259,7 @@ WebRequestHandler::PreLoadCollection(const nlohmann::json& json, std::string& re
     }
 
     auto collection_name = json["collection_name"];
-    auto status = request_handler_.PreloadCollection(context_ptr_, collection_name.get<std::string>());
+    auto status = req_handler_.LoadCollection(context_ptr_, collection_name.get<std::string>());
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());
@@ -303,7 +285,7 @@ WebRequestHandler::Flush(const nlohmann::json& json, std::string& result_str) {
         names.emplace_back(name.get<std::string>());
     }
 
-    auto status = request_handler_.Flush(context_ptr_, names);
+    auto status = req_handler_.Flush(context_ptr_, names);
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());
@@ -327,7 +309,7 @@ WebRequestHandler::Compact(const nlohmann::json& json, std::string& result_str) 
     auto name = collection_name.get<std::string>();
 
     double compact_threshold = 0.1;  // compact trigger threshold: delete_counts/segment_counts
-    auto status = request_handler_.Compact(context_ptr_, name, compact_threshold);
+    auto status = req_handler_.Compact(context_ptr_, name, compact_threshold);
 
     if (status.ok()) {
         nlohmann::json result;
@@ -712,8 +694,8 @@ Status
 WebRequestHandler::Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str) {
     Status status;
 
-    milvus::server::HybridCollectionSchema collection_schema;
-    status = request_handler_.DescribeCollection(context_ptr_, collection_name, collection_schema);
+    milvus::server::CollectionSchema collection_schema;
+    status = req_handler_.GetCollectionInfo(context_ptr_, collection_name, collection_schema);
     if (!status.ok()) {
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }
@@ -754,7 +736,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         query_ptr_->root = general_query->bin;
 
         engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-        status = request_handler_.Search(context_ptr_, query_ptr_, extra_params, result);
+        status = req_handler_.Search(context_ptr_, query_ptr_, extra_params, result);
 
         if (!status.ok()) {
             return status;
@@ -810,7 +792,7 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
         vector_ids.emplace_back(std::stol(id_str));
     }
 
-    auto status = request_handler_.DeleteByID(context_ptr_, collection_name, vector_ids);
+    auto status = req_handler_.DeleteEntityByID(context_ptr_, collection_name, vector_ids);
 
     nlohmann::json result_json;
     AddStatusToJson(result_json, status.code(), status.message());
@@ -828,7 +810,7 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
     std::vector<engine::AttrsData> attr_batch;
     std::vector<engine::VectorsData> vector_batch;
     auto status =
-        request_handler_.GetEntityByID(context_ptr_, collection_name, ids, field_names, field_mappings, data_chunk);
+        req_handler_.GetEntityByID(context_ptr_, collection_name, ids, field_names, field_mappings, data_chunk);
     if (!status.ok()) {
         return status;
     }
@@ -885,7 +867,7 @@ WebRequestHandler::GetVectorsByIDs(const std::string& collection_name, const std
                                    nlohmann::json& json_out) {
     std::vector<engine::VectorsData> vector_batch;
     auto status = Status::OK();
-    //    auto status = request_handler_.GetVectorsByID(context_ptr_, collection_name, ids, vector_batch);
+    //    auto status = req_handler_.GetVectorsByID(context_ptr_, collection_name, ids, vector_batch);
     if (!status.ok()) {
         return status;
     }
@@ -1205,7 +1187,7 @@ WebRequestHandler::CreateCollection(const CollectionRequestDto::ObjectWrapper& c
     }
 
     auto status = Status::OK();
-    //    auto status = request_handler_.CreateCollection(
+    //    auto status = req_handler_.CreateCollection(
     //        context_ptr_, collection_schema->collection_name->std_str(), collection_schema->dimension,
     //        collection_schema->index_file_size,
     //        static_cast<int64_t>(MetricNameMap.at(collection_schema->metric_type->std_str())));
@@ -1249,8 +1231,8 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
 
     milvus::json json_params;
 
-    auto status = request_handler_.CreateCollection(context_ptr_, collection_name, field_types, field_index_params,
-                                                    field_extra_params, json_params);
+    auto status = req_handler_.CreateCollection(context_ptr_, collection_name, field_types, field_index_params,
+                                                field_extra_params, json_params);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1280,7 +1262,7 @@ WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& re
     }
 
     std::vector<std::string> collections;
-    status = request_handler_.ShowCollections(context_ptr_, collections);
+    status = req_handler_.ListCollections(context_ptr_, collections);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
@@ -1343,7 +1325,7 @@ WebRequestHandler::GetCollection(const OString& collection_name, const OQueryPar
 
 StatusDto::ObjectWrapper
 WebRequestHandler::DropCollection(const OString& collection_name) {
-    auto status = request_handler_.DropCollection(context_ptr_, collection_name->std_str());
+    auto status = req_handler_.DropCollection(context_ptr_, collection_name->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1364,7 +1346,7 @@ WebRequestHandler::CreateIndex(const OString& collection_name, const OString& bo
 
         auto status = Status::OK();
         //        auto status =
-        //            request_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index,
+        //            req_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index,
         //            request_json["params"]);
         ASSIGN_RETURN_STATUS_DTO(status);
     } catch (nlohmann::detail::parse_error& e) {
@@ -1377,25 +1359,9 @@ WebRequestHandler::CreateIndex(const OString& collection_name, const OString& bo
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::GetIndex(const OString& collection_name, OString& result) {
-    IndexParam param;
-    auto status = request_handler_.DescribeIndex(context_ptr_, collection_name->std_str(), param);
-
-    if (status.ok()) {
-        nlohmann::json json_out;
-        auto index_type = engine::EngineType(param.index_type_);
-        json_out["index_type"] = index_type;
-        json_out["params"] = nlohmann::json::parse(param.extra_params_);
-        result = json_out.dump().c_str();
-    }
-
-    ASSIGN_RETURN_STATUS_DTO(status)
-}
-
-StatusDto::ObjectWrapper
 WebRequestHandler::DropIndex(const OString& collection_name) {
     auto status = Status::OK();
-    //    auto status = request_handler_.DropIndex(context_ptr_, collection_name->std_str());
+    //    auto status = req_handler_.DropIndex(context_ptr_, collection_name->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1407,7 +1373,7 @@ WebRequestHandler::CreatePartition(const OString& collection_name, const Partiti
     }
 
     auto status =
-        request_handler_.CreatePartition(context_ptr_, collection_name->std_str(), param->partition_tag->std_str());
+        req_handler_.CreatePartition(context_ptr_, collection_name->std_str(), param->partition_tag->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1443,7 +1409,7 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
     }
 
     std::vector<std::string> partition_names;
-    status = request_handler_.ShowPartitions(context_ptr_, collection_name->std_str(), partition_names);
+    status = req_handler_.ListPartitions(context_ptr_, collection_name->std_str(), partition_names);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
@@ -1481,7 +1447,7 @@ WebRequestHandler::DropPartition(const OString& collection_name, const OString& 
     } catch (nlohmann::detail::type_error& e) {
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
     }
-    auto status = request_handler_.DropPartition(context_ptr_, collection_name->std_str(), tag);
+    auto status = req_handler_.DropPartition(context_ptr_, collection_name->std_str(), tag);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1523,13 +1489,13 @@ WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryPara
         tag = query_params.get("partition_tag")->std_str();
     }
 
-    std::string info;
-    status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name->std_str(), info);
+    std::string stats;
+    status = req_handler_.GetCollectionStats(context_ptr_, collection_name->std_str(), stats);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    nlohmann::json info_json = nlohmann::json::parse(info);
+    nlohmann::json info_json = nlohmann::json::parse(stats);
     nlohmann::json segments_json = nlohmann::json::array();
     for (auto& par : info_json["partitions"]) {
         if (!(all_required || tag.empty() || tag == par["tag"])) {
@@ -1619,7 +1585,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 
     std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
     auto status = Status::OK();
-    //    auto status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name->c_str(), field_types);
+    // auto status = req_handler_.DescribeHybridCollection(context_ptr_, collection_name->c_str(), field_types);
 
     auto entities = body_json["entity"];
     if (!entities.is_array()) {
@@ -1661,9 +1627,9 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
                     ASSIGN_RETURN_STATUS_DTO(status)
                 }
 
-                //                engine::VectorsData vectors;
-                //                CopyRecordsFromJson(field_value, vectors, bin_flag);
-                //                vector_datas.insert(std::make_pair(field_name, vectors));
+                // engine::VectorsData vectors;
+                // CopyRecordsFromJson(field_value, vectors, bin_flag);
+                // vector_datas.insert(std::make_pair(field_name, vectors));
             }
             default: {}
         }
@@ -1671,7 +1637,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
         chunk_data.insert(std::make_pair(field_name, temp_data));
     }
 
-    status = request_handler_.InsertEntity(context_ptr_, collection_name->c_str(), partition_name, row_num, chunk_data);
+    status = req_handler_.Insert(context_ptr_, collection_name->c_str(), partition_name, row_num, chunk_data);
     if (!status.ok()) {
         RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Failed to insert data");
     }

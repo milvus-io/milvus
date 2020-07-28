@@ -25,7 +25,7 @@
 
 #include "db/Types.h"
 #include "server/context/Context.h"
-#include "server/delivery/RequestHandler.h"
+#include "server/delivery/ReqHandler.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/CollectionDto.hpp"
 #include "server/web_impl/dto/ConfigDto.hpp"
@@ -145,7 +145,7 @@ class WebRequestHandler {
  public:
     WebRequestHandler() {
         context_ptr_ = GenContextPtr("Web Handler");
-        request_handler_ = RequestHandler();
+        req_handler_ = ReqHandler();
     }
 
  public:
@@ -182,9 +182,6 @@ class WebRequestHandler {
 
     StatusDto::ObjectWrapper
     CreateIndex(const OString& collection_name, const OString& body);
-
-    StatusDto::ObjectWrapper
-    GetIndex(const OString& collection_name, OString& result);
 
     StatusDto::ObjectWrapper
     DropIndex(const OString& collection_name);
@@ -238,13 +235,13 @@ class WebRequestHandler {
 
  public:
     void
-    RegisterRequestHandler(const RequestHandler& handler) {
-        request_handler_ = handler;
+    RegisterRequestHandler(const ReqHandler& handler) {
+        req_handler_ = handler;
     }
 
  private:
     std::shared_ptr<Context> context_ptr_;
-    RequestHandler request_handler_;
+    ReqHandler req_handler_;
     query::QueryPtr query_ptr_;
     std::unordered_map<std::string, engine::meta::hybrid::DataType> field_type_;
 };
