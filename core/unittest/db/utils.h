@@ -78,6 +78,7 @@ using IteratePartitionHandler = milvus::engine::snapshot::IterateHandler<Partiti
 using IterateSegmentFileHandler = milvus::engine::snapshot::IterateHandler<SegmentFile>;
 using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
 using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
+using SegmentFileIterator = milvus::engine::snapshot::SegmentFileIterator;
 using DBImpl = milvus::engine::DBImpl;
 using Status = milvus::Status;
 using Store = milvus::engine::snapshot::Store;

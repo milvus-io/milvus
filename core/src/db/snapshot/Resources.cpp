@@ -133,12 +133,13 @@ SegmentCommit::ToString() const {
 }
 
 SegmentFile::SegmentFile(ID_TYPE collection_id, ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id,
-                         SIZE_TYPE row_cnt, SIZE_TYPE size, ID_TYPE id, LSN_TYPE lsn, State state, TS_TYPE created_on,
-                         TS_TYPE updated_on)
+                         FTYPE_TYPE ftype, SIZE_TYPE row_cnt, SIZE_TYPE size, ID_TYPE id, LSN_TYPE lsn, State state,
+                         TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       PartitionIdField(partition_id),
       SegmentIdField(segment_id),
       FieldElementIdField(field_element_id),
+      FtypeField(ftype),
       RowCountField(row_cnt),
       SizeField(size),
       IdField(id),
