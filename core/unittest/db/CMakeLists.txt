@@ -23,43 +23,27 @@ set(test_files
         )
 
 add_executable(test_db
-        ${common_files}
-        ${cache_files}
-        ${codecs_files}
-        ${config_files}
-        ${config_handler_files}
-        ${db_main_files}
-        ${db_engine_files}
-        ${db_insert_files}
-        ${db_meta_files}
-        ${db_merge_files}
-        ${db_wal_files}
-        ${db_snapshot_files}
+        ${scheduler_files}
+        ${server_context_files}
+        ${test_files}
         # ${grpc_server_files}
         # ${grpc_service_files}
-        ${log_files}
-        ${metrics_files}
-        ${query_files}
-        ${segment_files}
-        ${scheduler_files}
+        # ${web_server_files}
+        # ${server_delivery_files}
         # ${server_files}
         # ${server_init_files}
-        ${server_context_files}
-        # ${server_delivery_files}
-        ${storage_files}
-        ${tracing_files}
-        # ${web_server_files}
-        ${wrapper_files}
-        ${thirdparty_files}
-        ${test_files}
         )
 
 target_link_libraries(test_db
-        knowhere
         metrics
         config
         stdc++
         ${unittest_libs}
+        utils
+        tracing
+        query
+        log
+        milvus_engine
         )
 
 install(TARGETS test_db DESTINATION unittest)

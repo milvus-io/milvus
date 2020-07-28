@@ -11,6 +11,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
+# **************************** Engine Source Files ****************************
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
@@ -50,7 +51,6 @@ set(thirdparty_files
         )
 
 set(engine_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/../main.cpp
         ${cache_files}
         ${db_main_files}
         ${db_engine_files}
@@ -66,6 +66,12 @@ set(engine_files
         ${segment_files}
         )
 
+
+# **************************** Add Target milvus engine ****************************
+add_library(milvus_engine)
+target_sources(milvus_engine PUBLIC ${engine_files})
+
+# **************************** Libraries to be linked with target Engine ****************************
 set(engine_libs
         pthread
         libgomp.a
@@ -102,38 +108,32 @@ if (MILVUS_GPU_VERSION)
             cudart
             cublas
             )
-    set(third_party_libs ${third_party_libs}
-            ${cuda_lib}
-            )
+    list(APPEND third_party_libs ${cuda_lib})
 
     aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
-    set(engine_files ${engine_files}
-            ${wrapper_gpu_files}
-            )
+    target_sources(milvus_engine  PUBLIC ${wrapper_gpu_files})
 endif ()
 
 # cannot be enabled together with ENABLE_CPU_PROFILING
 if (ENABLE_MEM_PROFILING)
-    set(third_party_libs ${third_party_libs}
-            tcmalloc
-            )
+    list(APPEND third_party_libs tcmalloc)
 endif ()
 
 if (ENABLE_CPU_PROFILING)
-    set(third_party_libs ${third_party_libs}
+    list(APPEND third_party_libs
+        PUBLIC
             gperftools
             libunwind
             )
 endif ()
 
 if (MILVUS_WITH_PROMETHEUS)
-    set(third_party_libs ${third_party_libs}
-            ${prometheus_lib}
-            )
+    list(APPEND third_party_libs ${prometheus_lib})
 endif ()
 
 if (MILVS_WITH_AWS)
-    set(third_party_libs ${third_party_libs}
+    list(APPEND third_party_libs
+        PUBLIC
             ${s3_client_lib}
             curl
             crypto
@@ -141,13 +141,11 @@ if (MILVS_WITH_AWS)
 endif ()
 
 if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
-    set(engine_libs
-            ${engine_libs}
-            libquadmath.a
-            )
+    list(APPEND third_party_libs libquadmath.a)
 endif ()
 
-add_library(milvus_engine STATIC ${engine_files})
+
+# **************************** Link Libraries with milvus engine ****************************
 target_link_libraries(milvus_engine
     PUBLIC
         knowhere

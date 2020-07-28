@@ -25,31 +25,7 @@ include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 
-set(config_files
-        ${MILVUS_ENGINE_SRC}/config/ConfigMgr.cpp
-        ${MILVUS_ENGINE_SRC}/config/ConfigMgr.h
-        ${MILVUS_ENGINE_SRC}/config/ConfigType.cpp
-        ${MILVUS_ENGINE_SRC}/config/ConfigType.h
-        ${MILVUS_ENGINE_SRC}/config/ServerConfig.cpp
-        ${MILVUS_ENGINE_SRC}/config/ServerConfig.h
-        )
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/merge db_merge_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/snapshot db_snapshot_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/search search_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/query query_files)
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta/backend db_meta_backend_files)
-set(db_meta_files
-        ${db_meta_main_files}
-        ${db_meta_backend_files}
-        )
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -75,14 +51,6 @@ set(scheduler_files
         ${scheduler_selector_files}
         )
 
-aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
-aux_source_directory(${MILVUS_THIRDPARTY_SRC}/nlohmann thirdparty_nlohmann_files)
-aux_source_directory(${MILVUS_THIRDPARTY_SRC}/dablooms thirdparty_dablooms_files)
-set(thirdparty_files
-        ${thirdparty_easyloggingpp_files}
-        ${thirdparty_nlohmann_files}
-        ${thirdparty_dablooms_files}
-        )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/init server_init_files)
@@ -115,50 +83,11 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/strategy server_delive
 set(server_delivery_files
         ${server_delivery_impl_files}
         ${server_delivery_request_files}
-        ${server_delivery_strategy_files})
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/index/archive wrapper_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage/disk storage_disk_files)
-#aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
-set(storage_files
-        ${storage_main_files}
-        ${storage_disk_files}
-#        ${storage_s3_files}
+        ${server_delivery_strategy_files}
         )
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
 
 set(entry_file
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
-
-set(common_files
-        ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
-        ${MILVUS_ENGINE_SRC}/utils/ConfigUtils.cpp
-        ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
-        ${MILVUS_ENGINE_SRC}/utils/SignalHandler.cpp
-        ${MILVUS_ENGINE_SRC}/utils/Status.cpp
-        ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
-        )
-
-set(log_files
-        ${MILVUS_ENGINE_SRC}/log/Log.cpp
-        ${MILVUS_ENGINE_SRC}/log/LogMgr.cpp
-        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
-        )
-
-set(grpc_lib
-        grpcpp_channelz
-        grpc++
-        grpc
-        grpc_protobuf
-        grpc_protoc
-        )
 
 set(unittest_libs
         sqlite
@@ -175,45 +104,21 @@ set(unittest_libs
         opentracing
         opentracing_mocktracer
         fiu
-        ${grpc_lib}
+        dl
+        z
         )
 
 if (MILVUS_WITH_AWS)
     set(s3_client_lib
-        aws-cpp-sdk-s3
-        aws-cpp-sdk-core
-        )
-    set(unittest_libs ${unittest_libs}
-        ${s3_client_lib}
-        curl
-        crypto
-        )
-endif ()
-
-if (MILVUS_WITH_PROMETHEUS)
-    set(prometheus_lib
-        prometheus-cpp-push
-        prometheus-cpp-pull
-        prometheus-cpp-core
-        )
-    set(unittest_libs ${unittest_libs}
-        ${prometheus_lib}
-        curl
-        )
-endif ()
-set(unittest_libs ${unittest_libs}
-    dl
-    z
-    )
-
-if (MILVUS_GPU_VERSION)
-    include_directories("${CUDA_INCLUDE_DIRS}")
-    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
-    set(unittest_libs ${unittest_libs}
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-            cudart
-            cublas
+            aws-cpp-sdk-s3
+            aws-cpp-sdk-core
             )
+    list(APPEND unittest_libs
+            ${s3_client_lib}
+            curl
+            crypto
+            )
+
 endif ()
 
 add_subdirectory(db)
