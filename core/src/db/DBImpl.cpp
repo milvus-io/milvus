@@ -566,7 +566,7 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
     TimeRecorder rc("SSDBImpl::Query");
 
-    scheduler::SSSearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr);
 
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);
@@ -616,7 +616,7 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     //    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
     //
     //    VectorsData vectors;
-    //    scheduler::SSSearchJobPtr job =
+    //    scheduler::SearchJobPtr job =
     //        std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
     //    for (auto& sv : segment_visitors) {
     //        job->AddSegmentVisitor(sv);
@@ -943,7 +943,7 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
         snapshot::IDS_TYPE segment_ids;
         ss_visitor.SegmentsToIndex("", segment_ids);
 
-        scheduler::SSBuildIndexJobPtr job =
+        scheduler::BuildIndexJobPtr job =
             std::make_shared<scheduler::BuildIndexJob>(options_, collection_name, segment_ids);
 
         scheduler::JobMgrInst::GetInstance()->Put(job);
