@@ -13,22 +13,16 @@
 
 #include <boost/filesystem.hpp>
 #include <memory>
+#include <set>
 #include <string>
-#include <vector>
 
+#include "db/snapshot/MetaEvent.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
-
-class MetaEvent {
- public:
-    virtual Status Process(StorePtr) = 0;
-};
+namespace milvus::engine::snapshot {
 
 template <class ResourceT>
 class ResourceGCEvent : public MetaEvent {
@@ -49,9 +43,6 @@ class ResourceGCEvent : public MetaEvent {
         /* TODO: physically clean resource */
         auto res_prefix = store->GetRootPath();
         std::string res_path = GetResPath<ResourceT>(res_prefix, res_);
-        /* if (!boost::filesystem::exists(res_path)) { */
-        /*     return Status::OK(); */
-        /* } */
         if (res_path.empty()) {
             /* std::cout << "[GC] No remove action for " << res_->ToString() << std::endl; */
         } else if (boost::filesystem::is_directory(res_path)) {
@@ -61,7 +52,7 @@ class ResourceGCEvent : public MetaEvent {
             auto ok = boost::filesystem::remove(res_path);
             std::cout << "[GC] Remove FILE " << res_->ToString() << " " << res_path << " " << ok << std::endl;
         } else {
-            std::cout << "[GC] Remove STALE OBJECT " << res_path << " for " << res_->ToString() << std::endl;
+            RemoveWithSuffix(res_path, store->GetSuffixSet());
         }
 
         /* remove resource from meta */
@@ -72,9 +63,23 @@ class ResourceGCEvent : public MetaEvent {
     }
 
  private:
+    void
+    RemoveWithSuffix(const std::string& path, const std::set<std::string>& suffix_set) {
+        for (auto& suffix : suffix_set) {
+            if (suffix.empty()) {
+                continue;
+            }
+            auto adjusted = path + suffix;
+            if (boost::filesystem::is_regular_file(adjusted)) {
+                auto ok = boost::filesystem::remove(adjusted);
+                std::cout << "[GC] Remove FILE " << res_->ToString() << " " << adjusted << " " << ok << std::endl;
+                return;
+            }
+        }
+        std::cout << "[GC] Remove STALE OBJECT " << path << " for " << res_->ToString() << std::endl;
+    }
+
     class ResourceT::Ptr res_;
 };
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot

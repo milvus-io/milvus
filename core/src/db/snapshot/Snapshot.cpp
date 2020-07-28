@@ -261,6 +261,7 @@ Snapshot::ToString() const {
                 auto sf = GetResource<SegmentFile>(sf_id);
                 ss << "\n\tSegmentFile: id=" << sf_id << ",field_element_id=" << sf->GetFieldElementId();
                 ss << ",size=" << sf->GetSize();
+                ss << ",ftype=" << sf->GetFtype();
             }
         }
     }

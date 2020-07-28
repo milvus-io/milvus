@@ -17,9 +17,11 @@
 #include <set>
 #include <algorithm>
 
+#include "segment/Segment.h"
 #include "db/utils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/snapshot/IterateHandler.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
@@ -497,4 +499,51 @@ TEST_F(DBTest, MergeTest) {
     status = db_->CountEntities(collection_name, row_count);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(row_count, entity_count * repeat);
+
+    ScopedSnapshotT ss;
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    ASSERT_TRUE(status.ok());
+    std::cout << ss->ToString() << std::endl;
+
+    auto root_path = GetOptions().meta_.path_ + milvus::engine::COLLECTIONS_FOLDER;
+    std::vector<std::string> segment_paths;
+
+    auto seg_executor = [&] (const SegmentPtr& segment, SegmentIterator* handler) -> Status {
+        std::string res_path = milvus::engine::snapshot::GetResPath<Segment>(root_path, segment);
+        std::cout << res_path << std::endl;
+        if (!boost::filesystem::is_directory(res_path)) {
+            return Status(milvus::SS_ERROR, res_path + " not exist");
+        }
+        segment_paths.push_back(res_path);
+        return Status::OK();
+    };
+    auto segment_iter = std::make_shared<SegmentIterator>(ss, seg_executor);
+    segment_iter->Iterate();
+    status = segment_iter->GetStatus();
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    std::set<std::string> segment_file_paths;
+    auto sf_executor = [&] (const SegmentFilePtr& segment_file, SegmentFileIterator* handler) -> Status {
+        std::string res_path = milvus::engine::snapshot::GetResPath<SegmentFile>(root_path, segment_file);
+        if (boost::filesystem::is_regular_file(res_path) ||
+                boost::filesystem::is_regular_file(res_path + ".bf")) {
+            segment_file_paths.insert(res_path);
+            std::cout << res_path << std::endl;
+        }
+        return Status::OK();
+    };
+    auto sf_iterator = std::make_shared<SegmentFileIterator>(ss, sf_executor);
+    sf_iterator->Iterate();
+
+    std::set<std::string> expect_file_paths;
+    boost::filesystem::recursive_directory_iterator iter(root_path);
+    boost::filesystem::recursive_directory_iterator end;
+    for (; iter != end ; ++iter) {
+        if (boost::filesystem::is_regular_file((*iter).path())) {
+            expect_file_paths.insert((*iter).path().filename().string());
+        }
+    }
+
+    // TODO: Fix segment file suffix issue.
+    ASSERT_EQ(expect_file_paths.size(), segment_file_paths.size());
 }
