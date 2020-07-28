@@ -426,57 +426,6 @@ ClientProxy::Disconnect() {
     }
 }
 
-std::string
-ClientProxy::ClientVersion() const {
-    return MILVUS_SDK_VERSION;
-}
-
-std::string
-ClientProxy::ServerVersion() const {
-    Status status = Status::OK();
-    try {
-        std::string version;
-        Status status = client_ptr_->Cmd("version", version);
-        return version;
-    } catch (std::exception& ex) {
-        return "";
-    }
-}
-
-std::string
-ClientProxy::ServerStatus() const {
-    if (channel_ == nullptr) {
-        return "not connected to server";
-    }
-
-    try {
-        std::string dummy;
-        Status status = client_ptr_->Cmd("", dummy);
-        return "server alive";
-    } catch (std::exception& ex) {
-        return "connection lost";
-    }
-}
-
-Status
-ClientProxy::GetConfig(const std::string& node_name, std::string& value) const {
-    try {
-        return client_ptr_->Cmd("get_config " + node_name, value);
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to get config: " + node_name);
-    }
-}
-
-Status
-ClientProxy::SetConfig(const std::string& node_name, const std::string& value) const {
-    try {
-        std::string dummy;
-        return client_ptr_->Cmd("set_config " + node_name + " " + value, dummy);
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to set config: " + node_name);
-    }
-}
-
 Status
 ClientProxy::CreateCollection(const Mapping& mapping, const std::string& extra_params) {
     try {
@@ -507,6 +456,17 @@ ClientProxy::CreateCollection(const Mapping& mapping, const std::string& extra_p
     }
 }
 
+Status
+ClientProxy::DropCollection(const std::string& collection_name) {
+    try {
+        ::milvus::grpc::CollectionName grpc_collection_name;
+        grpc_collection_name.set_collection_name(collection_name);
+        return client_ptr_->DropCollection(grpc_collection_name);
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to drop collection: " + std::string(ex.what()));
+    }
+}
+
 bool
 ClientProxy::HasCollection(const std::string& collection_name) {
     try {
@@ -520,13 +480,143 @@ ClientProxy::HasCollection(const std::string& collection_name) {
 }
 
 Status
-ClientProxy::DropCollection(const std::string& collection_name) {
+ClientProxy::ListCollections(std::vector<std::string>& collection_array) {
+    try {
+        Status status;
+        milvus::grpc::CollectionNameList collection_name_list;
+        status = client_ptr_->ListCollections(collection_name_list);
+
+        collection_array.resize(collection_name_list.collection_names_size());
+        for (uint64_t i = 0; i < collection_name_list.collection_names_size(); ++i) {
+            collection_array[i] = collection_name_list.collection_names(i);
+        }
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to list collections: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::GetCollectionInfo(const std::string& collection_name, Mapping& mapping) {
+    try {
+        ::milvus::grpc::Mapping grpc_mapping;
+
+        Status status = client_ptr_->GetCollectionInfo(collection_name, grpc_mapping);
+
+        mapping.collection_name = collection_name;
+        for (int64_t i = 0; i < grpc_mapping.fields_size(); i++) {
+            auto grpc_field = grpc_mapping.fields(i);
+            FieldPtr field_ptr = std::make_shared<Field>();
+            field_ptr->field_name = grpc_field.name();
+            JSON json_index_params;
+            for (int64_t j = 0; j < grpc_field.index_params_size(); j++) {
+                JSON json_param;
+                json_param[grpc_field.index_params(j).key()] = grpc_field.index_params(j).value();
+                json_index_params.emplace_back(json_param);
+            }
+            field_ptr->index_params = json_index_params.dump();
+            JSON json_extra_params;
+            for (int64_t j = 0; j < grpc_field.extra_params_size(); j++) {
+                JSON json_param;
+                json_param = JSON::parse(grpc_field.extra_params(j).value());
+                json_extra_params.emplace_back(json_param);
+            }
+            field_ptr->extra_params = json_extra_params.dump();
+            field_ptr->field_type = (DataType)grpc_field.type();
+            mapping.fields.emplace_back(field_ptr);
+        }
+        if (!grpc_mapping.extra_params().empty()) {
+            mapping.extra_params = grpc_mapping.extra_params(0).value();
+        }
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to get collection info: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::GetCollectionStats(const std::string& collection_name, std::string& collection_stats) {
+    try {
+        Status status;
+        ::milvus::grpc::CollectionName grpc_collection_name;
+        grpc_collection_name.set_collection_name(collection_name);
+        milvus::grpc::CollectionInfo grpc_collection_stats;
+        status = client_ptr_->GetCollectionStats(grpc_collection_name, grpc_collection_stats);
+
+        collection_stats = grpc_collection_stats.json_info();
+
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to get collection stats: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::CountEntities(const std::string& collection_name, int64_t& row_count) {
+    try {
+        Status status;
+        ::milvus::grpc::CollectionName grpc_collection_name;
+        grpc_collection_name.set_collection_name(collection_name);
+        row_count = client_ptr_->CountEntities(grpc_collection_name, status);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to count collection: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::CreatePartition(const PartitionParam& partition_param) {
+    try {
+        ::milvus::grpc::PartitionParam grpc_partition_param;
+        grpc_partition_param.set_collection_name(partition_param.collection_name);
+        grpc_partition_param.set_tag(partition_param.partition_tag);
+        Status status = client_ptr_->CreatePartition(grpc_partition_param);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to create partition: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::DropPartition(const PartitionParam& partition_param) {
+    try {
+        ::milvus::grpc::PartitionParam grpc_partition_param;
+        grpc_partition_param.set_collection_name(partition_param.collection_name);
+        grpc_partition_param.set_tag(partition_param.partition_tag);
+        Status status = client_ptr_->DropPartition(grpc_partition_param);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to drop partition: " + std::string(ex.what()));
+    }
+}
+
+bool
+ClientProxy::HasPartition(const std::string& collection_name, const std::string& partition_tag) const {
+    try {
+        Status status = Status::OK();
+        ::milvus::grpc::PartitionParam grpc_partition_param;
+        grpc_partition_param.set_collection_name(collection_name);
+        grpc_partition_param.set_tag(partition_tag);
+        return client_ptr_->HasPartition(grpc_partition_param, status);
+    } catch (std::exception& ex) {
+        return false;
+    }
+}
+
+Status
+ClientProxy::ListPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const {
     try {
         ::milvus::grpc::CollectionName grpc_collection_name;
         grpc_collection_name.set_collection_name(collection_name);
-        return client_ptr_->DropCollection(grpc_collection_name);
+        ::milvus::grpc::PartitionList grpc_partition_list;
+        Status status = client_ptr_->ListPartitions(grpc_collection_name, grpc_partition_list);
+        partition_tag_array.resize(grpc_partition_list.partition_tag_array_size());
+        for (uint64_t i = 0; i < grpc_partition_list.partition_tag_array_size(); ++i) {
+            partition_tag_array[i] = grpc_partition_list.partition_tag_array(i);
+        }
+        return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to drop collection: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to show partitions: " + std::string(ex.what()));
     }
 }
 
@@ -543,6 +633,21 @@ ClientProxy::CreateIndex(const IndexParam& index_param) {
         return client_ptr_->CreateIndex(grpc_index_param);
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to build index: " + std::string(ex.what()));
+    }
+}
+
+Status
+ClientProxy::DropIndex(const std::string& collection_name, const std::string& field_name,
+                       const std::string& index_name) const {
+    try {
+        ::milvus::grpc::IndexParam grpc_index_param;
+        grpc_index_param.set_collection_name(collection_name);
+        grpc_index_param.set_field_name(field_name);
+        grpc_index_param.set_index_name(index_name);
+        Status status = client_ptr_->DropIndex(grpc_index_param);
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to drop index: " + std::string(ex.what()));
     }
 }
 
@@ -603,22 +708,17 @@ ClientProxy::GetEntityByID(const std::string& collection_name, const std::vector
 }
 
 Status
-ClientProxy::ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
-                             std::vector<int64_t>& id_array) {
+ClientProxy::DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
     try {
-        ::milvus::grpc::GetEntityIDsParam param;
-        param.set_collection_name(collection_name);
-        param.set_segment_name(segment_name);
-
-        ::milvus::grpc::EntityIds entity_ids;
-        Status status = client_ptr_->ListIDInSegment(param, entity_ids);
-        if (!status.ok()) {
-            return status;
+        ::milvus::grpc::DeleteByIDParam delete_by_id_param;
+        delete_by_id_param.set_collection_name(collection_name);
+        for (auto id : id_array) {
+            delete_by_id_param.add_id_array(id);
         }
-        id_array.insert(id_array.end(), entity_ids.entity_id_array().begin(), entity_ids.entity_id_array().end());
-        return status;
+
+        return client_ptr_->DeleteEntityByID(delete_by_id_param);
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to get ids from segment: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to delete entity id: " + std::string(ex.what()));
     }
 }
 
@@ -651,102 +751,22 @@ ClientProxy::Search(const std::string& collection_name, const std::vector<std::s
 }
 
 Status
-ClientProxy::GetCollectionInfo(const std::string& collection_name, Mapping& mapping) {
+ClientProxy::ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
+                             std::vector<int64_t>& id_array) {
     try {
-        ::milvus::grpc::Mapping grpc_mapping;
+        ::milvus::grpc::GetEntityIDsParam param;
+        param.set_collection_name(collection_name);
+        param.set_segment_name(segment_name);
 
-        Status status = client_ptr_->GetCollectionInfo(collection_name, grpc_mapping);
-
-        mapping.collection_name = collection_name;
-        for (int64_t i = 0; i < grpc_mapping.fields_size(); i++) {
-            auto grpc_field = grpc_mapping.fields(i);
-            FieldPtr field_ptr = std::make_shared<Field>();
-            field_ptr->field_name = grpc_field.name();
-            JSON json_index_params;
-            for (int64_t j = 0; j < grpc_field.index_params_size(); j++) {
-                JSON json_param;
-                json_param[grpc_field.index_params(j).key()] = grpc_field.index_params(j).value();
-                json_index_params.emplace_back(json_param);
-            }
-            field_ptr->index_params = json_index_params.dump();
-            JSON json_extra_params;
-            for (int64_t j = 0; j < grpc_field.extra_params_size(); j++) {
-                JSON json_param;
-                json_param = JSON::parse(grpc_field.extra_params(j).value());
-                json_extra_params.emplace_back(json_param);
-            }
-            field_ptr->extra_params = json_extra_params.dump();
-            field_ptr->field_type = (DataType)grpc_field.type();
-            mapping.fields.emplace_back(field_ptr);
+        ::milvus::grpc::EntityIds entity_ids;
+        Status status = client_ptr_->ListIDInSegment(param, entity_ids);
+        if (!status.ok()) {
+            return status;
         }
-        if (!grpc_mapping.extra_params().empty()) {
-            mapping.extra_params = grpc_mapping.extra_params(0).value();
-        }
+        id_array.insert(id_array.end(), entity_ids.entity_id_array().begin(), entity_ids.entity_id_array().end());
         return status;
     } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to describe collection: " + std::string(ex.what()));
-    }
-}
-
-Status
-ClientProxy::CountEntities(const std::string& collection_name, int64_t& row_count) {
-    try {
-        Status status;
-        ::milvus::grpc::CollectionName grpc_collection_name;
-        grpc_collection_name.set_collection_name(collection_name);
-        row_count = client_ptr_->CountEntities(grpc_collection_name, status);
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to count collection: " + std::string(ex.what()));
-    }
-}
-
-Status
-ClientProxy::ListCollections(std::vector<std::string>& collection_array) {
-    try {
-        Status status;
-        milvus::grpc::CollectionNameList collection_name_list;
-        status = client_ptr_->ListCollections(collection_name_list);
-
-        collection_array.resize(collection_name_list.collection_names_size());
-        for (uint64_t i = 0; i < collection_name_list.collection_names_size(); ++i) {
-            collection_array[i] = collection_name_list.collection_names(i);
-        }
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to show collections: " + std::string(ex.what()));
-    }
-}
-
-Status
-ClientProxy::GetCollectionStats(const std::string& collection_name, std::string& collection_stats) {
-    try {
-        Status status;
-        ::milvus::grpc::CollectionName grpc_collection_name;
-        grpc_collection_name.set_collection_name(collection_name);
-        milvus::grpc::CollectionInfo grpc_collection_stats;
-        status = client_ptr_->GetCollectionStats(grpc_collection_name, grpc_collection_stats);
-
-        collection_stats = grpc_collection_stats.json_info();
-
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to show collection info: " + std::string(ex.what()));
-    }
-}
-
-Status
-ClientProxy::DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
-    try {
-        ::milvus::grpc::DeleteByIDParam delete_by_id_param;
-        delete_by_id_param.set_collection_name(collection_name);
-        for (auto id : id_array) {
-            delete_by_id_param.add_id_array(id);
-        }
-
-        return client_ptr_->DeleteEntityByID(delete_by_id_param);
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to delete entity id: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "Failed to get ids from segment: " + std::string(ex.what()));
     }
 }
 
@@ -759,100 +779,6 @@ ClientProxy::LoadCollection(const std::string& collection_name) const {
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to preload collection: " + std::string(ex.what()));
-    }
-}
-
-Status
-ClientProxy::GetIndexInfo(const std::string& collection_name, IndexParam& index_param) const {
-    try {
-        ::milvus::grpc::CollectionName grpc_collection_name;
-        grpc_collection_name.set_collection_name(collection_name);
-
-        ::milvus::grpc::IndexParam grpc_index_param;
-        Status status = client_ptr_->GetIndexInfo(grpc_collection_name, grpc_index_param);
-        index_param.index_name = grpc_index_param.index_name();
-
-        for (int i = 0; i < grpc_index_param.extra_params_size(); i++) {
-            const milvus::grpc::KeyValuePair& kv = grpc_index_param.extra_params(i);
-            if (kv.key() == EXTRA_PARAM_KEY) {
-                index_param.extra_params = kv.value();
-            }
-        }
-
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to describe index: " + std::string(ex.what()));
-    }
-}
-
-Status
-ClientProxy::DropIndex(const std::string& collection_name, const std::string& field_name,
-                       const std::string& index_name) const {
-    try {
-        ::milvus::grpc::IndexParam grpc_index_param;
-        grpc_index_param.set_collection_name(collection_name);
-        grpc_index_param.set_field_name(field_name);
-        grpc_index_param.set_index_name(index_name);
-        Status status = client_ptr_->DropIndex(grpc_index_param);
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to drop index: " + std::string(ex.what()));
-    }
-}
-
-Status
-ClientProxy::CreatePartition(const PartitionParam& partition_param) {
-    try {
-        ::milvus::grpc::PartitionParam grpc_partition_param;
-        grpc_partition_param.set_collection_name(partition_param.collection_name);
-        grpc_partition_param.set_tag(partition_param.partition_tag);
-        Status status = client_ptr_->CreatePartition(grpc_partition_param);
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to create partition: " + std::string(ex.what()));
-    }
-}
-
-bool
-ClientProxy::HasPartition(const std::string& collection_name, const std::string& partition_tag) const {
-    try {
-        Status status = Status::OK();
-        ::milvus::grpc::PartitionParam grpc_partition_param;
-        grpc_partition_param.set_collection_name(collection_name);
-        grpc_partition_param.set_tag(partition_tag);
-        return client_ptr_->HasPartition(grpc_partition_param, status);
-    } catch (std::exception& ex) {
-        return false;
-    }
-}
-
-Status
-ClientProxy::ListPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const {
-    try {
-        ::milvus::grpc::CollectionName grpc_collection_name;
-        grpc_collection_name.set_collection_name(collection_name);
-        ::milvus::grpc::PartitionList grpc_partition_list;
-        Status status = client_ptr_->ListPartitions(grpc_collection_name, grpc_partition_list);
-        partition_tag_array.resize(grpc_partition_list.partition_tag_array_size());
-        for (uint64_t i = 0; i < grpc_partition_list.partition_tag_array_size(); ++i) {
-            partition_tag_array[i] = grpc_partition_list.partition_tag_array(i);
-        }
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to show partitions: " + std::string(ex.what()));
-    }
-}
-
-Status
-ClientProxy::DropPartition(const PartitionParam& partition_param) {
-    try {
-        ::milvus::grpc::PartitionParam grpc_partition_param;
-        grpc_partition_param.set_collection_name(partition_param.collection_name);
-        grpc_partition_param.set_tag(partition_param.partition_tag);
-        Status status = client_ptr_->DropPartition(grpc_partition_param);
-        return status;
-    } catch (std::exception& ex) {
-        return Status(StatusCode::UnknownError, "Failed to drop partition: " + std::string(ex.what()));
     }
 }
 

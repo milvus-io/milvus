@@ -12,28 +12,33 @@
 #pragma once
 
 #include "server/delivery/request/BaseReq.h"
-#include "utils/BlockingQueue.h"
-#include "utils/Status.h"
 
+#include <map>
 #include <memory>
-#include <queue>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace milvus {
 namespace server {
 
-class RequestStrategy {
- protected:
-    RequestStrategy() = default;
-
+class SearchRequest : public BaseRequest {
  public:
-    virtual Status
-    ReScheduleQueue(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) = 0;
-};
+    static BaseRequestPtr
+    Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+           const milvus::json& json_params, engine::QueryResultPtr& result);
 
-using RequestStrategyPtr = std::shared_ptr<RequestStrategy>;
+ protected:
+    SearchRequest(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
+                  const milvus::json& json_params, engine::QueryResultPtr& result);
+
+    Status
+    OnExecute() override;
+
+ private:
+    milvus::query::QueryPtr query_ptr_;
+    milvus::json json_params_;
+    engine::QueryResultPtr& result_;
+};
 
 }  // namespace server
 }  // namespace milvus
