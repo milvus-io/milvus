@@ -23,7 +23,6 @@
 #include "db/Utils.h"
 #include "db/engine/ExecutionEngineImpl.h"
 #include "scheduler/SchedInst.h"
-#include "scheduler/job/SearchJob.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -47,38 +46,35 @@ SearchTask::CreateExecEngine() {
     }
 }
 
-void
-SearchTask::Load(LoadType type, uint8_t device_id) {
+Status
+SearchTask::OnLoad(LoadType type, uint8_t device_id) {
     TimeRecorder rc(LogOut("[%s][%ld]", "search", segment_id_));
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
 
-    if (auto job = job_.lock()) {
-        try {
-            fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
-            if (type == LoadType::DISK2CPU) {
-                engine::ExecutionEngineContext context;
-                context.query_ptr_ = query_ptr_;
-                stat = execution_engine_->Load(context);
-                type_str = "DISK2CPU";
-            } else if (type == LoadType::CPU2GPU) {
-                stat = execution_engine_->CopyToGpu(device_id);
-                type_str = "CPU2GPU" + std::to_string(device_id);
-            } else if (type == LoadType::GPU2CPU) {
-                // stat = engine_->CopyToCpu();
-                type_str = "GPU2CPU";
-            } else {
-                error_msg = "Wrong load type";
-                stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
-            }
-        } catch (std::exception& ex) {
-            // typical error: out of disk space or permition denied
-            error_msg = "Failed to load index file: " + std::string(ex.what());
-            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Encounter exception: %s", "search", 0, error_msg.c_str());
+    try {
+        fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
+        if (type == LoadType::DISK2CPU) {
+            engine::ExecutionEngineContext context;
+            context.query_ptr_ = query_ptr_;
+            stat = execution_engine_->Load(context);
+            type_str = "DISK2CPU";
+        } else if (type == LoadType::CPU2GPU) {
+            stat = execution_engine_->CopyToGpu(device_id);
+            type_str = "CPU2GPU" + std::to_string(device_id);
+        } else if (type == LoadType::GPU2CPU) {
+            // stat = engine_->CopyToCpu();
+            type_str = "GPU2CPU";
+        } else {
+            error_msg = "Wrong load type";
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
-        fiu_do_on("XSearchTask.Load.out_of_memory", stat = Status(SERVER_UNEXPECTED_ERROR, "out of memory"));
+    } catch (std::exception& ex) {
+        // typical error: out of disk space or permition denied
+        error_msg = "Failed to load index file: " + std::string(ex.what());
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Encounter exception: %s", "search", 0, error_msg.c_str());
+        stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
     }
 
     if (!stat.ok()) {
@@ -91,78 +87,61 @@ SearchTask::Load(LoadType type, uint8_t device_id) {
             s = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
 
-        if (auto job = job_.lock()) {
-            auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
-            search_job->SearchDone(segment_id_);
-            search_job->status() = s;
-        }
-
-        return;
+        return s;
     }
 
     std::string info = "Search task load segment id: " + std::to_string(segment_id_) + " " + type_str + " totally cost";
     rc.ElapseFromBegin(info);
+
+    return Status::OK();
 }
 
-void
-SearchTask::Execute() {
+Status
+SearchTask::OnExecute() {
     milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(segment_id_));
     TimeRecorder rc(LogOut("[%s][%ld] DoSearch file id:%ld", "search", 0, segment_id_));
 
-    if (auto job = job_.lock()) {
-        auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
+    if (execution_engine_ == nullptr) {
+        return Status(DB_ERROR, "execution engine is null");
+    }
 
-        if (execution_engine_ == nullptr) {
-            search_job->SearchDone(segment_id_);
-            search_job->status() = Status(DB_ERROR, "execution engine is null");
-            return;
+    try {
+        /* step 2: search */
+        engine::ExecutionEngineContext context;
+        context.query_ptr_ = query_ptr_;
+        context.query_result_ = std::make_shared<engine::QueryResult>();
+        auto status = execution_engine_->Search(context);
+
+        if (!status.ok()) {
+            return status;
         }
 
-        fiu_do_on("XSearchTask.Execute.throw_std_exception", throw std::exception());
+        rc.RecordSection("search done");
 
-        try {
-            /* step 2: search */
-            engine::ExecutionEngineContext context;
-            context.query_ptr_ = query_ptr_;
-            context.query_result_ = std::make_shared<engine::QueryResult>();
-            auto status = execution_engine_->Search(context);
+        /* step 3: pick up topk result */
+        // auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
+        // if (spec_k == 0) {
+        //     LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty file. file location = %s",
+        //     "search", 0,
+        //                                   file_->location_.c_str());
+        // } else {
+        //     std::unique_lock<std::mutex> lock(search_job->mutex());
+        //   XSearchTask::MergeTopkToResultSet(result, spec_k, nq, topk, ascending_, search_job->GetQueryResult());
+        // }
 
-            fiu_do_on("XSearchTask.Execute.search_fail", status = Status(SERVER_UNEXPECTED_ERROR, ""));
-            if (!status.ok()) {
-                search_job->SearchDone(segment_id_);
-                search_job->status() = status;
-                return;
-            }
-
-            rc.RecordSection("search done");
-
-            /* step 3: pick up topk result */
-            // auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
-            // if (spec_k == 0) {
-            //     LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty file. file location = %s",
-            //     "search", 0,
-            //                                   file_->location_.c_str());
-            // } else {
-            //     std::unique_lock<std::mutex> lock(search_job->mutex());
-            //   XSearchTask::MergeTopkToResultSet(result, spec_k, nq, topk, ascending_, search_job->GetQueryResult());
-            // }
-
-            rc.RecordSection("reduce topk done");
-        } catch (std::exception& ex) {
-            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
-            search_job->status() = Status(SERVER_UNEXPECTED_ERROR, ex.what());
-        }
-
-        /* step 4: notify to send result to client */
-        search_job->SearchDone(segment_id_);
+        rc.RecordSection("reduce topk done");
+    } catch (std::exception& ex) {
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
     rc.ElapseFromBegin("totally cost");
+    return Status::OK();
 }
 
-std::string
-SearchTask::IndexName() {
-    return "";
+int64_t
+SearchTask::nq() {
+    return 0;
 }
 
 }  // namespace scheduler
