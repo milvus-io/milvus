@@ -162,6 +162,7 @@ SearchTask::Execute() {
 
 std::string
 SearchTask::IndexName() {
+    return "";
 }
 
 }  // namespace scheduler

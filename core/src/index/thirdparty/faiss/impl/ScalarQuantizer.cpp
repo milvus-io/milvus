@@ -128,7 +128,7 @@ void ScalarQuantizer::train_residual(size_t n,
 Quantizer *ScalarQuantizer::select_quantizer () const
 {
     /* use hook to decide use AVX512 or not */
-    sq_sel_quantizer(qtype, d, trained);
+    return sq_sel_quantizer(qtype, d, trained);
 }
 
 
