@@ -28,6 +28,7 @@ namespace engine {
 struct ExecutionEngineContext {
     query::QueryPtr query_ptr_;
     QueryResultPtr query_result_;
+    std::vector<std::string> target_fields_;  // for build index task, which field should be build
 };
 
 class ExecutionEngine {

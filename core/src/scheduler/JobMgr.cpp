@@ -18,7 +18,6 @@
 #include "scheduler/CPUBuilder.h"
 #include "scheduler/JobMgr.h"
 #include "scheduler/SchedInst.h"
-#include "scheduler/TaskCreator.h"
 #include "scheduler/selector/Optimizer.h"
 #include "scheduler/task/Task.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
@@ -99,7 +98,7 @@ JobMgr::worker_function() {
 
 std::vector<TaskPtr>
 JobMgr::build_task(const JobPtr& job) {
-    return TaskCreator::Create(job);
+    return job->CreateTasks();
 }
 
 void

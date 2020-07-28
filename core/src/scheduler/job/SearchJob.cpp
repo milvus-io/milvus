@@ -10,36 +10,26 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/job/SearchJob.h"
+#include "scheduler/task/SearchTask.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
 
 SearchJob::SearchJob(const server::ContextPtr& context, engine::DBOptions options, const query::QueryPtr& query_ptr)
-    : Job(JobType::SS_SEARCH), context_(context), options_(options), query_ptr_(query_ptr) {
+    : Job(JobType::SEARCH), context_(context), options_(options), query_ptr_(query_ptr) {
     GetSegmentsFromQuery(query_ptr, segment_ids_);
 }
 
-void
-SearchJob::WaitFinish() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return segment_ids_.empty(); });
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld all done", "search", 0, id());
-}
-
-void
-SearchJob::SearchDone(const engine::snapshot::ID_TYPE seg_id) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    for (engine::snapshot::IDS_TYPE::iterator iter = segment_ids_.begin(); iter != segment_ids_.end(); ++iter) {
-        if (*iter == seg_id) {
-            segment_ids_.erase(iter);
-            break;
-        }
+JobTasks
+SearchJob::CreateTasks() {
+    std::vector<TaskPtr> tasks;
+    for (auto& id : segment_ids_) {
+        auto task = std::make_shared<SearchTask>(context_, options_, query_ptr_, id, nullptr);
+        task->job_ = this;
+        tasks.emplace_back(task);
     }
-    if (segment_ids_.empty()) {
-        cv_.notify_all();
-    }
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld finish segment: %ld", "search", 0, id(), seg_id);
+    return tasks;
 }
 
 json
@@ -55,11 +45,6 @@ SearchJob::Dump() const {
 void
 SearchJob::GetSegmentsFromQuery(const query::QueryPtr& query_ptr, engine::snapshot::IDS_TYPE& segment_ids) {
     // TODO
-}
-
-int64_t
-SearchJob::nq() {
-    return 0;
 }
 
 }  // namespace scheduler

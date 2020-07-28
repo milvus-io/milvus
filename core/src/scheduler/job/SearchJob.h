@@ -43,14 +43,8 @@ class SearchJob : public Job {
     SearchJob(const server::ContextPtr& context, engine::DBOptions options, const query::QueryPtr& query_ptr);
 
  public:
-    void
-    AddSegmentVisitor(const engine::SegmentVisitorPtr& visitor);
-
-    void
-    WaitFinish();
-
-    void
-    SearchDone(const engine::snapshot::ID_TYPE seg_id);
+    JobTasks
+    CreateTasks() override;
 
     json
     Dump() const override;
@@ -81,19 +75,6 @@ class SearchJob : public Job {
         return segment_ids_;
     }
 
-    Status&
-    status() {
-        return status_;
-    }
-
-    std::mutex&
-    mutex() {
-        return mutex_;
-    }
-
-    int64_t
-    nq();
-
  private:
     void
     GetSegmentsFromQuery(const query::QueryPtr& query_ptr, engine::snapshot::IDS_TYPE& segment_ids);
@@ -106,10 +87,6 @@ class SearchJob : public Job {
     query::QueryPtr query_ptr_;
     engine::QueryResultPtr query_result_;
     engine::snapshot::IDS_TYPE segment_ids_;
-
-    Status status_;
-    std::mutex mutex_;
-    std::condition_variable cv_;
 };
 
 using SearchJobPtr = std::shared_ptr<SearchJob>;

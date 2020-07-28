@@ -8,42 +8,42 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
+#include "scheduler/task/TestTask.h"
 
-#include "job/DeleteJob.h"
-#include "src/scheduler/job/BuildIndexJob.h"
-#include "src/scheduler/job/SearchJob.h"
-#include "task/Task.h"
+#include <utility>
+
+#include "cache/GpuCacheMgr.h"
 
 namespace milvus {
 namespace scheduler {
 
-class TaskCreator {
- public:
-    static std::vector<TaskPtr>
-    Create(const JobPtr& job);
+TestTask::TestTask(TaskLabelPtr label) : Task(TaskType::SearchTask, std::move(label)) {
+}
 
- public:
-    static std::vector<TaskPtr>
-    Create(const DeleteJobPtr& job);
+Status
+TestTask::OnLoad(LoadType type, uint8_t device_id) {
+    load_count_++;
+    return Status::OK();
+}
 
-    static std::vector<TaskPtr>
-    Create(const SearchJobPtr& job);
+Status
+TestTask::OnExecute() {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        exec_count_++;
+        done_ = true;
+    }
+    cv_.notify_one();
 
-    static std::vector<TaskPtr>
-    Create(const BuildIndexJobPtr& job);
-};
+    return Status::OK();
+}
+
+void
+TestTask::Wait() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    cv_.wait(lock, [&] { return done_; });
+}
 
 }  // namespace scheduler
 }  // namespace milvus

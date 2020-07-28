@@ -48,13 +48,12 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
     //        return false;
     //    }
 
-    auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: gpu disable, specify cpu to search!", "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     }
-    if (search_job->nq() < (uint64_t)threshold_) {
+    if (search_task->nq() < (uint64_t)threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: nq < gpu_search_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");

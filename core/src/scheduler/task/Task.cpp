@@ -9,27 +9,41 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include "scheduler/task/Task.h"
+#include "scheduler/job/Job.h"
 
-#include "Task.h"
-#include "scheduler/job/DeleteJob.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
 
-class XDeleteTask : public Task {
- public:
-    explicit XDeleteTask(const scheduler::DeleteJobPtr& delete_job, TaskLabelPtr label);
+void
+Task::Load(LoadType type, uint8_t device_id) {
+    auto status = OnLoad(type, device_id);
 
-    void
-    Load(LoadType type, uint8_t device_id) override;
+    if (job_) {
+        if (!status.ok()) {
+            job_->status() = status;
+            job_->TaskDone(this);
+        }
+    } else {
+        LOG_ENGINE_ERROR_ << "Scheduler task's parent job not specified!";
+    }
+}
 
-    void
-    Execute() override;
+void
+Task::Execute() {
+    auto status = OnExecute();
 
- public:
-    scheduler::DeleteJobPtr delete_job_;
-};
+    if (job_) {
+        if (!status.ok()) {
+            job_->status() = status;
+        }
+        job_->TaskDone(this);
+    } else {
+        LOG_ENGINE_ERROR_ << "Scheduler task's parent job not specified!";
+    }
+}
 
 }  // namespace scheduler
 }  // namespace milvus

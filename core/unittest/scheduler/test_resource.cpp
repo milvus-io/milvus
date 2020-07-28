@@ -157,7 +157,7 @@ TEST_F(ResourceAdvanceTest, DISK_RESOURCE_TEST) {
     SegmentSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(disk_resource_);
-        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
+        auto task = std::make_shared<TestTask>(label);
         std::vector<std::string> path{disk_resource_->name()};
         task->path() = Path(path, 0);
         tasks.push_back(task);
@@ -185,7 +185,7 @@ TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
     SegmentSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(cpu_resource_);
-        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
+        auto task = std::make_shared<TestTask>(label);
         std::vector<std::string> path{cpu_resource_->name()};
         task->path() = Path(path, 0);
         tasks.push_back(task);
@@ -219,7 +219,7 @@ TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
     SegmentSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(gpu_resource_);
-        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
+        auto task = std::make_shared<TestTask>(label);
         std::vector<std::string> path{gpu_resource_->name()};
         task->path() = Path(path, 0);
         tasks.push_back(task);
@@ -247,7 +247,7 @@ TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     SegmentSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
         auto label = std::make_shared<SpecResLabel>(test_resource_);
-        auto task = std::make_shared<TestTask>(std::make_shared<server::Context>("dummy_request_id"), dummy, label);
+        auto task = std::make_shared<TestTask>(label);
         std::vector<std::string> path{test_resource_->name()};
         task->path() = Path(path, 0);
         tasks.push_back(task);

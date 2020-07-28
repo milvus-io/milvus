@@ -33,5 +33,37 @@ Job::Dump() const {
     return ret;
 }
 
+void
+Job::TaskDone(Task* task) {
+    if (task == nullptr) {
+        return;
+    }
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    for (JobTasks::iterator iter = tasks_.begin(); iter != tasks_.end(); ++iter) {
+        if (task == (*iter).get()) {
+            tasks_.erase(iter);
+            break;
+        }
+    }
+    if (tasks_.empty()) {
+        cv_.notify_all();
+    }
+
+    auto json = task->Dump();
+    std::string task_desc = json.dump();
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] task %s finish", "scheduler job", id(), task_desc.c_str());
+}
+
+void
+Job::WaitFinish() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    cv_.wait(lock, [this] { return tasks_.empty(); });
+    auto json = Dump();
+    std::string job_desc = json.dump();
+
+    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] %s all done", "scheduler job", id(), job_desc.c_str());
+}
+
 }  // namespace scheduler
 }  // namespace milvus

@@ -34,14 +34,12 @@ TEST(TaskTest, INVALID_INDEX) {
     auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
     dummy_context->SetTraceContext(trace_context);
 
-    SegmentSchemaPtr dummy_file = std::make_shared<engine::meta::SegmentSchema>();
-    dummy_file->index_params_ = "{ \"nlist\": 16384 }";
-    dummy_file->dimension_ = 64;
+    milvus::engine::DBOptions options;
     auto search_task =
-        std::make_shared<XSearchTask>(dummy_context, dummy_file, nullptr);
+        std::make_shared<SearchTask>(dummy_context, options, nullptr, 0, nullptr);
     search_task->Load(LoadType::TEST, 10);
 
-    auto build_task = std::make_shared<XBuildIndexTask>(nullptr, nullptr);
+    auto build_task = std::make_shared<BuildIndexTask>(options, "", 0, nullptr);
     build_task->Load(LoadType::TEST, 10);
 
     build_task->Execute();
