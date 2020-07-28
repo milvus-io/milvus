@@ -79,6 +79,16 @@ class SegmentReader {
     std::string
     GetSegmentPath();
 
+    std::string
+    GetRootPath() const {
+        return dir_root_;
+    }
+
+    engine::SegmentVisitorPtr
+    GetSegmentVisitor() const {
+        return segment_visitor_;
+    }
+
  private:
     Status
     Initialize();
