@@ -82,9 +82,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
     SegmentVisitorPtr segment_visitor_;
     segment::SegmentReaderPtr segment_reader_;
 
-    knowhere::VecIndexPtr vec_index_ptr_ = nullptr;
-    std::unordered_map<std::string, knowhere::IndexPtr> attr_index_;
-
     int64_t entity_count_;
     int64_t gpu_num_ = 0;
     bool gpu_enable_ = false;

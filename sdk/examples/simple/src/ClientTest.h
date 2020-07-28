@@ -37,7 +37,7 @@ class ClientTest {
     GetCollectionInfo(const std::string&);
 
     void
-    Insert(const std::string&);
+    InsertEntities(const std::string&);
 
     void
     CountEntities(const std::string&);
