@@ -25,7 +25,7 @@ namespace engine {
 
 const char* VECTOR_FIELD = "vector";  // hard code
 
-SSMemCollectionPtr
+MemCollectionPtr
 MemManagerImpl::GetMemByTable(int64_t collection_id, int64_t partition_id) {
     auto mem_collection = mem_map_.find(collection_id);
     if (mem_collection != mem_map_.end()) {
@@ -40,9 +40,9 @@ MemManagerImpl::GetMemByTable(int64_t collection_id, int64_t partition_id) {
     return mem;
 }
 
-std::vector<SSMemCollectionPtr>
+std::vector<MemCollectionPtr>
 MemManagerImpl::GetMemByTable(int64_t collection_id) {
-    std::vector<SSMemCollectionPtr> result;
+    std::vector<MemCollectionPtr> result;
     auto mem_collection = mem_map_.find(collection_id);
     if (mem_collection != mem_map_.end()) {
         for (auto& pair : mem_collection->second) {
@@ -156,7 +156,7 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, int64_t partition_id, const
 Status
 MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id,
                                      const milvus::engine::VectorSourcePtr& source, uint64_t lsn) {
-    SSMemCollectionPtr mem = GetMemByTable(collection_id, partition_id);
+    MemCollectionPtr mem = GetMemByTable(collection_id, partition_id);
     mem->SetLSN(lsn);
 
     auto status = mem->Add(source);
@@ -166,7 +166,7 @@ MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id
 Status
 MemManagerImpl::DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
-    std::vector<SSMemCollectionPtr> mems = GetMemByTable(collection_id);
+    std::vector<MemCollectionPtr> mems = GetMemByTable(collection_id);
 
     for (auto& mem : mems) {
         mem->SetLSN(lsn);
@@ -182,7 +182,7 @@ MemManagerImpl::DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t
 Status
 MemManagerImpl::DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
-    std::vector<SSMemCollectionPtr> mems = GetMemByTable(collection_id);
+    std::vector<MemCollectionPtr> mems = GetMemByTable(collection_id);
 
     for (auto& mem : mems) {
         mem->SetLSN(lsn);

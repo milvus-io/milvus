@@ -112,7 +112,7 @@ class SearchJob : public Job {
     std::condition_variable cv_;
 };
 
-using SSSearchJobPtr = std::shared_ptr<SearchJob>;
+using SearchJobPtr = std::shared_ptr<SearchJob>;
 
 }  // namespace scheduler
 }  // namespace milvus
