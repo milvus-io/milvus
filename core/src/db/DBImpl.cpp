@@ -1108,7 +1108,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
     switch (record.type) {
         case wal::MXLogType::Entity: {
             int64_t collection_name = 0, partition_id = 0;
-            auto status = get_collection_partition_id(record, collection_name, partition_id);
+            status = get_collection_partition_id(record, collection_name, partition_id);
             if (!status.ok()) {
                 LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << status.message();
                 return status;
@@ -1124,7 +1124,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 
         case wal::MXLogType::Delete: {
             snapshot::ScopedSnapshotT ss;
-            auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
+            status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
             if (!status.ok()) {
                 LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "delete", 0) << "Get snapshot fail: " << status.message();
                 return status;
@@ -1148,7 +1148,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
             if (!record.collection_id.empty()) {
                 // flush one collection
                 snapshot::ScopedSnapshotT ss;
-                auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
+                status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
                 if (!status.ok()) {
                     LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
                     return status;
@@ -1175,7 +1175,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 std::set<std::string> flushed_collections;
                 for (auto id : collection_names) {
                     snapshot::ScopedSnapshotT ss;
-                    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, id);
+                    status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, id);
                     if (!status.ok()) {
                         LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
                         return status;
@@ -1239,7 +1239,7 @@ DBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_merge
             merge_mgr_ptr_->UseStrategy(MergeStrategyType::ADAPTIVE);
         }
 
-        auto status = merge_mgr_ptr_->MergeFiles(collection_name);
+        status = merge_mgr_ptr_->MergeFiles(collection_name);
         merge_mgr_ptr_->UseStrategy(old_strategy);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_name
