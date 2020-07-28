@@ -98,7 +98,7 @@ MemCollection::GetTableFileCount() {
 
 Status
 MemCollection::Serialize(uint64_t wal_lsn) {
-    TimeRecorder recorder("SSMemCollection::Serialize collection " + collection_id_);
+    TimeRecorder recorder("MemCollection::Serialize collection " + collection_id_);
 
     if (!doc_ids_to_delete_.empty()) {
         auto status = ApplyDeletes();
@@ -170,7 +170,7 @@ MemCollection::ApplyDeletes() {
 
     //    LOG_ENGINE_DEBUG_ << "Applying " << doc_ids_to_delete_.size() << " deletes in collection: " << collection_id_;
     //
-    //    TimeRecorder recorder("SSMemCollection::ApplyDeletes for collection " + collection_id_);
+    //    TimeRecorder recorder("MemCollection::ApplyDeletes for collection " + collection_id_);
     //
     //    std::vector<int> file_types{meta::SegmentSchema::FILE_TYPE::RAW, meta::SegmentSchema::FILE_TYPE::TO_INDEX,
     //                                meta::SegmentSchema::FILE_TYPE::BACKUP};

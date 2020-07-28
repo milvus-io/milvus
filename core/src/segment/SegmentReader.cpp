@@ -489,7 +489,7 @@ SegmentReader::GetSegmentID(int64_t& id) {
         }
     }
 
-    return Status(DB_ERROR, "SSSegmentWriter::GetSegmentID: null pointer");
+    return Status(DB_ERROR, "SegmentWriter::GetSegmentID: null pointer");
 }
 
 std::string

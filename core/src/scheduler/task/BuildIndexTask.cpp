@@ -24,11 +24,13 @@ namespace milvus {
 namespace scheduler {
 
 BuildIndexTask::BuildIndexTask(const engine::DBOptions& options, const std::string& collection_name,
-                               engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
+                               engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields,
+                               TaskLabelPtr label)
     : Task(TaskType::BuildIndexTask, std::move(label)),
       options_(options),
       collection_name_(collection_name),
-      segment_id_(segment_id) {
+      segment_id_(segment_id),
+      target_fields_(target_fields) {
     CreateExecEngine();
 }
 
@@ -41,7 +43,7 @@ BuildIndexTask::CreateExecEngine() {
 
 Status
 BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
-    TimeRecorder rc("SSBuildIndexTask::Load");
+    TimeRecorder rc("BuildIndexTask::Load");
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
@@ -49,6 +51,7 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
     try {
         if (type == LoadType::DISK2CPU) {
             engine::ExecutionEngineContext context;
+            context.target_fields_ = target_fields_;
             stat = execution_engine_->Load(context);
             type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
@@ -100,6 +103,11 @@ BuildIndexTask::OnExecute() {
     }
 
     return Status::OK();
+}
+
+void
+BuildIndexTask::GroupFieldsForIndex(const std::string& collection_name, engine::TargetFieldGroups& groups) {
+    engine::EngineFactory::GroupFieldsForIndex(collection_name, groups);
 }
 
 }  // namespace scheduler

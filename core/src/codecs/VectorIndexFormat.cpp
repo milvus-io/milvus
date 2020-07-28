@@ -41,7 +41,7 @@ VectorIndexFormat::FilePostfix() {
 void
 VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                            knowhere::BinaryPtr& data) {
-    milvus::TimeRecorder recorder("SSVectorIndexFormat::ReadRaw");
+    milvus::TimeRecorder recorder("VectorIndexFormat::ReadRaw");
 
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open raw file: " + file_path + ", error: " + std::strerror(errno);
@@ -63,13 +63,13 @@ VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::strin
 
     double span = recorder.RecordSection("End");
     double rate = num_bytes * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "SSVectorIndexFormat::ReadIndex(" << file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "VectorIndexFormat::ReadIndex(" << file_path << ") rate " << rate << "MB/s";
 }
 
 void
 VectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                              knowhere::BinarySet& data) {
-    milvus::TimeRecorder recorder("SSVectorIndexFormat::ReadIndex");
+    milvus::TimeRecorder recorder("VectorIndexFormat::ReadIndex");
 
     std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
     if (!fs_ptr->reader_ptr_->open(full_file_path)) {
@@ -117,7 +117,7 @@ VectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::str
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "SSVectorIndexFormat::ReadIndex(" << full_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "VectorIndexFormat::ReadIndex(" << full_file_path << ") rate " << rate << "MB/s";
 }
 
 void
@@ -196,13 +196,13 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
 
     double span = recorder.RecordSection("End");
     double rate = fs_ptr->writer_ptr_->length() * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "SSVectorIndexFormat::WriteIndex(" << full_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "VectorIndexFormat::WriteIndex(" << full_file_path << ") rate " << rate << "MB/s";
 }
 
 void
 VectorIndexFormat::WriteCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                                  const knowhere::VecIndexPtr& index) {
-    milvus::TimeRecorder recorder("SSVectorIndexFormat::WriteCompress");
+    milvus::TimeRecorder recorder("VectorIndexFormat::WriteCompress");
 
     auto binaryset = index->Serialize(knowhere::Config());
 

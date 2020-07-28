@@ -26,11 +26,16 @@ BuildIndexJob::BuildIndexJob(engine::DBOptions options, const std::string& colle
 
 JobTasks
 BuildIndexJob::CreateTasks() {
+    engine::TargetFieldGroups target_groups;
+    BuildIndexTask::GroupFieldsForIndex(collection_name_, target_groups);
+
     std::vector<TaskPtr> tasks;
     for (auto& id : segment_ids_) {
-        auto task = std::make_shared<BuildIndexTask>(options_, collection_name_, id, nullptr);
-        task->job_ = this;
-        tasks.emplace_back(task);
+        for (auto& group : target_groups) {
+            auto task = std::make_shared<BuildIndexTask>(options_, collection_name_, id, group, nullptr);
+            task->job_ = this;
+            tasks.emplace_back(task);
+        }
     }
     return tasks;
 }

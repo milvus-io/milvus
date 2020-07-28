@@ -51,10 +51,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     LoadForSearch(const query::QueryPtr& query_ptr);
 
     Status
-    LoadForIndex();
-
-    Status
-    Load(const std::vector<std::string>& field_names);
+    Load(const TargetFields& field_names);
 
     Status
     ExecBinaryQuery(const query::GeneralQueryPtr& general_query, faiss::ConcurrentBitsetPtr& bitset,
@@ -82,10 +79,13 @@ class ExecutionEngineImpl : public ExecutionEngine {
     SegmentVisitorPtr segment_visitor_;
     segment::SegmentReaderPtr segment_reader_;
 
+    TargetFields target_fields_;
+
     knowhere::VecIndexPtr vec_index_ptr_ = nullptr;
     std::unordered_map<std::string, knowhere::IndexPtr> attr_index_;
 
     int64_t entity_count_;
+
     int64_t gpu_num_ = 0;
     bool gpu_enable_ = false;
 };

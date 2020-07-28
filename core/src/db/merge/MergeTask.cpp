@@ -69,7 +69,7 @@ MergeTask::Execute() {
         snapshot::SegmentFilePtr seg_file;
         status = op->CommitNewSegmentFile(sf_context, seg_file);
         if (!status.ok()) {
-            std::string err_msg = "SSMergeTask create segment failed: " + status.ToString();
+            std::string err_msg = "MergeTask create segment failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
@@ -87,7 +87,7 @@ MergeTask::Execute() {
         snapshot::SegmentFilePtr delete_doc_file, bloom_filter_file;
         status = op->CommitNewSegmentFile(sf_context, delete_doc_file);
         if (!status.ok()) {
-            std::string err_msg = "SSMergeTask create bloom filter segment file failed: " + status.ToString();
+            std::string err_msg = "MergeTask create bloom filter segment file failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
@@ -95,7 +95,7 @@ MergeTask::Execute() {
         sf_context.field_element_name = engine::DEFAULT_BLOOM_FILTER_NAME;
         status = op->CommitNewSegmentFile(sf_context, bloom_filter_file);
         if (!status.ok()) {
-            std::string err_msg = "SSMergeTask create deleted-doc segment file failed: " + status.ToString();
+            std::string err_msg = "MergeTask create deleted-doc segment file failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
@@ -116,7 +116,7 @@ MergeTask::Execute() {
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
         status = segment_writer->Merge(segment_reader);
         if (!status.ok()) {
-            std::string err_msg = "SSMergeTask merge failed: " + status.ToString();
+            std::string err_msg = "MergeTask merge failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }

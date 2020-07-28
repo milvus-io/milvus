@@ -46,16 +46,6 @@ extern Status
 ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type);
 
 extern Status
-ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& collection_schema,
-                     int64_t topk);
-
-extern Status
-ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema);
-
-extern Status
-ValidateVectorDataSize(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema);
-
-extern Status
 ValidateCollectionIndexFileSize(int64_t index_file_size);
 
 extern Status

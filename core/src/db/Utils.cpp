@@ -38,19 +38,6 @@ namespace milvus {
 namespace engine {
 namespace utils {
 
-namespace {
-
-const char* TABLES_FOLDER = "/tables/";
-
-static std::string
-ConstructParentFolder(const std::string& db_path, const meta::SegmentSchema& table_file) {
-    std::string table_path = db_path + TABLES_FOLDER + table_file.collection_id_;
-    std::string partition_path = table_path + "/" + table_file.segment_id_;
-    return partition_path;
-}
-
-}  // namespace
-
 int64_t
 GetMicroSecTimeStamp() {
     auto now = std::chrono::system_clock::now();
@@ -59,122 +46,10 @@ GetMicroSecTimeStamp() {
     return micros;
 }
 
-Status
-CreateCollectionPath(const DBMetaOptions& options, const std::string& collection_id) {
-    std::string db_path = options.path_;
-    std::string table_path = db_path + TABLES_FOLDER + collection_id;
-    auto status = CommonUtil::CreateDirectory(table_path);
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << status.message();
-        return status;
-    }
-    return Status::OK();
-}
-
-Status
-DeleteCollectionPath(const DBMetaOptions& options, const std::string& collection_id, bool force) {
-    std::string table_path = options.path_ + TABLES_FOLDER + collection_id;
-    if (force) {
-        boost::filesystem::remove_all(table_path);
-        LOG_ENGINE_DEBUG_ << "Remove collection folder: " << table_path;
-    } else if (boost::filesystem::exists(table_path) && boost::filesystem::is_empty(table_path)) {
-        boost::filesystem::remove_all(table_path);
-        LOG_ENGINE_DEBUG_ << "Remove collection folder: " << table_path;
-    }
-
-    // bool s3_enable = false;
-    // server::Config& config = server::Config::GetInstance();
-    // config.GetStorageConfigS3Enable(s3_enable);
-
-    // if (s3_enable) {
-    //     std::string table_path = options.path_ + TABLES_FOLDER + collection_id;
-
-    //     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
-    //     Status stat = storage_inst.DeleteObjects(table_path);
-    //     if (!stat.ok()) {
-    //         return stat;
-    //     }
-    // }
-
-    return Status::OK();
-}
-
-Status
-CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    std::string parent_path = ConstructParentFolder(options.path_, table_file);
-
-    auto status = CommonUtil::CreateDirectory(parent_path);
-    fiu_do_on("CreateCollectionFilePath.fail_create", status = Status(DB_INVALID_PATH, ""));
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << status.message();
-        return status;
-    }
-
-    table_file.location_ = parent_path + "/" + table_file.file_id_;
-
-    return Status::OK();
-}
-
-Status
-GetCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    std::string parent_path = ConstructParentFolder(options.path_, table_file);
-    std::string file_path = parent_path + "/" + table_file.file_id_;
-
-    // bool s3_enable = false;
-    // server::Config& config = server::Config::GetInstance();
-    // config.GetStorageConfigS3Enable(s3_enable);
-    // fiu_do_on("GetCollectionFilePath.enable_s3", s3_enable = true);
-    // if (s3_enable) {
-    //     /* need not check file existence */
-    //     table_file.location_ = file_path;
-    //     return Status::OK();
-    // }
-
-    if (boost::filesystem::exists(parent_path)) {
-        table_file.location_ = file_path;
-        return Status::OK();
-    }
-
-    std::string msg = "Collection file doesn't exist: " + file_path;
-    if (table_file.file_size_ > 0) {  // no need to pop error for empty file
-        LOG_ENGINE_ERROR_ << msg << " in path: " << options.path_ << " for collection: " << table_file.collection_id_;
-    }
-
-    return Status(DB_ERROR, msg);
-}
-
-Status
-DeleteCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    utils::GetCollectionFilePath(options, table_file);
-    boost::filesystem::remove(table_file.location_);
-    return Status::OK();
-}
-
-Status
-DeleteSegment(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    utils::GetCollectionFilePath(options, table_file);
-    std::string segment_dir;
-    GetParentPath(table_file.location_, segment_dir);
-    boost::filesystem::remove_all(segment_dir);
-    return Status::OK();
-}
-
-Status
-GetParentPath(const std::string& path, std::string& parent_path) {
-    boost::filesystem::path p(path);
-    parent_path = p.parent_path().string();
-    return Status::OK();
-}
-
 bool
 IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2) {
     return index1.index_name_ == index2.index_name_ && index1.extra_params_ == index2.extra_params_ &&
            index1.metric_name_ == index2.metric_name_;
-}
-
-bool
-IsRawIndexType(int32_t type) {
-    return (type == (int32_t)EngineType::FAISS_IDMAP) || (type == (int32_t)EngineType::FAISS_BIN_IDMAP);
 }
 
 bool
@@ -247,80 +122,11 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
     return Status::OK();
 }
 
-std::string
-GetIndexName(int32_t index_type) {
-    static std::map<int32_t, std::string> index_type_name = {
-        {(int32_t)engine::EngineType::FAISS_IDMAP, "FLAT"},
-        {(int32_t)engine::EngineType::FAISS_IVFFLAT, "IVF_FLAT"},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8, "IVF_SQ8"},
-        {(int32_t)engine::EngineType::FAISS_IVFSQ8H, "IVF_SQ8_HYBRID"},
-        {(int32_t)engine::EngineType::FAISS_PQ, "IVF_PQ"},
-#ifdef MILVUS_SUPPORT_SPTAG
-        {(int32_t)engine::EngineType::SPTAG_KDT, "SPTAG_KDT_RNT"},
-        {(int32_t)engine::EngineType::SPTAG_BKT, "SPTAG_BKT_RNT"},
-#endif
-        {(int32_t)engine::EngineType::FAISS_BIN_IDMAP, "BIN_FLAT"},
-        {(int32_t)engine::EngineType::FAISS_BIN_IVFFLAT, "BIN_IVF_FLAT"},
-        {(int32_t)engine::EngineType::HNSW, "HNSW"},
-        {(int32_t)engine::EngineType::NSG_MIX, "NSG"},
-        {(int32_t)engine::EngineType::ANNOY, "ANNOY"}};
-
-    if (index_type_name.find(index_type) == index_type_name.end()) {
-        return "Unknow";
-    }
-
-    return index_type_name[index_type];
-}
-
 void
 SendExitSignal() {
     LOG_SERVER_INFO_ << "Send SIGUSR2 signal to exit";
     pid_t pid = getpid();
     kill(pid, SIGUSR2);
-}
-
-void
-ExitOnWriteError(Status& status) {
-    if (status.code() == SERVER_WRITE_ERROR) {
-        utils::SendExitSignal();
-    }
-}
-
-void
-EraseFromCache(const std::string& item_key) {
-    if (item_key.empty()) {
-        LOG_SERVER_ERROR_ << "Empty key cannot be erased from cache";
-        return;
-    }
-
-    cache::CpuCacheMgr::GetInstance()->EraseItem(item_key);
-
-#ifdef MILVUS_GPU_VERSION
-    std::vector<int64_t> gpus = ParseGPUDevices(config.gpu.search_devices());
-    for (auto& gpu : gpus) {
-        cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(item_key);
-    }
-#endif
-}
-
-std::string
-IndexTypeToStr(const int32_t type) {
-    auto pair = s_index_type2name.find(type);
-    if (pair == s_index_type2name.end()) {
-        return "";
-    }
-
-    return pair->second;
-}
-
-int32_t
-StrToIndexType(const std::string& str) {
-    auto pair = s_index_name2type.find(str);
-    if (pair == s_index_name2type.end()) {
-        return 0;
-    }
-
-    return pair->second;
 }
 
 }  // namespace utils

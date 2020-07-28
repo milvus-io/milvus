@@ -566,7 +566,7 @@ Status
 DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) {
     CHECK_INITIALIZED;
 
-    TimeRecorder rc("SSDBImpl::Query");
+    TimeRecorder rc("DBImpl::Query");
 
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr);
 
@@ -908,7 +908,6 @@ DBImpl::TimingMetricThread() {
 
         swn_metric_.Wait_For(std::chrono::seconds(BACKGROUND_METRIC_INTERVAL));
         StartMetricTask();
-        meta::FilesHolder::PrintInfo();
     }
 }
 

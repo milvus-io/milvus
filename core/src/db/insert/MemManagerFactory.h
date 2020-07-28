@@ -12,7 +12,7 @@
 #pragma once
 
 #include "MemManager.h"
-#include "db/meta/Meta.h"
+#include "db/Options.h"
 
 #include <memory>
 

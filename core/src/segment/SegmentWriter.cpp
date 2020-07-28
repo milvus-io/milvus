@@ -146,7 +146,7 @@ SegmentWriter::WriteFields() {
 Status
 SegmentWriter::WriteBloomFilter() {
     try {
-        TimeRecorder recorder("SSSegmentWriter::WriteBloomFilter");
+        TimeRecorder recorder("SegmentWriter::WriteBloomFilter");
 
         engine::FIXED_FIELD_DATA uid_data;
         auto status = segment_ptr_->GetFixedFieldData(engine::DEFAULT_UID_NAME, uid_data);
@@ -190,7 +190,7 @@ SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilte
     }
 
     try {
-        TimeRecorder recorder("SSSegmentWriter::WriteBloomFilter");
+        TimeRecorder recorder("SegmentWriter::WriteBloomFilter");
 
         auto& ss_codec = codec::Codec::instance();
         ss_codec.GetIdBloomFilterFormat()->Write(fs_ptr_, file_path, id_bloom_filter_ptr);
@@ -224,7 +224,7 @@ SegmentWriter::WriteDeletedDocs(const std::string& file_path, const DeletedDocsP
     }
 
     try {
-        TimeRecorderAuto recorder("SSSegmentWriter::WriteDeletedDocs");
+        TimeRecorderAuto recorder("SegmentWriter::WriteDeletedDocs");
 
         auto& ss_codec = codec::Codec::instance();
         ss_codec.GetDeletedDocsFormat()->Write(fs_ptr_, file_path, deleted_docs);
@@ -260,7 +260,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
 
     LOG_ENGINE_DEBUG_ << "Merging from " << segment_reader->GetSegmentPath() << " to " << GetSegmentPath();
 
-    TimeRecorder recorder("SSSegmentWriter::Merge");
+    TimeRecorder recorder("SegmentWriter::Merge");
 
     // merge deleted docs (Note: this step must before merge raw data)
     segment::DeletedDocsPtr src_deleted_docs;
@@ -425,7 +425,7 @@ SegmentWriter::GetSegmentID(int64_t& id) {
         }
     }
 
-    return Status(DB_ERROR, "SSSegmentWriter::GetSegmentID: null pointer");
+    return Status(DB_ERROR, "SegmentWriter::GetSegmentID: null pointer");
 }
 
 std::string

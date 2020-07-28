@@ -178,62 +178,6 @@ class CollectAddMetrics : CollectMetricsBase {
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class CollectDurationMetrics : CollectMetricsBase {
- public:
-    explicit CollectDurationMetrics(int index_type) : index_type_(index_type) {
-    }
-
-    ~CollectDurationMetrics() {
-        auto total_time = TimeFromBegine();
-        switch (index_type_) {
-            case engine::meta::SegmentSchema::RAW: {
-                server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-                break;
-            }
-            case engine::meta::SegmentSchema::TO_INDEX: {
-                server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-                break;
-            }
-            default: {
-                server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
-                break;
-            }
-        }
-    }
-
- private:
-    int index_type_;
-};
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class CollectSearchTaskMetrics : CollectMetricsBase {
- public:
-    explicit CollectSearchTaskMetrics(int index_type) : index_type_(index_type) {
-    }
-
-    ~CollectSearchTaskMetrics() {
-        auto total_time = TimeFromBegine();
-        switch (index_type_) {
-            case engine::meta::SegmentSchema::RAW: {
-                server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-                break;
-            }
-            case engine::meta::SegmentSchema::TO_INDEX: {
-                server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-                break;
-            }
-            default: {
-                server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
-                break;
-            }
-        }
-    }
-
- private:
-    int index_type_;
-};
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class MetricCollector : CollectMetricsBase {
  public:
     MetricCollector() {
