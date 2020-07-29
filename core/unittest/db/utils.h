@@ -320,6 +320,9 @@ class DBTest : public BaseTest {
     SetUp() override;
     void
     TearDown() override;
+
+ protected:
+    std::shared_ptr<milvus::server::Context> dummy_context_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

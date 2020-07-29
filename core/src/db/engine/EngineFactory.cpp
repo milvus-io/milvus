@@ -46,7 +46,7 @@ EngineFactory::GroupFieldsForIndex(const std::string& collection_name, TargetFie
     for (auto& field_name : field_names) {
         auto field = ss->GetField(field_name);
         auto ftype = field->GetFtype();
-        if (ftype == meta::hybrid::DataType::VECTOR_FLOAT || ftype == meta::hybrid::DataType::VECTOR_BINARY) {
+        if (ftype == meta::DataType::VECTOR_FLOAT || ftype == meta::DataType::VECTOR_BINARY) {
             std::set<std::string> index_field = {field_name};
             field_groups.emplace_back(index_field);
         } else {

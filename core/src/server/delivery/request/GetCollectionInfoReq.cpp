@@ -53,7 +53,7 @@ GetCollectionInfoReq::OnExecute() {
         collection_schema_.extra_params_ = collection->GetParams();
         for (auto& field_kv : collection_mappings) {
             auto field = field_kv.first;
-            if (field->GetFtype() == (engine::snapshot::FTYPE_TYPE)engine::meta::hybrid::DataType::UID) {
+            if (field->GetFtype() == (engine::snapshot::FTYPE_TYPE)engine::meta::DataType::UID) {
                 continue;
             }
 
@@ -68,7 +68,7 @@ GetCollectionInfoReq::OnExecute() {
 
             auto field_name = field->GetName();
             collection_schema_.field_types_.insert(
-                std::make_pair(field_name, (engine::meta::hybrid::DataType)field->GetFtype()));
+                std::make_pair(field_name, (engine::meta::DataType)field->GetFtype()));
             collection_schema_.index_params_.insert(std::make_pair(field_name, json_index_param));
             milvus::json json_extra_param = field->GetParams();
             collection_schema_.field_params_.insert(std::make_pair(field_name, json_extra_param));

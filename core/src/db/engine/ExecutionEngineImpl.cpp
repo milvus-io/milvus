@@ -19,7 +19,6 @@
 #include "config/ServerConfig.h"
 #include "db/SnapshotUtils.h"
 #include "db/Utils.h"
-#include "db/snapshot/CompoundOperations.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
 #include "utils/CommonUtil.h"
@@ -51,41 +50,6 @@
 
 namespace milvus {
 namespace engine {
-
-namespace {
-
-Status
-MappingMetricType(MetricType metric_type, milvus::json& conf) {
-    switch (metric_type) {
-        case MetricType::IP:
-            conf[knowhere::Metric::TYPE] = knowhere::Metric::IP;
-            break;
-        case MetricType::L2:
-            conf[knowhere::Metric::TYPE] = knowhere::Metric::L2;
-            break;
-        case MetricType::HAMMING:
-            conf[knowhere::Metric::TYPE] = knowhere::Metric::HAMMING;
-            break;
-        case MetricType::JACCARD:
-            conf[knowhere::Metric::TYPE] = knowhere::Metric::JACCARD;
-            break;
-        case MetricType::TANIMOTO:
-            conf[knowhere::Metric::TYPE] = knowhere::Metric::TANIMOTO;
-            break;
-        case MetricType::SUBSTRUCTURE:
-            conf[knowhere::Metric::TYPE] = knowhere::Metric::SUBSTRUCTURE;
-            break;
-        case MetricType::SUPERSTRUCTURE:
-            conf[knowhere::Metric::TYPE] = knowhere::Metric::SUPERSTRUCTURE;
-            break;
-        default:
-            return Status(DB_ERROR, "Unsupported metric type");
-    }
-
-    return Status::OK();
-}
-
-}  // namespace
 
 ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
     : gpu_enable_(config.gpu.enable()) {
@@ -125,10 +89,10 @@ ExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
 }
 
 Status
-ExecutionEngineImpl::CreateStructuredIndex(const milvus::engine::meta::hybrid::DataType field_type,
+ExecutionEngineImpl::CreateStructuredIndex(const milvus::engine::meta::DataType field_type,
                                            std::vector<uint8_t>& raw_data, knowhere::IndexPtr& index_ptr) {
     switch (field_type) {
-        case engine::meta::hybrid::DataType::INT32: {
+        case engine::meta::DataType::INT32: {
             auto size = raw_data.size() / sizeof(int32_t);
             std::vector<int32_t> int32_data(size, 0);
             memcpy(int32_data.data(), raw_data.data(), size);
@@ -137,17 +101,17 @@ ExecutionEngineImpl::CreateStructuredIndex(const milvus::engine::meta::hybrid::D
             index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
             break;
         }
-        case engine::meta::hybrid::DataType::INT64: {
+        case engine::meta::DataType::INT64: {
             auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
                 raw_data.size(), reinterpret_cast<const int64_t*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
         }
-        case engine::meta::hybrid::DataType::FLOAT: {
+        case engine::meta::DataType::FLOAT: {
             auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
                 raw_data.size(), reinterpret_cast<const float*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
         }
-        case engine::meta::hybrid::DataType::DOUBLE: {
+        case engine::meta::DataType::DOUBLE: {
             auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
                 raw_data.size(), reinterpret_cast<const double*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
@@ -178,10 +142,13 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
             segment_reader_->LoadStructuredIndex(name, index_ptr);
             index_exist = (index_ptr != nullptr);
             if (!index_exist) {
+                // for structured field, create a simple sorted index for it
+                // we also can do this in BuildIndex step, but for now we do this in Load step
                 std::vector<uint8_t> raw_data;
                 segment_reader_->LoadField(name, raw_data);
                 STATUS_CHECK(CreateStructuredIndex(field_type, raw_data, index_ptr));
                 segment_ptr->SetStructuredIndex(name, index_ptr);
+                index_exist = true;
             }
         }
 
@@ -230,7 +197,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         SegmentPtr segment_ptr;
         segment_reader_->GetSegment(segment_ptr);
         knowhere::VecIndexPtr vec_index = nullptr;
-        std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
+        std::unordered_map<std::string, engine::meta::DataType> attr_type;
 
         auto segment_visitor = segment_reader_->GetSegmentVisitor();
         auto field_visitors = segment_visitor->GetFieldVisitors();
@@ -238,14 +205,14 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             auto& field_visitor = pair.second;
             auto& field = field_visitor->GetField();
             auto type = field->GetFtype();
-            if (field->GetFtype() == (int)engine::meta::hybrid::DataType::VECTOR_FLOAT ||
-                field->GetFtype() == (int)engine::meta::hybrid::DataType::VECTOR_BINARY) {
+            if (field->GetFtype() == (int)engine::meta::DataType::VECTOR_FLOAT ||
+                field->GetFtype() == (int)engine::meta::DataType::VECTOR_BINARY) {
                 segment_ptr->GetVectorIndex(field->GetName(), vec_index);
                 break;
-            } else if (type == (int)engine::meta::hybrid::DataType::UID) {
+            } else if (type == (int)engine::meta::DataType::UID) {
                 continue;
             } else {
-                attr_type.insert(std::make_pair(field->GetName(), (engine::meta::hybrid::DataType)type));
+                attr_type.insert(std::make_pair(field->GetName(), (engine::meta::DataType)type));
             }
         }
 
@@ -280,7 +247,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
 Status
 ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& general_query,
                                      faiss::ConcurrentBitsetPtr& bitset,
-                                     std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                                     std::unordered_map<std::string, meta::DataType>& attr_type,
                                      std::string& vector_placeholder) {
     Status status = Status::OK();
     if (general_query->leaf == nullptr) {
@@ -378,33 +345,33 @@ ProcessIndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr& 
 
 Status
 ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const std::string& field_name,
-                                      const meta::hybrid::DataType& data_type, milvus::json& term_values_json) {
+                                      const meta::DataType& data_type, milvus::json& term_values_json) {
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
     knowhere::IndexPtr index_ptr = nullptr;
     auto attr_index = segment_ptr->GetStructuredIndex(field_name, index_ptr);
     switch (data_type) {
-        case meta::hybrid::DataType::INT8: {
+        case meta::DataType::INT8: {
             ProcessIndexedTermQuery<int8_t>(bitset, index_ptr, term_values_json);
             break;
         }
-        case meta::hybrid::DataType::INT16: {
+        case meta::DataType::INT16: {
             ProcessIndexedTermQuery<int16_t>(bitset, index_ptr, term_values_json);
             break;
         }
-        case meta::hybrid::DataType::INT32: {
+        case meta::DataType::INT32: {
             ProcessIndexedTermQuery<int32_t>(bitset, index_ptr, term_values_json);
             break;
         }
-        case meta::hybrid::DataType::INT64: {
+        case meta::DataType::INT64: {
             ProcessIndexedTermQuery<int64_t>(bitset, index_ptr, term_values_json);
             break;
         }
-        case meta::hybrid::DataType::FLOAT: {
+        case meta::DataType::FLOAT: {
             ProcessIndexedTermQuery<float>(bitset, index_ptr, term_values_json);
             break;
         }
-        case meta::hybrid::DataType::DOUBLE: {
+        case meta::DataType::DOUBLE: {
             ProcessIndexedTermQuery<double>(bitset, index_ptr, term_values_json);
             break;
         }
@@ -415,7 +382,7 @@ ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const 
 
 Status
 ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, const query::TermQueryPtr& term_query,
-                                      std::unordered_map<std::string, meta::hybrid::DataType>& attr_type) {
+                                      std::unordered_map<std::string, meta::DataType>& attr_type) {
     auto status = Status::OK();
     auto term_query_json = term_query->json_obj;
     auto term_it = term_query_json.begin();
@@ -456,31 +423,31 @@ ProcessIndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr&
 }
 
 Status
-ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const meta::hybrid::DataType& data_type,
+ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const meta::DataType& data_type,
                                        knowhere::IndexPtr& index_ptr, milvus::json& range_values_json) {
     auto status = Status::OK();
     switch (data_type) {
-        case meta::hybrid::DataType::INT8: {
+        case meta::DataType::INT8: {
             ProcessIndexedRangeQuery<int8_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case meta::hybrid::DataType::INT16: {
+        case meta::DataType::INT16: {
             ProcessIndexedRangeQuery<int16_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case meta::hybrid::DataType::INT32: {
+        case meta::DataType::INT32: {
             ProcessIndexedRangeQuery<int32_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case meta::hybrid::DataType::INT64: {
+        case meta::DataType::INT64: {
             ProcessIndexedRangeQuery<int64_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case meta::hybrid::DataType::FLOAT: {
+        case meta::DataType::FLOAT: {
             ProcessIndexedRangeQuery<float>(bitset, index_ptr, range_values_json);
             break;
         }
-        case meta::hybrid::DataType::DOUBLE: {
+        case meta::DataType::DOUBLE: {
             ProcessIndexedRangeQuery<double>(bitset, index_ptr, range_values_json);
             break;
         }
@@ -491,7 +458,7 @@ ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const
 }
 
 Status
-ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, meta::DataType>& attr_type,
                                        faiss::ConcurrentBitsetPtr& bitset, const query::RangeQueryPtr& range_query) {
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
@@ -521,131 +488,195 @@ ExecutionEngineImpl::BuildIndex() {
     auto& segment = segment_visitor->GetSegment();
 
     for (auto& field_name : target_fields_) {
-        auto field_visitor = segment_visitor->GetFieldVisitor(field_name);
-        auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (element_visitor == nullptr) {
-            continue;  // no index specified
-        }
-        if (element_visitor->GetFile() != nullptr) {
-            continue;  // index already build?
-        }
-
-        auto& field = field_visitor->GetField();
-        auto& element = element_visitor->GetElement();
-
-        if (!IsVectorField(field)) {
-            continue;  // not vector field?
-        }
-
-        // add segment files
         snapshot::OperationContext context;
         context.prev_partition = snapshot->GetResource<snapshot::Partition>(segment->GetPartitionId());
         auto build_op = std::make_shared<snapshot::ChangeSegmentFileOperation>(context, snapshot);
 
-        auto add_segment_file = [&](const std::string& element_name, snapshot::SegmentFilePtr& seg_file) -> Status {
-            snapshot::SegmentFileContext sf_context;
-            sf_context.field_name = field->GetName();
-            sf_context.field_element_name = element->GetName();
-            sf_context.collection_id = segment->GetCollectionId();
-            sf_context.partition_id = segment->GetPartitionId();
-
-            return build_op->CommitNewSegmentFile(sf_context, seg_file);
-        };
-
-        // create snapshot index file
-        snapshot::SegmentFilePtr index_file;
-        add_segment_file(element->GetName(), index_file);
-
-        // create snapshot compress file
-        std::string index_name = element->GetName();
-        if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
-            index_name == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
-            auto compress_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
-            if (compress_visitor) {
-                std::string compress_name = compress_visitor->GetElement()->GetName();
-                snapshot::SegmentFilePtr compress_file;
-                add_segment_file(compress_name, compress_file);
-            }
-        }
-
-        knowhere::VecIndexPtr index_raw;
-        segment_ptr->GetVectorIndex(field->GetName(), index_raw);
-
-        auto from_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_raw);
-        auto bin_from_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(index_raw);
-        if (from_index == nullptr && bin_from_index == nullptr) {
-            LOG_ENGINE_ERROR_ << "ExecutionEngineImpl: from_index is not IDMAP, skip build index for ";
-            return Status(DB_ERROR, "Field to build index");
+        // create snapshot segment files
+        CollectionIndex index_info;
+        auto status = CreateSnapshotIndexFile(build_op, field_name, index_info);
+        if (!status.ok()) {
+            return status;
         }
 
         // build index by knowhere
-        auto to_index = CreateVecIndex(index_name);
-        if (!to_index) {
-            throw Exception(DB_ERROR, "Unsupported index type");
-        }
-
-        auto element_json = element->GetParams();
-        auto metric_type = element_json[engine::PARAM_INDEX_METRIC_TYPE];
-        auto index_params = element_json[engine::PARAM_INDEX_EXTRA_PARAMS];
-
-        auto field_json = field->GetParams();
-        auto dimension = field_json[milvus::knowhere::meta::DIM];
-
-        auto segment_commit = snapshot->GetSegmentCommitBySegmentId(segment->GetID());
-        auto row_count = segment_commit->GetRowCount();
-
-        milvus::json conf = index_params;
-        conf[knowhere::meta::DIM] = dimension;
-        conf[knowhere::meta::ROWS] = row_count;
-        conf[knowhere::meta::DEVICEID] = gpu_num_;
-        MappingMetricType(metric_type, conf);
-        LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
-        auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(to_index->index_type());
-        if (!adapter->CheckTrain(conf, to_index->index_mode())) {
-            throw Exception(DB_ERROR, "Illegal index params");
-        }
-        LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
-
-        std::vector<segment::doc_id_t> uids;
-        faiss::ConcurrentBitsetPtr blacklist;
-        if (from_index) {
-            auto dataset =
-                knowhere::GenDatasetWithIds(row_count, dimension, from_index->GetRawVectors(), from_index->GetRawIds());
-            to_index->BuildAll(dataset, conf);
-            uids = from_index->GetUids();
-            blacklist = from_index->GetBlacklist();
-        } else if (bin_from_index) {
-            auto dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
-                                                       bin_from_index->GetRawIds());
-            to_index->BuildAll(dataset, conf);
-            uids = bin_from_index->GetUids();
-            blacklist = bin_from_index->GetBlacklist();
-        }
-
-#ifdef MILVUS_GPU_VERSION
-        /* for GPU index, need copy back to CPU */
-        if (to_index->index_mode() == knowhere::IndexMode::MODE_GPU) {
-            auto device_index = std::dynamic_pointer_cast<knowhere::GPUIndex>(to_index);
-            to_index = device_index->CopyGpuToCpu(conf);
-        }
-#endif
-
-        to_index->SetUids(uids);
-        if (blacklist != nullptr) {
-            to_index->SetBlacklist(blacklist);
-        }
-
-        rc.RecordSection("build index");
+        auto field_visitor = segment_visitor->GetFieldVisitor(field_name);
+        auto& field = field_visitor->GetField();
 
         auto root_path = segment_reader_->GetRootPath();
         auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(root_path, segment_visitor);
-        segment_writer_ptr->SetVectorIndex(field->GetName(), to_index);
-        segment_writer_ptr->WriteVectorIndex(field->GetName());
+        if (IsVectorField(field)) {
+            knowhere::VecIndexPtr new_index;
+            status = BuildKnowhereIndex(field_name, index_info, new_index);
+            if (!status.ok()) {
+                return status;
+            }
+            segment_writer_ptr->SetVectorIndex(field_name, new_index);
+            rc.RecordSection("build index");
+        } else {
+            knowhere::IndexPtr index_ptr;
+            segment_ptr->GetStructuredIndex(field_name, index_ptr);
+            segment_writer_ptr->SetStructuredIndex(field_name, index_ptr);
+            rc.RecordSection("build index");
+        }
 
+        // serialze index files
+        status = segment_writer_ptr->WriteVectorIndex(field_name);
+        if (!status.ok()) {
+            return status;
+        }
         rc.RecordSection("serialize index");
 
         // finish transaction
         build_op->Push();
+    }
+
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation, const std::string& field_name,
+                                             CollectionIndex& index_info) {
+    auto segment_visitor = segment_reader_->GetSegmentVisitor();
+    auto& segment = segment_visitor->GetSegment();
+    auto field_visitor = segment_visitor->GetFieldVisitor(field_name);
+    auto& field = field_visitor->GetField();
+
+    auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+    auto& index_element = element_visitor->GetElement();
+    if (element_visitor == nullptr) {
+        return Status(DB_ERROR, "Could not build index: index not specified");  // no index specified
+    }
+
+    snapshot::SegmentFilePtr seg_file = element_visitor->GetFile();
+    if (seg_file != nullptr) {
+        // index already build?
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_reader_->GetRootPath(), seg_file);
+        if (CommonUtil::IsFileExist(file_path)) {
+            return Status(DB_ERROR, "Could not build index: Index file already exist");  // index already build
+        }
+    } else {
+        // create snapshot index file
+        snapshot::SegmentFileContext sf_context;
+        sf_context.field_name = field_name;
+        sf_context.field_element_name = index_element->GetName();
+        sf_context.collection_id = segment->GetCollectionId();
+        sf_context.partition_id = segment->GetPartitionId();
+
+        auto status = operation->CommitNewSegmentFile(sf_context, seg_file);
+        if (!status.ok()) {
+            return status;
+        }
+    }
+
+    // create snapshot compress file
+    std::string index_name = index_element->GetName();
+    if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
+        index_name == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+        auto compress_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+        if (compress_visitor == nullptr) {
+            return Status(DB_ERROR,
+                          "Could not build index: compress element not exist");  // something wrong in CreateIndex
+        }
+
+        auto& compress_element = compress_visitor->GetElement();
+        seg_file = compress_visitor->GetFile();
+        if (seg_file == nullptr) {
+            // create snapshot index compress file
+            snapshot::SegmentFileContext sf_context;
+            sf_context.field_name = field_name;
+            sf_context.field_element_name = compress_element->GetName();
+            sf_context.collection_id = segment->GetCollectionId();
+            sf_context.partition_id = segment->GetPartitionId();
+
+            auto status = operation->CommitNewSegmentFile(sf_context, seg_file);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const CollectionIndex& index_info,
+                                        knowhere::VecIndexPtr& new_index) {
+    SegmentPtr segment_ptr;
+    segment_reader_->GetSegment(segment_ptr);
+
+    knowhere::VecIndexPtr index_raw;
+    segment_ptr->GetVectorIndex(field_name, index_raw);
+
+    auto from_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_raw);
+    auto bin_from_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(index_raw);
+    if (from_index == nullptr && bin_from_index == nullptr) {
+        LOG_ENGINE_ERROR_ << "ExecutionEngineImpl: from_index is not IDMAP, skip build index for " << field_name;
+        throw Exception(DB_ERROR, "ExecutionEngineImpl: from_index is not IDMAP");
+    }
+
+    // build index by knowhere
+    auto to_index = CreateVecIndex(index_info.index_name_);
+    if (!to_index) {
+        throw Exception(DB_ERROR, "Unsupported index type");
+    }
+
+    auto segment_visitor = segment_reader_->GetSegmentVisitor();
+    auto& snapshot = segment_visitor->GetSnapshot();
+    auto& segment = segment_visitor->GetSegment();
+    auto field_visitor = segment_visitor->GetFieldVisitor(field_name);
+    auto& field = field_visitor->GetField();
+
+    auto element_json = index_info.extra_params_;
+    auto metric_type = element_json[engine::PARAM_INDEX_METRIC_TYPE];
+    auto index_params = element_json[engine::PARAM_INDEX_EXTRA_PARAMS];
+
+    auto field_json = field->GetParams();
+    auto dimension = field_json[milvus::knowhere::meta::DIM];
+
+    auto segment_commit = snapshot->GetSegmentCommitBySegmentId(segment->GetID());
+    auto row_count = segment_commit->GetRowCount();
+
+    milvus::json conf = index_params;
+    conf[knowhere::meta::DIM] = dimension;
+    conf[knowhere::meta::ROWS] = row_count;
+    conf[knowhere::meta::DEVICEID] = gpu_num_;
+    conf[knowhere::Metric::TYPE] = metric_type;
+    LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(to_index->index_type());
+    if (!adapter->CheckTrain(conf, to_index->index_mode())) {
+        throw Exception(DB_ERROR, "Illegal index params");
+    }
+    LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
+
+    std::vector<segment::doc_id_t> uids;
+    faiss::ConcurrentBitsetPtr blacklist;
+    if (from_index) {
+        auto dataset =
+            knowhere::GenDatasetWithIds(row_count, dimension, from_index->GetRawVectors(), from_index->GetRawIds());
+        to_index->BuildAll(dataset, conf);
+        uids = from_index->GetUids();
+        blacklist = from_index->GetBlacklist();
+    } else if (bin_from_index) {
+        auto dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
+                                                   bin_from_index->GetRawIds());
+        to_index->BuildAll(dataset, conf);
+        uids = bin_from_index->GetUids();
+        blacklist = bin_from_index->GetBlacklist();
+    }
+
+#ifdef MILVUS_GPU_VERSION
+    /* for GPU index, need copy back to CPU */
+    if (to_index->index_mode() == knowhere::IndexMode::MODE_GPU) {
+        auto device_index = std::dynamic_pointer_cast<knowhere::GPUIndex>(to_index);
+        to_index = device_index->CopyGpuToCpu(conf);
+    }
+#endif
+
+    to_index->SetUids(uids);
+    if (blacklist != nullptr) {
+        to_index->SetBlacklist(blacklist);
     }
 
     return Status::OK();

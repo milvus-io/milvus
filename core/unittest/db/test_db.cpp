@@ -59,7 +59,7 @@ CreateCollection2(std::shared_ptr<DBImpl> db, const std::string& collection_name
     auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR_FLOAT, params);
     context.fields_schema[vector_field] = {};
 
-    std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type = {
+    std::unordered_map<std::string, milvus::engine::meta::DataType> attr_type = {
         {"field_0", milvus::engine::FieldType::INT32},
         {"field_1", milvus::engine::FieldType::INT64},
         {"field_2", milvus::engine::FieldType::DOUBLE},
@@ -226,76 +226,6 @@ TEST_F(DBTest, PartitionTest) {
     ASSERT_EQ(partition_names.size(), 1);
 }
 
-TEST_F(DBTest, IndexTest) {
-    LSN_TYPE lsn = 0;
-    auto next_lsn = [&]() -> decltype(lsn) {
-        return ++lsn;
-    };
-
-    std::string c1 = "c1";
-    auto status = CreateCollection(db_, c1, next_lsn());
-    ASSERT_TRUE(status.ok());
-
-    std::stringstream p_name;
-    auto num = RandomInt(3, 5);
-    for (auto i = 0; i < num; ++i) {
-        p_name.str("");
-        p_name << "partition_" << i;
-        status = db_->CreatePartition(c1, p_name.str());
-        ASSERT_TRUE(status.ok());
-    }
-
-    ScopedSnapshotT ss;
-    status = Snapshots::GetInstance().GetSnapshot(ss, c1);
-    ASSERT_TRUE(status.ok());
-
-    SegmentFileContext sf_context;
-    SFContextBuilder(sf_context, ss);
-
-    auto new_total = 0;
-    auto& partitions = ss->GetResources<Partition>();
-    for (auto& kv : partitions) {
-        num = RandomInt(2, 5);
-        auto row_cnt = 100;
-        for (auto i = 0; i < num; ++i) {
-            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
-        }
-        new_total += num;
-    }
-
-    auto field_element_id = ss->GetFieldElementId(sf_context.field_name, sf_context.field_element_name);
-    ASSERT_NE(field_element_id, 0);
-
-    auto filter1 = [&](SegmentFile::Ptr segment_file) -> bool {
-        if (segment_file->GetFieldElementId() == field_element_id) {
-            return true;
-        }
-        return false;
-    };
-
-    status = Snapshots::GetInstance().GetSnapshot(ss, c1);
-    ASSERT_TRUE(status.ok());
-    auto sf_collector = std::make_shared<SegmentFileCollector>(ss, filter1);
-    sf_collector->Iterate();
-    ASSERT_EQ(new_total, sf_collector->segment_files_.size());
-
-    status = db_->DropIndex(c1, sf_context.field_name);
-//    ASSERT_TRUE(status.ok());
-
-//    status = Snapshots::GetInstance().GetSnapshot(ss, c1);
-//    ASSERT_TRUE(status.ok());
-//    sf_collector = std::make_shared<SegmentFileCollector>(ss, filter1);
-//    sf_collector->Iterate();
-//    ASSERT_EQ(0, sf_collector->segment_files_.size());
-//
-//    {
-//        auto& field_elements = ss->GetResources<FieldElement>();
-//        for (auto& kv : field_elements) {
-//            ASSERT_NE(kv.second->GetID(), field_element_id);
-//        }
-//    }
-}
-
 TEST_F(DBTest, VisitorTest) {
     LSN_TYPE lsn = 0;
     auto next_lsn = [&]() -> decltype(lsn) {
@@ -449,7 +379,7 @@ TEST_F(DBTest, QueryTest) {
     milvus::query::GeneralQueryPtr general_query;
     milvus::query::QueryPtr query_ptr;
     std::vector<std::string> field_names;
-    std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type;
+    std::unordered_map<std::string, milvus::engine::meta::DataType> attr_type;
     milvus::engine::QueryResult result;
     //db_->Query(ctx1, c1, partition_patterns, general_query, query_ptr, field_names, attr_type, result);
 }
@@ -546,4 +476,27 @@ TEST_F(DBTest, MergeTest) {
 
     // TODO: Fix segment file suffix issue.
     ASSERT_EQ(expect_file_paths.size(), segment_file_paths.size());
+}
+
+TEST_F(DBTest, IndexTest) {
+    std::string collection_name = "INDEX_TEST";
+    auto status = CreateCollection2(db_, collection_name, 0);
+    ASSERT_TRUE(status.ok());
+
+    const uint64_t entity_count = 10000;
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities(entity_count, 0, data_chunk);
+
+    status = db_->Insert(collection_name, "", data_chunk);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok());
+
+//    milvus::engine::CollectionIndex index;
+//    index.index_name_ = "IVFLAT";
+//    index.metric_name_ = "L2";
+//    index.extra_params_["nlist"] = 2048;
+//    status = db_->CreateIndex(dummy_context_, collection_name, "vector", index);
+//    ASSERT_TRUE(status.ok());
 }

@@ -43,7 +43,7 @@ namespace server {
 
 Status
 ReqHandler::CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                             std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                             std::unordered_map<std::string, engine::meta::DataType>& field_types,
                              std::unordered_map<std::string, milvus::json>& field_index_params,
                              std::unordered_map<std::string, std::string>& field_params, milvus::json& json_param) {
     BaseReqPtr req_ptr = CreateCollectionReq::Create(context, collection_name, field_types, field_index_params,

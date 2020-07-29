@@ -20,6 +20,7 @@ const char* DEFAULT_RAW_DATA_NAME = "_raw";
 const char* DEFAULT_BLOOM_FILTER_NAME = "_blf";
 const char* DEFAULT_DELETED_DOCS_NAME = "_del";
 const char* DEFAULT_INDEX_NAME = "_idx";
+const char* DEFAULT_INDEX_COMPRESS_NAME = "_compress";
 
 const char* PARAM_COLLECTION_DIMENSION = "dim";
 const char* PARAM_INDEX_METRIC_TYPE = "metric_type";

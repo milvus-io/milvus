@@ -30,7 +30,7 @@ namespace server {
 
 CreateCollectionReq::CreateCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
                                          const std::string& collection_name,
-                                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                                         std::unordered_map<std::string, engine::meta::DataType>& field_types,
                                          std::unordered_map<std::string, milvus::json>& field_index_params,
                                          std::unordered_map<std::string, std::string>& field_params,
                                          milvus::json& extra_params)
@@ -44,7 +44,7 @@ CreateCollectionReq::CreateCollectionReq(const std::shared_ptr<milvus::server::C
 
 BaseReqPtr
 CreateCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                            std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                            std::unordered_map<std::string, engine::meta::DataType>& field_types,
                             std::unordered_map<std::string, milvus::json>& field_index_params,
                             std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params) {
     return std::shared_ptr<BaseReq>(
@@ -83,8 +83,8 @@ CreateCollectionReq::OnExecute() {
             json field_params;
             if (!field_params_.at(field_name).empty()) {
                 field_params = json::parse(field_params_.at(field_name));
-                if (field_type.second == engine::meta::hybrid::DataType::VECTOR_FLOAT ||
-                    field_type.second == engine::meta::hybrid::DataType::VECTOR_BINARY) {
+                if (field_type.second == engine::meta::DataType::VECTOR_FLOAT ||
+                    field_type.second == engine::meta::DataType::VECTOR_BINARY) {
                     if (!field_params.contains(engine::PARAM_COLLECTION_DIMENSION)) {
                         return Status{milvus::SERVER_INVALID_VECTOR_DIMENSION,
                                       "Dimension should be defined in vector field extra_params"};

@@ -39,7 +39,7 @@ class StructuredIndexFormat {
     Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::IndexPtr& index);
 
     void
-    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::meta::hybrid::DataType data_type,
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::meta::DataType data_type,
           const knowhere::IndexPtr& index);
 
     // No copy and move
@@ -53,7 +53,7 @@ class StructuredIndexFormat {
 
  private:
     knowhere::IndexPtr
-    CreateStructuredIndex(const engine::meta::hybrid::DataType data_type);
+    CreateStructuredIndex(const engine::meta::DataType data_type);
 };
 
 using StructuredIndexFormatPtr = std::shared_ptr<StructuredIndexFormat>;
