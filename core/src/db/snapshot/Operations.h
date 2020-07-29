@@ -193,6 +193,7 @@ class Operations : public std::enable_shared_from_this<Operations> {
     std::condition_variable finish_cond_;
     ID_TYPE uid_;
     OperationsType type_;
+    double execution_time_ = 0;
 };
 
 template <typename StepT>

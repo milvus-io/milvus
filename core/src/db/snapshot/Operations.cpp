@@ -70,6 +70,7 @@ Operations::ToString() const {
             ss << " | " << FailureString();
         }
     }
+    ss << " | " << execution_time_ / 1000 << " ms";
     return ss.str();
 }
 
@@ -197,7 +198,11 @@ Operations::ApplyToStore(StorePtr store) {
         Done(store);
         return status_;
     }
+    auto start_time = std::chrono::high_resolution_clock::now();
     auto status = OnExecute(store);
+    execution_time_ =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start_time)
+            .count();
     SetStatus(status);
     Done(store);
     return status_;
