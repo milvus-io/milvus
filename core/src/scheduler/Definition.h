@@ -32,7 +32,7 @@ using ExecutionEnginePtr = engine::ExecutionEnginePtr;
 using EngineFactory = engine::EngineFactory;
 using EngineType = engine::EngineType;
 using MetricType = engine::MetricType;
-using DataType = engine::meta::hybrid::DataType;
+using DataType = engine::meta::DataType;
 
 constexpr uint64_t TASK_TABLE_MAX_COUNT = 1ULL << 16ULL;
 

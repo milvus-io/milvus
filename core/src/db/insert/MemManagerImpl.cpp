@@ -90,47 +90,47 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, int64_t partition_id, const
         size_t data_size = iter->second.size();
 
         snapshot::FieldPtr field = ss->GetField(name);
-        meta::hybrid::DataType ftype = static_cast<meta::hybrid::DataType>(field->GetFtype());
+        meta::DataType ftype = static_cast<meta::DataType>(field->GetFtype());
         std::string err_msg = "Illegal data size for chunk field: ";
         switch (ftype) {
-            case meta::hybrid::DataType::BOOL:
+            case meta::DataType::BOOL:
                 if (data_size != chunk->count_ * sizeof(bool)) {
                     return Status(DB_ERROR, err_msg + name);
                 }
                 break;
-            case meta::hybrid::DataType::DOUBLE:
+            case meta::DataType::DOUBLE:
                 if (data_size != chunk->count_ * sizeof(double)) {
                     return Status(DB_ERROR, err_msg + name);
                 }
                 break;
-            case meta::hybrid::DataType::FLOAT:
+            case meta::DataType::FLOAT:
                 if (data_size != chunk->count_ * sizeof(float)) {
                     return Status(DB_ERROR, err_msg + name);
                 }
                 break;
-            case meta::hybrid::DataType::INT8:
+            case meta::DataType::INT8:
                 if (data_size != chunk->count_ * sizeof(uint8_t)) {
                     return Status(DB_ERROR, err_msg + name);
                 }
                 break;
-            case meta::hybrid::DataType::INT16:
+            case meta::DataType::INT16:
                 if (data_size != chunk->count_ * sizeof(uint16_t)) {
                     return Status(DB_ERROR, err_msg + name);
                 }
                 break;
-            case meta::hybrid::DataType::INT32:
+            case meta::DataType::INT32:
                 if (data_size != chunk->count_ * sizeof(uint32_t)) {
                     return Status(DB_ERROR, err_msg + name);
                 }
                 break;
-            case meta::hybrid::DataType::UID:
-            case meta::hybrid::DataType::INT64:
+            case meta::DataType::UID:
+            case meta::DataType::INT64:
                 if (data_size != chunk->count_ * sizeof(uint64_t)) {
                     return Status(DB_ERROR, err_msg + name);
                 }
                 break;
-            case meta::hybrid::DataType::VECTOR_FLOAT:
-            case meta::hybrid::DataType::VECTOR_BINARY: {
+            case meta::DataType::VECTOR_FLOAT:
+            case meta::DataType::VECTOR_BINARY: {
                 json params = field->GetParams();
                 if (params.find(knowhere::meta::DIM) == params.end()) {
                     std::string msg = "Vector field params must contain: dimension";
@@ -139,8 +139,7 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, int64_t partition_id, const
                 }
 
                 int64_t dimension = params[knowhere::meta::DIM];
-                int64_t row_size =
-                    (ftype == meta::hybrid::DataType::VECTOR_BINARY) ? dimension / 8 : dimension * sizeof(float);
+                int64_t row_size = (ftype == meta::DataType::VECTOR_BINARY) ? dimension / 8 : dimension * sizeof(float);
                 if (data_size != chunk->count_ * row_size) {
                     return Status(DB_ERROR, err_msg + name);
                 }
