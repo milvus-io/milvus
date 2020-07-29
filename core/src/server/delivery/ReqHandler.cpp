@@ -157,9 +157,10 @@ ReqHandler::Insert(const std::shared_ptr<Context>& context, const std::string& c
 Status
 ReqHandler::GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
                           const engine::IDNumbers& ids, std::vector<std::string>& field_names,
-                          engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
+                          std::vector<bool>& valid_row, engine::snapshot::CollectionMappings& field_mappings,
+                          engine::DataChunkPtr& data_chunk) {
     BaseReqPtr req_ptr =
-        GetEntityByIDReq::Create(context, collection_name, ids, field_names, field_mappings, data_chunk);
+        GetEntityByIDReq::Create(context, collection_name, ids, field_names, valid_row, field_mappings, data_chunk);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
