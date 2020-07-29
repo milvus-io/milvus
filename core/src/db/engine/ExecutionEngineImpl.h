@@ -81,9 +81,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     TargetFields target_fields_;
 
-    knowhere::VecIndexPtr vec_index_ptr_ = nullptr;
-    std::unordered_map<std::string, knowhere::IndexPtr> attr_index_;
-
     int64_t entity_count_;
 
     int64_t gpu_num_ = 0;

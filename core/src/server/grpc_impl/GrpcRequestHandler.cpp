@@ -636,7 +636,7 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
         return ::grpc::Status::OK;
     }
     for (int i = 0; i < request->fields_size(); ++i) {
-        auto field = request->fields(i);
+        const auto& field = request->fields(i);
         auto field_name = field.name();
         field_types.insert(std::make_pair(field_name, (engine::meta::hybrid::DataType)field.type()));
 
@@ -1515,18 +1515,27 @@ ParseRangeQuery(const nlohmann::json& range_json, query::RangeQueryPtr& range_qu
 #endif
 
 Status
-GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query) {
+GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query,
+                                         std::string& field_name) {
     auto status = Status::OK();
     if (json.contains("term")) {
         auto leaf_query = std::make_shared<query::LeafQuery>();
         auto term_query = std::make_shared<query::TermQuery>();
-        term_query->json_obj = json["term"];
+        nlohmann::json json_obj = json["term"];
+        term_query->json_obj = json_obj;
+        nlohmann::json::iterator json_it = json_obj.begin();
+        field_name = json_it.key();
+
         leaf_query->term_query = term_query;
         query->AddLeafQuery(leaf_query);
     } else if (json.contains("range")) {
         auto leaf_query = std::make_shared<query::LeafQuery>();
         auto range_query = std::make_shared<query::RangeQuery>();
-        range_query->json_obj = json["range"];
+        nlohmann::json json_obj = json["range"];
+        range_query->json_obj = json_obj;
+        nlohmann::json::iterator json_it = json_obj.begin();
+        field_name = json_it.key();
+
         leaf_query->range_query = range_query;
         query->AddLeafQuery(leaf_query);
     } else if (json.contains("vector")) {
@@ -1540,7 +1549,8 @@ GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::Bool
 }
 
 Status
-GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query) {
+GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
+                                            query::QueryPtr& query_ptr) {
     auto status = Status::OK();
     for (auto& el : query_json.items()) {
         if (el.key() == "must") {
@@ -1554,15 +1564,13 @@ GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, qu
             for (auto& json : must_json) {
                 auto must_query = std::make_shared<query::BooleanQuery>();
                 if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
-                    status = ProcessBooleanQueryJson(json, must_query);
-                    if (!status.ok()) {
-                        return status;
-                    }
+                    STATUS_CHECK(ProcessBooleanQueryJson(json, must_query, query_ptr));
                     boolean_query->AddBooleanQuery(must_query);
                 } else {
-                    status = ProcessLeafQueryJson(json, boolean_query);
-                    if (!status.ok()) {
-                        return status;
+                    std::string field_name;
+                    STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name));
+                    if (!field_name.empty()) {
+                        query_ptr->index_fields.insert(field_name);
                     }
                 }
             }
@@ -1577,15 +1585,13 @@ GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, qu
             for (auto& json : should_json) {
                 auto should_query = std::make_shared<query::BooleanQuery>();
                 if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
-                    status = ProcessBooleanQueryJson(json, should_query);
-                    if (!status.ok()) {
-                        return status;
-                    }
+                    STATUS_CHECK(ProcessBooleanQueryJson(json, should_query, query_ptr));
                     boolean_query->AddBooleanQuery(should_query);
                 } else {
-                    status = ProcessLeafQueryJson(json, boolean_query);
-                    if (!status.ok()) {
-                        return status;
+                    std::string field_name;
+                    STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name));
+                    if (!field_name.empty()) {
+                        query_ptr->index_fields.insert(field_name);
                     }
                 }
             }
@@ -1600,15 +1606,13 @@ GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, qu
             for (auto& json : should_json) {
                 if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
                     auto must_not_query = std::make_shared<query::BooleanQuery>();
-                    status = ProcessBooleanQueryJson(json, must_not_query);
-                    if (!status.ok()) {
-                        return status;
-                    }
+                    STATUS_CHECK(ProcessBooleanQueryJson(json, must_not_query, query_ptr));
                     boolean_query->AddBooleanQuery(must_not_query);
                 } else {
-                    status = ProcessLeafQueryJson(json, boolean_query);
-                    if (!status.ok()) {
-                        return status;
+                    std::string field_name;
+                    STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name));
+                    if (!field_name.empty()) {
+                        query_ptr->index_fields.insert(field_name);
                     }
                 }
             }
@@ -1624,13 +1628,13 @@ GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, qu
 Status
 GrpcRequestHandler::DeserializeJsonToBoolQuery(
     const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vector_params, const std::string& dsl_string,
-    query::BooleanQueryPtr& boolean_query, std::unordered_map<std::string, query::VectorQueryPtr>& vectors) {
+    query::BooleanQueryPtr& boolean_query, query::QueryPtr& query_ptr) {
     try {
         nlohmann::json dsl_json = json::parse(dsl_string);
 
         auto status = Status::OK();
         for (const auto& vector_param : vector_params) {
-            std::string vector_string = vector_param.json();
+            const std::string& vector_string = vector_param.json();
             nlohmann::json vector_json = json::parse(vector_string);
             json::iterator it = vector_json.begin();
             std::string placeholder = it.key();
@@ -1638,7 +1642,8 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             auto vector_query = std::make_shared<query::VectorQuery>();
             json::iterator vector_param_it = it.value().begin();
             if (vector_param_it != it.value().end()) {
-                vector_query->field_name = vector_param_it.key();
+                std::string field_name = vector_param_it.key();
+                vector_query->field_name = field_name;
                 int64_t topk = vector_param_it.value()["topk"];
                 status = server::ValidateSearchTopk(topk);
                 if (!status.ok()) {
@@ -1648,6 +1653,7 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
                 if (!vector_param_it.value()["params"].empty()) {
                     vector_query->extra_params = vector_param_it.value()["params"];
                 }
+                query_ptr->index_fields.insert(field_name);
             }
 
             engine::VectorsData vector_data;
@@ -1656,11 +1662,11 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             vector_query->query_vector.binary_data = vector_data.binary_data_;
             vector_query->query_vector.float_data = vector_data.float_data_;
 
-            vectors.insert(std::make_pair(placeholder, vector_query));
+            query_ptr->vectors.insert(std::make_pair(placeholder, vector_query));
         }
         if (dsl_json.contains("bool")) {
             auto boolean_query_json = dsl_json["bool"];
-            status = ProcessBooleanQueryJson(boolean_query_json, boolean_query);
+            status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr);
             if (!status.ok()) {
                 return status;
             }
@@ -1694,9 +1700,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     query::QueryPtr query_ptr = std::make_shared<query::Query>();
     query_ptr->collection_id = request->collection_name();
 
-    std::unordered_map<std::string, query::VectorQueryPtr> vectors;
-
-    status = DeserializeJsonToBoolQuery(request->vector_param(), request->dsl(), boolean_query, vectors);
+    status = DeserializeJsonToBoolQuery(request->vector_param(), request->dsl(), boolean_query, query_ptr);
     if (!status.ok()) {
         SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
@@ -1707,8 +1711,6 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
         SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
     }
-
-    query_ptr->vectors = vectors;
 
     query::GeneralQueryPtr general_query = std::make_shared<query::GeneralQuery>();
     query::GenBinaryQuery(boolean_query, general_query->bin);
