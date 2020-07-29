@@ -53,10 +53,6 @@ namespace milvus {
 namespace engine {
 
 namespace {
-Status
-GetRequiredIndexFields(const query::QueryPtr& query_ptr, TargetFields& field_names) {
-    return Status::OK();
-}
 
 Status
 MappingMetricType(MetricType metric_type, milvus::json& conf) {
@@ -125,10 +121,7 @@ ExecutionEngineImpl::Load(ExecutionEngineContext& context) {
 
 Status
 ExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
-    TargetFields field_names;
-    GetRequiredIndexFields(query_ptr, field_names);
-
-    return Load(field_names);
+    return Load(query_ptr->index_fields);
 }
 
 Status
@@ -177,9 +170,9 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
 
         bool index_exist = false;
         if (field_type == FIELD_TYPE::VECTOR_FLOAT || field_type == FIELD_TYPE::VECTOR_BINARY) {
-            // knowhere::VecIndexPtr index_ptr;
-            segment_reader_->LoadVectorIndex(name, vec_index_ptr_);
-            index_exist = (vec_index_ptr_ != nullptr);
+            knowhere::VecIndexPtr index_ptr;
+            segment_reader_->LoadVectorIndex(name, index_ptr);
+            index_exist = (index_ptr != nullptr);
         } else {
             knowhere::IndexPtr index_ptr;
             segment_reader_->LoadStructuredIndex(name, index_ptr);
@@ -187,9 +180,9 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
             if (!index_exist) {
                 std::vector<uint8_t> raw_data;
                 segment_reader_->LoadField(name, raw_data);
-                auto status = CreateStructuredIndex(field_type, raw_data, index_ptr);
+                STATUS_CHECK(CreateStructuredIndex(field_type, raw_data, index_ptr));
+                segment_ptr->SetStructuredIndex(name, index_ptr);
             }
-            attr_index_.insert(std::make_pair(name, index_ptr));
         }
 
         // index not yet build, load raw data
@@ -233,23 +226,30 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         faiss::ConcurrentBitsetPtr bitset;
         std::string vector_placeholder;
         faiss::ConcurrentBitsetPtr list;
-        list = vec_index_ptr_->GetBlacklist();
-        entity_count_ = list->capacity();
 
+        SegmentPtr segment_ptr;
+        segment_reader_->GetSegment(segment_ptr);
+        knowhere::VecIndexPtr vec_index = nullptr;
         std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
 
         auto field_visitors = segment_visitor_->GetFieldVisitors();
         for (auto& pair : field_visitors) {
             auto& field_visitor = pair.second;
-            auto field = field_visitor->GetField();
+            auto& field = field_visitor->GetField();
             auto type = field->GetFtype();
-            if (type == (int)engine::meta::hybrid::DataType::VECTOR_BINARY ||
-                type == (int)engine::meta::hybrid::DataType::VECTOR_FLOAT ||
-                type == (int)engine::meta::hybrid::DataType::UID) {
+            if (field->GetFtype() == (int)engine::meta::hybrid::DataType::VECTOR_FLOAT ||
+                field->GetFtype() == (int)engine::meta::hybrid::DataType::VECTOR_BINARY) {
+                segment_ptr->GetVectorIndex(field->GetName(), vec_index);
+                break;
+            } else if (type == (int)engine::meta::hybrid::DataType::UID) {
+                continue;
+            } else {
                 attr_type.insert(std::make_pair(field->GetName(), (engine::meta::hybrid::DataType)type));
             }
         }
 
+        list = vec_index->GetBlacklist();
+        entity_count_ = list->capacity();
         // Parse general query
         auto status = ExecBinaryQuery(context.query_ptr_->root, bitset, attr_type, vector_placeholder);
         if (!status.ok()) {
@@ -262,7 +262,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
                 list->clear(i);
             }
         }
-        vec_index_ptr_->SetBlacklist(list);
+        vec_index->SetBlacklist(list);
 
         auto vector_query = context.query_ptr_->vectors.at(vector_placeholder);
 
@@ -378,29 +378,33 @@ ProcessIndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr& 
 Status
 ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const std::string& field_name,
                                       const meta::hybrid::DataType& data_type, milvus::json& term_values_json) {
+    SegmentPtr segment_ptr;
+    segment_reader_->GetSegment(segment_ptr);
+    knowhere::IndexPtr index_ptr = nullptr;
+    auto attr_index = segment_ptr->GetStructuredIndex(field_name, index_ptr);
     switch (data_type) {
         case meta::hybrid::DataType::INT8: {
-            ProcessIndexedTermQuery<int8_t>(bitset, attr_index_.at(field_name), term_values_json);
+            ProcessIndexedTermQuery<int8_t>(bitset, index_ptr, term_values_json);
             break;
         }
         case meta::hybrid::DataType::INT16: {
-            ProcessIndexedTermQuery<int16_t>(bitset, attr_index_.at(field_name), term_values_json);
+            ProcessIndexedTermQuery<int16_t>(bitset, index_ptr, term_values_json);
             break;
         }
         case meta::hybrid::DataType::INT32: {
-            ProcessIndexedTermQuery<int32_t>(bitset, attr_index_.at(field_name), term_values_json);
+            ProcessIndexedTermQuery<int32_t>(bitset, index_ptr, term_values_json);
             break;
         }
         case meta::hybrid::DataType::INT64: {
-            ProcessIndexedTermQuery<int64_t>(bitset, attr_index_.at(field_name), term_values_json);
+            ProcessIndexedTermQuery<int64_t>(bitset, index_ptr, term_values_json);
             break;
         }
         case meta::hybrid::DataType::FLOAT: {
-            ProcessIndexedTermQuery<float>(bitset, attr_index_.at(field_name), term_values_json);
+            ProcessIndexedTermQuery<float>(bitset, index_ptr, term_values_json);
             break;
         }
         case meta::hybrid::DataType::DOUBLE: {
-            ProcessIndexedTermQuery<double>(bitset, attr_index_.at(field_name), term_values_json);
+            ProcessIndexedTermQuery<double>(bitset, index_ptr, term_values_json);
             break;
         }
         default: { return Status{SERVER_INVALID_ARGUMENT, "Attribute:" + field_name + " type is wrong"}; }
@@ -488,12 +492,17 @@ ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const
 Status
 ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
                                        faiss::ConcurrentBitsetPtr& bitset, const query::RangeQueryPtr& range_query) {
+    SegmentPtr segment_ptr;
+    segment_reader_->GetSegment(segment_ptr);
+
     auto status = Status::OK();
     auto range_query_json = range_query->json_obj;
     auto range_it = range_query_json.begin();
     if (range_it != range_query_json.end()) {
         const std::string& field_name = range_it.key();
-        IndexedRangeQuery(bitset, attr_type.at(field_name), attr_index_.at(field_name), range_it.value());
+        knowhere::IndexPtr index_ptr = nullptr;
+        segment_ptr->GetStructuredIndex(field_name, index_ptr);
+        IndexedRangeQuery(bitset, attr_type.at(field_name), index_ptr, range_it.value());
     }
     return Status::OK();
 }
