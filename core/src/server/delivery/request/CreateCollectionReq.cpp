@@ -82,12 +82,10 @@ CreateCollectionReq::OnExecute() {
             int64_t dimension = 0;
             json field_params;
             if (!field_params_.at(field_name).empty()) {
-                field_params = field_params_.at(field_name);
+                field_params = json::parse(field_params_.at(field_name));
                 if (field_type.second == engine::meta::hybrid::DataType::VECTOR_FLOAT ||
                     field_type.second == engine::meta::hybrid::DataType::VECTOR_BINARY) {
-                    if (field_params.contains(engine::PARAM_COLLECTION_DIMENSION)) {
-                        dimension = field_params[engine::PARAM_COLLECTION_DIMENSION].get<int64_t>();
-                    } else {
+                    if (!field_params.contains(engine::PARAM_COLLECTION_DIMENSION)) {
                         return Status{milvus::SERVER_INVALID_VECTOR_DIMENSION,
                                       "Dimension should be defined in vector field extra_params"};
                     }

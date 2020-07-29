@@ -13,6 +13,7 @@
 
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -114,6 +115,7 @@ struct Query {
     std::string collection_id;
     std::vector<std::string> partitions;
     std::vector<std::string> field_names;
+    std::set<std::string> index_fields;
 };
 using QueryPtr = std::shared_ptr<Query>;
 

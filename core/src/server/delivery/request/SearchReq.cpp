@@ -63,13 +63,17 @@ SearchReq::OnExecute() {
             }
         }
 
-        int64_t dimension = collection->GetParams()[engine::DIMENSION].get<int64_t>();
+        int64_t dimension = 0;
 
         // step 4: Get field info
         std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
         for (auto& schema : fields_schema) {
-            field_types.insert(
-                std::make_pair(schema.first->GetName(), (engine::meta::hybrid::DataType)schema.first->GetFtype()));
+            auto field = schema.first;
+            field_types.insert(std::make_pair(field->GetName(), (engine::meta::hybrid::DataType)field->GetFtype()));
+            if (field->GetFtype() == (int)engine::meta::hybrid::DataType::VECTOR_FLOAT ||
+                field->GetFtype() == (int)engine::meta::hybrid::DataType::VECTOR_BINARY) {
+                dimension = field->GetParams()[engine::DIMENSION];
+            }
         }
 
         // step 5: check field names

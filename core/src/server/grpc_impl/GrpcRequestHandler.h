@@ -321,13 +321,14 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     Status
     DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vector_params,
                                const std::string& dsl_string, query::BooleanQueryPtr& boolean_query,
-                               std::unordered_map<std::string, query::VectorQueryPtr>& query_ptr);
+                               query::QueryPtr& query_ptr);
 
     Status
-    ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query);
+    ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
+                            query::QueryPtr& query_ptr);
 
     Status
-    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query);
+    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query, std::string& field_name);
 
  private:
     ReqHandler req_handler_;
