@@ -31,11 +31,10 @@ def get_segment_id(connect, collection, nb=1, vec_type='float', index_params=Non
     if index_params:
         connect.create_index(collection, field_name, default_index_name, index_params)
     stats = connect.get_collection_stats(collection)
-    # import pdb;pdb.set_trace()
     return ids, stats["partitions"][0]["segments"][0]["id"]
 
 
-class TestGetVectorIdsBase:
+class TestListIdInSegmentBase:
         
     """
     ******************************************************************
@@ -91,7 +90,7 @@ class TestGetVectorIdsBase:
         ids, segment_id = get_segment_id(connect, collection)
         segment = None
         with pytest.raises(Exception) as e:
-            vector_ids = connect.list_id_in_segment(collection, segment_id)
+            vector_ids = connect.list_id_in_segment(collection, segment)
 
     def test_list_id_in_segment_name_not_existed(self, connect, collection):
         '''
@@ -194,7 +193,7 @@ class TestGetVectorIdsBase:
         assert vector_ids[0] == ids[1]
 
 
-class TestGetVectorIdsIP:
+class TestListIdInSegmentIP:
     """
     ******************************************************************
       The following cases are used to test `list_id_in_segment` function
@@ -288,7 +287,7 @@ class TestGetVectorIdsIP:
         assert vector_ids[0] == ids[1]
 
 
-class TestGetVectorIdsJAC:
+class TestListIdInSegmentJAC:
     """
     ******************************************************************
       The following cases are used to test `list_id_in_segment` function
@@ -346,8 +345,8 @@ class TestGetVectorIdsJAC:
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        ids, name = get_segment_name(connect, jac_collection, nb=nb, index_params=get_jaccard_index, vec_type='binary')
-        vector_ids = connect.list_id_in_segment(jac_collection, name)
+        ids, seg_id = get_segment_id(connect, jac_collection, nb=nb, index_params=get_jaccard_index, vec_type='binary')
+        vector_ids = connect.list_id_in_segment(jac_collection, seg_id)
         # TODO: 
 
     def test_list_id_in_segment_with_index_B(self, connect, jac_collection, get_jaccard_index):
