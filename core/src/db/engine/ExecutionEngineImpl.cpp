@@ -518,20 +518,27 @@ ExecutionEngineImpl::BuildIndex() {
                 return status;
             }
             segment_writer_ptr->SetVectorIndex(field_name, new_index);
-            rc.RecordSection("build index");
+            rc.RecordSection("build structured index");
+
+            // serialze index files
+            status = segment_writer_ptr->WriteVectorIndex(field_name);
+            if (!status.ok()) {
+                return status;
+            }
+            rc.RecordSection("serialize vector index");
         } else {
             knowhere::IndexPtr index_ptr;
             segment_ptr->GetStructuredIndex(field_name, index_ptr);
             segment_writer_ptr->SetStructuredIndex(field_name, index_ptr);
-            rc.RecordSection("build index");
-        }
+            rc.RecordSection("build structured index");
 
-        // serialze index files
-        status = segment_writer_ptr->WriteVectorIndex(field_name);
-        if (!status.ok()) {
-            return status;
+            // serialze index files
+            status = segment_writer_ptr->WriteStructuredIndex(field_name);
+            if (!status.ok()) {
+                return status;
+            }
+            rc.RecordSection("serialize structured index");
         }
-        rc.RecordSection("serialize index");
 
         // finish transaction
         build_op->Push();
