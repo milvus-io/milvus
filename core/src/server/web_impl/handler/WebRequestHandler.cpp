@@ -804,13 +804,14 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
 Status
 WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
                                   std::vector<std::string>& field_names, nlohmann::json& json_out) {
+    std::vector<bool> valid_row;
     engine::DataChunkPtr data_chunk;
     engine::snapshot::CollectionMappings field_mappings;
 
     std::vector<engine::AttrsData> attr_batch;
     std::vector<engine::VectorsData> vector_batch;
-    auto status =
-        req_handler_.GetEntityByID(context_ptr_, collection_name, ids, field_names, field_mappings, data_chunk);
+    auto status = req_handler_.GetEntityByID(context_ptr_, collection_name, ids, field_names, valid_row, field_mappings,
+                                             data_chunk);
     if (!status.ok()) {
         return status;
     }
@@ -1679,6 +1680,7 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
             StringHelpFunctions::SplitStringByDelimeter(query_fields->c_str(), ",", field_names);
         }
 
+        std::vector<bool> valid_row;
         nlohmann::json entity_result_json;
         status = GetEntityByIDs(collection_name->std_str(), entity_ids, field_names, entity_result_json);
         if (!status.ok()) {
