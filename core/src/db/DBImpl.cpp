@@ -206,7 +206,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     // check uid existence/validation
     bool has_uid = false;
     for (auto& pair : ctx.fields_schema) {
-        if (pair.first->GetFtype() == meta::hybrid::DataType::UID) {
+        if (pair.first->GetFtype() == meta::DataType::UID) {
             has_uid = true;
             break;
         }
@@ -524,14 +524,16 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
 
 Status
 DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                      const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) {
+                      const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
+                      DataChunkPtr& data_chunk) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     std::string dir_root = options_.meta_.path_;
-    auto handler = std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, dir_root, id_array, field_names);
+    auto handler =
+        std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, dir_root, id_array, field_names, valid_row);
     handler->Iterate();
     STATUS_CHECK(handler->GetStatus());
 
@@ -566,7 +568,7 @@ Status
 DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) {
     CHECK_INITIALIZED;
 
-    TimeRecorder rc("SSDBImpl::Query");
+    TimeRecorder rc("DBImpl::Query");
 
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr);
 
@@ -908,7 +910,6 @@ DBImpl::TimingMetricThread() {
 
         swn_metric_.Wait_For(std::chrono::seconds(BACKGROUND_METRIC_INTERVAL));
         StartMetricTask();
-        meta::FilesHolder::PrintInfo();
     }
 }
 

@@ -12,7 +12,6 @@
 #pragma once
 
 #include "db/Types.h"
-#include "db/meta/FilesHolder.h"
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/Snapshot.h"
 #include "segment/Segment.h"
@@ -80,7 +79,7 @@ struct GetEntityByIdSegmentHandler : public snapshot::IterateHandler<snapshot::S
     using BaseT = snapshot::IterateHandler<ResourceT>;
     GetEntityByIdSegmentHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
                                 const std::string& dir_root, const IDNumbers& ids,
-                                const std::vector<std::string>& field_names);
+                                const std::vector<std::string>& field_names, std::vector<bool>& valid_row);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
@@ -90,6 +89,7 @@ struct GetEntityByIdSegmentHandler : public snapshot::IterateHandler<snapshot::S
     const engine::IDNumbers ids_;
     const std::vector<std::string> field_names_;
     engine::DataChunkPtr data_chunk_;
+    std::vector<bool>& valid_row_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

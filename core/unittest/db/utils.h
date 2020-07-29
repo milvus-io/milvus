@@ -46,7 +46,7 @@ using PartitionContext = milvus::engine::snapshot::PartitionContext;
 using DropIndexOperation = milvus::engine::snapshot::DropIndexOperation;
 using AddFieldElementOperation = milvus::engine::snapshot::AddFieldElementOperation;
 using DropAllIndexOperation = milvus::engine::snapshot::DropAllIndexOperation;
-using AddSegmentFileOperation = milvus::engine::snapshot::AddSegmentFileOperation;
+using ChangeSegmentFileOperation = milvus::engine::snapshot::ChangeSegmentFileOperation;
 using MergeOperation = milvus::engine::snapshot::MergeOperation;
 using CreateCollectionOperation = milvus::engine::snapshot::CreateCollectionOperation;
 using NewSegmentOperation = milvus::engine::snapshot::NewSegmentOperation;
@@ -320,6 +320,9 @@ class DBTest : public BaseTest {
     SetUp() override;
     void
     TearDown() override;
+
+ protected:
+    std::shared_ptr<milvus::server::Context> dummy_context_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

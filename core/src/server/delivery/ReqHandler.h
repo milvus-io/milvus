@@ -32,7 +32,7 @@ class ReqHandler {
 
     Status
     CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                     std::unordered_map<std::string, engine::meta::DataType>& field_types,
                      std::unordered_map<std::string, milvus::json>& field_index_params,
                      std::unordered_map<std::string, std::string>& field_params, milvus::json& json_params);
 
@@ -86,7 +86,7 @@ class ReqHandler {
 
     Status
     GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                  const engine::IDNumbers& ids, std::vector<std::string>& field_names,
+                  const engine::IDNumbers& ids, std::vector<std::string>& field_names, std::vector<bool>& valid_row,
                   engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
     Status

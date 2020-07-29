@@ -42,7 +42,7 @@ MemSegment::CreateSegment() {
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
     if (!status.ok()) {
-        std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+        std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
@@ -53,7 +53,7 @@ MemSegment::CreateSegment() {
     operation_ = std::make_shared<snapshot::NewSegmentOperation>(context, ss);
     status = operation_->CommitNewSegment(segment_);
     if (!status.ok()) {
-        std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+        std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
@@ -71,7 +71,7 @@ MemSegment::CreateSegment() {
         snapshot::SegmentFilePtr seg_file;
         status = operation_->CommitNewSegmentFile(sf_context, seg_file);
         if (!status.ok()) {
-            std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+            std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
@@ -89,7 +89,7 @@ MemSegment::CreateSegment() {
         snapshot::SegmentFilePtr delete_doc_file, bloom_filter_file;
         status = operation_->CommitNewSegmentFile(sf_context, delete_doc_file);
         if (!status.ok()) {
-            std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+            std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
@@ -97,7 +97,7 @@ MemSegment::CreateSegment() {
         sf_context.field_element_name = engine::DEFAULT_BLOOM_FILTER_NAME;
         status = operation_->CommitNewSegmentFile(sf_context, bloom_filter_file);
         if (!status.ok()) {
-            std::string err_msg = "SSMemSegment::CreateSegment failed: " + status.ToString();
+            std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
@@ -117,7 +117,7 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
     if (!status.ok()) {
-        std::string err_msg = "SSMemSegment::SingleEntitySize failed: " + status.ToString();
+        std::string err_msg = "MemSegment::SingleEntitySize failed: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
@@ -126,32 +126,32 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
     std::vector<std::string> field_names = ss->GetFieldNames();
     for (auto& name : field_names) {
         snapshot::FieldPtr field = ss->GetField(name);
-        meta::hybrid::DataType ftype = static_cast<meta::hybrid::DataType>(field->GetFtype());
+        meta::DataType ftype = static_cast<meta::DataType>(field->GetFtype());
         switch (ftype) {
-            case meta::hybrid::DataType::BOOL:
+            case meta::DataType::BOOL:
                 single_size += sizeof(bool);
                 break;
-            case meta::hybrid::DataType::DOUBLE:
+            case meta::DataType::DOUBLE:
                 single_size += sizeof(double);
                 break;
-            case meta::hybrid::DataType::FLOAT:
+            case meta::DataType::FLOAT:
                 single_size += sizeof(float);
                 break;
-            case meta::hybrid::DataType::INT8:
+            case meta::DataType::INT8:
                 single_size += sizeof(uint8_t);
                 break;
-            case meta::hybrid::DataType::INT16:
+            case meta::DataType::INT16:
                 single_size += sizeof(uint16_t);
                 break;
-            case meta::hybrid::DataType::INT32:
+            case meta::DataType::INT32:
                 single_size += sizeof(uint32_t);
                 break;
-            case meta::hybrid::DataType::UID:
-            case meta::hybrid::DataType::INT64:
+            case meta::DataType::UID:
+            case meta::DataType::INT64:
                 single_size += sizeof(uint64_t);
                 break;
-            case meta::hybrid::DataType::VECTOR_FLOAT:
-            case meta::hybrid::DataType::VECTOR_BINARY: {
+            case meta::DataType::VECTOR_FLOAT:
+            case meta::DataType::VECTOR_BINARY: {
                 json params = field->GetParams();
                 if (params.find(knowhere::meta::DIM) == params.end()) {
                     std::string msg = "Vector field params must contain: dimension";
@@ -160,7 +160,7 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
                 }
 
                 int64_t dimension = params[knowhere::meta::DIM];
-                if (ftype == meta::hybrid::DataType::VECTOR_BINARY) {
+                if (ftype == meta::DataType::VECTOR_BINARY) {
                     single_size += (dimension / 8);
                 } else {
                     single_size += (dimension * sizeof(float));

@@ -31,28 +31,8 @@ namespace utils {
 int64_t
 GetMicroSecTimeStamp();
 
-Status
-CreateCollectionPath(const DBMetaOptions& options, const std::string& collection_id);
-Status
-DeleteCollectionPath(const DBMetaOptions& options, const std::string& collection_id, bool force = true);
-
-Status
-CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
-Status
-GetCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
-Status
-DeleteCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
-Status
-DeleteSegment(const DBMetaOptions& options, meta::SegmentSchema& table_file);
-
-Status
-GetParentPath(const std::string& path, std::string& parent_path);
-
 bool
 IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2);
-
-bool
-IsRawIndexType(int32_t type);
 
 bool
 IsBinaryMetricType(int32_t metric_type);
@@ -76,23 +56,9 @@ struct MetaUriInfo {
 Status
 ParseMetaUri(const std::string& uri, MetaUriInfo& info);
 
-std::string
-GetIndexName(int32_t index_type);
-
 void
 SendExitSignal();
 
-void
-ExitOnWriteError(Status& status);
-
-void
-EraseFromCache(const std::string& item_key);
-
-std::string
-IndexTypeToStr(const int32_t type);
-
-int32_t
-StrToIndexType(const std::string& str);
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

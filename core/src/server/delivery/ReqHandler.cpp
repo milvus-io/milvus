@@ -43,7 +43,7 @@ namespace server {
 
 Status
 ReqHandler::CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                             std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
+                             std::unordered_map<std::string, engine::meta::DataType>& field_types,
                              std::unordered_map<std::string, milvus::json>& field_index_params,
                              std::unordered_map<std::string, std::string>& field_params, milvus::json& json_param) {
     BaseReqPtr req_ptr = CreateCollectionReq::Create(context, collection_name, field_types, field_index_params,
@@ -157,9 +157,10 @@ ReqHandler::Insert(const std::shared_ptr<Context>& context, const std::string& c
 Status
 ReqHandler::GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
                           const engine::IDNumbers& ids, std::vector<std::string>& field_names,
-                          engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
+                          std::vector<bool>& valid_row, engine::snapshot::CollectionMappings& field_mappings,
+                          engine::DataChunkPtr& data_chunk) {
     BaseReqPtr req_ptr =
-        GetEntityByIDReq::Create(context, collection_name, ids, field_names, field_mappings, data_chunk);
+        GetEntityByIDReq::Create(context, collection_name, ids, field_names, valid_row, field_mappings, data_chunk);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
