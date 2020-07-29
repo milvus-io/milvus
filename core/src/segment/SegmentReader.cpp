@@ -72,9 +72,9 @@ SegmentReader::Initialize() {
             int64_t field_width = 0;
             int64_t dimension = params[knowhere::meta::DIM];
             if (ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
-                field_width += (dimension / 8);
+                field_width = (dimension / 8);
             } else {
-                field_width += (dimension * sizeof(float));
+                field_width = (dimension * sizeof(float));
             }
             segment_ptr_->AddField(name, ftype, field_width);
         } else {
@@ -238,23 +238,20 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         auto& snapshot = segment_visitor_->GetSnapshot();
         auto segment_commit = snapshot->GetSegmentCommitBySegmentId(segment->GetID());
         segment::DeletedDocsPtr deleted_docs_ptr;
-        auto status = LoadDeletedDocs(deleted_docs_ptr);
-        if (!status.ok()) {
-            return status;
-        }
-        auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+        STATUS_CHECK(LoadDeletedDocs(deleted_docs_ptr));
+
         faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-            std::make_shared<faiss::ConcurrentBitset>(segment_commit->GetRowCount());
-        for (auto& offset : deleted_docs) {
-            concurrent_bitset_ptr->set(offset);
+                std::make_shared<faiss::ConcurrentBitset>(segment_commit->GetRowCount());
+        if (deleted_docs_ptr != nullptr) {
+            auto &deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+            for (auto &offset : deleted_docs) {
+                concurrent_bitset_ptr->set(offset);
+            }
         }
 
         // load uids
         std::vector<int64_t> uids;
-        status = LoadUids(uids);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(LoadUids(uids));
 
         knowhere::BinarySet index_data;
         knowhere::BinaryPtr raw_data, compress_data;
@@ -274,11 +271,10 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         // if index not specified, or index file not created, return IDMAP
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
-            auto& snapshot = segment_visitor_->GetSnapshot();
-            auto& json = snapshot->GetCollection()->GetParams();
+            auto& json = field_visitor->GetField()->GetParams();
             int64_t dimension = json[knowhere::meta::DIM];
             std::vector<uint8_t> raw;
-            LoadField(field_name, raw);
+            STATUS_CHECK(LoadField(field_name, raw));
             auto dataset = knowhere::GenDataset(segment_commit->GetRowCount(), dimension, raw.data());
 
             knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
