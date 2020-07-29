@@ -747,9 +747,14 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
 
     std::vector<engine::AttrsData> attrs;
     std::vector<engine::VectorsData> vectors;
+    std::vector<bool> valid_row;
 
     Status status = req_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, field_names,
-                                               field_mappings, data_chunk);
+                                               valid_row, field_mappings, data_chunk);
+
+    for (auto it : valid_row) {
+        response->add_valid_row(it);
+    }
 
     auto id_size = vector_ids.size();
     for (const auto& it : field_mappings) {
@@ -757,9 +762,16 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
         std::string name = it.first->GetName();
         std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
 
+        auto single_size = data.size() / id_size;
+
         if (type == engine::meta::hybrid::DataType::UID) {
-            response->mutable_ids()->Resize(data.size(), 0);
-            memcpy(response->mutable_ids()->mutable_data(), data.data(), data.size() * sizeof(uint64_t));
+            int64_t int64_value;
+            auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
+            for (int i = 0; i < id_size; i++) {
+                auto offset = i * single_size;
+                memcpy(&int64_value, data.data() + offset, single_size);
+                response->add_ids(int64_value);
+            }
             continue;
         }
 
@@ -768,7 +780,6 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
 
         field_value->set_field_name(name);
         field_value->set_type(static_cast<milvus::grpc::DataType>(type));
-        auto single_size = data.size() / id_size;
         // general data
         if (type == engine::meta::hybrid::DataType::VECTOR_BINARY) {
             // add binary vector data
