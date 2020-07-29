@@ -242,11 +242,13 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         if (!status.ok()) {
             return status;
         }
-        auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
         faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
             std::make_shared<faiss::ConcurrentBitset>(segment_commit->GetRowCount());
-        for (auto& offset : deleted_docs) {
-            concurrent_bitset_ptr->set(offset);
+        if (deleted_docs_ptr) {
+            auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+            for (auto& offset : deleted_docs) {
+                concurrent_bitset_ptr->set(offset);
+            }
         }
 
         // load uids
@@ -275,8 +277,9 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
             auto& snapshot = segment_visitor_->GetSnapshot();
-            auto& json = snapshot->GetCollection()->GetParams();
+            auto& json = snapshot->GetField(field_name)->GetParams();
             int64_t dimension = json[knowhere::meta::DIM];
+            std::string metric_type = json[knowhere::Metric::TYPE];
             std::vector<uint8_t> raw;
             LoadField(field_name, raw);
             auto dataset = knowhere::GenDataset(segment_commit->GetRowCount(), dimension, raw.data());
@@ -284,7 +287,8 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
             index_ptr =
                 vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP, knowhere::IndexMode::MODE_CPU);
-            milvus::json conf{{knowhere::meta::DIM, dimension}};
+            milvus::json conf{{knowhere::meta::DIM, dimension}, {knowhere::Metric::TYPE, metric_type}};
+            index_ptr->Train(knowhere::DatasetPtr(), conf);
             index_ptr->AddWithoutIds(dataset, conf);
             index_ptr->SetUids(uids);
             index_ptr->SetBlacklist(concurrent_bitset_ptr);
@@ -346,7 +350,7 @@ SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::Inde
 
         // read field index
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (index_visitor) {
+        if (index_visitor->GetFile()) {
             std::string file_path =
                 engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, index_visitor->GetFile());
             ss_codec.GetStructuredIndexFormat()->Read(fs_ptr_, file_path, index_ptr);

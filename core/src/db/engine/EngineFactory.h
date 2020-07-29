@@ -23,7 +23,7 @@ namespace engine {
 class EngineFactory {
  public:
     static ExecutionEnginePtr
-    Build(const std::string& dir_root, const std::string& collection_name, int64_t segment_id);
+    Build(const std::string& dir_root, const std::string& collection_name, int64_t segment_id, int64_t ss_id);
 
     // this method distribute fields to multiple groups:
     // put structured fields into one group

@@ -26,7 +26,7 @@ class BuildIndexTask : public Task {
  public:
     explicit BuildIndexTask(const engine::DBOptions& options, const std::string& collection_name,
                             engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields,
-                            TaskLabelPtr label);
+                            engine::snapshot::ID_TYPE ss_id, TaskLabelPtr label);
 
     inline json
     Dump() const override {
@@ -55,6 +55,7 @@ class BuildIndexTask : public Task {
     const engine::DBOptions& options_;
     std::string collection_name_;
     engine::snapshot::ID_TYPE segment_id_;
+    engine::snapshot::ID_TYPE ss_id_;
 
     // structured field could not be processed with vector field in a task
     // vector field could be build by cpu or gpu, so each task could only handle one field

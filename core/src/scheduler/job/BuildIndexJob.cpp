@@ -20,8 +20,12 @@ namespace milvus {
 namespace scheduler {
 
 BuildIndexJob::BuildIndexJob(engine::DBOptions options, const std::string& collection_name,
-                             const engine::snapshot::IDS_TYPE& segment_ids)
-    : Job(JobType::BUILD), options_(std::move(options)), collection_name_(collection_name), segment_ids_(segment_ids) {
+                             const engine::snapshot::IDS_TYPE& segment_ids, engine::snapshot::ID_TYPE ss_id)
+    : Job(JobType::BUILD),
+      options_(std::move(options)),
+      collection_name_(collection_name),
+      segment_ids_(segment_ids),
+      ss_id_(ss_id) {
 }
 
 JobTasks
@@ -32,7 +36,7 @@ BuildIndexJob::CreateTasks() {
     std::vector<TaskPtr> tasks;
     for (auto& id : segment_ids_) {
         for (auto& group : target_groups) {
-            auto task = std::make_shared<BuildIndexTask>(options_, collection_name_, id, group, nullptr);
+            auto task = std::make_shared<BuildIndexTask>(options_, collection_name_, id, group, ss_id_, nullptr);
             task->job_ = this;
             tasks.emplace_back(task);
         }

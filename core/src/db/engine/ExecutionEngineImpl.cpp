@@ -141,16 +141,19 @@ ExecutionEngineImpl::CreateStructuredIndex(const milvus::engine::meta::hybrid::D
             auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
                 raw_data.size(), reinterpret_cast<const int64_t*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
+            break;
         }
         case engine::meta::hybrid::DataType::FLOAT: {
             auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
                 raw_data.size(), reinterpret_cast<const float*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
+            break;
         }
         case engine::meta::hybrid::DataType::DOUBLE: {
             auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
                 raw_data.size(), reinterpret_cast<const double*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
+            break;
         }
         default: { return Status(DB_ERROR, "Field is not structured type"); }
     }
@@ -220,6 +223,87 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
     return Status::OK();
 }
 
+void
+MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::segment::doc_id_t>& uids, int64_t nq,
+                 int64_t k, float* distances, int64_t* labels) {
+    int64_t* res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
+    float* res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
+
+    memcpy(distances, res_dist, sizeof(float) * nq * k);
+
+    /* map offsets to ids */
+    int64_t num = nq * k;
+    for (int64_t i = 0; i < num; ++i) {
+        int64_t offset = res_ids[i];
+        if (offset != -1) {
+            labels[i] = uids[offset];
+        } else {
+            labels[i] = -1;
+        }
+    }
+
+    free(res_ids);
+    free(res_dist);
+}
+
+Status
+ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
+                               const query::VectorQueryPtr& vector_param, knowhere::VecIndexPtr& vec_index,
+                               bool hybrid) {
+    TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search", "search", 0));
+
+    if (vec_index == nullptr) {
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
+        return Status(DB_ERROR, "index is null");
+    }
+
+    double span;
+    uint64_t nq = 0;
+    auto query_vector = vector_param->query_vector;
+    if (!query_vector.float_data.empty()) {
+        nq = vector_param->query_vector.float_data.size() / vec_index->Dim();
+    } else if (!query_vector.binary_data.empty()) {
+        nq = vector_param->query_vector.binary_data.size() * 8 / vec_index->Dim();
+    }
+    uint64_t topk = vector_param->topk;
+
+    context.query_result_ = std::make_shared<QueryResult>();
+    context.query_result_->result_ids_.resize(topk * nq);
+    context.query_result_->result_distances_.resize(topk * nq);
+
+    milvus::json conf = vector_param->extra_params;
+    conf[knowhere::meta::TOPK] = topk;
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(vec_index->index_type());
+    if (!adapter->CheckSearch(conf, vec_index->index_type(), vec_index->index_mode())) {
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
+        throw Exception(DB_ERROR, "Illegal search params");
+    }
+
+    if (hybrid) {
+        //        HybridLoad();
+    }
+
+    rc.RecordSection("query prepare");
+    knowhere::DatasetPtr dataset;
+    if (!query_vector.float_data.empty()) {
+        dataset = knowhere::GenDataset(nq, vec_index->Dim(), query_vector.float_data.data());
+    } else {
+        dataset = knowhere::GenDataset(nq, vec_index->Dim(), query_vector.binary_data.data());
+    }
+    auto result = vec_index->Query(dataset, conf);
+    span = rc.RecordSection("query done");
+
+    MapAndCopyResult(result, vec_index->GetUids(), nq, topk, context.query_result_->result_distances_.data(),
+                     context.query_result_->result_ids_.data());
+    span = rc.RecordSection("map uids " + std::to_string(nq * topk));
+
+    if (hybrid) {
+        //        HybridUnset();
+    }
+
+    return Status::OK();
+}
+
 Status
 ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
     try {
@@ -240,7 +324,6 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             if (field->GetFtype() == (int)engine::meta::hybrid::DataType::VECTOR_FLOAT ||
                 field->GetFtype() == (int)engine::meta::hybrid::DataType::VECTOR_BINARY) {
                 segment_ptr->GetVectorIndex(field->GetName(), vec_index);
-                break;
             } else if (type == (int)engine::meta::hybrid::DataType::UID) {
                 continue;
             } else {
@@ -264,8 +347,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         }
         vec_index->SetBlacklist(list);
 
-        auto vector_query = context.query_ptr_->vectors.at(vector_placeholder);
-
+        status = VecSearch(context, context.query_ptr_->vectors.at(vector_placeholder), vec_index);
         if (!status.ok()) {
             return status;
         }

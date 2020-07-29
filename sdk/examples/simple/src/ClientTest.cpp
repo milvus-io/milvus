@@ -352,5 +352,5 @@ ClientTest::Test() {
     //    entities
     //
     //    DropIndex(collection_name, "field_vec", "index_3");
-    DropCollection(collection_name);
+    //    DropCollection(collection_name);
 }

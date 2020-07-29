@@ -22,9 +22,12 @@ namespace milvus {
 namespace engine {
 
 ExecutionEnginePtr
-EngineFactory::Build(const std::string& dir_root, const std::string& collection_name, int64_t segment_id) {
+EngineFactory::Build(const std::string& dir_root, const std::string& collection_name, int64_t segment_id,
+                     int64_t ss_id) {
     snapshot::ScopedSnapshotT ss;
-    snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name, ss_id);
+
+    //    snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
     auto seg_visitor = engine::SegmentVisitor::Build(ss, segment_id);
 
     ExecutionEnginePtr execution_engine_ptr = std::make_shared<ExecutionEngineImpl>(dir_root, seg_visitor);

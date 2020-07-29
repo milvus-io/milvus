@@ -27,7 +27,8 @@ namespace scheduler {
 class SearchTask : public Task {
  public:
     explicit SearchTask(const server::ContextPtr& context, const engine::DBOptions& options,
-                        const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
+                        const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id,
+                        engine::snapshot::ID_TYPE ss_id, TaskLabelPtr label);
 
     inline json
     Dump() const override {
@@ -57,6 +58,7 @@ class SearchTask : public Task {
     const engine::DBOptions& options_;
     query::QueryPtr query_ptr_;
     engine::snapshot::ID_TYPE segment_id_;
+    engine::snapshot::ID_TYPE ss_id_;
 
     engine::ExecutionEnginePtr execution_engine_;
 };

@@ -32,7 +32,7 @@ namespace scheduler {
 class BuildIndexJob : public Job {
  public:
     explicit BuildIndexJob(engine::DBOptions options, const std::string& collection_name,
-                           const engine::snapshot::IDS_TYPE& segment_ids);
+                           const engine::snapshot::IDS_TYPE& segment_ids, engine::snapshot::ID_TYPE ss_id);
 
     ~BuildIndexJob() = default;
 
@@ -63,6 +63,7 @@ class BuildIndexJob : public Job {
     engine::DBOptions options_;
     std::string collection_name_;
     engine::snapshot::IDS_TYPE segment_ids_;
+    engine::snapshot::ID_TYPE ss_id_;
 };
 
 using BuildIndexJobPtr = std::shared_ptr<BuildIndexJob>;

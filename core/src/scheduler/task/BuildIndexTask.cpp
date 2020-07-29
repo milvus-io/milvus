@@ -25,11 +25,12 @@ namespace scheduler {
 
 BuildIndexTask::BuildIndexTask(const engine::DBOptions& options, const std::string& collection_name,
                                engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields,
-                               TaskLabelPtr label)
+                               engine::snapshot::ID_TYPE ss_id, TaskLabelPtr label)
     : Task(TaskType::BuildIndexTask, std::move(label)),
       options_(options),
       collection_name_(collection_name),
       segment_id_(segment_id),
+      ss_id_(ss_id),
       target_fields_(target_fields) {
     CreateExecEngine();
 }
@@ -37,7 +38,7 @@ BuildIndexTask::BuildIndexTask(const engine::DBOptions& options, const std::stri
 void
 BuildIndexTask::CreateExecEngine() {
     if (execution_engine_ == nullptr) {
-        execution_engine_ = engine::EngineFactory::Build(options_.meta_.path_, collection_name_, segment_id_);
+        execution_engine_ = engine::EngineFactory::Build(options_.meta_.path_, collection_name_, segment_id_, ss_id_);
     }
 }
 
