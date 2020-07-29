@@ -82,7 +82,7 @@ GetEntityByIDReq::OnExecute() {
 
         if (field_names_.empty()) {
             for (const auto& schema : field_mappings_) {
-                if (schema.first->GetFtype() != engine::meta::hybrid::DataType::UID)
+                if (schema.first->GetFtype() != engine::meta::DataType::UID)
                     field_names_.emplace_back(schema.first->GetName());
             }
         } else {

@@ -206,7 +206,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     // check uid existence/validation
     bool has_uid = false;
     for (auto& pair : ctx.fields_schema) {
-        if (pair.first->GetFtype() == meta::hybrid::DataType::UID) {
+        if (pair.first->GetFtype() == meta::DataType::UID) {
             has_uid = true;
             break;
         }

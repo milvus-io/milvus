@@ -243,7 +243,7 @@ class WebRequestHandler {
     std::shared_ptr<Context> context_ptr_;
     ReqHandler req_handler_;
     query::QueryPtr query_ptr_;
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_type_;
+    std::unordered_map<std::string, engine::meta::DataType> field_type_;
 };
 
 }  // namespace web

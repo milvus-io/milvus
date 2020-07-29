@@ -59,7 +59,7 @@ CreateCollection2(std::shared_ptr<DBImpl> db, const std::string& collection_name
     auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR_FLOAT, params);
     context.fields_schema[vector_field] = {};
 
-    std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type = {
+    std::unordered_map<std::string, milvus::engine::meta::DataType> attr_type = {
         {"field_0", milvus::engine::FieldType::INT32},
         {"field_1", milvus::engine::FieldType::INT64},
         {"field_2", milvus::engine::FieldType::DOUBLE},
@@ -449,7 +449,7 @@ TEST_F(DBTest, QueryTest) {
     milvus::query::GeneralQueryPtr general_query;
     milvus::query::QueryPtr query_ptr;
     std::vector<std::string> field_names;
-    std::unordered_map<std::string, milvus::engine::meta::hybrid::DataType> attr_type;
+    std::unordered_map<std::string, milvus::engine::meta::DataType> attr_type;
     milvus::engine::QueryResult result;
     //db_->Query(ctx1, c1, partition_patterns, general_query, query_ptr, field_names, attr_type, result);
 }
