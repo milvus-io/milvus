@@ -75,10 +75,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
                       knowhere::IndexPtr& index_ptr, milvus::json& range_values_json);
 
  private:
-    std::string root_path_;
-    SegmentVisitorPtr segment_visitor_;
     segment::SegmentReaderPtr segment_reader_;
-
     TargetFields target_fields_;
 
     int64_t entity_count_;

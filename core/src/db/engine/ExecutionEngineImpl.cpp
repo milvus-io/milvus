@@ -88,7 +88,7 @@ MappingMetricType(MetricType metric_type, milvus::json& conf) {
 }  // namespace
 
 ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
-    : root_path_(dir_root), segment_visitor_(segment_visitor), gpu_enable_(config.gpu.enable()) {
+    : gpu_enable_(config.gpu.enable()) {
     segment_reader_ = std::make_shared<segment::SegmentReader>(dir_root, segment_visitor);
 }
 
@@ -232,7 +232,8 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         knowhere::VecIndexPtr vec_index = nullptr;
         std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
 
-        auto field_visitors = segment_visitor_->GetFieldVisitors();
+        auto segment_visitor = segment_reader_->GetSegmentVisitor();
+        auto field_visitors = segment_visitor->GetFieldVisitors();
         for (auto& pair : field_visitors) {
             auto& field_visitor = pair.second;
             auto& field = field_visitor->GetField();
@@ -514,12 +515,13 @@ ExecutionEngineImpl::BuildIndex() {
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
 
-    auto& snapshot = segment_visitor_->GetSnapshot();
+    auto segment_visitor = segment_reader_->GetSegmentVisitor();
+    auto& snapshot = segment_visitor->GetSnapshot();
     auto collection = snapshot->GetCollection();
-    auto& segment = segment_visitor_->GetSegment();
+    auto& segment = segment_visitor->GetSegment();
 
     for (auto& field_name : target_fields_) {
-        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        auto field_visitor = segment_visitor->GetFieldVisitor(field_name);
         auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (element_visitor == nullptr) {
             continue;  // no index specified
@@ -635,7 +637,8 @@ ExecutionEngineImpl::BuildIndex() {
 
         rc.RecordSection("build index");
 
-        auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(root_path_, segment_visitor_);
+        auto root_path = segment_reader_->GetRootPath();
+        auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(root_path, segment_visitor);
         segment_writer_ptr->SetVectorIndex(field->GetName(), to_index);
         segment_writer_ptr->WriteVectorIndex(field->GetName());
 
