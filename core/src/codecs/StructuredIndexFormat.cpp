@@ -43,30 +43,30 @@ StructuredIndexFormat::FilePostfix() {
 }
 
 knowhere::IndexPtr
-StructuredIndexFormat::CreateStructuredIndex(const milvus::engine::meta::hybrid::DataType data_type) {
+StructuredIndexFormat::CreateStructuredIndex(const milvus::engine::meta::DataType data_type) {
     knowhere::IndexPtr index = nullptr;
     switch (data_type) {
-        case engine::meta::hybrid::DataType::INT8: {
+        case engine::meta::DataType::INT8: {
             index = std::make_shared<knowhere::StructuredIndexSort<int8_t>>();
             break;
         }
-        case engine::meta::hybrid::DataType::INT16: {
+        case engine::meta::DataType::INT16: {
             index = std::make_shared<knowhere::StructuredIndexSort<int16_t>>();
             break;
         }
-        case engine::meta::hybrid::DataType::INT32: {
+        case engine::meta::DataType::INT32: {
             index = std::make_shared<knowhere::StructuredIndexSort<int32_t>>();
             break;
         }
-        case engine::meta::hybrid::DataType::INT64: {
+        case engine::meta::DataType::INT64: {
             index = std::make_shared<knowhere::StructuredIndexSort<int64_t>>();
             break;
         }
-        case engine::meta::hybrid::DataType::FLOAT: {
+        case engine::meta::DataType::FLOAT: {
             index = std::make_shared<knowhere::StructuredIndexSort<float>>();
             break;
         }
-        case engine::meta::hybrid::DataType::DOUBLE: {
+        case engine::meta::DataType::DOUBLE: {
             index = std::make_shared<knowhere::StructuredIndexSort<double>>();
             break;
         }
@@ -135,14 +135,14 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
     double rate = length * 1000000.0 / span / 1024 / 1024;
     LOG_ENGINE_DEBUG_ << "StructuredIndexFormat::read(" << full_file_path << ") rate " << rate << "MB/s";
 
-    auto attr_type = static_cast<engine::meta::hybrid::DataType>(data_type);
+    auto attr_type = static_cast<engine::meta::DataType>(data_type);
     index = CreateStructuredIndex(attr_type);
     index->Load(load_data_list);
 }
 
 void
 StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-                             engine::meta::hybrid::DataType data_type, const knowhere::IndexPtr& index) {
+                             engine::meta::DataType data_type, const knowhere::IndexPtr& index) {
     milvus::TimeRecorder recorder("StructuredIndexFormat::Write");
 
     std::string full_file_path = file_path + STRUCTURED_INDEX_POSTFIX;

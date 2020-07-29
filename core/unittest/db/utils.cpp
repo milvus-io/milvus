@@ -219,6 +219,15 @@ void
 DBTest::SetUp() {
     BaseTest::SetUp();
     BaseTest::SnapshotStart(false, GetOptions());
+
+    dummy_context_ = std::make_shared<milvus::server::Context>("dummy_request_id");
+    opentracing::mocktracer::MockTracerOptions tracer_options;
+    auto mock_tracer =
+        std::shared_ptr<opentracing::Tracer>{new opentracing::mocktracer::MockTracer{std::move(tracer_options)}};
+    auto mock_span = mock_tracer->StartSpan("mock_span");
+    auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
+    dummy_context_->SetTraceContext(trace_context);
+
     db_ = std::make_shared<milvus::engine::DBImpl>(GetOptions());
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
