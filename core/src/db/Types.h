@@ -60,7 +60,7 @@ struct Entity {
 
 struct AttrsData {
     uint64_t attr_count_ = 0;
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type_;
+    std::unordered_map<std::string, engine::meta::DataType> attr_type_;
     std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
     IDNumbers id_array_;
 };
@@ -83,13 +83,14 @@ extern const char* DEFAULT_RAW_DATA_NAME;
 extern const char* DEFAULT_BLOOM_FILTER_NAME;
 extern const char* DEFAULT_DELETED_DOCS_NAME;
 extern const char* DEFAULT_INDEX_NAME;
+extern const char* DEFAULT_INDEX_COMPRESS_NAME;
 
 extern const char* PARAM_COLLECTION_DIMENSION;
 extern const char* PARAM_INDEX_METRIC_TYPE;
 extern const char* PARAM_INDEX_EXTRA_PARAMS;
 extern const char* PARAM_SEGMENT_SIZE;
 
-using FieldType = meta::hybrid::DataType;
+using FieldType = meta::DataType;
 
 enum FieldElementType {
     FET_NONE = 0,

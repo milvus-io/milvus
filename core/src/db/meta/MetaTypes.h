@@ -116,8 +116,6 @@ namespace meta {
 
 using DateT = int;
 
-namespace hybrid {
-
 enum DataType {
     NONE = 0,
     BOOL = 1,
@@ -136,8 +134,6 @@ enum DataType {
     VECTOR_BINARY = 100,
     VECTOR_FLOAT = 101,
 };
-
-}  // namespace hybrid
 
 }  // namespace meta
 }  // namespace engine

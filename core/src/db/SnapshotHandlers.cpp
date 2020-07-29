@@ -123,8 +123,9 @@ SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commi
 GetEntityByIdSegmentHandler::GetEntityByIdSegmentHandler(const std::shared_ptr<milvus::server::Context>& context,
                                                          engine::snapshot::ScopedSnapshotT ss,
                                                          const std::string& dir_root, const IDNumbers& ids,
-                                                         const std::vector<std::string>& field_names)
-    : BaseT(ss), context_(context), dir_root_(dir_root), ids_(ids), field_names_(field_names) {
+                                                         const std::vector<std::string>& field_names,
+                                                         std::vector<bool>& valid_row)
+    : BaseT(ss), context_(context), dir_root_(dir_root), ids_(ids), field_names_(field_names), valid_row_(valid_row) {
 }
 
 Status
@@ -149,6 +150,7 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     for (auto id : ids_) {
         // fast check using bloom filter
         if (!id_bloom_filter_ptr->Check(id)) {
+            valid_row_.push_back(false);
             continue;
         }
 
@@ -158,6 +160,7 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
         }
         auto found = std::find(uids.begin(), uids.end(), id);
         if (found == uids.end()) {
+            valid_row_.push_back(false);
             continue;
         }
 
@@ -170,9 +173,11 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
             if (deleted != deleted_docs.end()) {
+                valid_row_.push_back(false);
                 continue;
             }
         }
+        valid_row_.push_back(true);
         offsets.push_back(offset);
     }
 

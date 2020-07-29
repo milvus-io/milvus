@@ -34,7 +34,7 @@ namespace server {
 
 struct CollectionSchema {
     std::string collection_name_;
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types_;
+    std::unordered_map<std::string, engine::meta::DataType> field_types_;
     std::unordered_map<std::string, milvus::json> index_params_;
     std::unordered_map<std::string, milvus::json> field_params_;
     milvus::json extra_params_;
