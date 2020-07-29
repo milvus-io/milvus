@@ -152,6 +152,8 @@ MemCollection::ApplyDeletes() {
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_));
 
+    return Status(1, "Not Inplemented");
+
 //    std::
     std::unordered_map<int64_t, std::vector<segment::doc_id_t>> delete_ids_map;
     for (auto & m : mem_segment_list_) {
