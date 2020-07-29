@@ -41,8 +41,7 @@ CreateCollectionReq::CreateCollectionReq(const std::shared_ptr<milvus::server::C
 BaseReqPtr
 CreateCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                             std::unordered_map<std::string, FieldSchema>& fields, milvus::json& extra_params) {
-    return std::shared_ptr<BaseReq>(
-        new CreateCollectionReq(context, collection_name, fields, extra_params));
+    return std::shared_ptr<BaseReq>(new CreateCollectionReq(context, collection_name, fields, extra_params));
 }
 
 Status
@@ -80,8 +79,7 @@ CreateCollectionReq::OnExecute() {
             }
 
             std::cout << field_params.dump() << std::endl;
-            if (field_type == engine::FieldType::VECTOR_FLOAT ||
-                field_type == engine::FieldType::VECTOR_BINARY) {
+            if (field_type == engine::FieldType::VECTOR_FLOAT || field_type == engine::FieldType::VECTOR_BINARY) {
                 if (!field_params.contains(engine::PARAM_DIMENSION)) {
                     return Status(SERVER_INVALID_VECTOR_DIMENSION, "Dimension not defined in field_params");
                 }

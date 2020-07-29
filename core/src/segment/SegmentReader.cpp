@@ -244,7 +244,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         STATUS_CHECK(LoadDeletedDocs(deleted_docs_ptr));
         if (deleted_docs_ptr != nullptr) {
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
-            for (auto &offset : deleted_docs) {
+            for (auto& offset : deleted_docs) {
                 concurrent_bitset_ptr->set(offset);
             }
         }
