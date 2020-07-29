@@ -491,11 +491,11 @@ ExecutionEngineImpl::BuildIndex() {
     auto collection = snapshot->GetCollection();
     auto& segment = segment_visitor->GetSegment();
 
-    for (auto& field_name : target_fields_) {
-        snapshot::OperationContext context;
-        context.prev_partition = snapshot->GetResource<snapshot::Partition>(segment->GetPartitionId());
-        auto build_op = std::make_shared<snapshot::ChangeSegmentFileOperation>(context, snapshot);
+    snapshot::OperationContext context;
+    context.prev_partition = snapshot->GetResource<snapshot::Partition>(segment->GetPartitionId());
+    auto build_op = std::make_shared<snapshot::ChangeSegmentFileOperation>(context, snapshot);
 
+    for (auto& field_name : target_fields_) {
         // create snapshot segment files
         CollectionIndex index_info;
         auto status = CreateSnapshotIndexFile(build_op, field_name, index_info);
@@ -539,10 +539,10 @@ ExecutionEngineImpl::BuildIndex() {
             }
             rc.RecordSection("serialize structured index");
         }
-
-        // finish transaction
-        build_op->Push();
     }
+
+    // finish transaction
+    build_op->Push();
 
     return Status::OK();
 }
@@ -573,8 +573,9 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
     snapshot::SegmentFilePtr seg_file = element_visitor->GetFile();
     if (seg_file != nullptr) {
         // index already build?
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_reader_->GetRootPath(), seg_file);
+        std::string file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(
+            segment_reader_->GetCollectionsPath(), seg_file);
+        file_path += codec::VectorIndexFormat::FilePostfix();
         if (CommonUtil::IsFileExist(file_path)) {
             return Status(DB_ERROR, "Could not build index: Index file already exist");  // index already build
         }

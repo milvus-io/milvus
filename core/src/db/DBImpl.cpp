@@ -950,6 +950,9 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
 
         snapshot::IDS_TYPE segment_ids;
         ss_visitor.SegmentsToIndex("", segment_ids);
+        if (segment_ids.empty()) {
+            continue;
+        }
 
         scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_ids);
 

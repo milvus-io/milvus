@@ -43,7 +43,7 @@ void
 SearchTask::CreateExecEngine() {
     if (execution_engine_ == nullptr && query_ptr_ != nullptr) {
         engine::snapshot::ScopedSnapshotT latest_ss;
-        auto status = engine::snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, query_ptr_->collection_id);
+        engine::snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, query_ptr_->collection_id);
         execution_engine_ = engine::EngineFactory::Build(latest_ss, options_.meta_.path_, segment_id_);
     }
 }

@@ -84,6 +84,11 @@ class SegmentReader {
         return dir_root_;
     }
 
+    std::string
+    GetCollectionsPath() const {
+        return dir_collections_;
+    }
+
     engine::SegmentVisitorPtr
     GetSegmentVisitor() const {
         return segment_visitor_;
