@@ -549,18 +549,9 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
     auto& field = field_visitor->GetField();
 
     auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+    auto& index_element = element_visitor->GetElement();
     if (element_visitor == nullptr) {
         return Status(DB_ERROR, "Could not build index: index not specified");  // no index specified
-    }
-
-    auto& index_element = element_visitor->GetElement();
-    index_info.index_name_ = index_element->GetName();
-    auto params = index_element->GetParams();
-    if (params.find(engine::PARAM_INDEX_METRIC_TYPE) != params.end()) {
-        index_info.metric_name_ = params[engine::PARAM_INDEX_METRIC_TYPE];
-    }
-    if (params.find(engine::PARAM_INDEX_EXTRA_PARAMS) != params.end()) {
-        index_info.extra_params_ = params[engine::PARAM_INDEX_EXTRA_PARAMS];
     }
 
     snapshot::SegmentFilePtr seg_file = element_visitor->GetFile();
@@ -578,7 +569,6 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
         sf_context.field_element_name = index_element->GetName();
         sf_context.collection_id = segment->GetCollectionId();
         sf_context.partition_id = segment->GetPartitionId();
-        sf_context.segment_id = segment->GetID();
 
         auto status = operation->CommitNewSegmentFile(sf_context, seg_file);
         if (!status.ok()) {
@@ -633,8 +623,8 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
 
     // build index by knowhere
-    new_index = CreateVecIndex(index_info.index_name_);
-    if (!new_index) {
+    auto to_index = CreateVecIndex(index_info.index_name_);
+    if (!to_index) {
         throw Exception(DB_ERROR, "Unsupported index type");
     }
 
@@ -644,21 +634,24 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     auto field_visitor = segment_visitor->GetFieldVisitor(field_name);
     auto& field = field_visitor->GetField();
 
+    auto element_json = index_info.extra_params_;
+    auto metric_type = element_json[engine::PARAM_INDEX_METRIC_TYPE];
+    auto index_params = element_json[engine::PARAM_INDEX_EXTRA_PARAMS];
+
     auto field_json = field->GetParams();
     auto dimension = field_json[milvus::knowhere::meta::DIM];
 
     auto segment_commit = snapshot->GetSegmentCommitBySegmentId(segment->GetID());
     auto row_count = segment_commit->GetRowCount();
 
-    milvus::json conf = index_info.extra_params_;
+    milvus::json conf = index_params;
     conf[knowhere::meta::DIM] = dimension;
     conf[knowhere::meta::ROWS] = row_count;
     conf[knowhere::meta::DEVICEID] = gpu_num_;
-    conf[knowhere::Metric::TYPE] = index_info.metric_name_;
+    conf[knowhere::Metric::TYPE] = metric_type;
     LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
-
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(new_index->index_type());
-    if (!adapter->CheckTrain(conf, new_index->index_mode())) {
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(to_index->index_type());
+    if (!adapter->CheckTrain(conf, to_index->index_mode())) {
         throw Exception(DB_ERROR, "Illegal index params");
     }
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
