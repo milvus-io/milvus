@@ -18,6 +18,7 @@
 
 #include "ExecutionEngine.h"
 #include "db/SnapshotVisitor.h"
+#include "db/snapshot/CompoundOperations.h"
 #include "segment/SegmentReader.h"
 
 namespace milvus {
@@ -48,7 +49,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     CreateVecIndex(const std::string& index_name);
 
     Status
-    CreateStructuredIndex(const engine::meta::hybrid::DataType field_type, std::vector<uint8_t>& raw_data,
+    CreateStructuredIndex(const engine::meta::DataType field_type, std::vector<uint8_t>& raw_data,
                           knowhere::IndexPtr& index_ptr);
 
     Status
@@ -59,30 +60,35 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     ExecBinaryQuery(const query::GeneralQueryPtr& general_query, faiss::ConcurrentBitsetPtr& bitset,
-                    std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
-                    std::string& vector_placeholder);
+                    std::unordered_map<std::string, meta::DataType>& attr_type, std::string& vector_placeholder);
 
     Status
     ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, const query::TermQueryPtr& term_query,
-                     std::unordered_map<std::string, meta::hybrid::DataType>& attr_type);
+                     std::unordered_map<std::string, meta::DataType>& attr_type);
 
     Status
-    IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const std::string& field_name,
-                     const meta::hybrid::DataType& data_type, milvus::json& term_values_json);
+    IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const std::string& field_name, const meta::DataType& data_type,
+                     milvus::json& term_values_json);
 
     Status
-    ProcessRangeQuery(const std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+    ProcessRangeQuery(const std::unordered_map<std::string, meta::DataType>& attr_type,
                       faiss::ConcurrentBitsetPtr& bitset, const query::RangeQueryPtr& range_query);
 
     Status
-    IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const meta::hybrid::DataType& data_type,
+    IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const meta::DataType& data_type,
                       knowhere::IndexPtr& index_ptr, milvus::json& range_values_json);
 
- private:
-    std::string root_path_;
-    SegmentVisitorPtr segment_visitor_;
-    segment::SegmentReaderPtr segment_reader_;
+    using AddSegmentFileOperation = std::shared_ptr<snapshot::ChangeSegmentFileOperation>;
+    Status
+    CreateSnapshotIndexFile(AddSegmentFileOperation& operation, const std::string& field_name,
+                            CollectionIndex& index_info);
 
+    Status
+    BuildKnowhereIndex(const std::string& field_name, const CollectionIndex& index_info,
+                       knowhere::VecIndexPtr& new_index);
+
+ private:
+    segment::SegmentReaderPtr segment_reader_;
     TargetFields target_fields_;
 
     int64_t entity_count_;

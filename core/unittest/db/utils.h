@@ -47,6 +47,7 @@ using DropIndexOperation = milvus::engine::snapshot::DropIndexOperation;
 using AddFieldElementOperation = milvus::engine::snapshot::AddFieldElementOperation;
 using DropAllIndexOperation = milvus::engine::snapshot::DropAllIndexOperation;
 using ChangeSegmentFileOperation = milvus::engine::snapshot::ChangeSegmentFileOperation;
+using CompoundSegmentsOperation = milvus::engine::snapshot::CompoundSegmentsOperation;
 using MergeOperation = milvus::engine::snapshot::MergeOperation;
 using CreateCollectionOperation = milvus::engine::snapshot::CreateCollectionOperation;
 using NewSegmentOperation = milvus::engine::snapshot::NewSegmentOperation;
@@ -64,6 +65,8 @@ using Segment = milvus::engine::snapshot::Segment;
 using SegmentPtr = milvus::engine::snapshot::SegmentPtr;
 using SegmentFile = milvus::engine::snapshot::SegmentFile;
 using SegmentFilePtr = milvus::engine::snapshot::SegmentFilePtr;
+using SegmentCommit = milvus::engine::snapshot::SegmentCommit;
+using SegmentCommitPtr = milvus::engine::snapshot::SegmentCommitPtr;
 using Field = milvus::engine::snapshot::Field;
 using FieldElement = milvus::engine::snapshot::FieldElement;
 using FieldElementPtr = milvus::engine::snapshot::FieldElementPtr;
@@ -320,6 +323,9 @@ class DBTest : public BaseTest {
     SetUp() override;
     void
     TearDown() override;
+
+ protected:
+    std::shared_ptr<milvus::server::Context> dummy_context_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
