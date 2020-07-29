@@ -48,13 +48,12 @@ SearchTask::CreateExecEngine() {
 
 Status
 SearchTask::OnLoad(LoadType type, uint8_t device_id) {
-    TimeRecorder rc(LogOut("[%s][%ld]", "search", segment_id_));
+    TimeRecorder rc("SearchTask::OnLoad " + std::to_string(segment_id_));
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
 
     try {
-        fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
         if (type == LoadType::DISK2CPU) {
             engine::ExecutionEngineContext context;
             context.query_ptr_ = query_ptr_;
@@ -73,7 +72,7 @@ SearchTask::OnLoad(LoadType type, uint8_t device_id) {
     } catch (std::exception& ex) {
         // typical error: out of disk space or permition denied
         error_msg = "Failed to load index file: " + std::string(ex.what());
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Encounter exception: %s", "search", 0, error_msg.c_str());
+        LOG_ENGINE_ERROR_ << LogOut("Search task encounter exception: %s", error_msg.c_str());
         stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
     }
 

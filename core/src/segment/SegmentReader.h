@@ -97,7 +97,9 @@ class SegmentReader {
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
     engine::SegmentPtr segment_ptr_;
+
     std::string dir_root_;
+    std::string dir_collections_;
 };
 
 using SegmentReaderPtr = std::shared_ptr<SegmentReader>;

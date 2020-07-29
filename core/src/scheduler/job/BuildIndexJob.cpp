@@ -24,12 +24,11 @@ BuildIndexJob::BuildIndexJob(engine::DBOptions options, const std::string& colle
     : Job(JobType::BUILD), options_(std::move(options)), collection_name_(collection_name), segment_ids_(segment_ids) {
 }
 
-JobTasks
-BuildIndexJob::CreateTasks() {
+void
+BuildIndexJob::OnCreateTasks(JobTasks& tasks) {
     engine::TargetFieldGroups target_groups;
     BuildIndexTask::GroupFieldsForIndex(collection_name_, target_groups);
 
-    std::vector<TaskPtr> tasks;
     for (auto& id : segment_ids_) {
         for (auto& group : target_groups) {
             auto task = std::make_shared<BuildIndexTask>(options_, collection_name_, id, group, nullptr);
@@ -37,7 +36,6 @@ BuildIndexJob::CreateTasks() {
             tasks.emplace_back(task);
         }
     }
-    return tasks;
 }
 
 json

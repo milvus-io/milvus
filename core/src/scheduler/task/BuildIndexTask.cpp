@@ -43,7 +43,7 @@ BuildIndexTask::CreateExecEngine() {
 
 Status
 BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
-    TimeRecorder rc("BuildIndexTask::Load");
+    TimeRecorder rc("BuildIndexTask::OnLoad");
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
@@ -61,7 +61,6 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
             error_msg = "Wrong load type";
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
-        fiu_do_on("XSSBuildIndexTask.Load.throw_std_exception", throw std::exception());
     } catch (std::exception& ex) {
         // typical error: out of disk space or permission denied
         error_msg = "Failed to load to_index file: " + std::string(ex.what());
@@ -80,7 +79,6 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
         }
 
         LOG_ENGINE_ERROR_ << s.message();
-
         return s;
     }
 
@@ -89,7 +87,7 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
 
 Status
 BuildIndexTask::OnExecute() {
-    TimeRecorderAuto rc("XSSBuildIndexTask::Execute " + std::to_string(segment_id_));
+    TimeRecorderAuto rc("BuildIndexTask::OnExecute " + std::to_string(segment_id_));
 
     if (execution_engine_ == nullptr) {
         return Status(DB_ERROR, "execution engine is null");
@@ -97,7 +95,7 @@ BuildIndexTask::OnExecute() {
 
     auto status = execution_engine_->BuildIndex();
     if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to create collection file: " << status.ToString();
+        LOG_ENGINE_ERROR_ << "Failed to build index: " << status.ToString();
         execution_engine_ = nullptr;
         return status;
     }

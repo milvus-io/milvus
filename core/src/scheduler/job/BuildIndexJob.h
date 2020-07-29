@@ -37,13 +37,9 @@ class BuildIndexJob : public Job {
     ~BuildIndexJob() = default;
 
  public:
-    JobTasks
-    CreateTasks() override;
-
     json
     Dump() const override;
 
- public:
     engine::DBOptions
     options() const {
         return options_;
@@ -58,6 +54,10 @@ class BuildIndexJob : public Job {
     segment_ids() {
         return segment_ids_;
     }
+
+ protected:
+    void
+    OnCreateTasks(JobTasks& tasks) override;
 
  private:
     engine::DBOptions options_;
