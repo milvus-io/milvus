@@ -938,7 +938,7 @@ TEST_F(SnapshotTest, OperationTest) {
     Snapshots::GetInstance().Reset();
 }
 
-TEST_F(SnapshotTest, ChangeSegmentFileOperationTest) {
+TEST_F(SnapshotTest, OperationTest2) {
     LSN_TYPE lsn = 0;
     std::string collection_name("c1");
     auto ss = CreateCollection(collection_name, ++lsn);
@@ -971,42 +971,181 @@ TEST_F(SnapshotTest, ChangeSegmentFileOperationTest) {
     auto stale_sf = ss->GetResource<SegmentFile>(*(sf_ids.begin()));
     ASSERT_TRUE(stale_sf);
 
-    std::cout << stale_sf->GetSize() << std::endl;
+    {
+        OperationContext context;
+        context.lsn = ++lsn;
+        context.stale_segment_files.push_back(stale_sf);
+        auto op = std::make_shared<ChangeSegmentFileOperation>(context, ss);
+        SegmentFilePtr seg_file;
+        sf_context.field_name = "vector";
+        sf_context.field_element_name = "_raw";
+        sf_context.segment_id = stale_sf->GetSegmentId();
+        sf_context.partition_id = stale_sf->GetPartitionId();
+        sf_context.collection_id = stale_sf->GetCollectionId();
+        status = op->CommitNewSegmentFile(sf_context, seg_file);
+        /* std::cout << status.ToString() << std::endl; */
+        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(seg_file);
 
-    OperationContext context;
-    context.lsn = ++lsn;
-    context.stale_segment_files.push_back(stale_sf);
-    auto op = std::make_shared<ChangeSegmentFileOperation>(context, ss);
-    SegmentFilePtr seg_file;
-    sf_context.field_name = "vector";
-    sf_context.field_element_name = "_raw";
-    sf_context.segment_id = stale_sf->GetSegmentId();
-    sf_context.partition_id = stale_sf->GetPartitionId();
-    sf_context.collection_id = stale_sf->GetCollectionId();
-    status = op->CommitNewSegmentFile(sf_context, seg_file);
-    /* std::cout << status.ToString() << std::endl; */
-    ASSERT_TRUE(status.ok());
-    ASSERT_TRUE(seg_file);
+        auto prev_segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
+        auto prev_segment_commit_mappings = prev_segment_commit->GetMappings();
+        ASSERT_FALSE(prev_segment_commit->ToString().empty());
 
-    auto prev_segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
-    auto prev_segment_commit_mappings = prev_segment_commit->GetMappings();
-    ASSERT_FALSE(prev_segment_commit->ToString().empty());
+        auto new_size = RandomInt(1000, 20000);
+        seg_file->SetSize(new_size);
+        total_size += new_size;
+        total_size -= stale_sf->GetSize();
 
-    auto new_size = RandomInt(1000, 20000);
-    seg_file->SetSize(new_size);
-    total_size += new_size;
-    total_size -= stale_sf->GetSize();
+        auto delta = prev_segment_commit->GetRowCount() / 2;
+        op->CommitRowCountDelta(delta);
+        total_row_cnt -= delta;
 
-    auto delta = prev_segment_commit->GetRowCount() / 2;
-    op->CommitRowCountDelta(delta);
-    total_row_cnt -= delta;
+        status = op->Push();
+        ASSERT_TRUE(status.ok()) << status.message();
+        status = op->GetSnapshot(ss);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
+        ASSERT_EQ(ss->GetCollectionCommit()->GetSize(), total_size);
+        std::cout << ss->ToString() << std::endl;
+    }
 
-    status = op->Push();
-    ASSERT_TRUE(status.ok()) << status.message();
-    status = op->GetSnapshot(ss);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), total_row_cnt);
-    ASSERT_EQ(ss->GetCollectionCommit()->GetSize(), total_size);
+    {
+        OperationContext context;
+        context.lsn = ++lsn;
+
+        SegmentFile::VecT stale_sfs;
+        std::set<ID_TYPE> modified_segments;
+        auto executor = [&](const SegmentFilePtr& sf,
+                            SegmentFileIterator* itr) -> Status {
+            context.stale_segment_files.push_back(sf);
+            modified_segments.insert(sf->GetSegmentId());
+            return Status::OK();
+        };
+        auto iterator = std::make_shared<SegmentFileIterator>(ss, executor);
+        iterator->Iterate();
+        ASSERT_TRUE(iterator->GetStatus().ok());
+
+        {
+            auto op = std::make_shared<CompoundSegmentsOperation>(context, ss);
+
+            for (auto seg_id : modified_segments) {
+                auto sc = ss->GetSegmentCommitBySegmentId(seg_id);
+                ASSERT_TRUE(sc);
+                status = op->CommitRowCountDelta(seg_id, sc->GetRowCount() + 1, true);
+                ASSERT_TRUE(status.ok()) << status.ToString();
+            }
+
+            status = op->Push();
+            ASSERT_FALSE(status.ok()) << status.ToString();
+        }
+
+        {
+            auto op = std::make_shared<CompoundSegmentsOperation>(context, ss);
+            status = op->CommitRowCountDelta(100000000, 1, false);
+            ASSERT_FALSE(status.ok()) << status.ToString();
+        }
+
+        {
+            auto segment_cnt = ss->GetResources<Segment>().size();
+            context.lsn++;
+            auto op = std::make_shared<CompoundSegmentsOperation>(context, ss);
+            for (auto seg_id : modified_segments) {
+                auto sc = ss->GetSegmentCommitBySegmentId(seg_id);
+                ASSERT_TRUE(sc);
+                bool is_sub = (RandomInt(1, 10) >= 5);
+                auto delta = sc->GetRowCount() / 2;
+                status = op->CommitRowCountDelta(seg_id, delta, is_sub);
+                ASSERT_TRUE(status.ok()) << status.ToString();
+                if (is_sub) {
+                    total_row_cnt -= delta;
+                } else {
+                    total_row_cnt += delta;
+                }
+            }
+
+            auto new_size = 0;
+            for (auto stale_sf : context.stale_segment_files) {
+                SegmentFilePtr seg_file;
+                sf_context.field_name = "vector";
+                sf_context.field_element_name = "_raw";
+                sf_context.segment_id = stale_sf->GetSegmentId();
+                sf_context.partition_id = stale_sf->GetPartitionId();
+                sf_context.collection_id = stale_sf->GetCollectionId();
+                status = op->CommitNewSegmentFile(sf_context, seg_file);
+                auto size_delta = RandomInt(100, 1000);
+                seg_file->SetSize(size_delta);
+                new_size += size_delta;
+                ASSERT_TRUE(status.ok()) << status.ToString();
+            }
+
+            SegmentPtr new_seg;
+            OperationContext new_seg_ctx;
+            new_seg_ctx.prev_partition = ss->GetResource<Partition>(
+                    context.stale_segment_files[0]->GetPartitionId());
+            status = op->CommitNewSegment(new_seg_ctx, new_seg);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_TRUE(new_seg);
+
+            {
+                SegmentFilePtr seg_file;
+                sf_context.field_name = "vector";
+                sf_context.field_element_name = "_raw";
+                sf_context.segment_id = new_seg->GetID();
+                sf_context.partition_id = new_seg->GetPartitionId();
+                sf_context.collection_id = new_seg->GetCollectionId();
+                status = op->CommitNewSegmentFile(sf_context, seg_file);
+                ASSERT_TRUE(status.ok()) << status.ToString();
+                auto size_delta = RandomInt(100, 1000);
+                seg_file->SetSize(size_delta);
+                new_size += size_delta;
+                ASSERT_TRUE(status.ok()) << status.ToString();
+            }
+
+            auto delta_row = RandomInt(100, 1000);
+            status = op->CommitRowCountDelta(new_seg->GetID(), delta_row, false);
+            ASSERT_TRUE(status.ok());
+            total_row_cnt += delta_row;
+
+            status = op->Push();
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            status = op->GetSnapshot(ss);
+            ASSERT_TRUE(status.ok());
+            std::cout << ss->ToString() << std::endl;
+            ASSERT_EQ(segment_cnt + 1, ss->GetResources<Segment>().size());
+
+            auto expect_size = ss->GetCollectionCommit()->GetSize();
+            ASSERT_EQ(expect_size, new_size) << status.ToString();
+            auto expect_row_cnt = ss->GetCollectionCommit()->GetRowCount();
+            ASSERT_EQ(expect_row_cnt, total_row_cnt) << status.ToString();
+        }
+
+        {
+            modified_segments.clear();
+            context.stale_segment_files.clear();
+            iterator = std::make_shared<SegmentFileIterator>(ss, executor);
+            iterator->Iterate();
+            ASSERT_TRUE(iterator->GetStatus().ok());
+
+            context.lsn++;
+            auto op = std::make_shared<CompoundSegmentsOperation>(context, ss);
+
+            for (auto seg_id : modified_segments) {
+                auto sc = ss->GetSegmentCommitBySegmentId(seg_id);
+                ASSERT_TRUE(sc);
+                status = op->CommitRowCountDelta(seg_id, sc->GetRowCount(), true);
+                ASSERT_TRUE(status.ok()) << status.ToString();
+            }
+
+            status = op->Push();
+            ASSERT_TRUE(status.ok()) << status.ToString();
+
+            status = op->GetSnapshot(ss);
+            ASSERT_TRUE(status.ok());
+            std::cout << ss->ToString() << std::endl;
+            ASSERT_EQ(ss->GetCollectionCommit()->GetRowCount(), 0);
+            ASSERT_EQ(ss->GetCollectionCommit()->GetSize(), 0);
+        }
+    }
 }
 
 TEST_F(SnapshotTest, CompoundTest1) {
