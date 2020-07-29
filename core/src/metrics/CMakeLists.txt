@@ -19,7 +19,6 @@ set( METRICS_LIB    yaml-cpp )
 set( PROMETHEUS_LIB prometheus-cpp-push
                     prometheus-cpp-pull
                     prometheus-cpp-core
-                    curl
                     )
 
 add_library(    metrics STATIC ${METRICS_FILES})
@@ -31,3 +30,4 @@ endif ()
 
 
 target_link_libraries( metrics PRIVATE ${METRICS_LIB} )
+add_dependencies( metrics ${PROMETHEUS_LIB} )
