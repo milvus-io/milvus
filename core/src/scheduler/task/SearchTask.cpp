@@ -42,7 +42,9 @@ SearchTask::SearchTask(const server::ContextPtr& context, const engine::DBOption
 void
 SearchTask::CreateExecEngine() {
     if (execution_engine_ == nullptr && query_ptr_ != nullptr) {
-        execution_engine_ = engine::EngineFactory::Build(options_.meta_.path_, query_ptr_->collection_id, segment_id_);
+        engine::snapshot::ScopedSnapshotT latest_ss;
+        auto status = engine::snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, query_ptr_->collection_id);
+        execution_engine_ = engine::EngineFactory::Build(latest_ss, options_.meta_.path_, segment_id_);
     }
 }
 

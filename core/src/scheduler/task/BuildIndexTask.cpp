@@ -23,12 +23,12 @@
 namespace milvus {
 namespace scheduler {
 
-BuildIndexTask::BuildIndexTask(const engine::DBOptions& options, const std::string& collection_name,
+BuildIndexTask::BuildIndexTask(const engine::snapshot::ScopedSnapshotT& snapshot, const engine::DBOptions& options,
                                engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields,
                                TaskLabelPtr label)
     : Task(TaskType::BuildIndexTask, std::move(label)),
+      snapshot_(snapshot),
       options_(options),
-      collection_name_(collection_name),
       segment_id_(segment_id),
       target_fields_(target_fields) {
     CreateExecEngine();
@@ -37,7 +37,7 @@ BuildIndexTask::BuildIndexTask(const engine::DBOptions& options, const std::stri
 void
 BuildIndexTask::CreateExecEngine() {
     if (execution_engine_ == nullptr) {
-        execution_engine_ = engine::EngineFactory::Build(options_.meta_.path_, collection_name_, segment_id_);
+        execution_engine_ = engine::EngineFactory::Build(snapshot_, options_.meta_.path_, segment_id_);
     }
 }
 
@@ -101,11 +101,6 @@ BuildIndexTask::OnExecute() {
     }
 
     return Status::OK();
-}
-
-void
-BuildIndexTask::GroupFieldsForIndex(const std::string& collection_name, engine::TargetFieldGroups& groups) {
-    engine::EngineFactory::GroupFieldsForIndex(collection_name, groups);
 }
 
 }  // namespace scheduler

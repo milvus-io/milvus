@@ -31,7 +31,7 @@ namespace scheduler {
 
 class BuildIndexJob : public Job {
  public:
-    explicit BuildIndexJob(engine::DBOptions options, const std::string& collection_name,
+    explicit BuildIndexJob(const engine::snapshot::ScopedSnapshotT&, engine::DBOptions options,
                            const engine::snapshot::IDS_TYPE& segment_ids);
 
     ~BuildIndexJob() = default;
@@ -45,11 +45,6 @@ class BuildIndexJob : public Job {
         return options_;
     }
 
-    const std::string&
-    collection_name() {
-        return collection_name_;
-    }
-
     const engine::snapshot::IDS_TYPE&
     segment_ids() {
         return segment_ids_;
@@ -60,8 +55,8 @@ class BuildIndexJob : public Job {
     OnCreateTasks(JobTasks& tasks) override;
 
  private:
+    engine::snapshot::ScopedSnapshotT snapshot_;
     engine::DBOptions options_;
-    std::string collection_name_;
     engine::snapshot::IDS_TYPE segment_ids_;
 };
 
