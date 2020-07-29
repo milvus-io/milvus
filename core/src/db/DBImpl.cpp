@@ -524,14 +524,16 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
 
 Status
 DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                      const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) {
+                      const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
+                      DataChunkPtr& data_chunk) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     std::string dir_root = options_.meta_.path_;
-    auto handler = std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, dir_root, id_array, field_names);
+    auto handler =
+        std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, dir_root, id_array, field_names, valid_row);
     handler->Iterate();
     STATUS_CHECK(handler->GetStatus());
 

@@ -33,13 +33,14 @@ class GetEntityByIDReq : public BaseReq {
  public:
     static BaseReqPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
+           const engine::IDNumbers& id_array, std::vector<std::string>& field_names_, std::vector<bool>& valid_row,
            engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
  protected:
     GetEntityByIDReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                      const engine::IDNumbers& id_array, std::vector<std::string>& field_names,
-                     engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
+                     std::vector<bool>& valid_row, engine::snapshot::CollectionMappings& field_mappings,
+                     engine::DataChunkPtr& data_chunk);
 
     Status
     OnExecute() override;
@@ -50,6 +51,7 @@ class GetEntityByIDReq : public BaseReq {
     std::vector<std::string>& field_names_;
     engine::snapshot::CollectionMappings& field_mappings_;
     engine::DataChunkPtr& data_chunk_;
+    std::vector<bool>& valid_row_;
 };
 
 }  // namespace server

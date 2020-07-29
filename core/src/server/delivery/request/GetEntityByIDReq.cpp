@@ -31,13 +31,14 @@ constexpr uint64_t MAX_COUNT_RETURNED = 1000;
 
 GetEntityByIDReq::GetEntityByIDReq(const std::shared_ptr<milvus::server::Context>& context,
                                    const std::string& collection_name, const engine::IDNumbers& id_array,
-                                   std::vector<std::string>& field_names,
+                                   std::vector<std::string>& field_names, std::vector<bool>& valid_row,
                                    engine::snapshot::CollectionMappings& field_mappings,
                                    engine::DataChunkPtr& data_chunk)
     : BaseReq(context, BaseReq::kGetEntityByID),
       collection_name_(collection_name),
       id_array_(id_array),
       field_names_(field_names),
+      valid_row_(valid_row),
       field_mappings_(field_mappings),
       data_chunk_(data_chunk) {
 }
@@ -45,9 +46,10 @@ GetEntityByIDReq::GetEntityByIDReq(const std::shared_ptr<milvus::server::Context
 BaseReqPtr
 GetEntityByIDReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
                          const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
-                         engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
+                         std::vector<bool>& valid_row, engine::snapshot::CollectionMappings& field_mappings,
+                         engine::DataChunkPtr& data_chunk) {
     return std::shared_ptr<BaseReq>(
-        new GetEntityByIDReq(context, collection_name, id_array, field_names_, field_mappings, data_chunk));
+        new GetEntityByIDReq(context, collection_name, id_array, field_names_, valid_row, field_mappings, data_chunk));
 }
 
 Status
@@ -82,8 +84,8 @@ GetEntityByIDReq::OnExecute() {
 
         if (field_names_.empty()) {
             for (const auto& schema : field_mappings_) {
-                if (schema.first->GetFtype() != engine::meta::hybrid::DataType::UID)
-                    field_names_.emplace_back(schema.first->GetName());
+                // if (schema.first->GetFtype() != engine::meta::hybrid::DataType::UID)
+                field_names_.emplace_back(schema.first->GetName());
             }
         } else {
             for (const auto& name : field_names_) {
@@ -101,7 +103,7 @@ GetEntityByIDReq::OnExecute() {
         }
 
         // step 2: get vector data, now only support get one id
-        status = DBWrapper::DB()->GetEntityByID(collection_name_, id_array_, field_names_, data_chunk_);
+        status = DBWrapper::DB()->GetEntityByID(collection_name_, id_array_, field_names_, valid_row_, data_chunk_);
         if (!status.ok()) {
             return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
         }
