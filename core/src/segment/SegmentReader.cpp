@@ -237,13 +237,13 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         auto& segment = segment_visitor_->GetSegment();
         auto& snapshot = segment_visitor_->GetSnapshot();
         auto segment_commit = snapshot->GetSegmentCommitBySegmentId(segment->GetID());
+        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+            std::make_shared<faiss::ConcurrentBitset>(segment_commit->GetRowCount());
+
         segment::DeletedDocsPtr deleted_docs_ptr;
         STATUS_CHECK(LoadDeletedDocs(deleted_docs_ptr));
-
-        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-                std::make_shared<faiss::ConcurrentBitset>(segment_commit->GetRowCount());
         if (deleted_docs_ptr != nullptr) {
-            auto &deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+            auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             for (auto &offset : deleted_docs) {
                 concurrent_bitset_ptr->set(offset);
             }
@@ -271,7 +271,10 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         // if index not specified, or index file not created, return IDMAP
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
-            auto& json = field_visitor->GetField()->GetParams();
+            auto& json = field->GetParams();
+            if (json.find(knowhere::meta::DIM) == json.end()) {
+                return Status(DB_ERROR, "Vector field dimension undefined");
+            }
             int64_t dimension = json[knowhere::meta::DIM];
             std::vector<uint8_t> raw;
             STATUS_CHECK(LoadField(field_name, raw));
@@ -281,6 +284,8 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             index_ptr =
                 vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP, knowhere::IndexMode::MODE_CPU);
             milvus::json conf{{knowhere::meta::DIM, dimension}};
+            conf[engine::PARAM_INDEX_METRIC_TYPE] = knowhere::Metric::L2;
+            index_ptr->Train(knowhere::DatasetPtr(), conf);
             index_ptr->AddWithoutIds(dataset, conf);
             index_ptr->SetUids(uids);
             index_ptr->SetBlacklist(concurrent_bitset_ptr);

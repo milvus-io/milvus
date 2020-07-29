@@ -80,17 +80,17 @@ CreateCollectionReq::OnExecute() {
             }
 
             std::cout << field_params.dump() << std::endl;
-            if (field_type == engine::meta::hybrid::DataType::VECTOR_FLOAT ||
-                field_type == engine::meta::hybrid::DataType::VECTOR_BINARY) {
+            if (field_type == engine::FieldType::VECTOR_FLOAT ||
+                field_type == engine::FieldType::VECTOR_BINARY) {
                 if (!field_params.contains(engine::PARAM_DIMENSION)) {
                     return Status(SERVER_INVALID_VECTOR_DIMENSION, "Dimension not defined in field_params");
                 }
-//                if (index_params.contains(engine::PARAM_INDEX_METRIC_TYPE)) {
-//                    auto metric_type = index_params[engine::PARAM_INDEX_METRIC_TYPE];
-//                    if (engine::s_map_metric_type.find(metric_type) == engine::s_map_metric_type.end()) {
-//                        return Status(SERVER_INVALID_INDEX_METRIC_TYPE, "Invalid metric type");
-//                    }
-//                }
+                // if (index_params.contains(engine::PARAM_INDEX_METRIC_TYPE)) {
+                //     auto metric_type = index_params[engine::PARAM_INDEX_METRIC_TYPE];
+                //     if (engine::s_map_metric_type.find(metric_type) == engine::s_map_metric_type.end()) {
+                //         return Status(SERVER_INVALID_INDEX_METRIC_TYPE, "Invalid metric type");
+                //     }
+                // }
             }
 
             auto field = std::make_shared<engine::snapshot::Field>(field_name, 0, field_type, field_params);

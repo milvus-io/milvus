@@ -91,7 +91,8 @@ class DBImpl : public DB, public ConfigObserver {
 
     Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                  const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) override;
+                  const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
+                  DataChunkPtr& data_chunk) override;
 
     Status
     DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers entity_ids) override;
