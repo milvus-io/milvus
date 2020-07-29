@@ -11,6 +11,8 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
-add_library(utils STATIC ${utils_files})
-add_dependencies(utils fiu)
+aux_source_directory( ${MILVUS_ENGINE_SRC}/utils UTILS_FILES )
+
+add_library( utils STATIC ${UTILS_FILES} )
+
+add_dependencies( utils fiu )

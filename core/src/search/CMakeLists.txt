@@ -10,6 +10,8 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
-aux_source_directory(${MILVUS_ENGINE_SRC}/search search_files)
-add_library(search STATIC ${search_files})
-target_include_directories(search PUBLIC ${MILVUS_ENGINE_SRC}/search)
+aux_source_directory( ${MILVUS_ENGINE_SRC}/search   SEARCH_FILES )
+
+add_library(                search STATIC )
+target_sources(             search PRIVATE  ${SEARCH_FILES} )
+target_include_directories( search PUBLIC   ${MILVUS_ENGINE_SRC}/search )
