@@ -31,6 +31,12 @@ extern Status
 ValidateFieldName(const std::string& field_name);
 
 extern Status
+ValidateIndexName(const std::string& index_name);
+
+extern Status
+ValidateDimension(int64_t dimension, bool is_binary);
+
+extern Status
 ValidateIndexType(const std::string& index_type);
 
 extern Status
