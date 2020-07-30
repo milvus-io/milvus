@@ -29,10 +29,12 @@
 namespace milvus {
 namespace scheduler {
 
-SearchTask::SearchTask(const server::ContextPtr& context, const engine::DBOptions& options,
-                       const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
+SearchTask::SearchTask(const server::ContextPtr& context, engine::snapshot::ScopedSnapshotT snapshot,
+                       const engine::DBOptions& options, const query::QueryPtr& query_ptr,
+                       engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
     : Task(TaskType::SearchTask, std::move(label)),
       context_(context),
+      snapshot_(snapshot),
       options_(options),
       query_ptr_(query_ptr),
       segment_id_(segment_id) {
@@ -42,9 +44,7 @@ SearchTask::SearchTask(const server::ContextPtr& context, const engine::DBOption
 void
 SearchTask::CreateExecEngine() {
     if (execution_engine_ == nullptr && query_ptr_ != nullptr) {
-        engine::snapshot::ScopedSnapshotT latest_ss;
-        engine::snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, query_ptr_->collection_id);
-        execution_engine_ = engine::EngineFactory::Build(latest_ss, options_.meta_.path_, segment_id_);
+        execution_engine_ = engine::EngineFactory::Build(snapshot_, options_.meta_.path_, segment_id_);
     }
 }
 
@@ -106,29 +106,37 @@ SearchTask::OnExecute() {
         return Status(DB_ERROR, "execution engine is null");
     }
 
+    //    auto search_job = std::static_pointer_cast<scheduler::SearchJob>(std::shared_ptr<scheduler::Job>(job_));
+    auto search_job = static_cast<scheduler::SearchJob*>(job_);
     try {
         /* step 2: search */
         engine::ExecutionEngineContext context;
         context.query_ptr_ = query_ptr_;
         context.query_result_ = std::make_shared<engine::QueryResult>();
-        auto status = execution_engine_->Search(context);
-
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(execution_engine_->Search(context));
 
         rc.RecordSection("search done");
 
         /* step 3: pick up topk result */
-        // auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
-        // if (spec_k == 0) {
-        //     LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty file. file location = %s",
-        //     "search", 0,
-        //                                   file_->location_.c_str());
-        // } else {
-        //     std::unique_lock<std::mutex> lock(search_job->mutex());
-        //   XSearchTask::MergeTopkToResultSet(result, spec_k, nq, topk, ascending_, search_job->GetQueryResult());
-        // }
+        // TODO(yukun): Remove hardcode here
+        auto vector_param = context.query_ptr_->vectors.begin()->second;
+        auto topk = vector_param->topk;
+        auto segment_ptr = snapshot_->GetSegmentCommitBySegmentId(segment_id_);
+        auto spec_k = segment_ptr->GetRowCount() < topk ? segment_ptr->GetRowCount() : topk;
+        int64_t nq = vector_param->nq;
+        if (spec_k == 0) {
+            LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty segment. segment id = %d", "search", 0,
+                                          segment_ptr->GetID());
+        } else {
+            //            std::unique_lock<std::mutex> lock(search_job->mutex());
+            if (!search_job->query_result()) {
+                search_job->query_result() = std::make_shared<engine::QueryResult>();
+                search_job->query_result()->row_num_ = nq;
+            }
+            SearchTask::MergeTopkToResultSet(context.query_result_->result_ids_,
+                                             context.query_result_->result_distances_, spec_k, nq, topk,
+                                             ascending_reduce_, search_job->query_result());
+        }
 
         rc.RecordSection("reduce topk done");
     } catch (std::exception& ex) {
@@ -138,6 +146,72 @@ SearchTask::OnExecute() {
 
     rc.ElapseFromBegin("totally cost");
     return Status::OK();
+}
+
+void
+SearchTask::MergeTopkToResultSet(const engine::ResultIds& src_ids, const engine::ResultDistances& src_distances,
+                                 size_t src_k, size_t nq, size_t topk, bool ascending, engine::QueryResultPtr& result) {
+    if (src_ids.empty()) {
+        LOG_ENGINE_DEBUG_ << LogOut("[%s][%d] Search result is empty.", "search", 0);
+        return;
+    }
+
+    size_t tar_k = result->result_ids_.size() / nq;
+    size_t buf_k = std::min(topk, src_k + tar_k);
+
+    engine::ResultIds buf_ids(nq * buf_k, -1);
+    engine::ResultDistances buf_distances(nq * buf_k, 0.0);
+    for (uint64_t i = 0; i < nq; i++) {
+        size_t buf_k_j = 0, src_k_j = 0, tar_k_j = 0;
+        size_t buf_idx, src_idx, tar_idx;
+
+        size_t buf_k_multi_i = buf_k * i;
+        size_t src_k_multi_i = topk * i;
+        size_t tar_k_multi_i = tar_k * i;
+
+        while (buf_k_j < buf_k && src_k_j < src_k && tar_k_j < tar_k) {
+            src_idx = src_k_multi_i + src_k_j;
+            tar_idx = tar_k_multi_i + tar_k_j;
+            buf_idx = buf_k_multi_i + buf_k_j;
+
+            if ((result->result_ids_[tar_idx] == -1) ||  // initialized value
+                (ascending && src_distances[src_idx] < result->result_distances_[tar_idx]) ||
+                (!ascending && src_distances[src_idx] > result->result_distances_[tar_idx])) {
+                buf_ids[buf_idx] = src_ids[src_idx];
+                buf_distances[buf_idx] = src_distances[src_idx];
+                src_k_j++;
+            } else {
+                buf_ids[buf_idx] = result->result_ids_[tar_idx];
+                buf_distances[buf_idx] = result->result_distances_[tar_idx];
+                tar_k_j++;
+            }
+            buf_k_j++;
+        }
+
+        if (buf_k_j < buf_k) {
+            if (src_k_j < src_k) {
+                while (buf_k_j < buf_k && src_k_j < src_k) {
+                    buf_idx = buf_k_multi_i + buf_k_j;
+                    src_idx = src_k_multi_i + src_k_j;
+                    buf_ids[buf_idx] = src_ids[src_idx];
+                    buf_distances[buf_idx] = src_distances[src_idx];
+                    src_k_j++;
+                    buf_k_j++;
+                }
+            } else {
+                while (buf_k_j < buf_k && tar_k_j < tar_k) {
+                    buf_idx = buf_k_multi_i + buf_k_j;
+                    tar_idx = tar_k_multi_i + tar_k_j;
+                    buf_ids[buf_idx] = result->result_ids_[tar_idx];
+                    buf_distances[buf_idx] = result->result_distances_[tar_idx];
+                    tar_k_j++;
+                    buf_k_j++;
+                }
+            }
+        }
+    }
+    result->result_ids_.swap(buf_ids);
+    result->result_distances_.swap(buf_distances);
 }
 
 int64_t

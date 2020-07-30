@@ -643,7 +643,9 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
 
         // Currently only one extra_param
         if (field.extra_params_size() != 0) {
-            field_schema.field_params_ = json::parse(field.extra_params(0).value());
+            if (!field.extra_params(0).value().empty()) {
+                field_schema.field_params_ = json::parse(field.extra_params(0).value());
+            }
         }
 
         for (int j = 0; j < field.index_params_size(); j++) {
