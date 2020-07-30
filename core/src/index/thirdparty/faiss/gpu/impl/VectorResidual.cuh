@@ -31,9 +31,11 @@ void runReconstruct(Tensor<int, 1, true>& listIds,
                     Tensor<float, 2, true>& out,
                     cudaStream_t stream);
 
+#ifdef FAISS_USE_FLOAT16
 void runReconstruct(Tensor<int, 1, true>& listIds,
                     Tensor<half, 2, true>& vecs,
                     Tensor<float, 2, true>& out,
                     cudaStream_t stream);
+# endif
 
 } } // namespace

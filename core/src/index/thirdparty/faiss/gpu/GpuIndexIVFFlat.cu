@@ -261,3 +261,4 @@ GpuIndexIVFFlat::searchImpl_(int n,
 
 
 } } // namespace
+
