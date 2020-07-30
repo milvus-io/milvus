@@ -493,10 +493,23 @@ TEST_F(DBTest, IndexTest) {
     status = db_->Flush();
     ASSERT_TRUE(status.ok());
 
-//    milvus::engine::CollectionIndex index;
-//    index.index_name_ = "IVFLAT";
-//    index.metric_name_ = "L2";
-//    index.extra_params_["nlist"] = 2048;
-//    status = db_->CreateIndex(dummy_context_, collection_name, "vector", index);
-//    ASSERT_TRUE(status.ok());
+    {
+        milvus::engine::CollectionIndex index;
+        index.index_name_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+        index.metric_name_ = milvus::knowhere::Metric::L2;
+        index.extra_params_["nlist"] = 2048;
+        status = db_->CreateIndex(dummy_context_, collection_name, "vector", index);
+        ASSERT_TRUE(status.ok());
+    }
+
+    {
+//        milvus::engine::CollectionIndex index;
+//        index.index_name_ = "SORTED";
+//        status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
+//        ASSERT_TRUE(status.ok());
+//        status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);
+//        ASSERT_TRUE(status.ok());
+//        status = db_->CreateIndex(dummy_context_, collection_name, "field_2", index);
+//        ASSERT_TRUE(status.ok());
+    }
 }
