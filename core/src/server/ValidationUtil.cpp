@@ -27,7 +27,7 @@ namespace {
 
 constexpr size_t NAME_SIZE_LIMIT = 255;
 constexpr int64_t MAX_DIMENSION = 32768;
-constexpr int32_t MAX_SEGMENT_SIZE = 4096;  /* MB */
+constexpr int32_t MAX_SEGMENT_SIZE = 4096; /* MB */
 constexpr int64_t M_BYTE = 1024 * 1024;
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
 
