@@ -59,7 +59,7 @@ CreateIndexReq::OnExecute() {
             return status;
         }
 
-        status = ValidateIndexName(index_name_);
+        status = ValidateIndexType(index_name_);
         if (!status.ok()) {
             return status;
         }
@@ -92,7 +92,7 @@ CreateIndexReq::OnExecute() {
         if (engine::IsVectorField(field)) {
             int32_t field_type = field->GetFtype();
             auto params = field->GetParams();
-            int64_t dimension = params[engine::DIMENSION].get<int64_t>();
+            int64_t dimension = params[engine::PARAM_DIMENSION].get<int64_t>();
 
             // validate index type
             std::string index_type = 0;
@@ -109,7 +109,7 @@ CreateIndexReq::OnExecute() {
             if (json_params_.contains("metric_type")) {
                 metric_type = json_params_["metric_type"].get<std::string>();
             }
-            status = ValidateMetricType(metric_type);
+            status = ValidateIndexMetricType(metric_type);
             if (!status.ok()) {
                 return status;
             }

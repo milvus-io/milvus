@@ -18,6 +18,7 @@
 
 #include <fiu-local.h>
 #include <limits>
+#include <set>
 #include <string>
 
 namespace milvus {
@@ -27,7 +28,7 @@ namespace {
 
 constexpr size_t NAME_SIZE_LIMIT = 255;
 constexpr int64_t COLLECTION_DIMENSION_LIMIT = 32768;
-constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
+constexpr int32_t SEGMENT_ROW_COUNT_LIMIT = 4 * 1024 * 1024;
 constexpr int64_t M_BYTE = 1024 * 1024;
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
 
@@ -167,45 +168,41 @@ ValidateFieldName(const std::string& field_name) {
 }
 
 Status
-ValidateIndexName(const std::string& index_name) {
+ValidateIndexType(const std::string& index_type) {
     // Index name shouldn't be empty.
-    if (index_name.empty()) {
+    if (index_type.empty()) {
         std::string msg = "Index name should not be empty.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_FIELD_NAME, msg);
     }
 
-    std::string invalid_msg = "Invalid index name: " + index_name + ". ";
-    // Index name size shouldn't exceed 255.
-    if (index_name.size() > NAME_SIZE_LIMIT) {
-        std::string msg = invalid_msg + "The length of a field name must be less than 255 characters.";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_FIELD_NAME, msg);
-    }
+    static std::set<std::string> s_valid_index_names = {
+        knowhere::IndexEnum::INVALID,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+        knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
+        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
+        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR,
+        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H,
+        knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+        knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+        knowhere::IndexEnum::INDEX_NSG,
+        knowhere::IndexEnum::INDEX_HNSW,
+        knowhere::IndexEnum::INDEX_ANNOY,
+        knowhere::IndexEnum::INDEX_HNSW_SQ8NM,
+    };
 
-    // Field name first character should be underscore or character.
-    char first_char = index_name[0];
-    if (first_char != '_' && std::isalpha(first_char) == 0) {
-        std::string msg = invalid_msg + "The first character of a field name must be an underscore or letter.";
+    if (s_valid_index_names.find(index_type) == s_valid_index_names.end()) {
+        std::string msg = "Invalid index name: " + index_type;
         LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_FIELD_NAME, msg);
-    }
-
-    int64_t field_name_size = index_name.size();
-    for (int64_t i = 1; i < field_name_size; ++i) {
-        char name_char = index_name[i];
-        if (name_char != '_' && std::isalnum(name_char) == 0) {
-            std::string msg = invalid_msg + "Field name cannot only contain numbers, letters, and underscores.";
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_INVALID_FIELD_NAME, msg);
-        }
+        return Status(SERVER_INVALID_INDEX_TYPE, msg);
     }
 
     return Status::OK();
 }
 
 Status
-ValidateTableDimension(int64_t dimension, int64_t metric_type) {
+ValidateVectorDimension(int64_t dimension, const std::string& metric_type) {
     if (dimension <= 0 || dimension > COLLECTION_DIMENSION_LIMIT) {
         std::string msg = "Invalid collection dimension: " + std::to_string(dimension) + ". " +
                           "The collection dimension must be within the range of 1 ~ " +
@@ -223,16 +220,6 @@ ValidateTableDimension(int64_t dimension, int64_t metric_type) {
         }
     }
 
-    return Status::OK();
-}
-
-Status
-ValidateIndexType(const std::string& index_type) {
-    return Status::OK();
-}
-
-Status
-ValidateMetricType(const std::string& metric_type) {
     return Status::OK();
 }
 
@@ -322,23 +309,32 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 }
 
 Status
-ValidateCollectionIndexFileSize(int64_t index_file_size) {
-    if (index_file_size <= 0 || index_file_size > INDEX_FILE_SIZE_LIMIT) {
-        std::string msg = "Invalid index file size: " + std::to_string(index_file_size) + ". " +
-                          "The index file size must be within the range of 1 ~ " +
-                          std::to_string(INDEX_FILE_SIZE_LIMIT) + ".";
+ValidateSegmentRowCount(int64_t segment_row_count) {
+    if (segment_row_count <= 0 || segment_row_count > SEGMENT_ROW_COUNT_LIMIT) {
+        std::string msg = "Invalid segment row count: " + std::to_string(segment_row_count) + ". " +
+                          "The segment row count must be within the range of 1 ~ " +
+                          std::to_string(SEGMENT_ROW_COUNT_LIMIT) + ".";
         LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_INDEX_FILE_SIZE, msg);
+        return Status(SERVER_INVALID_SEGMENT_ROW_COUNT, msg);
     }
 
     return Status::OK();
 }
 
 Status
-ValidateCollectionIndexMetricType(int32_t metric_type) {
-    if (metric_type <= 0 || metric_type > static_cast<int32_t>(engine::MetricType::MAX_VALUE)) {
-        std::string msg = "Invalid index metric type: " + std::to_string(metric_type) + ". " +
-                          "Make sure the metric type is in MetricType list.";
+ValidateIndexMetricType(const std::string& metric_type) {
+    static std::set<std::string> s_valid_metric = {
+        milvus::knowhere::Metric::L2,
+        milvus::knowhere::Metric::IP,
+        milvus::knowhere::Metric::HAMMING,
+        milvus::knowhere::Metric::JACCARD,
+        milvus::knowhere::Metric::TANIMOTO,
+        milvus::knowhere::Metric::SUBSTRUCTURE,
+        milvus::knowhere::Metric::SUPERSTRUCTURE,
+    };
+    if (s_valid_metric.find(metric_type) == s_valid_metric.end()) {
+        std::string msg =
+            "Invalid index metric type: " + metric_type + ". " + "Make sure the metric type is in MetricType list.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
     }

@@ -23,8 +23,6 @@
 namespace milvus {
 namespace engine {
 
-static const char* DIMENSION = "dim";
-
 // TODO(linxj): replace with VecIndex::IndexType
 enum class EngineType {
     INVALID = 0,
@@ -105,11 +103,6 @@ static std::map<std::string, MetricType> s_map_metric_type = {
     {"TANIMOTO", MetricType::TANIMOTO},
     {"SUBSTRUCTURE", MetricType::SUBSTRUCTURE},
     {"SUPERSTRUCTURE", MetricType::SUPERSTRUCTURE},
-};
-
-enum class StructuredIndexType {
-    INVALID = 0,
-    SORTED = 1,
 };
 
 namespace meta {

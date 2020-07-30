@@ -82,13 +82,13 @@ extern const char* DEFAULT_UID_NAME;
 extern const char* DEFAULT_RAW_DATA_NAME;
 extern const char* DEFAULT_BLOOM_FILTER_NAME;
 extern const char* DEFAULT_DELETED_DOCS_NAME;
-extern const char* DEFAULT_INDEX_NAME;
 extern const char* DEFAULT_INDEX_COMPRESS_NAME;
+extern const char* DEFAULT_STRUCTURED_INDEX_NAME;
 
 extern const char* PARAM_DIMENSION;
 extern const char* PARAM_INDEX_METRIC_TYPE;
 extern const char* PARAM_INDEX_EXTRA_PARAMS;
-extern const char* PARAM_SEGMENT_SIZE;
+extern const char* PARAM_SEGMENT_ROW_COUNT;
 
 using FieldType = meta::DataType;
 

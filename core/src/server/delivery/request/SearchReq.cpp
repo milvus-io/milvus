@@ -72,7 +72,7 @@ SearchReq::OnExecute() {
             field_types.insert(std::make_pair(field->GetName(), (engine::meta::DataType)field->GetFtype()));
             if (field->GetFtype() == (int)engine::meta::DataType::VECTOR_FLOAT ||
                 field->GetFtype() == (int)engine::meta::DataType::VECTOR_BINARY) {
-                dimension = field->GetParams()[engine::DIMENSION];
+                dimension = field->GetParams()[engine::PARAM_DIMENSION];
             }
         }
 

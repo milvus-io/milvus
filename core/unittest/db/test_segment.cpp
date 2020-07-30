@@ -51,7 +51,7 @@ CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name,
     auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR_FLOAT, vector_param,
             field_id);
     auto vector_field_element_index = std::make_shared<FieldElement>(collection_id, field_id,
-            milvus::engine::DEFAULT_INDEX_NAME, milvus::engine::FieldElementType::FET_INDEX);
+            milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::engine::FieldElementType::FET_INDEX);
 
     context.fields_schema[uid_field] = {uid_field_element_blt, uid_field_element_del};
     context.fields_schema[vector_field] = {vector_field_element_index};

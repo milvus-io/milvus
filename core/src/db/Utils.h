@@ -35,7 +35,7 @@ bool
 IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2);
 
 bool
-IsBinaryMetricType(int32_t metric_type);
+IsBinaryMetricType(const std::string& metric_type);
 
 meta::DateT
 GetDate(const std::time_t& t, int day_delta = 0);

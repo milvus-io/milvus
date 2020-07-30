@@ -29,6 +29,7 @@
 #endif
 #include "config/ServerConfig.h"
 //#include "storage/s3/S3ClientWrapper.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
@@ -53,12 +54,10 @@ IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2) {
 }
 
 bool
-IsBinaryMetricType(int32_t metric_type) {
-    return (metric_type == (int32_t)engine::MetricType::HAMMING) ||
-           (metric_type == (int32_t)engine::MetricType::JACCARD) ||
-           (metric_type == (int32_t)engine::MetricType::SUBSTRUCTURE) ||
-           (metric_type == (int32_t)engine::MetricType::SUPERSTRUCTURE) ||
-           (metric_type == (int32_t)engine::MetricType::TANIMOTO);
+IsBinaryMetricType(const std::string& metric_type) {
+    return (metric_type == knowhere::Metric::HAMMING) || (metric_type == knowhere::Metric::JACCARD) ||
+           (metric_type == knowhere::Metric::SUBSTRUCTURE) || (metric_type == knowhere::Metric::SUPERSTRUCTURE) ||
+           (metric_type == knowhere::Metric::TANIMOTO);
 }
 
 meta::DateT

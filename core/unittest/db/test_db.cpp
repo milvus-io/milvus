@@ -503,13 +503,13 @@ TEST_F(DBTest, IndexTest) {
     }
 
     {
-//        milvus::engine::CollectionIndex index;
-//        index.index_name_ = "SORTED";
-//        status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
-//        ASSERT_TRUE(status.ok());
-//        status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);
-//        ASSERT_TRUE(status.ok());
-//        status = db_->CreateIndex(dummy_context_, collection_name, "field_2", index);
-//        ASSERT_TRUE(status.ok());
+        milvus::engine::CollectionIndex index;
+        index.index_name_ = "SORTED";
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
+        ASSERT_TRUE(status.ok());
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);
+        ASSERT_TRUE(status.ok());
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_2", index);
+        ASSERT_TRUE(status.ok());
     }
 }

@@ -378,7 +378,6 @@ SegmentWriter::WriteStructuredIndex(const std::string& field_name) {
             return Status(DB_ERROR, "Structured index doesn't exist: " + status.message());
         }
 
-        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
         auto field = segment_visitor_->GetFieldVisitor(field_name);
         if (field == nullptr) {
             return Status(DB_ERROR, "Invalid filed name: " + field_name);

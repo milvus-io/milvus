@@ -60,7 +60,7 @@ WebErrorMap(ErrorCode code) {
         {SERVER_INVALID_NPROBE, StatusCode::ILLEGAL_ARGUMENT},
         {SERVER_INVALID_INDEX_NLIST, StatusCode::ILLEGAL_NLIST},
         {SERVER_INVALID_INDEX_METRIC_TYPE, StatusCode::ILLEGAL_METRIC_TYPE},
-        {SERVER_INVALID_INDEX_FILE_SIZE, StatusCode::ILLEGAL_ARGUMENT},
+        {SERVER_INVALID_SEGMENT_ROW_COUNT, StatusCode::ILLEGAL_ARGUMENT},
         {SERVER_ILLEGAL_VECTOR_ID, StatusCode::ILLEGAL_VECTOR_ID},
         {SERVER_ILLEGAL_SEARCH_RESULT, StatusCode::ILLEGAL_SEARCH_RESULT},
         {SERVER_CACHE_FULL, StatusCode::CACHE_FAILED},
@@ -159,7 +159,7 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
 
     json_out["collection_name"] = schema.collection_name_;
     json_out["dimension"] = schema.extra_params_[engine::PARAM_DIMENSION].get<int64_t>();
-    json_out["index_file_size"] = schema.extra_params_[engine::PARAM_SEGMENT_SIZE].get<int64_t>();
+    json_out["segment_row_count"] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT].get<int64_t>();
     json_out["metric_type"] = schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE].get<int64_t>();
     json_out["index_params"] = schema.extra_params_[engine::PARAM_INDEX_EXTRA_PARAMS].get<std::string>();
     json_out["count"] = count;

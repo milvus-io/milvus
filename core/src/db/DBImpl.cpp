@@ -960,8 +960,8 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
             continue;
         }
 
+        LOG_ENGINE_DEBUG_ << "Create BuildIndexJob for " << segment_ids.size() << " segments of " << collection_name;
         scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_ids);
-
         scheduler::JobMgrInst::GetInstance()->Put(job);
         job->WaitFinish();
 

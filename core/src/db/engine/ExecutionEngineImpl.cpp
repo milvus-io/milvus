@@ -518,26 +518,30 @@ ExecutionEngineImpl::BuildIndex() {
                 return status;
             }
             segment_writer_ptr->SetVectorIndex(field_name, new_index);
-            rc.RecordSection("build structured index");
+
+            rc.RecordSection("build vector index for field: " + field_name);
 
             // serialze index files
             status = segment_writer_ptr->WriteVectorIndex(field_name);
             if (!status.ok()) {
                 return status;
             }
-            rc.RecordSection("serialize vector index");
+
+            rc.RecordSection("serialize vector index for field: " + field_name);
         } else {
             knowhere::IndexPtr index_ptr;
             segment_ptr->GetStructuredIndex(field_name, index_ptr);
             segment_writer_ptr->SetStructuredIndex(field_name, index_ptr);
-            rc.RecordSection("build structured index");
+
+            rc.RecordSection("build structured index for field: " + field_name);
 
             // serialze index files
             status = segment_writer_ptr->WriteStructuredIndex(field_name);
             if (!status.ok()) {
                 return status;
             }
-            rc.RecordSection("serialize structured index");
+
+            rc.RecordSection("serialize structured index for field: " + field_name);
         }
     }
 
@@ -554,6 +558,7 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
     auto& segment = segment_visitor->GetSegment();
     auto field_visitor = segment_visitor->GetFieldVisitor(field_name);
     auto& field = field_visitor->GetField();
+    bool is_vector = IsVectorField(field);
 
     auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
     if (element_visitor == nullptr) {
@@ -575,7 +580,8 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
         // index already build?
         std::string file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(
             segment_reader_->GetCollectionsPath(), seg_file);
-        file_path += codec::VectorIndexFormat::FilePostfix();
+        file_path +=
+            (is_vector ? codec::VectorIndexFormat::FilePostfix() : codec::StructuredIndexFormat::FilePostfix());
         if (CommonUtil::IsFileExist(file_path)) {
             return Status(DB_ERROR, "Could not build index: Index file already exist");  // index already build
         }
