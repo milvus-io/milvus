@@ -43,13 +43,9 @@ class SearchJob : public Job {
               const engine::snapshot::IDS_TYPE& segment_ids, const engine::snapshot::ID_TYPE& ss_id);
 
  public:
-    JobTasks
-    CreateTasks() override;
-
     json
     Dump() const override;
 
- public:
     const server::ContextPtr&
     GetContext() const {
         return context_;
@@ -74,6 +70,10 @@ class SearchJob : public Job {
     segment_ids() {
         return segment_ids_;
     }
+
+ protected:
+    void
+    OnCreateTasks(JobTasks& tasks) override;
 
  private:
     const server::ContextPtr context_;

@@ -26,15 +26,13 @@ SearchJob::SearchJob(const server::ContextPtr& context, engine::DBOptions option
       ss_id_(ss_id) {
 }
 
-JobTasks
-SearchJob::CreateTasks() {
-    std::vector<TaskPtr> tasks;
+void
+SearchJob::OnCreateTasks(JobTasks& tasks) {
     for (auto& id : segment_ids_) {
         auto task = std::make_shared<SearchTask>(context_, options_, query_ptr_, id, ss_id_, nullptr);
         task->job_ = this;
         tasks.emplace_back(task);
     }
-    return tasks;
 }
 
 json

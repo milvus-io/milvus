@@ -30,7 +30,7 @@ class IdBloomFilterFormat {
  public:
     IdBloomFilterFormat() = default;
 
-    std::string
+    static std::string
     FilePostfix();
 
     void
