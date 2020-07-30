@@ -333,11 +333,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
  private:
     ReqHandler req_handler_;
 
-    // std::unordered_map<::grpc::ServerContext*, std::shared_ptr<Context>> context_map_;
     std::unordered_map<std::string, std::shared_ptr<Context>> context_map_;
     std::shared_ptr<opentracing::Tracer> tracer_;
-    std::unordered_map<std::string, engine::meta::DataType> field_type_;
-    //    std::unordered_map<::grpc::ServerContext*, std::unique_ptr<opentracing::Span>> span_map_;
 
     mutable std::mt19937_64 random_num_generator_;
     mutable std::mutex random_mutex_;

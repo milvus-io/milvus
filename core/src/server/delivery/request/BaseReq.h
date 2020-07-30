@@ -32,11 +32,15 @@
 namespace milvus {
 namespace server {
 
+struct FieldSchema {
+    engine::FieldType field_type_;
+    milvus::json field_params_;
+    milvus::json index_params_;
+};
+
 struct CollectionSchema {
     std::string collection_name_;
-    std::unordered_map<std::string, engine::meta::DataType> field_types_;
-    std::unordered_map<std::string, milvus::json> index_params_;
-    std::unordered_map<std::string, milvus::json> field_params_;
+    std::unordered_map<std::string, FieldSchema> fields_;
     milvus::json extra_params_;
 };
 
