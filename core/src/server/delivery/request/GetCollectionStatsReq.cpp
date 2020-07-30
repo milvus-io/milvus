@@ -51,7 +51,9 @@ GetCollectionStatsReq::OnExecute() {
             return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
 
-        STATUS_CHECK(DBWrapper::DB()->GetCollectionStats(collection_name_, collection_stats_));
+        milvus::json json_stats;
+        STATUS_CHECK(DBWrapper::DB()->GetCollectionStats(collection_name_, json_stats));
+        collection_stats_ = json_stats.dump();
         rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());

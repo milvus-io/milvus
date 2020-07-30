@@ -24,6 +24,7 @@
 #include "db/snapshot/Context.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
+#include "utils/Json.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -63,7 +64,7 @@ class DB {
                       snapshot::CollectionMappings& fields_schema) = 0;
 
     virtual Status
-    GetCollectionStats(const std::string& collection_name, std::string& collection_stats) = 0;
+    GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) = 0;
 
     virtual Status
     CountEntities(const std::string& collection_name, int64_t& row_count) = 0;
