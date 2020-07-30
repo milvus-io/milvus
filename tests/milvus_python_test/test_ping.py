@@ -55,6 +55,11 @@ class TestPing:
 
 
 class TestPingWithTimeout:
+    @pytest.fixture(scope="function", autouse=True)
+    def skip_http_check(self, args):
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
     def test_server_version_legal_timeout(self, connect):
         '''
         target: test get the server version with legal timeout
