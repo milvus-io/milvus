@@ -101,20 +101,24 @@ ExecutionEngineImpl::CreateStructuredIndex(const milvus::engine::meta::DataType 
             index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
             break;
         }
+        case engine::meta::DataType::UID:
         case engine::meta::DataType::INT64: {
             auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
                 raw_data.size(), reinterpret_cast<const int64_t*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
+            break;
         }
         case engine::meta::DataType::FLOAT: {
             auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
                 raw_data.size(), reinterpret_cast<const float*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
+            break;
         }
         case engine::meta::DataType::DOUBLE: {
             auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
                 raw_data.size(), reinterpret_cast<const double*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
+            break;
         }
         default: { return Status(DB_ERROR, "Field is not structured type"); }
     }
@@ -487,11 +491,11 @@ ExecutionEngineImpl::BuildIndex() {
     auto collection = snapshot->GetCollection();
     auto& segment = segment_visitor->GetSegment();
 
-    for (auto& field_name : target_fields_) {
-        snapshot::OperationContext context;
-        context.prev_partition = snapshot->GetResource<snapshot::Partition>(segment->GetPartitionId());
-        auto build_op = std::make_shared<snapshot::ChangeSegmentFileOperation>(context, snapshot);
+    snapshot::OperationContext context;
+    context.prev_partition = snapshot->GetResource<snapshot::Partition>(segment->GetPartitionId());
+    auto build_op = std::make_shared<snapshot::ChangeSegmentFileOperation>(context, snapshot);
 
+    for (auto& field_name : target_fields_) {
         // create snapshot segment files
         CollectionIndex index_info;
         auto status = CreateSnapshotIndexFile(build_op, field_name, index_info);
@@ -504,7 +508,9 @@ ExecutionEngineImpl::BuildIndex() {
         auto& field = field_visitor->GetField();
 
         auto root_path = segment_reader_->GetRootPath();
-        auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(root_path, segment_visitor);
+        auto op_ctx = build_op->GetContext();
+        auto new_visitor = SegmentVisitor::Build(snapshot, segment, op_ctx.new_segment_files);
+        auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(root_path, new_visitor);
         if (IsVectorField(field)) {
             knowhere::VecIndexPtr new_index;
             status = BuildKnowhereIndex(field_name, index_info, new_index);
@@ -512,24 +518,31 @@ ExecutionEngineImpl::BuildIndex() {
                 return status;
             }
             segment_writer_ptr->SetVectorIndex(field_name, new_index);
-            rc.RecordSection("build index");
+            rc.RecordSection("build structured index");
+
+            // serialze index files
+            status = segment_writer_ptr->WriteVectorIndex(field_name);
+            if (!status.ok()) {
+                return status;
+            }
+            rc.RecordSection("serialize vector index");
         } else {
             knowhere::IndexPtr index_ptr;
             segment_ptr->GetStructuredIndex(field_name, index_ptr);
             segment_writer_ptr->SetStructuredIndex(field_name, index_ptr);
-            rc.RecordSection("build index");
-        }
+            rc.RecordSection("build structured index");
 
-        // serialze index files
-        status = segment_writer_ptr->WriteVectorIndex(field_name);
-        if (!status.ok()) {
-            return status;
+            // serialze index files
+            status = segment_writer_ptr->WriteStructuredIndex(field_name);
+            if (!status.ok()) {
+                return status;
+            }
+            rc.RecordSection("serialize structured index");
         }
-        rc.RecordSection("serialize index");
-
-        // finish transaction
-        build_op->Push();
     }
+
+    // finish transaction
+    build_op->Push();
 
     return Status::OK();
 }
@@ -543,16 +556,26 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
     auto& field = field_visitor->GetField();
 
     auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-    auto& index_element = element_visitor->GetElement();
     if (element_visitor == nullptr) {
         return Status(DB_ERROR, "Could not build index: index not specified");  // no index specified
+    }
+
+    auto& index_element = element_visitor->GetElement();
+    index_info.index_name_ = index_element->GetName();
+    auto params = index_element->GetParams();
+    if (params.find(engine::PARAM_INDEX_METRIC_TYPE) != params.end()) {
+        index_info.metric_name_ = params[engine::PARAM_INDEX_METRIC_TYPE];
+    }
+    if (params.find(engine::PARAM_INDEX_EXTRA_PARAMS) != params.end()) {
+        index_info.extra_params_ = params[engine::PARAM_INDEX_EXTRA_PARAMS];
     }
 
     snapshot::SegmentFilePtr seg_file = element_visitor->GetFile();
     if (seg_file != nullptr) {
         // index already build?
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_reader_->GetRootPath(), seg_file);
+        std::string file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(
+            segment_reader_->GetCollectionsPath(), seg_file);
+        file_path += codec::VectorIndexFormat::FilePostfix();
         if (CommonUtil::IsFileExist(file_path)) {
             return Status(DB_ERROR, "Could not build index: Index file already exist");  // index already build
         }
@@ -563,6 +586,7 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
         sf_context.field_element_name = index_element->GetName();
         sf_context.collection_id = segment->GetCollectionId();
         sf_context.partition_id = segment->GetPartitionId();
+        sf_context.segment_id = segment->GetID();
 
         auto status = operation->CommitNewSegmentFile(sf_context, seg_file);
         if (!status.ok()) {
@@ -589,6 +613,7 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
             sf_context.field_element_name = compress_element->GetName();
             sf_context.collection_id = segment->GetCollectionId();
             sf_context.partition_id = segment->GetPartitionId();
+            sf_context.segment_id = segment->GetID();
 
             auto status = operation->CommitNewSegmentFile(sf_context, seg_file);
             if (!status.ok()) {
@@ -617,8 +642,8 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
 
     // build index by knowhere
-    auto to_index = CreateVecIndex(index_info.index_name_);
-    if (!to_index) {
+    new_index = CreateVecIndex(index_info.index_name_);
+    if (!new_index) {
         throw Exception(DB_ERROR, "Unsupported index type");
     }
 
@@ -628,24 +653,20 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     auto field_visitor = segment_visitor->GetFieldVisitor(field_name);
     auto& field = field_visitor->GetField();
 
-    auto element_json = index_info.extra_params_;
-    auto metric_type = element_json[engine::PARAM_INDEX_METRIC_TYPE];
-    auto index_params = element_json[engine::PARAM_INDEX_EXTRA_PARAMS];
-
     auto field_json = field->GetParams();
     auto dimension = field_json[milvus::knowhere::meta::DIM];
 
     auto segment_commit = snapshot->GetSegmentCommitBySegmentId(segment->GetID());
     auto row_count = segment_commit->GetRowCount();
 
-    milvus::json conf = index_params;
+    milvus::json conf = index_info.extra_params_;
     conf[knowhere::meta::DIM] = dimension;
     conf[knowhere::meta::ROWS] = row_count;
     conf[knowhere::meta::DEVICEID] = gpu_num_;
-    conf[knowhere::Metric::TYPE] = metric_type;
+    conf[knowhere::Metric::TYPE] = index_info.metric_name_;
     LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(to_index->index_type());
-    if (!adapter->CheckTrain(conf, to_index->index_mode())) {
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(new_index->index_type());
+    if (!adapter->CheckTrain(conf, new_index->index_mode())) {
         throw Exception(DB_ERROR, "Illegal index params");
     }
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
@@ -655,28 +676,28 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     if (from_index) {
         auto dataset =
             knowhere::GenDatasetWithIds(row_count, dimension, from_index->GetRawVectors(), from_index->GetRawIds());
-        to_index->BuildAll(dataset, conf);
+        new_index->BuildAll(dataset, conf);
         uids = from_index->GetUids();
         blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {
         auto dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
                                                    bin_from_index->GetRawIds());
-        to_index->BuildAll(dataset, conf);
+        new_index->BuildAll(dataset, conf);
         uids = bin_from_index->GetUids();
         blacklist = bin_from_index->GetBlacklist();
     }
 
 #ifdef MILVUS_GPU_VERSION
     /* for GPU index, need copy back to CPU */
-    if (to_index->index_mode() == knowhere::IndexMode::MODE_GPU) {
-        auto device_index = std::dynamic_pointer_cast<knowhere::GPUIndex>(to_index);
-        to_index = device_index->CopyGpuToCpu(conf);
+    if (new_index->index_mode() == knowhere::IndexMode::MODE_GPU) {
+        auto device_index = std::dynamic_pointer_cast<knowhere::GPUIndex>(new_index);
+        new_index = device_index->CopyGpuToCpu(conf);
     }
 #endif
 
-    to_index->SetUids(uids);
+    new_index->SetUids(uids);
     if (blacklist != nullptr) {
-        to_index->SetBlacklist(blacklist);
+        new_index->SetBlacklist(blacklist);
     }
 
     return Status::OK();

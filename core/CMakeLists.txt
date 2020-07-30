@@ -110,11 +110,9 @@ if ( BUILD_UNIT_TEST STREQUAL "ON" )
                             "-fprofile-arcs"
                             "-ftest-coverage"
                             )
-        # set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage" )
     endif ()
     append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
 
-    # set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DELPP_DISABLE_LOGS" )
     add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/unittest )
 endif ()
 
