@@ -106,7 +106,8 @@ SearchTask::OnExecute() {
         return Status(DB_ERROR, "execution engine is null");
     }
 
-    auto search_job = std::static_pointer_cast<scheduler::SearchJob>(std::shared_ptr<scheduler::Job>(job_));
+    //    auto search_job = std::static_pointer_cast<scheduler::SearchJob>(std::shared_ptr<scheduler::Job>(job_));
+    auto search_job = static_cast<scheduler::SearchJob*>(job_);
     try {
         /* step 2: search */
         engine::ExecutionEngineContext context;
@@ -130,6 +131,7 @@ SearchTask::OnExecute() {
             //            std::unique_lock<std::mutex> lock(search_job->mutex());
             if (!search_job->query_result()) {
                 search_job->query_result() = std::make_shared<engine::QueryResult>();
+                search_job->query_result()->row_num_ = nq;
             }
             SearchTask::MergeTopkToResultSet(context.query_result_->result_ids_,
                                              context.query_result_->result_distances_, spec_k, nq, topk,
