@@ -12,143 +12,152 @@
 #-------------------------------------------------------------------------------
 
 # **************************** Engine Source Files ****************************
-aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/merge db_merge_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/wal db_wal_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/snapshot db_snapshot_files)
+aux_source_directory( ${MILVUS_ENGINE_SRC}/cache            CACHE_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db               DB_MAIN_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/engine        DB_ENGINE_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/insert        DB_INSERT_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/merge         DB_MERGE_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/wal           DB_WAL_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/snapshot      DB_SNAPSHOT_FILES )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta/backend db_meta_backend_files)
-set(db_meta_files
-        ${db_meta_main_files}
-        ${db_meta_backend_files}
-        )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta          DB_META_MAIN_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta/backend  DB_META_BACKEND_FILES )
+set( DB_META_FILES  ${DB_META_MAIN_FILES}
+                    ${DB_META_BACKEND_FILES}
+                    )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage storage_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/storage/disk storage_disk_files)
-#aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
-set(storage_files
-        ${storage_main_files}
-        ${storage_disk_files}
-#        ${storage_s3_files}
-        )
-aux_source_directory(${MILVUS_ENGINE_SRC}/index/archive wrapper_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/codecs codecs_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/segment segment_files)
+aux_source_directory( ${MILVUS_ENGINE_SRC}/storage          STORAGE_MAIN_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/disk     STORAGE_DISK_FILES )
+# aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/s3     STORAGE_S3_FILES )
+set( STORAGE_FILES  ${STORAGE_MAIN_FILES}
+                    ${STORAGE_DISK_FILES}
+                    # ${STORAGE_S3_FILES}
+                    )
+
+aux_source_directory( ${MILVUS_ENGINE_SRC}/index/archive    WRAPPER_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/codecs           CODECS_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/segment          SEGMENT_FILES )
 
 
-aux_source_directory(${MILVUS_THIRDPARTY_SRC}/easyloggingpp thirdparty_easyloggingpp_files)
-aux_source_directory(${MILVUS_THIRDPARTY_SRC}/nlohmann thirdparty_nlohmann_files)
-aux_source_directory(${MILVUS_THIRDPARTY_SRC}/dablooms thirdparty_dablooms_files)
+aux_source_directory( ${MILVUS_THIRDPARTY_SRC}/easyloggingpp THIRDPARTY_EASYLOGGINGPP_FILES )
+aux_source_directory( ${MILVUS_THIRDPARTY_SRC}/nlohmann      THIRDPARTY_NLOHMANN_FILES )
+aux_source_directory( ${MILVUS_THIRDPARTY_SRC}/dablooms      THIRDPARTY_DABLOOMS_FILES )
 
-set(thirdparty_files
-        ${thirdparty_easyloggingpp_files}
-        ${thirdparty_nlohmann_files}
-        ${thirdparty_dablooms_files}
-        )
+set( THIRDPARTY_FILES   ${THIRDPARTY_EASYLOGGINGPP_FILES}
+                        ${THIRDPARTY_NLOHMANN_FILES}
+                        ${THIRDPARTY_DABLOOMS_FILES}
+                        )
 
-set(engine_files
-        ${cache_files}
-        ${db_main_files}
-        ${db_engine_files}
-        ${db_insert_files}
-        ${db_meta_files}
-        ${db_merge_files}
-        ${db_wal_files}
-        ${db_snapshot_files}
-        ${storage_files}
-        ${thirdparty_files}
-        ${wrapper_files}
-        ${codecs_files}
-        ${segment_files}
-        )
+set( ENGINE_FILES   ${CACHE_FILES}
+                    ${DB_MAIN_FILES}
+                    ${DB_ENGINE_FILES}
+                    ${DB_INSERT_FILES}
+                    ${DB_META_FILES}
+                    ${DB_MERGE_FILES}
+                    ${DB_WAL_FILES}
+                    ${DB_SNAPSHOT_FILES}
+                    ${STORAGE_FILES}
+                    ${THIRDPARTY_FILES}
+                    ${WRAPPER_FILES}
+                    ${CODECS_FILES}
+                    ${SEGMENT_FILES}
+                    )
 
 
 # **************************** Add Target milvus engine ****************************
-add_library(milvus_engine)
-target_sources(milvus_engine PUBLIC ${engine_files})
+add_library(    milvus_engine STATIC)
+target_sources( milvus_engine PRIVATE ${ENGINE_FILES})
+
+target_include_directories( milvus_engine
+    PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/engine"
+            "${CMAKE_CURRENT_SOURCE_DIR}/insert"
+            "${CMAKE_CURRENT_SOURCE_DIR}/merge"
+            "${CMAKE_CURRENT_SOURCE_DIR}/meta"
+            "${CMAKE_CURRENT_SOURCE_DIR}/meta/backend"
+            "${CMAKE_CURRENT_SOURCE_DIR}/snapshot"
+            "${CMAKE_CURRENT_SOURCE_DIR}/wal"
+            )
 
 # **************************** Libraries to be linked with target Engine ****************************
-set(engine_libs
-        pthread
-        libgomp.a
-        libgfortran.a
-        )
+set( ENGINE_LIBS    pthread
+                    libgomp.a
+                    libgfortran.a
+                    )
 
-set(grpc_lib
-        grpcpp_channelz
-        grpc++
-        grpc
-        grpc_protobuf
-        grpc_protoc
-        )
+set( GRPC_LIB   grpcpp_channelz
+                grpc++
+                grpc
+                grpc_protobuf
+                grpc_protoc
+                )
 
-set(boost_lib
-        libboost_system.a
-        libboost_filesystem.a
-        libboost_serialization.a
-        )
+set( BOOST_LIB  libboost_system.a
+                libboost_filesystem.a
+                libboost_serialization.a
+                )
 
-set(third_party_libs
-        sqlite
-        ${grpc_lib}
-        yaml-cpp
-        mysqlpp
-        zlib
-        fiu
-        ${boost_lib}
-        )
+set( PROMETHEUS_LIB prometheus-cpp-push
+                    prometheus-cpp-pull
+                    prometheus-cpp-core
+                    curl
+                    )
 
-if (MILVUS_GPU_VERSION)
-    set(cuda_lib
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-            cudart
-            cublas
-            )
-    list(APPEND third_party_libs ${cuda_lib})
+set( THIRD_PARTY_LIBS   sqlite
+                        yaml-cpp
+                        mysqlpp
+                        zlib
+                        fiu
+                        ${BOOST_LIB}
+                        ${GRPC_LIB}
+                        )
 
-    aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/gpu wrapper_gpu_files)
-    target_sources(milvus_engine  PUBLIC ${wrapper_gpu_files})
+set( S3_CLIENT_LIB  aws-cpp-sdk-s3
+                    aws-cpp-sdk-core
+                    )
+
+if ( MILVUS_GPU_VERSION )
+    set( CUDA_LIB   ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+                    cudart
+                    cublas
+                    )
+
+    list( APPEND THIRD_PARTY_LIBS ${CUDA_LIB} )
+    aux_source_directory( ${MILVUS_ENGINE_SRC}/wrapper/gpu WRAPPER_GPU_FILES )
+    target_sources( milvus_engine PUBLIC ${WRAPPER_GPU_FILES} )
 endif ()
 
 # cannot be enabled together with ENABLE_CPU_PROFILING
-if (ENABLE_MEM_PROFILING)
-    list(APPEND third_party_libs tcmalloc)
+if ( ENABLE_MEM_PROFILING )
+    list( APPEND THIRD_PARTY_LIBS tcmalloc )
 endif ()
 
-if (ENABLE_CPU_PROFILING)
-    list(APPEND third_party_libs
-        PUBLIC
-            gperftools
-            libunwind
-            )
+if ( ENABLE_CPU_PROFILING )
+    list( APPEND THIRD_PARTY_LIBS
+                 PUBLIC  gperftools
+                         libunwind
+                         )
 endif ()
 
-if (MILVUS_WITH_PROMETHEUS)
-    list(APPEND third_party_libs ${prometheus_lib})
+if ( MILVUS_WITH_PROMETHEUS )
+    list( APPEND THIRD_PARTY_LIBS ${PROMETHEUS_LIB} )
 endif ()
 
-if (MILVS_WITH_AWS)
-    list(APPEND third_party_libs
-        PUBLIC
-            ${s3_client_lib}
-            curl
-            crypto
-            )
+if ( MILVS_WITH_AWS )
+    list(APPEND THIRD_PARTY_LIBS
+                PUBLIC  ${S3_CLIENT_LIB}
+                        curl
+                        crypto
+                        )
 endif ()
 
-if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
-    list(APPEND third_party_libs libquadmath.a)
+if ( NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64" )
+    list( APPEND THIRD_PARTY_LIBS libquadmath.a )
 endif ()
 
 
 # **************************** Link Libraries with milvus engine ****************************
-target_link_libraries(milvus_engine
-    PUBLIC
-        knowhere
-        ${third_party_libs}
-        ${engine_libs}
-        )
+target_link_libraries( milvus_engine
+                       PUBLIC  knowhere
+                               ${THIRD_PARTY_LIBS}
+                               ${ENGINE_LIBS}
+                               )
