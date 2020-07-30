@@ -20,6 +20,18 @@
 namespace milvus {
 namespace engine {
 
+extern const char* JSON_ROW_COUNT;
+extern const char* JSON_ID;
+extern const char* JSON_PARTITIONS;
+extern const char* JSON_PARTITION_TAG;
+extern const char* JSON_SEGMENTS;
+extern const char* JSON_FIELD;
+extern const char* JSON_NAME;
+extern const char* JSON_FILES;
+extern const char* JSON_INDEX_NAME;
+extern const char* JSON_DATA_SIZE;
+extern const char* JSON_PATH;
+
 Status
 SetSnapshotIndex(const std::string& collection_name, const std::string& field_name,
                  engine::CollectionIndex& index_info);

@@ -19,6 +19,7 @@
 
 #include "segment/Segment.h"
 #include "db/utils.h"
+#include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/ResourceHelper.h"
@@ -512,4 +513,55 @@ TEST_F(DBTest, IndexTest) {
         status = db_->CreateIndex(dummy_context_, collection_name, "field_2", index);
         ASSERT_TRUE(status.ok());
     }
+}
+
+TEST_F(DBTest, StatsTest) {
+    std::string collection_name = "STATS_TEST";
+    auto status = CreateCollection2(db_, collection_name, 0);
+    ASSERT_TRUE(status.ok());
+
+    std::string partition_name = "p1";
+    status = db_->CreatePartition(collection_name, partition_name);
+    ASSERT_TRUE(status.ok());
+
+    const uint64_t entity_count = 10000;
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities(entity_count, 0, data_chunk);
+
+    status = db_->Insert(collection_name, "", data_chunk);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->Insert(collection_name, partition_name, data_chunk);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok());
+
+    {
+        milvus::engine::CollectionIndex index;
+        index.index_name_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+        index.metric_name_ = milvus::knowhere::Metric::L2;
+        index.extra_params_["nlist"] = 2048;
+        status = db_->CreateIndex(dummy_context_, collection_name, "vector", index);
+        ASSERT_TRUE(status.ok());
+    }
+
+    {
+        milvus::engine::CollectionIndex index;
+        index.index_name_ = "SORTED";
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
+        ASSERT_TRUE(status.ok());
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);
+        ASSERT_TRUE(status.ok());
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_2", index);
+        ASSERT_TRUE(status.ok());
+    }
+
+    nlohmann::json json_stats;
+    status = db_->GetCollectionStats(collection_name, json_stats);
+    int64_t row_count = json_stats[milvus::engine::JSON_ROW_COUNT];
+    ASSERT_EQ(row_count, entity_count * 2);
+
+//    std::string ss = json_stats.dump();
+//    std::cout << ss << std::endl;
 }

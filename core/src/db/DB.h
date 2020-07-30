@@ -63,7 +63,7 @@ class DB {
                       snapshot::CollectionMappings& fields_schema) = 0;
 
     virtual Status
-    GetCollectionStats(const std::string& collection_name, std::string& collection_stats) = 0;
+    GetCollectionStats(const std::string& collection_name, nlohmann::json& collection_stats) = 0;
 
     virtual Status
     CountEntities(const std::string& collection_name, int64_t& row_count) = 0;
