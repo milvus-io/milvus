@@ -35,9 +35,6 @@ namespace engine {
 namespace snapshot {
 
 using CheckStaleFunc = std::function<Status(ScopedSnapshotT&)>;
-// using StepsHolderT = std::tuple<CollectionCommit::SetT, Collection::SetT, SchemaCommit::SetT, FieldCommit::SetT,
-//                                Field::SetT, FieldElement::SetT, PartitionCommit::SetT, Partition::SetT,
-//                                SegmentCommit::SetT, Segment::SetT, SegmentFile::SetT>;
 template <typename ResourceT>
 using StepsContextSet = std::set<typename ResourceContext<ResourceT>::Ptr>;
 using StepsHolderT =
@@ -184,9 +181,6 @@ class Operations : public std::enable_shared_from_this<Operations> {
     OnApplyErrorCallback(Status);
     virtual Status
     OnApplyTimeoutCallback(StorePtr);
-
-    virtual Status
-    CheckCommited(StorePtr store, ID_TYPE& result_id);
 
     virtual std::string
     SuccessString() const;

@@ -184,7 +184,6 @@ Operations::GetSnapshot(ScopedSnapshotT& ss) const {
     STATUS_CHECK(CheckPrevSnapshot());
     STATUS_CHECK(CheckDone());
     STATUS_CHECK(CheckIDSNotEmpty());
-    /* status = Snapshots::GetInstance().GetSnapshot(ss, prev_ss_->GetCollectionId(), ids_.back()); */
     ss = context_.latest_ss;
     return Status::OK();
 }
@@ -247,31 +246,20 @@ Operations::DoExecute(StorePtr store) {
 }
 
 Status
-Operations::CheckCommited(StorePtr store, ID_TYPE& result_id) {
-    return Status::OK();
-    /* auto& holder = std::get<T>::value>(holders_); */
-}
-
-Status
 Operations::OnApplyTimeoutCallback(StorePtr store) {
-    auto try_times = 0;
-    ID_TYPE result_id;
-    auto status = CheckCommited(store, result_id);
-    while (!status.ok() || !HasAborted()) {
-        if (status.code() == SS_NOT_COMMITED) {
-            return PostExecute(store);
-        }
-        if (status.code() == SS_TIMEOUT) {
-            std::cout << GetName() << " Timeout! Try " << try_times << std::endl;
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            status = CheckCommited(store, result_id);
-            continue;
-        }
-        return OnApplyErrorCallback(status);
-    }
+    ApplyContext context;
+    context.on_succes_cb = std::bind(&Operations::OnApplySuccessCallback, this,
+            std::placeholders::_1);
+    context.on_error_cb = std::bind(&Operations::OnApplyErrorCallback, this,
+            std::placeholders::_1);
 
-    if (status.ok()) {
-        return OnApplySuccessCallback(result_id);
+    auto try_times = 0;
+
+    auto status = store->ApplyOperation(*this, context);
+    while (status.code() == SS_TIMEOUT && !HasAborted()) {
+        std::cout << GetName() << " Timeout! Try " << ++try_times << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        status = store->ApplyOperation(*this, context);
     }
     return status;
 }
@@ -296,6 +284,7 @@ Operations::PostExecute(StorePtr store) {
             std::placeholders::_1);
     context.on_timeout_cb = std::bind(&Operations::OnApplyTimeoutCallback, this,
             std::placeholders::_1);
+
     return store->ApplyOperation(*this, context);
 }
 
