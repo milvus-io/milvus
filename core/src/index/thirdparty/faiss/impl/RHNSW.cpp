@@ -22,7 +22,8 @@ namespace faiss {
 
 int* RHNSW::get_neighbor_link(idx_t no, int layer_no) const
 {
-  return layer_no ? (int*)(level0_links + no * level0_link_size) : (int*)(linkLists[no] + (layer_no - 1) * link_size);
+//    printf("in function get_neighbor_link, level0_links addr is %p, this->level0_links addr is %p\n", level0_links, this->level0_links);
+  return layer_no == 0 ? (int*)(level0_links + no * level0_link_size) : (int*)(linkLists[no] + (layer_no - 1) * link_size);
 }
 
 unsigned short int RHNSW::get_neighbors_num(int *p) const {
@@ -142,7 +143,7 @@ int RHNSW::prepare_level_tab(size_t n, bool preset_levels)
   } else {
     FAISS_ASSERT (n0 == levels.size());
     double random_level_arg = 1 / log(double(M));
-    levels.resize(n0 + n);
+//    levels.resize(n0 + n);
     for (int i = 0; i < n; i++) {
       int pt_level = random_level(random_level_arg);
       levels.push_back(pt_level);
@@ -153,18 +154,23 @@ int RHNSW::prepare_level_tab(size_t n, bool preset_levels)
   if (level0_links_new == nullptr) {
     throw std::runtime_error("No enough memory 4 level0_links!");
   }
-  printf("level0_links_new addr: %p has malloc %d bytes space, level0_link_size = %d\n", level0_links_new, level0_link_size * (n0 + n), level0_link_size);
-  memcpy(level0_links_new, level0_links, n0 * level0_link_size);
-  free(level0_links);
+  memset(level0_links_new, 0, (n0 + n) * level0_link_size);
+//  printf("level0_links_new addr: %p has malloc %d bytes space, level0_link_size = %d\n", level0_links_new, level0_link_size * (n0 + n), level0_link_size);
+  if (level0_links) {
+    memcpy(level0_links_new, level0_links, n0 * level0_link_size);
+    free(level0_links);
+  }
   level0_links = level0_links_new;
 
   char **linkLists_new = (char **)malloc(sizeof(void*) * (n0 + n));
   if (linkLists_new == nullptr) {
     throw std::runtime_error("No enough memory 4 level0_links_new!");
   }
-  printf("linkLists_new addr: %p has malloc %d bytes space, link_size = %d\n", linkLists_new, sizeof(void*) * (n0 + n), link_size);
-  memcpy(linkLists_new, linkLists, n0 * sizeof(void*));
-  free(linkLists);
+//  printf("linkLists_new addr: %p has malloc %d bytes space, link_size = %d\n", linkLists_new, sizeof(void*) * (n0 + n), link_size);
+  if (linkLists) {
+    memcpy(linkLists_new, linkLists, n0 * sizeof(void*));
+    free(linkLists);
+  }
   linkLists = linkLists_new;
 
   int max_level = 0;
@@ -271,7 +277,7 @@ void add_link(RHNSW& hnsw,
   int *p_neighbors = src_level_link + 1;
   auto neighbor_num = hnsw.get_neighbors_num(src_level_link);
   if (neighbor_num < curr_M) {
-    p_neighbors[++ neighbor_num] = dest;
+    p_neighbors[neighbor_num ++] = dest;
     hnsw.set_neighbors_num(src_level_link, neighbor_num);
     return;
   }
@@ -401,14 +407,32 @@ void RHNSW::add_links_starting_from(DistanceComputer& ptdis,
 
   search_neighbors_to_add(*this, ptdis, link_targets, nearest, d_nearest,
                           level, vt);
+//  if (!pt_id) {
+//    int *cur_links = get_neighbor_link(99, 0);
+//    int *cur_neighbors = cur_links + 1;
+//    auto cur_neighbor_num = get_neighbors_num(cur_links);
+//    printf("entry_point is %d, has %d neighbors:\n", 99, cur_neighbor_num);
+//    for (auto i = 0; i < cur_neighbor_num; ++ i)
+//      printf("%d ", cur_neighbors[i]);
+//    printf("\n");
+//  }
 
   // but we can afford only this many neighbors
   int curr_M = level ? M : M << 1;
 
   ::faiss::shrink_neighbor_list(ptdis, link_targets, curr_M);
+//  if (!pt_id) {
+//    printf("elements in link_targets after faiss::shrink_neighbor_list:\n");
+//    auto it = link_targets.begin();
+//    for (; it != link_targets.end; ++ it) {
+//      printf("%d %.2f\n", it->id, it->d);
+//    }
+//  }
 
   while (!link_targets.empty()) {
     int other_id = link_targets.top().id;
+//    if (!pt_id)
+//      printf("begin add link between %d and %d\n", pt_id, other_id);
 
     omp_set_lock(&locks[other_id]);
     add_link(*this, ptdis, other_id, pt_id, level);
@@ -417,6 +441,8 @@ void RHNSW::add_links_starting_from(DistanceComputer& ptdis,
     add_link(*this, ptdis, pt_id, other_id, level);
 
     link_targets.pop();
+//    if (!pt_id)
+//      printf("end add link between %d and %d\n", pt_id, other_id);
   }
 }
 

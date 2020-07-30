@@ -40,7 +40,7 @@ int main() {
     int M = 16;
     int efConstruction = 200;
     int efSearch = 100;
-    int topk = 10;
+    int topk = 1;
 
     float *xb = new float[d * nb];
     float *xq = new float[d * nq];

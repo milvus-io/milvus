@@ -6,7 +6,7 @@
 -include ../../makefile.inc
 
 #CPU_TARGETS = 1-Flat 2-IVFFlat 3-IVFPQ 9-BinaryFlat
-CPU_TARGETS = hnsw-cmli #hnsw-milvus hnsw-faiss 
+CPU_TARGETS = hnsw-cmli hnsw-milvus hnsw-faiss hnsw-sq8-cmli hnsw-sq8-milvus hnsw-sq8-faiss 
 GPU_TARGETS = 4-GPU 5-Multiple-GPUs
 
 default: cpu

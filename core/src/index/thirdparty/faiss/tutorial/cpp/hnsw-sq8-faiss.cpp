@@ -39,7 +39,7 @@ int main() {
     int M = 16;
     int efConstruction = 200;
     int efSearch = 100;
-    int topk = 10;
+    int topk = 1;
 
     float *xb = new float[d * nb];
     float *xq = new float[d * nq];
@@ -72,8 +72,8 @@ int main() {
     hnsw->hnsw.efConstruction = efConstruction;
     hnsw->hnsw.efSearch = efSearch;
 
-    auto ts = std::chrono::high_resolution_clock::now();
     hnsw->train(nb, xb);
+    auto ts = std::chrono::high_resolution_clock::now();
     hnsw->add(nb, xb);
     auto te = std::chrono::high_resolution_clock::now();
     std::cout << "build index costs: " << std::chrono::duration_cast<std::chrono::milliseconds>(te - ts).count() << "ms " << std::endl;

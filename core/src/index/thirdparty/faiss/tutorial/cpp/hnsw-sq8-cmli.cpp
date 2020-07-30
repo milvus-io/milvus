@@ -36,12 +36,12 @@ int main() {
     int d = 128;                            // dimension
     int nb = 1000000;                       // database size
 //    int nb = 100;                       // database size
-//    int nq = 10000;                        // nb of queries
-    int nq = 100;                        // nb of queries
+    int nq = 10000;                        // nb of queries
+//    int nq = 1;                        // nb of queries
     int M = 16;
     int efConstruction = 200;
     int efSearch = 100;
-    int topk = 3;
+    int topk = 1;
 
     float *xb = new float[d * nb];
     float *xq = new float[d * nq];
@@ -70,13 +70,13 @@ int main() {
     }
 
 
-    std::shared_ptr<faiss::IndexRHNSWFlat> hnsw = std::make_shared<faiss::IndexRHNSWFlat>(d, M);
+    std::shared_ptr<faiss::IndexRHNSWSQ> hnsw = std::make_shared<faiss::IndexRHNSWSQ>(d, faiss::QuantizerType::QT_8bit, M);
     hnsw->hnsw.efConstruction = efConstruction;
     hnsw->hnsw.efSearch = efSearch;
 
 //    hnsw->verbose = true;
 
-    std::cout << "start to build" << std::endl;
+    hnsw->train(nb, xb);
     auto ts = std::chrono::high_resolution_clock::now();
     hnsw->add(nb, xb);
     auto te = std::chrono::high_resolution_clock::now();
@@ -89,14 +89,12 @@ int main() {
         ts = std::chrono::high_resolution_clock::now();
         int correct_cnt = 0;
         hnsw->search(nq, xb, topk, D, I, nullptr);
-        {
-            for (auto i = 0; i < nq; ++ i) {
-                if (i == I[i * topk] || D[i * topk] < 1e-5)
-                    correct_cnt ++;
-                for (auto j = 0; j < topk; ++ j)
-                    std::cout << "query " << i << ", topk " << j << ": id = " << I[i * topk + j] << ", dis = " << D[i * topk + j] << std::endl;
-            }
-        }
+//        {
+//            for (auto i = 0; i < nq; ++ i) {
+//                if (i == I[i * topk] || D[i * topk] < 1e-5)
+//                    correct_cnt ++;
+//            }
+//        }
         te = std::chrono::high_resolution_clock::now();
         std::cout << "search " << nq << " times costs: " << std::chrono::duration_cast<std::chrono::milliseconds>(te - ts).count() << "ms " << std::endl;
         std::cout << "correct query of top" << topk << " is " << correct_cnt << std::endl;

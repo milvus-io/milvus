@@ -230,7 +230,16 @@ void hnsw_add_vertices(IndexRHNSW &index_hnsw,
                         continue;
                     }
 
+//                    vt.set(pt_id);
                     hnsw.add_with_locks(*dis, pt_level, pt_id, locks, vt);
+
+//                    int *cur_links = hnsw.get_neighbor_link(pt_id, 0);
+//                    int *cur_neighbors = cur_links + 1;
+//                    auto cur_neighbor_num = hnsw.get_neighbors_num(cur_links);
+//                    printf("node %d added, has %d neighbors at level 0:\n", pt_id, cur_neighbor_num);
+//                    for (auto i = 0; i < cur_neighbor_num; ++ i)
+//                        printf("%d ", cur_neighbors[i]);
+//                    printf("\n");
 
                     if (prev_display >= 0 && i - i0 > prev_display + 10000) {
                         prev_display = i - i0;
@@ -380,6 +389,7 @@ void IndexRHNSW::add(idx_t n, const float *x)
 
     hnsw_add_vertices (*this, n0, n, x, verbose,
                        hnsw.levels.size() == ntotal);
+    printf("after hnsw_add_vertices, sizeof hnsw.levels.size() is %d\n", hnsw.levels.size());
 }
 
 void IndexRHNSW::reset()
@@ -439,6 +449,7 @@ void IndexRHNSW::search_level_0(
 {
 
     storage_idx_t ntotal = hnsw.levels.size();
+    printf("enter IndexRHNSW::search_level_0, ntotal = hnsw.levels.size() = %d\n", hnsw.levels.size());
 #pragma omp parallel
     {
         DistanceComputer *qdis = storage_distance_computer(storage);

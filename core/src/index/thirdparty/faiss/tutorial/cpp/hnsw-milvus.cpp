@@ -11,7 +11,7 @@
 #include <cassert>
 #include <chrono>
 
-#include "../../../hnswlib/hnswalg.h"
+#include "../../../hnswlib/hnswalg_nm.h"
 #include "/usr/include/hdf5/serial/hdf5.h"
 #include "/usr/include/hdf5/serial/H5Cpp.h"
 
@@ -32,7 +32,7 @@ void LoadData(const std::string file_location, float *&data, const std::string d
     status = H5Fclose(fd);
 }
 
-using namespace hnswlib;
+using namespace hnswlib_nm;
 int main() {
     int d = 128;                            // dimension
     int nb = 1000000;                       // database size
@@ -68,19 +68,19 @@ int main() {
     }
 
 
-    L2Space *space = new L2Space(d);
-    std::shared_ptr<HierarchicalNSW<float>> hnsw = std::make_shared<HierarchicalNSW<float>>(space, nb, M, efConstruction);
+    hnswlib_nm::L2Space *space = new hnswlib_nm::L2Space(d);
+    std::shared_ptr<HierarchicalNSW_NM<float>> hnsw = std::make_shared<HierarchicalNSW_NM<float>>(space, nb, M, efConstruction);
 
     auto ts = std::chrono::high_resolution_clock::now();
-    hnsw->addPoint(xb, 0);
+    hnsw->addPoint(xb, 0, 0, 0);
 #pragma omp parallel for
     for (int i = 1; i < nb; ++ i) {
-        hnsw->addPoint(xb + i * d, i);
+        hnsw->addPoint(xb, i, 0, i);
     }
     auto te = std::chrono::high_resolution_clock::now();
     std::cout << "build index costs: " << std::chrono::duration_cast<std::chrono::milliseconds>(te - ts).count() << "ms " << std::endl;
-    hnsw->show_stats();
-    hnsw->print_stats();
+//    hnsw->show_stats();
+//    hnsw->print_stats();
 
     {       // search xq
 //        long *I = new long[k * nq];
@@ -95,7 +95,7 @@ int main() {
 #pragma omp parallel for
         for (int i = 0; i < nq; ++ i) {
             std::vector<P> ret;
-            ret = hnsw->searchKnn((void*)(xb + i * d), topk, compare, nullptr);
+            ret = hnsw->searchKnn_NM((void*)(xb + i * d), topk, compare, nullptr, xb);
 //            {
 //                if (i == ret[0].second || ret[0].first < 1e-5)
 //                    correct_cnt ++;
