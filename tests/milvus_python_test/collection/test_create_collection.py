@@ -13,9 +13,9 @@ from utils import *
 nb = 1
 dim = 128
 collection_id = "create_collection"
-default_segment_size = 1024
+default_segment_row_count = 100000
 drop_collection_interval_time = 3
-segment_size = 10
+segment_row_count = 5000
 default_fields = gen_default_fields() 
 entities = gen_entities(nb)
 
@@ -42,9 +42,9 @@ class TestCreateCollection:
 
     @pytest.fixture(
         scope="function",
-        params=gen_segment_sizes()
+        params=gen_segment_row_counts()
     )
-    def get_segment_size(self, request):
+    def get_segment_row_count(self, request):
         yield request.param
 
     def test_create_collection_fields(self, connect, get_filter_field, get_vector_field):
@@ -59,7 +59,7 @@ class TestCreateCollection:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_size": segment_size
+                "segment_row_count": segment_row_count
         }
         logging.getLogger().info(fields)
         connect.create_collection(collection_name, fields)
@@ -77,20 +77,20 @@ class TestCreateCollection:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_size": segment_size
+                "segment_row_count": segment_row_count
         }
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
         
-    def test_create_collection_segment_size(self, connect, get_segment_size):
+    def test_create_collection_segment_row_count(self, connect, get_segment_row_count):
         '''
         target: test create normal collection with different fields
-        method: create collection with diff segment_size
+        method: create collection with diff segment_row_count
         expected: no exception raised
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields["segment_size"] = get_segment_size
+        fields["segment_row_count"] = get_segment_row_count
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
 
@@ -197,7 +197,7 @@ class TestCreateCollectionInvalid(object):
         scope="function",
         params=gen_invalid_ints()
     )
-    def get_segment_size(self, request):
+    def get_segment_row_count(self, request):
         yield request.param
 
     @pytest.fixture(
@@ -222,20 +222,20 @@ class TestCreateCollectionInvalid(object):
         yield request.param
 
     @pytest.mark.level(2)
-    def test_create_collection_with_invalid_segment_size(self, connect, get_segment_size):
+    def test_create_collection_with_invalid_segment_row_count(self, connect, get_segment_row_count):
         collection_name = gen_unique_str()
         fields = copy.deepcopy(default_fields)
-        fields["segment_size"] = get_segment_size
+        fields["segment_row_count"] = get_segment_row_count
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
 
-    @pytest.mark.level(2)
-    def test_create_collection_with_invalid_metric_type(self, connect, get_metric_type):
-        collection_name = gen_unique_str()
-        fields = copy.deepcopy(default_fields)
-        fields["fields"][-1]["params"]["metric_type"] = get_metric_type
-        with pytest.raises(Exception) as e:
-            connect.create_collection(collection_name, fields)
+    # @pytest.mark.level(2)
+    # def test_create_collection_with_invalid_metric_type(self, connect, get_metric_type):
+    #     collection_name = gen_unique_str()
+    #     fields = copy.deepcopy(default_fields)
+    #     fields["fields"][-1]["params"]["metric_type"] = get_metric_type
+    #     with pytest.raises(Exception) as e:
+    #         connect.create_collection(collection_name, fields)
 
     @pytest.mark.level(2)
     def test_create_collection_with_invalid_dimension(self, connect, get_dim):
@@ -285,34 +285,33 @@ class TestCreateCollectionInvalid(object):
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
 
-    def test_create_collection_no_segment_size(self, connect):
+    def test_create_collection_no_segment_row_count(self, connect):
         '''
-        target: test create collection with no segment_size params
+        target: test create collection with no segment_row_count params
         method: create collection with corrent params
-        expected: use default default_segment_size
+        expected: use default default_segment_row_count
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields.pop("segment_size")
+        fields.pop("segment_row_count")
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
         logging.getLogger().info(res)
-        assert res["segment_size"] == default_segment_size
+        assert res["segment_row_count"] == default_segment_row_count
 
-    # TODO:
-    def _test_create_collection_no_metric_type(self, connect):
-        '''
-        target: test create collection with no metric_type params
-        method: create collection with corrent params
-        expected: use default L2
-        '''
-        collection_name = gen_unique_str(collection_id)
-        fields = copy.deepcopy(default_fields)
-        fields["fields"][-1]["params"].pop("metric_type")
-        connect.create_collection(collection_name, fields)
-        res = connect.get_collection_info(collection_name)
-        logging.getLogger().info(res)
-        assert res["metric_type"] == "L2"
+    # def _test_create_collection_no_metric_type(self, connect):
+    #     '''
+    #     target: test create collection with no metric_type params
+    #     method: create collection with corrent params
+    #     expected: use default L2
+    #     '''
+    #     collection_name = gen_unique_str(collection_id)
+    #     fields = copy.deepcopy(default_fields)
+    #     fields["fields"][-1]["params"].pop("metric_type")
+    #     connect.create_collection(collection_name, fields)
+    #     res = connect.get_collection_info(collection_name)
+    #     logging.getLogger().info(res)
+    #     assert res["metric_type"] == "L2"
 
     # TODO: assert exception
     def test_create_collection_limit_fields(self, connect):
