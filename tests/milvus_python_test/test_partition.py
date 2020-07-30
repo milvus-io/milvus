@@ -9,7 +9,7 @@ from utils import *
 
 
 dim = 128
-segment_row_count = 10000
+segment_row_count = 5000
 collection_id = "partition"
 nprobe = 1
 tag = "1970-01-01"

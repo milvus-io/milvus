@@ -7,7 +7,7 @@ import pytest
 from utils import *
 
 dim = 128
-segment_row_count = 10000
+segment_row_count = 5000
 nprobe = 1
 top_k = 1
 epsilon = 0.0001
