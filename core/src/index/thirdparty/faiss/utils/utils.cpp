@@ -708,4 +708,6 @@ int64_t get_L3_Size() {
     return l3_size;
 }
 
+void (*LOG_INFO_)(const std::string&);
+
 } // namespace faiss

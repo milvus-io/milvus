@@ -27,6 +27,9 @@ SetThreadName(const std::string& name);
 std::string
 GetThreadName();
 
+void
+log_info_(const std::string&);
+
 /*
  * Please use LOG_MODULE_LEVEL_C macro in member function of class
  * and LOG_MODULE_LEVEL_ macro in other functions.

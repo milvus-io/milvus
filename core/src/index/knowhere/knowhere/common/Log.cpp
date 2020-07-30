@@ -51,5 +51,10 @@ GetThreadName() {
     return thread_name;
 }
 
+void
+log_info_(const std::string& s) {
+    LOG_KNOWHERE_DEBUG_ << s;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

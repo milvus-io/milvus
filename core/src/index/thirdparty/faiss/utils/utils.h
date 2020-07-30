@@ -17,6 +17,7 @@
 #define FAISS_utils_h
 
 #include <stdint.h>
+#include <string>
 
 #include <faiss/utils/Heap.h>
 
@@ -162,6 +163,8 @@ bool check_openmp();
 
 /** get the size of L3 cache  */
 int64_t get_L3_Size();
+
+extern void (*LOG_INFO_)(const std::string&);
 
 } // namspace faiss
 
