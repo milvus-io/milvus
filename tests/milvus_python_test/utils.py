@@ -16,7 +16,7 @@ epsilon = 0.000001
 default_flush_interval = 1
 big_flush_interval = 1000
 dimension = 128
-segment_size = 10
+segment_row_count = 10000
 
 # TODO:
 all_index_types = [

@@ -13,9 +13,9 @@ from utils import *
 nb = 1
 dim = 128
 collection_id = "create_collection"
-default_segment_size = 1024
+default_segment_row_count = 100000
 drop_collection_interval_time = 3
-segment_size = 10
+segment_row_count = 10000
 default_fields = gen_default_fields() 
 entities = gen_entities(nb)
 

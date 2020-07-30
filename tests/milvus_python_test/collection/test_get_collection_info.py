@@ -9,7 +9,7 @@ from utils import *
 
 collection_id = "info"
 default_fields = gen_default_fields() 
-segment_size = 10
+segment_row_count = 10000
 
 
 class TestInfoBase:

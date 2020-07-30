@@ -7,7 +7,7 @@ import pytest
 from utils import *
 
 dim = 128
-segment_size = 10
+segment_row_count = 10000
 index_file_size = 10
 collection_id = "test_flush"
 DELETE_TIMEOUT = 60
