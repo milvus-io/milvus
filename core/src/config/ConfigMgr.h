@@ -82,7 +82,7 @@ class ConfigMgr {
     Notify(const std::string& name);
 
  private:
-    std::vector<BaseConfigPtr> config_list_;
+    std::unordered_map<std::string, BaseConfigPtr> config_list_;
     std::mutex mutex_;
 
     std::unordered_map<std::string, std::list<ConfigObserver*>> observers_;
