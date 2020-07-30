@@ -52,17 +52,6 @@ DeleteEntityByIDReq::OnExecute() {
             return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
         }
 
-#ifdef MILVUS_SUPPORT_SPTAG
-        /* Check collection's index type supports delete */
-        if (collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_BKT ||
-            collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_KDT) {
-            std::string err_msg =
-                "Index type " + std::to_string(collection_schema.engine_type_) + " does not support delete operation";
-            LOG_SERVER_ERROR_ << err_msg;
-            return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
-        }
-#endif
-
         STATUS_CHECK(DBWrapper::DB()->DeleteEntityByID(collection_name_, entity_ids_));
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());

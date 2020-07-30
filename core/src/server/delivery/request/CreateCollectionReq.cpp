@@ -58,6 +58,13 @@ CreateCollectionReq::OnExecute() {
             return status;
         }
 
+        if (!extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
+            extra_params_[engine::PARAM_SEGMENT_ROW_COUNT] = engine::DEFAULT_SEGMENT_ROW_COUNT;
+        } else {
+            auto segment_row = extra_params_[engine::PARAM_SEGMENT_ROW_COUNT].get<int64_t>();
+            STATUS_CHECK(ValidateSegmentRowCount(segment_row));
+        }
+
         rc.RecordSection("check validation");
 
         // step 2: create snapshot collection context
@@ -89,13 +96,6 @@ CreateCollectionReq::OnExecute() {
             auto field_element = std::make_shared<engine::snapshot::FieldElement>(
                 0, 0, index_name, engine::FieldElementType::FET_INDEX, index_params);
             create_collection_context.fields_schema[field] = {field_element};
-        }
-
-        if (!extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
-            return Status(SERVER_UNEXPECTED_ERROR, "Segment row count not defined");
-        } else {
-            auto segment_row = extra_params_[engine::PARAM_SEGMENT_ROW_COUNT].get<int64_t>();
-            STATUS_CHECK(ValidateSegmentRowCount(segment_row));
         }
 
         // step 3: create collection

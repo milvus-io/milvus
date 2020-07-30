@@ -20,6 +20,7 @@
 #include <fiu-local.h>
 
 #include "config/ServerConfig.h"
+#include "db/Utils.h"
 #include "metrics/SystemInfo.h"
 #include "query/BinaryQuery.h"
 #include "server/delivery/request/BaseReq.h"
@@ -108,10 +109,8 @@ WebRequestHandler::IsBinaryCollection(const std::string& collection_name, bool& 
     CollectionSchema schema;
     auto status = req_handler_.GetCollectionInfo(context_ptr_, collection_name, schema);
     if (status.ok()) {
-        auto metric = engine::MetricType(schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE].get<int64_t>());
-        bin = (metric == engine::MetricType::HAMMING || metric == engine::MetricType::JACCARD ||
-               metric == engine::MetricType::TANIMOTO || metric == engine::MetricType::SUPERSTRUCTURE ||
-               metric == engine::MetricType::SUBSTRUCTURE);
+        std::string metric_type = schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE];
+        bin = engine::utils::IsBinaryMetricType(metric_type);
     }
 
     return status;

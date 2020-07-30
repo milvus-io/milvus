@@ -59,7 +59,7 @@ class DBImpl : public DB, public ConfigObserver {
                       snapshot::CollectionMappings& fields_schema) override;
 
     Status
-    GetCollectionStats(const std::string& collection_name, std::string& collection_stats);
+    GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) override;
 
     Status
     CountEntities(const std::string& collection_name, int64_t& row_count) override;

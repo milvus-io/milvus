@@ -90,6 +90,8 @@ extern const char* PARAM_INDEX_METRIC_TYPE;
 extern const char* PARAM_INDEX_EXTRA_PARAMS;
 extern const char* PARAM_SEGMENT_ROW_COUNT;
 
+constexpr int64_t DEFAULT_SEGMENT_ROW_COUNT = 100000;
+
 using FieldType = meta::DataType;
 
 enum FieldElementType {
