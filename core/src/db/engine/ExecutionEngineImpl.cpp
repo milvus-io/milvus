@@ -588,6 +588,11 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
             bool gpu_cache_enable = false;
             STATUS_CHECK(server::Config::GetInstance().GetGpuResourceConfigCacheEnable(gpu_cache_enable));
 
+            /* CopyCpuToGpu() is an asynchronous method.
+             * It should be make sure that the CPU index is always valid.
+             * Therefore, we reserve its shared pointer.
+             */
+            index_reserve_ = index_;
             if (gpu_cache_enable) {
                 gpu_cache_mgr->Reserve(index_->Size());
                 index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
