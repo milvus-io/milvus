@@ -225,7 +225,6 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
         return Status(DB_ERROR, "index is null");
     }
 
-    double span;
     uint64_t nq = 0;
     auto query_vector = vector_param->query_vector;
     if (!query_vector.float_data.empty()) {
@@ -259,11 +258,9 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
         dataset = knowhere::GenDataset(nq, vec_index->Dim(), query_vector.binary_data.data());
     }
     auto result = vec_index->Query(dataset, conf);
-    span = rc.RecordSection("query done");
 
     MapAndCopyResult(result, vec_index->GetUids(), nq, topk, context.query_result_->result_distances_.data(),
                      context.query_result_->result_ids_.data());
-    span = rc.RecordSection("map uids " + std::to_string(nq * topk));
 
     if (hybrid) {
         //        HybridUnset();
@@ -315,6 +312,13 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             }
         }
         vec_index->SetBlacklist(list);
+
+        auto& vector_param = context.query_ptr_->vectors.at(vector_placeholder);
+        if (!vector_param->query_vector.float_data.empty()) {
+            vector_param->nq = vector_param->query_vector.float_data.size() / vec_index->Dim();
+        } else if (!vector_param->query_vector.binary_data.empty()) {
+            vector_param->nq = vector_param->query_vector.binary_data.size() * 8 / vec_index->Dim();
+        }
 
         status = VecSearch(context, context.query_ptr_->vectors.at(vector_placeholder), vec_index);
         if (!status.ok()) {

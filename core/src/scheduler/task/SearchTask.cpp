@@ -106,6 +106,7 @@ SearchTask::OnExecute() {
         return Status(DB_ERROR, "execution engine is null");
     }
 
+    auto search_job = std::static_pointer_cast<scheduler::SearchJob>(std::shared_ptr<scheduler::Job>(job_));
     try {
         /* step 2: search */
         engine::ExecutionEngineContext context;
@@ -121,18 +122,15 @@ SearchTask::OnExecute() {
         auto topk = vector_param->topk;
         auto segment_ptr = snapshot_->GetSegmentCommitBySegmentId(segment_id_);
         auto spec_k = segment_ptr->GetRowCount() < topk ? segment_ptr->GetRowCount() : topk;
-        int64_t nq = 0;
-        if (!vector_param->query_vector.float_data.empty()) {
-            nq = vector_param->query_vector.float_data.size() / topk;
-        } else {
-            nq = vector_param->query_vector.binary_data.size() * 8 / topk;
-        }
+        int64_t nq = vector_param->nq;
         if (spec_k == 0) {
             LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty segment. segment id = %d", "search", 0,
                                           segment_ptr->GetID());
         } else {
-            auto search_job = std::static_pointer_cast<scheduler::SearchJob>(std::shared_ptr<scheduler::Job>(job_));
             //            std::unique_lock<std::mutex> lock(search_job->mutex());
+            if (!search_job->query_result()) {
+                search_job->query_result() = std::make_shared<engine::QueryResult>();
+            }
             SearchTask::MergeTopkToResultSet(context.query_result_->result_ids_,
                                              context.query_result_->result_distances_, spec_k, nq, topk,
                                              ascending_reduce_, search_job->query_result());
