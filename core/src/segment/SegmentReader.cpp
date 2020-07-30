@@ -276,7 +276,6 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 return Status(DB_ERROR, "Vector field dimension undefined");
             }
             int64_t dimension = json[knowhere::meta::DIM];
-            std::string metric_type = json[knowhere::Metric::TYPE];
             std::vector<uint8_t> raw;
             STATUS_CHECK(LoadField(field_name, raw));
             auto dataset = knowhere::GenDataset(segment_commit->GetRowCount(), dimension, raw.data());

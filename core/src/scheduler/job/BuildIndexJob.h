@@ -58,7 +58,6 @@ class BuildIndexJob : public Job {
     engine::snapshot::ScopedSnapshotT snapshot_;
     engine::DBOptions options_;
     engine::snapshot::IDS_TYPE segment_ids_;
-    engine::snapshot::ID_TYPE ss_id_;
 };
 
 using BuildIndexJobPtr = std::shared_ptr<BuildIndexJob>;
