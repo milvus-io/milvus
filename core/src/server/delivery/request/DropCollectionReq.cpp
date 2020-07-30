@@ -39,6 +39,8 @@ DropCollectionReq::OnExecute() {
         std::string hdr = "DropCollectionReq(collection=" + collection_name_ + ")";
         TimeRecorder rc(hdr);
 
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
