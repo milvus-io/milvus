@@ -326,7 +326,7 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
             }
             ss << idx[i * nprobe + j];
         }
-        (*LOG_INFO_)(ss.str());
+        (*LOG_DEBUG_)(ss.str());
     }
 }
 

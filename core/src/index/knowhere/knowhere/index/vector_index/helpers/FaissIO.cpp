@@ -64,7 +64,7 @@ MemoryIOReader::operator()(void* ptr, size_t size, size_t nitems) {
 void
 enable_faiss_logging(bool trigger) {
     if (trigger) {
-        faiss::LOG_INFO_ = &log_info_;
+        faiss::LOG_DEBUG_ = &log_debug_;
     }
 }
 

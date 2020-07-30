@@ -164,7 +164,17 @@ bool check_openmp();
 /** get the size of L3 cache  */
 int64_t get_L3_Size();
 
+extern void (*LOG_TRACE_)(const std::string&);
+
+extern void (*LOG_DEBUG_)(const std::string&);
+
 extern void (*LOG_INFO_)(const std::string&);
+
+extern void (*LOG_WARNING_)(const std::string&);
+
+extern void (*LOG_FATAL_)(const std::string&);
+
+extern void (*LOG_ERROR_)(const std::string&);
 
 } // namspace faiss
 
