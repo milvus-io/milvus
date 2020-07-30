@@ -518,6 +518,7 @@ ExecutionEngineImpl::BuildIndex() {
                 return status;
             }
             segment_writer_ptr->SetVectorIndex(field_name, new_index);
+
             rc.RecordSection("build vector index for field: " + field_name);
 
             // serialze index files
@@ -525,11 +526,13 @@ ExecutionEngineImpl::BuildIndex() {
             if (!status.ok()) {
                 return status;
             }
+
             rc.RecordSection("serialize vector index for field: " + field_name);
         } else {
             knowhere::IndexPtr index_ptr;
             segment_ptr->GetStructuredIndex(field_name, index_ptr);
             segment_writer_ptr->SetStructuredIndex(field_name, index_ptr);
+
             rc.RecordSection("build structured index for field: " + field_name);
 
             // serialze index files
@@ -537,6 +540,7 @@ ExecutionEngineImpl::BuildIndex() {
             if (!status.ok()) {
                 return status;
             }
+
             rc.RecordSection("serialize structured index for field: " + field_name);
         }
     }

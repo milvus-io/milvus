@@ -20,7 +20,6 @@ namespace milvus {
 namespace scheduler {
 
 namespace {
-
 // each vector field create one group
 // all structured fields put into one group
 void
@@ -87,6 +86,5 @@ BuildIndexJob::Dump() const {
     ret.insert(base.begin(), base.end());
     return ret;
 }
-
 }  // namespace scheduler
 }  // namespace milvus

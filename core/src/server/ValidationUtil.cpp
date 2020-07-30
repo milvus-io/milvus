@@ -193,7 +193,7 @@ ValidateIndexType(const std::string& index_type) {
     };
 
     if (s_valid_index_names.find(index_type) == s_valid_index_names.end()) {
-        std::string msg = "Invalid index name: " + index_name;
+        std::string msg = "Invalid index name: " + index_type;
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
     }

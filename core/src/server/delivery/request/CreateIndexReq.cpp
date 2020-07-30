@@ -59,7 +59,7 @@ CreateIndexReq::OnExecute() {
             return status;
         }
 
-        status = ValidateIndexName(index_name_);
+        status = ValidateIndexType(index_name_);
         if (!status.ok()) {
             return status;
         }
