@@ -248,10 +248,8 @@ Operations::DoExecute(StorePtr store) {
 Status
 Operations::OnApplyTimeoutCallback(StorePtr store) {
     ApplyContext context;
-    context.on_succes_cb = std::bind(&Operations::OnApplySuccessCallback, this,
-            std::placeholders::_1);
-    context.on_error_cb = std::bind(&Operations::OnApplyErrorCallback, this,
-            std::placeholders::_1);
+    context.on_succes_cb = std::bind(&Operations::OnApplySuccessCallback, this, std::placeholders::_1);
+    context.on_error_cb = std::bind(&Operations::OnApplyErrorCallback, this, std::placeholders::_1);
 
     auto try_times = 0;
 
@@ -278,12 +276,9 @@ Operations::OnApplyErrorCallback(Status status) {
 Status
 Operations::PostExecute(StorePtr store) {
     ApplyContext context;
-    context.on_succes_cb = std::bind(&Operations::OnApplySuccessCallback, this,
-            std::placeholders::_1);
-    context.on_error_cb = std::bind(&Operations::OnApplyErrorCallback, this,
-            std::placeholders::_1);
-    context.on_timeout_cb = std::bind(&Operations::OnApplyTimeoutCallback, this,
-            std::placeholders::_1);
+    context.on_succes_cb = std::bind(&Operations::OnApplySuccessCallback, this, std::placeholders::_1);
+    context.on_error_cb = std::bind(&Operations::OnApplyErrorCallback, this, std::placeholders::_1);
+    context.on_timeout_cb = std::bind(&Operations::OnApplyTimeoutCallback, this, std::placeholders::_1);
 
     return store->ApplyOperation(*this, context);
 }

@@ -177,10 +177,8 @@ class Operations : public std::enable_shared_from_this<Operations> {
  protected:
     virtual Status
     OnApplySuccessCallback(ID_TYPE result_id);
-    virtual Status
-    OnApplyErrorCallback(Status);
-    virtual Status
-    OnApplyTimeoutCallback(StorePtr);
+    virtual Status OnApplyErrorCallback(Status);
+    virtual Status OnApplyTimeoutCallback(StorePtr);
 
     virtual std::string
     SuccessString() const;

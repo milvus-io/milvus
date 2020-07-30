@@ -24,6 +24,7 @@
 #include "utils/Log.h"
 #include "utils/Status.h"
 
+#include <fiu-local.h>
 #include <stdlib.h>
 #include <time.h>
 #include <any>
@@ -101,6 +102,8 @@ class Store : public std::enable_shared_from_this<Store> {
 
         ID_TYPE result_id;
         auto status = session->Commit(result_id);
+        fiu_do_on("Store.ApplyOperation.mock_timeout", { status = Status(SS_TIMEOUT, "Mock Timeout"); });
+
         if (status.ok() && context.on_succes_cb) {
             return context.on_succes_cb(result_id);
         } else if (status.code() == SS_TIMEOUT && context.on_timeout_cb) {
