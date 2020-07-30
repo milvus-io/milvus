@@ -41,6 +41,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
     BuildIndex() override;
 
  private:
+    Status
+    VecSearch(ExecutionEngineContext& context, const query::VectorQueryPtr& vector_param,
+              knowhere::VecIndexPtr& vec_index, bool hybrid = false);
+
     knowhere::VecIndexPtr
     CreateVecIndex(const std::string& index_name);
 
