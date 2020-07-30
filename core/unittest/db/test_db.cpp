@@ -562,6 +562,6 @@ TEST_F(DBTest, StatsTest) {
     int64_t row_count = json_stats[milvus::engine::JSON_ROW_COUNT];
     ASSERT_EQ(row_count, entity_count * 2);
 
-//    std::string ss = json_stats.dump();
-//    std::cout << ss << std::endl;
+    std::string ss = json_stats.dump();
+    std::cout << ss << std::endl;
 }
