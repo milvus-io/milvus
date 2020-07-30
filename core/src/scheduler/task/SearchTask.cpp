@@ -29,24 +29,22 @@
 namespace milvus {
 namespace scheduler {
 
-SearchTask::SearchTask(const server::ContextPtr& context, const engine::DBOptions& options,
-                       const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id,
-                       engine::snapshot::ID_TYPE ss_id, TaskLabelPtr label)
+SearchTask::SearchTask(const server::ContextPtr& context, engine::snapshot::ScopedSnapshotT snapshot,
+                       const engine::DBOptions& options, const query::QueryPtr& query_ptr,
+                       engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
     : Task(TaskType::SearchTask, std::move(label)),
       context_(context),
+      snapshot_(snapshot),
       options_(options),
       query_ptr_(query_ptr),
-      segment_id_(segment_id),
-      ss_id_(ss_id) {
+      segment_id_(segment_id) {
     CreateExecEngine();
 }
 
 void
 SearchTask::CreateExecEngine() {
     if (execution_engine_ == nullptr && query_ptr_ != nullptr) {
-        engine::snapshot::ScopedSnapshotT latest_ss;
-        engine::snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, query_ptr_->collection_id);
-        execution_engine_ = engine::EngineFactory::Build(latest_ss, options_.meta_.path_, segment_id_);
+        execution_engine_ = engine::EngineFactory::Build(snapshot_, options_.meta_.path_, segment_id_);
     }
 }
 

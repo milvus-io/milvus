@@ -621,8 +621,7 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
         segment_ids.emplace_back(sv->GetSegment()->GetID());
     }
 
-    scheduler::SearchJobPtr job =
-        std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr, segment_ids, ss_id);
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, ss, options_, query_ptr, segment_ids);
 
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);

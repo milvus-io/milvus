@@ -39,8 +39,9 @@ namespace scheduler {
 
 class SearchJob : public Job {
  public:
-    SearchJob(const server::ContextPtr& context, engine::DBOptions options, const query::QueryPtr& query_ptr,
-              const engine::snapshot::IDS_TYPE& segment_ids, const engine::snapshot::ID_TYPE& ss_id);
+    SearchJob(const server::ContextPtr& context, const engine::snapshot::ScopedSnapshotT& snapshot,
+              engine::DBOptions options, const query::QueryPtr& query_ptr,
+              const engine::snapshot::IDS_TYPE& segment_ids);
 
  public:
     json
@@ -77,13 +78,12 @@ class SearchJob : public Job {
 
  private:
     const server::ContextPtr context_;
-
+    engine::snapshot::ScopedSnapshotT snapshot_;
     engine::DBOptions options_;
 
     query::QueryPtr query_ptr_;
     engine::QueryResultPtr query_result_;
     engine::snapshot::IDS_TYPE segment_ids_;
-    engine::snapshot::ID_TYPE ss_id_;
 };
 
 using SearchJobPtr = std::shared_ptr<SearchJob>;
