@@ -91,11 +91,11 @@ CreateCollectionReq::OnExecute() {
             create_collection_context.fields_schema[field] = {field_element};
         }
 
-        if (!extra_params_.contains(engine::PARAM_SEGMENT_SIZE)) {
-            return Status(SERVER_UNEXPECTED_ERROR, "Segment size not defined");
+        if (!extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Segment row count not defined");
         } else {
-            auto segment_size = extra_params_[engine::PARAM_SEGMENT_SIZE].get<int64_t>();
-            STATUS_CHECK(ValidateCollectionIndexFileSize(segment_size));
+            auto segment_row = extra_params_[engine::PARAM_SEGMENT_ROW_COUNT].get<int64_t>();
+            STATUS_CHECK(ValidateSegmentRowCount(segment_row));
         }
 
         // step 3: create collection

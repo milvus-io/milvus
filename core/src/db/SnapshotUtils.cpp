@@ -67,7 +67,7 @@ SetSnapshotIndex(const std::string& collection_name, const std::string& field_na
         }
     } else {
         auto new_element = std::make_shared<snapshot::FieldElement>(
-            ss->GetCollectionId(), field->GetID(), "structured_index", milvus::engine::FieldElementType::FET_INDEX);
+            ss->GetCollectionId(), field->GetID(), index_info.index_name_, milvus::engine::FieldElementType::FET_INDEX);
         ss_context.new_field_elements.push_back(new_element);
     }
 
@@ -109,7 +109,7 @@ GetSnapshotIndex(const std::string& collection_name, const std::string& field_na
     } else {
         for (auto& field_element : field_elements) {
             if (field_element->GetFtype() == (int64_t)milvus::engine::FieldElementType::FET_INDEX) {
-                index_info.index_name_ = "SORTED";
+                index_info.index_name_ = DEFAULT_STRUCTURED_INDEX_NAME;
             }
         }
     }
