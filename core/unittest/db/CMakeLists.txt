@@ -23,25 +23,19 @@ set( TEST_FILES ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
 
 add_executable( test_db
                 ${SCHEDULER_FILES}
-                ${SERVER_CONTEXT_FILES}
                 ${TEST_FILES}
-                # ${grpc_server_files}
-                # ${grpc_service_files}
-                # ${web_server_files}
-                # ${server_delivery_files}
-                # ${server_files}
-                # ${server_init_files}
                 )
 
 target_link_libraries( test_db  ${UNITTEST_LIBS}
-                                milvus_engine
-                                metrics
-                                config
-                                stdc++
-                                utils
-                                tracing
-                                query
-                                log
+                                server
+                                # milvus_engine
+                                # metrics
+                                # config
+                                # stdc++
+                                # utils
+                                # tracing
+                                # query
+                                # log
                                 )
 
 install( TARGETS test_db DESTINATION unittest )
