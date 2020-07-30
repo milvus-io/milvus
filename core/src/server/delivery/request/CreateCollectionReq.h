@@ -26,24 +26,18 @@ class CreateCollectionReq : public BaseReq {
  public:
     static BaseReqPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::unordered_map<std::string, engine::meta::DataType>& field_types,
-           std::unordered_map<std::string, milvus::json>& field_index_params,
-           std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params);
+           std::unordered_map<std::string, FieldSchema>& fields, milvus::json& extra_params);
 
  protected:
     CreateCollectionReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                        std::unordered_map<std::string, engine::meta::DataType>& field_types,
-                        std::unordered_map<std::string, milvus::json>& field_index_params,
-                        std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params);
+                        std::unordered_map<std::string, FieldSchema>& fields, milvus::json& extra_params);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
-    std::unordered_map<std::string, engine::meta::DataType> field_types_;
-    std::unordered_map<std::string, milvus::json> field_index_params_;
-    std::unordered_map<std::string, std::string> field_params_;
+    std::unordered_map<std::string, FieldSchema> fields_;
     milvus::json extra_params_;
 };
 

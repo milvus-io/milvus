@@ -22,7 +22,7 @@ const char* DEFAULT_DELETED_DOCS_NAME = "_del";
 const char* DEFAULT_INDEX_NAME = "_idx";
 const char* DEFAULT_INDEX_COMPRESS_NAME = "_compress";
 
-const char* PARAM_COLLECTION_DIMENSION = "dim";
+const char* PARAM_DIMENSION = "dim";
 const char* PARAM_INDEX_METRIC_TYPE = "metric_type";
 const char* PARAM_INDEX_EXTRA_PARAMS = "extra_params";
 const char* PARAM_SEGMENT_SIZE = "segment_size";
