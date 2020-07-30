@@ -947,13 +947,20 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
     std::unique_lock<std::mutex> lock(build_index_mutex_);
 
     for (auto collection_name : collection_names) {
-        SnapshotVisitor ss_visitor(collection_name);
+        snapshot::ScopedSnapshotT latest_ss;
+        auto status = snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
+        if (!status.ok()) {
+            return;
+        }
+        SnapshotVisitor ss_visitor(latest_ss);
 
         snapshot::IDS_TYPE segment_ids;
         ss_visitor.SegmentsToIndex("", segment_ids);
+        if (segment_ids.empty()) {
+            continue;
+        }
 
-        scheduler::BuildIndexJobPtr job =
-            std::make_shared<scheduler::BuildIndexJob>(options_, collection_name, segment_ids);
+        scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_ids);
 
         scheduler::JobMgrInst::GetInstance()->Put(job);
         job->WaitFinish();

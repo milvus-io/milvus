@@ -31,7 +31,7 @@ class VectorIndexFormat {
  public:
     VectorIndexFormat() = default;
 
-    std::string
+    static std::string
     FilePostfix();
 
     void

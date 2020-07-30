@@ -33,6 +33,18 @@ Job::Dump() const {
     return ret;
 }
 
+JobTasks
+Job::CreateTasks() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    tasks_.clear();
+    OnCreateTasks(tasks_);
+    tasks_created_ = true;
+    if (tasks_.empty()) {
+        cv_.notify_all();
+    }
+    return tasks_;
+}
+
 void
 Job::TaskDone(Task* task) {
     if (task == nullptr) {
@@ -52,17 +64,17 @@ Job::TaskDone(Task* task) {
 
     auto json = task->Dump();
     std::string task_desc = json.dump();
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] task %s finish", "scheduler job", id(), task_desc.c_str());
+    LOG_SERVER_DEBUG_ << LogOut("scheduler job [%ld] task %s finish", id(), task_desc.c_str());
 }
 
 void
 Job::WaitFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return tasks_.empty(); });
+    cv_.wait(lock, [this] { return tasks_created_ && tasks_.empty(); });
+
     auto json = Dump();
     std::string job_desc = json.dump();
-
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] %s all done", "scheduler job", id(), job_desc.c_str());
+    LOG_SERVER_DEBUG_ << LogOut("scheduler job [%ld] %s all done", id(), job_desc.c_str());
 }
 
 }  // namespace scheduler

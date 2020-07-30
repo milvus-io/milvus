@@ -30,7 +30,7 @@ class VectorCompressFormat {
  public:
     VectorCompressFormat() = default;
 
-    std::string
+    static std::string
     FilePostfix();
 
     void

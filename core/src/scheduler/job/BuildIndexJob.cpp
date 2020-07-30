@@ -19,25 +19,56 @@
 namespace milvus {
 namespace scheduler {
 
-BuildIndexJob::BuildIndexJob(engine::DBOptions options, const std::string& collection_name,
-                             const engine::snapshot::IDS_TYPE& segment_ids)
-    : Job(JobType::BUILD), options_(std::move(options)), collection_name_(collection_name), segment_ids_(segment_ids) {
+namespace {
+
+// each vector field in one group
+// all structured fields put into one group
+void
+WhichFieldsToBuild(const engine::snapshot::ScopedSnapshotT& snapshot, std::vector<engine::TargetFields>& field_groups) {
+    auto field_names = snapshot->GetFieldNames();
+    engine::TargetFields structured_fields;
+    for (auto& field_name : field_names) {
+        auto field = snapshot->GetField(field_name);
+        engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
+        bool is_vector = (ftype == engine::FIELD_TYPE::VECTOR_FLOAT || ftype == engine::FIELD_TYPE::VECTOR_BINARY);
+        auto elements = snapshot->GetFieldElementsByField(field_name);
+        for (auto& element : elements) {
+            if (element->GetFtype() == engine::FieldElementType::FET_INDEX) {
+                // index has been defined
+                if (is_vector) {
+                    engine::TargetFields fields = {field_name};
+                    field_groups.emplace_back(fields);
+                } else {
+                    structured_fields.insert(field_name);
+                }
+                break;
+            }
+        }
+    }
+
+    if (!structured_fields.empty()) {
+        field_groups.push_back(structured_fields);
+    }
 }
 
-JobTasks
-BuildIndexJob::CreateTasks() {
-    engine::TargetFieldGroups target_groups;
-    BuildIndexTask::GroupFieldsForIndex(collection_name_, target_groups);
+}  // namespace
 
-    std::vector<TaskPtr> tasks;
+BuildIndexJob::BuildIndexJob(const engine::snapshot::ScopedSnapshotT& snapshot, engine::DBOptions options,
+                             const engine::snapshot::IDS_TYPE& segment_ids)
+    : Job(JobType::BUILD), snapshot_(snapshot), options_(std::move(options)), segment_ids_(segment_ids) {
+}
+
+void
+BuildIndexJob::OnCreateTasks(JobTasks& tasks) {
+    std::vector<engine::TargetFields> field_groups;
+    WhichFieldsToBuild(snapshot_, field_groups);
     for (auto& id : segment_ids_) {
-        for (auto& group : target_groups) {
-            auto task = std::make_shared<BuildIndexTask>(options_, collection_name_, id, group, nullptr);
+        for (auto& group : field_groups) {
+            auto task = std::make_shared<BuildIndexTask>(snapshot_, options_, id, group, nullptr);
             task->job_ = this;
             tasks.emplace_back(task);
         }
     }
-    return tasks;
 }
 
 json

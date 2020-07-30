@@ -84,6 +84,11 @@ class SegmentReader {
         return dir_root_;
     }
 
+    std::string
+    GetCollectionsPath() const {
+        return dir_collections_;
+    }
+
     engine::SegmentVisitorPtr
     GetSegmentVisitor() const {
         return segment_visitor_;
@@ -97,7 +102,9 @@ class SegmentReader {
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
     engine::SegmentPtr segment_ptr_;
+
     std::string dir_root_;
+    std::string dir_collections_;
 };
 
 using SegmentReaderPtr = std::shared_ptr<SegmentReader>;

@@ -44,10 +44,10 @@ SegmentWriter::SegmentWriter(const std::string& dir_root, const engine::SegmentV
 
 Status
 SegmentWriter::Initialize() {
-    dir_root_ += engine::COLLECTIONS_FOLDER;
+    dir_collections_ = dir_root_ + engine::COLLECTIONS_FOLDER;
 
     std::string directory =
-        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
 
     storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
     storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
@@ -136,7 +136,7 @@ SegmentWriter::WriteFields() {
 
         auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
         std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, element_visitor->GetFile());
         STATUS_CHECK(WriteField(file_path, raw_data));
     }
 
@@ -158,7 +158,7 @@ SegmentWriter::WriteBloomFilter() {
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
         auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
         std::string uid_blf_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, uid_blf_visitor->GetFile());
 
         auto& ss_codec = codec::Codec::instance();
         segment::IdBloomFilterPtr bloom_filter_ptr;
@@ -212,7 +212,7 @@ SegmentWriter::WriteDeletedDocs() {
     auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
     auto del_doc_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
     std::string file_path =
-        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, del_doc_visitor->GetFile());
+        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, del_doc_visitor->GetFile());
 
     return WriteDeletedDocs(file_path, segment_ptr_->GetDeletedDocs());
 }
@@ -344,13 +344,13 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
         fs_ptr_->operation_ptr_->CreateDirectory();
 
         std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, element_visitor->GetFile());
         ss_codec.GetVectorIndexFormat()->WriteIndex(fs_ptr_, file_path, index);
 
         element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
         if (element_visitor != nullptr) {
-            file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+            file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_,
+                                                                                    element_visitor->GetFile());
             ss_codec.GetVectorIndexFormat()->WriteCompress(fs_ptr_, file_path, index);
         }
     } catch (std::exception& e) {
@@ -396,7 +396,7 @@ SegmentWriter::WriteStructuredIndex(const std::string& field_name) {
         segment_ptr_->GetFieldType(field_name, field_type);
 
         std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, element_visitor->GetFile());
         ss_codec.GetStructuredIndexFormat()->Write(fs_ptr_, file_path, field_type, index);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
@@ -431,7 +431,7 @@ SegmentWriter::GetSegmentID(int64_t& id) {
 std::string
 SegmentWriter::GetSegmentPath() {
     std::string seg_path =
-        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
     return seg_path;
 }
 

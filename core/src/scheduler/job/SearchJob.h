@@ -42,13 +42,9 @@ class SearchJob : public Job {
     SearchJob(const server::ContextPtr& context, engine::DBOptions options, const query::QueryPtr& query_ptr);
 
  public:
-    JobTasks
-    CreateTasks() override;
-
     json
     Dump() const override;
 
- public:
     const server::ContextPtr&
     GetContext() const {
         return context_;
@@ -73,6 +69,10 @@ class SearchJob : public Job {
     segment_ids() {
         return segment_ids_;
     }
+
+ protected:
+    void
+    OnCreateTasks(JobTasks& tasks) override;
 
  private:
     void

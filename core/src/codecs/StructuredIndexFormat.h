@@ -32,7 +32,7 @@ class StructuredIndexFormat {
  public:
     StructuredIndexFormat() = default;
 
-    std::string
+    static std::string
     FilePostfix();
 
     void

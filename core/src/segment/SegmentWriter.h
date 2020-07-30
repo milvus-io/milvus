@@ -81,6 +81,16 @@ class SegmentWriter {
     std::string
     GetSegmentPath();
 
+    std::string
+    GetRootPath() const {
+        return dir_root_;
+    }
+
+    engine::SegmentVisitorPtr
+    GetSegmentVisitor() const {
+        return segment_visitor_;
+    }
+
  private:
     Status
     Initialize();
@@ -101,7 +111,9 @@ class SegmentWriter {
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
     engine::SegmentPtr segment_ptr_;
+
     std::string dir_root_;
+    std::string dir_collections_;
 };
 
 using SegmentWriterPtr = std::shared_ptr<SegmentWriter>;

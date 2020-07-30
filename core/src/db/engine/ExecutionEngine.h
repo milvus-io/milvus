@@ -27,7 +27,6 @@ namespace milvus {
 namespace engine {
 
 using TargetFields = std::set<std::string>;
-using TargetFieldGroups = std::vector<TargetFields>;
 
 struct ExecutionEngineContext {
     query::QueryPtr query_ptr_;
