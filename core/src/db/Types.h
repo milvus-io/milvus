@@ -13,6 +13,7 @@
 
 #include <faiss/Index.h>
 
+#include <src/segment/Segment.h>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -69,8 +70,7 @@ struct QueryResult {
     uint64_t row_num_;
     engine::ResultIds result_ids_;
     engine::ResultDistances result_distances_;
-    std::vector<engine::VectorsData> vectors_;
-    std::vector<engine::AttrsData> attrs_;
+    engine::DataChunkPtr data_chunk_;
 };
 using QueryResultPtr = std::shared_ptr<QueryResult>;
 
