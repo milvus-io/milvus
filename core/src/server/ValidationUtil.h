@@ -12,7 +12,6 @@
 #pragma once
 
 #include "db/Types.h"
-#include "db/meta/MetaTypes.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
 

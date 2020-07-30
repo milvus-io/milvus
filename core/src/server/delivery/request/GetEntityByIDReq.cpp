@@ -16,7 +16,8 @@
 // under the License.
 
 #include "server/delivery/request/GetEntityByIDReq.h"
-#include "db/meta/MetaTypes.h"
+
+#include "db/Types.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
 #include "utils/TimeRecorder.h"

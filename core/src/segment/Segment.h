@@ -22,7 +22,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "db/meta/MetaTypes.h"
+#include "db/Types.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
@@ -32,8 +32,8 @@ namespace engine {
 
 extern const char* COLLECTIONS_FOLDER;
 
-using FIELD_TYPE = engine::meta::DataType;
-using FIELD_TYPE_MAP = std::unordered_map<std::string, engine::meta::DataType>;
+using FIELD_TYPE = engine::DataType;
+using FIELD_TYPE_MAP = std::unordered_map<std::string, FIELD_TYPE>;
 using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;
 using FIXED_FIELD_DATA = std::vector<uint8_t>;
 using FIXEDX_FIELD_MAP = std::unordered_map<std::string, FIXED_FIELD_DATA>;

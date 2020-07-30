@@ -23,14 +23,14 @@
 
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngine.h"
-#include "db/meta/MetaTypes.h"
+#include "db/Types.h"
 
 namespace milvus {
 namespace scheduler {
 
 using ExecutionEnginePtr = engine::ExecutionEnginePtr;
 using EngineFactory = engine::EngineFactory;
-using DataType = engine::meta::DataType;
+using DataType = engine::DataType;
 
 constexpr uint64_t TASK_TABLE_MAX_COUNT = 1ULL << 16ULL;
 

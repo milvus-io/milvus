@@ -15,6 +15,7 @@
 #include "scheduler/SchedInst.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "version.h"
 
 #include <algorithm>
 #include <cctype>

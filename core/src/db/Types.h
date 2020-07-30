@@ -22,11 +22,14 @@
 #include <utility>
 #include <vector>
 
-#include "db/meta/MetaTypes.h"
+
+#include "db/Types.h"
 #include "utils/Json.h"
 
 namespace milvus {
 namespace engine {
+
+using DateT = int;
 
 typedef int64_t IDNumber;
 typedef IDNumber* IDNumberPtr;
@@ -37,6 +40,25 @@ typedef std::vector<VectorDistance> VectorDistances;
 
 typedef std::vector<faiss::Index::idx_t> ResultIds;
 typedef std::vector<faiss::Index::distance_t> ResultDistances;
+
+enum DataType {
+    NONE = 0,
+    BOOL = 1,
+    INT8 = 2,
+    INT16 = 3,
+    INT32 = 4,
+    INT64 = 5,
+
+    FLOAT = 10,
+    DOUBLE = 11,
+
+    STRING = 20,
+
+    UID = 30,
+
+    VECTOR_BINARY = 100,
+    VECTOR_FLOAT = 101,
+};
 
 struct CollectionIndex {
     std::string index_name_;
@@ -60,7 +82,7 @@ struct Entity {
 
 struct AttrsData {
     uint64_t attr_count_ = 0;
-    std::unordered_map<std::string, engine::meta::DataType> attr_type_;
+    std::unordered_map<std::string, engine::DataType> attr_type_;
     std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
     IDNumbers id_array_;
 };
@@ -91,8 +113,6 @@ extern const char* PARAM_INDEX_EXTRA_PARAMS;
 extern const char* PARAM_SEGMENT_ROW_COUNT;
 
 constexpr int64_t DEFAULT_SEGMENT_ROW_COUNT = 100000;
-
-using FieldType = meta::DataType;
 
 enum FieldElementType {
     FET_NONE = 0,

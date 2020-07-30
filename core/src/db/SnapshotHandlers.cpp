@@ -13,7 +13,6 @@
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
 #include "db/meta/MetaConsts.h"
-#include "db/meta/MetaTypes.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshot.h"
@@ -34,8 +33,8 @@ LoadVectorFieldElementHandler::LoadVectorFieldElementHandler(const std::shared_p
 
 Status
 LoadVectorFieldElementHandler::Handle(const snapshot::FieldElementPtr& field_element) {
-    if (field_->GetFtype() != engine::FieldType::VECTOR_FLOAT &&
-        field_->GetFtype() != engine::FieldType::VECTOR_BINARY) {
+    if (field_->GetFtype() != engine::DataType::VECTOR_FLOAT &&
+        field_->GetFtype() != engine::DataType::VECTOR_BINARY) {
         return Status(DB_ERROR, "Should be VECTOR field");
     }
     if (field_->GetID() != field_element->GetFieldId()) {
@@ -52,7 +51,7 @@ LoadVectorFieldHandler::LoadVectorFieldHandler(const std::shared_ptr<server::Con
 
 Status
 LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
-    if (field->GetFtype() != engine::FieldType::VECTOR_FLOAT && field->GetFtype() != engine::FieldType::VECTOR_BINARY) {
+    if (field->GetFtype() != engine::DataType::VECTOR_FLOAT && field->GetFtype() != engine::DataType::VECTOR_BINARY) {
         return Status::OK();
     }
     if (context_ && context_->IsConnectionBroken()) {

@@ -212,7 +212,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     // check uid existence/validation
     bool has_uid = false;
     for (auto& pair : ctx.fields_schema) {
-        if (pair.first->GetFtype() == meta::DataType::UID) {
+        if (pair.first->GetFtype() == DataType::UID) {
             has_uid = true;
             break;
         }
@@ -220,7 +220,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 
     // add uid field if not specified
     if (!has_uid) {
-        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, milvus::engine::FieldType::UID);
+        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, milvus::engine::DataType::UID);
         auto bloom_filter_element = std::make_shared<snapshot::FieldElement>(
             0, 0, DEFAULT_BLOOM_FILTER_NAME, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
         auto delete_doc_element = std::make_shared<snapshot::FieldElement>(
