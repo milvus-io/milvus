@@ -40,13 +40,16 @@ extern Status
 ValidateIndexType(const std::string& index_type);
 
 extern Status
-ValidateMetricType(const std::string& metric_type);
+ValidateVectorDimension(int64_t dimension, const std::string& metric_type);
 
 extern Status
 ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type);
 
 extern Status
-ValidateSegmentSize(int64_t segment_size);
+ValidateSegmentRowCount(int64_t segment_row_count);
+
+extern Status
+ValidateIndexMetricType(const std::string& metric_type);
 
 extern Status
 ValidateSearchTopk(int64_t top_k);
