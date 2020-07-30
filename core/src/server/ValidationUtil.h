@@ -34,7 +34,7 @@ extern Status
 ValidateIndexName(const std::string& index_name);
 
 extern Status
-ValidateTableDimension(int64_t dimension, int64_t metric_type);
+ValidateDimension(int64_t dimension, bool is_binary);
 
 extern Status
 ValidateIndexType(const std::string& index_type);
@@ -46,7 +46,7 @@ extern Status
 ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type);
 
 extern Status
-ValidateCollectionIndexFileSize(int64_t index_file_size);
+ValidateSegmentSize(int64_t segment_size);
 
 extern Status
 ValidateSearchTopk(int64_t top_k);

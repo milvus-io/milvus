@@ -26,8 +26,8 @@ namespace server {
 namespace {
 
 constexpr size_t NAME_SIZE_LIMIT = 255;
-constexpr int64_t COLLECTION_DIMENSION_LIMIT = 32768;
-constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
+constexpr int64_t MAX_DIMENSION = 32768;
+constexpr int32_t MAX_SEGMENT_SIZE = 4096;  /* MB */
 constexpr int64_t M_BYTE = 1024 * 1024;
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
 
@@ -205,22 +205,18 @@ ValidateIndexName(const std::string& index_name) {
 }
 
 Status
-ValidateTableDimension(int64_t dimension, int64_t metric_type) {
-    if (dimension <= 0 || dimension > COLLECTION_DIMENSION_LIMIT) {
-        std::string msg = "Invalid collection dimension: " + std::to_string(dimension) + ". " +
-                          "The collection dimension must be within the range of 1 ~ " +
-                          std::to_string(COLLECTION_DIMENSION_LIMIT) + ".";
+ValidateDimension(int64_t dim, bool is_binary) {
+    if (dim <= 0 || dim > MAX_DIMENSION) {
+        std::string msg = "Invalid dimension: " + std::to_string(dim) + ". Should be in range 1 ~ " +
+                          std::to_string(MAX_DIMENSION) + ".";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
     }
 
-    if (milvus::engine::utils::IsBinaryMetricType(metric_type)) {
-        if ((dimension % 8) != 0) {
-            std::string msg = "Invalid collection dimension: " + std::to_string(dimension) + ". " +
-                              "The collection dimension must be a multiple of 8";
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
-        }
+    if (is_binary && (dim % 8) != 0) {
+        std::string msg = "Invalid dimension: " + std::to_string(dim) + ". Should be multiple of 8.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
     }
 
     return Status::OK();
@@ -322,15 +318,13 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 }
 
 Status
-ValidateCollectionIndexFileSize(int64_t index_file_size) {
-    if (index_file_size <= 0 || index_file_size > INDEX_FILE_SIZE_LIMIT) {
-        std::string msg = "Invalid index file size: " + std::to_string(index_file_size) + ". " +
-                          "The index file size must be within the range of 1 ~ " +
-                          std::to_string(INDEX_FILE_SIZE_LIMIT) + ".";
+ValidateSegmentSize(int64_t segment_size) {
+    if (segment_size <= 0 || segment_size > MAX_SEGMENT_SIZE) {
+        std::string msg = "Invalid segment size: " + std::to_string(segment_size) + ". Should be in range 1 ~ " +
+                          std::to_string(MAX_SEGMENT_SIZE) + ".";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_FILE_SIZE, msg);
     }
-
     return Status::OK();
 }
 

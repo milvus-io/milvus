@@ -72,16 +72,23 @@ CreateCollectionReq::OnExecute() {
             auto& field_params = field_schema.field_params_;
             auto& index_params = field_schema.index_params_;
 
-            std::cout << index_params.dump() << std::endl;
+            STATUS_CHECK(ValidateFieldName(field_name));
+
             std::string index_name;
             if (index_params.contains("name")) {
                 index_name = index_params["name"];
             }
 
-            std::cout << field_params.dump() << std::endl;
             if (field_type == engine::FieldType::VECTOR_FLOAT || field_type == engine::FieldType::VECTOR_BINARY) {
                 if (!field_params.contains(engine::PARAM_DIMENSION)) {
                     return Status(SERVER_INVALID_VECTOR_DIMENSION, "Dimension not defined in field_params");
+                } else {
+                    auto dim = field_params[engine::PARAM_DIMENSION].get<int64_t>();
+                    if (field_type == engine::FieldType::VECTOR_FLOAT) {
+                        STATUS_CHECK(ValidateDimension(dim, false));
+                    } else {
+                        STATUS_CHECK(ValidateDimension(dim, true));
+                    }
                 }
             }
 
@@ -95,7 +102,7 @@ CreateCollectionReq::OnExecute() {
             return Status(SERVER_UNEXPECTED_ERROR, "Segment size not defined");
         } else {
             auto segment_size = extra_params_[engine::PARAM_SEGMENT_SIZE].get<int64_t>();
-            STATUS_CHECK(ValidateCollectionIndexFileSize(segment_size));
+            STATUS_CHECK(ValidateSegmentSize(segment_size));
         }
 
         // step 3: create collection
