@@ -111,24 +111,32 @@ SearchTask::OnExecute() {
         engine::ExecutionEngineContext context;
         context.query_ptr_ = query_ptr_;
         context.query_result_ = std::make_shared<engine::QueryResult>();
-        auto status = execution_engine_->Search(context);
-
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(execution_engine_->Search(context));
 
         rc.RecordSection("search done");
 
         /* step 3: pick up topk result */
-        // auto spec_k = file_->row_count_ < topk ? file_->row_count_ : topk;
-        // if (spec_k == 0) {
-        //     LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty file. file location = %s",
-        //     "search", 0,
-        //                                   file_->location_.c_str());
-        // } else {
-        //     std::unique_lock<std::mutex> lock(search_job->mutex());
-        //   XSearchTask::MergeTopkToResultSet(result, spec_k, nq, topk, ascending_, search_job->GetQueryResult());
-        // }
+        // TODO(yukun): Remove hardcode here
+        auto vector_param = context.query_ptr_->vectors.begin()->second;
+        auto topk = vector_param->topk;
+        auto segment_ptr = snapshot_->GetSegmentCommitBySegmentId(segment_id_);
+        auto spec_k = segment_ptr->GetRowCount() < topk ? segment_ptr->GetRowCount() : topk;
+        int64_t nq = 0;
+        if (!vector_param->query_vector.float_data.empty()) {
+            nq = vector_param->query_vector.float_data.size() / topk;
+        } else {
+            nq = vector_param->query_vector.binary_data.size() * 8 / topk;
+        }
+        if (spec_k == 0) {
+            LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty segment. segment id = %d", "search", 0,
+                                          segment_ptr->GetID());
+        } else {
+            auto search_job = std::static_pointer_cast<scheduler::SearchJob>(std::shared_ptr<scheduler::Job>(job_));
+            //            std::unique_lock<std::mutex> lock(search_job->mutex());
+            SearchTask::MergeTopkToResultSet(context.query_result_->result_ids_,
+                                             context.query_result_->result_distances_, spec_k, nq, topk,
+                                             ascending_reduce_, search_job->query_result());
+        }
 
         rc.RecordSection("reduce topk done");
     } catch (std::exception& ex) {
@@ -138,6 +146,72 @@ SearchTask::OnExecute() {
 
     rc.ElapseFromBegin("totally cost");
     return Status::OK();
+}
+
+void
+SearchTask::MergeTopkToResultSet(const engine::ResultIds& src_ids, const engine::ResultDistances& src_distances,
+                                 size_t src_k, size_t nq, size_t topk, bool ascending, engine::QueryResultPtr& result) {
+    if (src_ids.empty()) {
+        LOG_ENGINE_DEBUG_ << LogOut("[%s][%d] Search result is empty.", "search", 0);
+        return;
+    }
+
+    size_t tar_k = result->result_ids_.size() / nq;
+    size_t buf_k = std::min(topk, src_k + tar_k);
+
+    engine::ResultIds buf_ids(nq * buf_k, -1);
+    engine::ResultDistances buf_distances(nq * buf_k, 0.0);
+    for (uint64_t i = 0; i < nq; i++) {
+        size_t buf_k_j = 0, src_k_j = 0, tar_k_j = 0;
+        size_t buf_idx, src_idx, tar_idx;
+
+        size_t buf_k_multi_i = buf_k * i;
+        size_t src_k_multi_i = topk * i;
+        size_t tar_k_multi_i = tar_k * i;
+
+        while (buf_k_j < buf_k && src_k_j < src_k && tar_k_j < tar_k) {
+            src_idx = src_k_multi_i + src_k_j;
+            tar_idx = tar_k_multi_i + tar_k_j;
+            buf_idx = buf_k_multi_i + buf_k_j;
+
+            if ((result->result_ids_[tar_idx] == -1) ||  // initialized value
+                (ascending && src_distances[src_idx] < result->result_distances_[tar_idx]) ||
+                (!ascending && src_distances[src_idx] > result->result_distances_[tar_idx])) {
+                buf_ids[buf_idx] = src_ids[src_idx];
+                buf_distances[buf_idx] = src_distances[src_idx];
+                src_k_j++;
+            } else {
+                buf_ids[buf_idx] = result->result_ids_[tar_idx];
+                buf_distances[buf_idx] = result->result_distances_[tar_idx];
+                tar_k_j++;
+            }
+            buf_k_j++;
+        }
+
+        if (buf_k_j < buf_k) {
+            if (src_k_j < src_k) {
+                while (buf_k_j < buf_k && src_k_j < src_k) {
+                    buf_idx = buf_k_multi_i + buf_k_j;
+                    src_idx = src_k_multi_i + src_k_j;
+                    buf_ids[buf_idx] = src_ids[src_idx];
+                    buf_distances[buf_idx] = src_distances[src_idx];
+                    src_k_j++;
+                    buf_k_j++;
+                }
+            } else {
+                while (buf_k_j < buf_k && tar_k_j < tar_k) {
+                    buf_idx = buf_k_multi_i + buf_k_j;
+                    tar_idx = tar_k_multi_i + tar_k_j;
+                    buf_ids[buf_idx] = result->result_ids_[tar_idx];
+                    buf_distances[buf_idx] = result->result_distances_[tar_idx];
+                    tar_k_j++;
+                    buf_k_j++;
+                }
+            }
+        }
+    }
+    result->result_ids_.swap(buf_ids);
+    result->result_distances_.swap(buf_distances);
 }
 
 int64_t

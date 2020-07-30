@@ -45,6 +45,10 @@ class SearchTask : public Task {
     Status
     OnExecute() override;
 
+    static void
+    MergeTopkToResultSet(const engine::ResultIds& src_ids, const engine::ResultDistances& src_distances, size_t src_k,
+                         size_t nq, size_t topk, bool ascending, engine::QueryResultPtr& result);
+
     int64_t
     nq();
 
@@ -61,6 +65,10 @@ class SearchTask : public Task {
     engine::snapshot::ID_TYPE segment_id_;
 
     engine::ExecutionEnginePtr execution_engine_;
+
+    // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
+    // similarity -- infinity value means two vectors equal, descending reduce, IP
+    bool ascending_reduce_ = true;
 };
 
 }  // namespace scheduler

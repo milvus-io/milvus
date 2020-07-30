@@ -631,6 +631,7 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
         return job->status();
     }
 
+    result = job->query_result();
     // step 3: construct results
     //    result.row_num_ = job->vector_count();
     //    result.result_ids_ = job->GetResultIds();
