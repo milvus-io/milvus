@@ -121,7 +121,7 @@ add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
 
 # **************************** Install ****************************
 
-if ( NOT ${MILVUS_DB_PATH} )
+if ( NOT MILVUS_DB_PATH )
     set( MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}" )
 endif ()
 
