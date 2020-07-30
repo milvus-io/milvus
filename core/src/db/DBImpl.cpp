@@ -264,7 +264,7 @@ DBImpl::HasCollection(const std::string& collection_name, bool& has_or_not) {
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
     has_or_not = status.ok();
 
-    return status;
+    return Status::OK();
 }
 
 Status

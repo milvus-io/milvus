@@ -16,7 +16,6 @@
 #include "utils/TimeRecorder.h"
 
 #include <fiu-local.h>
-#include <memory>
 
 namespace milvus {
 namespace server {
@@ -38,6 +37,7 @@ HasCollectionReq::OnExecute() {
         std::string hdr = "HasCollectionReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist_));
 
         rc.ElapseFromBegin("done");

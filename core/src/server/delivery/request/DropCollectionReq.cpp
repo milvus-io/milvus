@@ -15,11 +15,6 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
-#include <memory>
-#include <unordered_map>
-#include <vector>
-
 namespace milvus {
 namespace server {
 
@@ -38,6 +33,8 @@ DropCollectionReq::OnExecute() {
     try {
         std::string hdr = "DropCollectionReq(collection=" + collection_name_ + ")";
         TimeRecorder rc(hdr);
+
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
 
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);

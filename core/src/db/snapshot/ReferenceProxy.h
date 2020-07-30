@@ -47,7 +47,7 @@ class ReferenceProxy {
         }
     }
 
-    [[nodiscard]] int64_t
+    int64_t
     ref_count() const {
         return ref_count_;
     }

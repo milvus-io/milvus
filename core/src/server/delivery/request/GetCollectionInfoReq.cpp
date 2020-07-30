@@ -12,16 +12,12 @@
 #include "server/delivery/request/GetCollectionInfoReq.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "server/web_impl/Constants.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
-#include <memory>
-#include <string>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
 namespace milvus {
 namespace server {
@@ -45,6 +41,8 @@ GetCollectionInfoReq::OnExecute() {
     TimeRecorderAuto rc(hdr);
 
     try {
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings collection_mappings;
         STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, collection_mappings));

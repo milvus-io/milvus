@@ -21,10 +21,6 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <memory>
-#include <unordered_map>
-#include <vector>
-
 namespace milvus {
 namespace server {
 
@@ -46,16 +42,22 @@ GetCollectionStatsReq::OnExecute() {
     std::string hdr = "GetCollectionStatsReq(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
-    bool exist = false;
-    auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
-    if (!exist) {
-        return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-    }
+    try {
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
 
-    nlohmann::json json_stats;
-    STATUS_CHECK(DBWrapper::DB()->GetCollectionStats(collection_name_, json_stats));
-    collection_stats_ = json_stats.dump();
-    rc.ElapseFromBegin("done");
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+        }
+
+        milvus::json json_stats;
+        STATUS_CHECK(DBWrapper::DB()->GetCollectionStats(collection_name_, json_stats));
+        collection_stats_ = json_stats.dump();
+        rc.ElapseFromBegin("done");
+    } catch (std::exception& ex) {
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
 
     return Status::OK();
 }
