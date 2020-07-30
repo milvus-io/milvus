@@ -24,7 +24,7 @@ namespace scheduler {
 
 class BuildIndexTask : public Task {
  public:
-    explicit BuildIndexTask(const engine::DBOptions& options, const std::string& collection_name,
+    explicit BuildIndexTask(const engine::snapshot::ScopedSnapshotT& snapshot, const engine::DBOptions& options,
                             engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields,
                             TaskLabelPtr label);
 
@@ -32,7 +32,6 @@ class BuildIndexTask : public Task {
     Dump() const override {
         json ret{
             {"type", type_},
-            {"collection_name", collection_name_},
             {"segment_id", segment_id_},
         };
         return ret;
@@ -44,16 +43,13 @@ class BuildIndexTask : public Task {
     Status
     OnExecute() override;
 
-    static void
-    GroupFieldsForIndex(const std::string& collection_name, engine::TargetFieldGroups& groups);
-
  private:
     void
     CreateExecEngine();
 
  public:
-    const engine::DBOptions& options_;
-    std::string collection_name_;
+    engine::snapshot::ScopedSnapshotT snapshot_;
+    engine::DBOptions options_;
     engine::snapshot::ID_TYPE segment_id_;
 
     // structured field could not be processed with vector field in a task

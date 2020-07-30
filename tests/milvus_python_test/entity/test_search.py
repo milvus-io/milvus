@@ -11,7 +11,7 @@ from milvus import DataType
 from utils import *
 
 dim = 128
-segment_size = 10
+segment_row_count = 5000
 top_k_limit = 2048
 collection_id = "search"
 tag = "1970-01-01"

@@ -12,16 +12,12 @@
 #include "server/delivery/request/GetCollectionInfoReq.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "server/web_impl/Constants.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
-#include <memory>
-#include <string>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
 namespace milvus {
 namespace server {
@@ -45,6 +41,8 @@ GetCollectionInfoReq::OnExecute() {
     TimeRecorderAuto rc(hdr);
 
     try {
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::CollectionMappings collection_mappings;
         STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, collection_mappings));
@@ -57,21 +55,22 @@ GetCollectionInfoReq::OnExecute() {
                 continue;
             }
 
-            milvus::json json_index_param;
+            milvus::json field_index_param;
             auto field_elements = field_kv.second;
             for (const auto& element : field_elements) {
                 if (element->GetFtype() == (engine::snapshot::FTYPE_TYPE)engine::FieldElementType::FET_INDEX) {
-                    json_index_param = element->GetParams().dump();
+                    field_index_param = element->GetParams();
                     break;
                 }
             }
 
             auto field_name = field->GetName();
-            collection_schema_.field_types_.insert(
-                std::make_pair(field_name, (engine::meta::DataType)field->GetFtype()));
-            collection_schema_.index_params_.insert(std::make_pair(field_name, json_index_param));
-            milvus::json json_extra_param = field->GetParams();
-            collection_schema_.field_params_.insert(std::make_pair(field_name, json_extra_param));
+            FieldSchema field_schema;
+            field_schema.field_type_ = (engine::FieldType)field->GetFtype();
+            field_schema.field_params_ = field->GetParams();
+            field_schema.index_params_ = field_index_param;
+
+            collection_schema_.fields_.insert(std::make_pair(field_name, field_schema));
         }
 
         rc.ElapseFromBegin("done");

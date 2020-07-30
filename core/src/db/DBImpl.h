@@ -23,13 +23,14 @@
 
 #include "db/DB.h"
 
+#include "config/ConfigMgr.h"
 #include "utils/ThreadPool.h"
 #include "wal/WalManager.h"
 
 namespace milvus {
 namespace engine {
 
-class DBImpl : public DB {
+class DBImpl : public DB, public ConfigObserver {
  public:
     explicit DBImpl(const DBOptions& options);
 
@@ -58,7 +59,7 @@ class DBImpl : public DB {
                       snapshot::CollectionMappings& fields_schema) override;
 
     Status
-    GetCollectionStats(const std::string& collection_name, std::string& collection_stats);
+    GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) override;
 
     Status
     CountEntities(const std::string& collection_name, int64_t& row_count) override;
@@ -114,6 +115,9 @@ class DBImpl : public DB {
 
     Status
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold = 0.0) override;
+
+    void
+    ConfigUpdate(const std::string& name) override;
 
  private:
     void

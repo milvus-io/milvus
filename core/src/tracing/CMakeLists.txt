@@ -11,14 +11,15 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/tracing tracing_files)
-add_library(tracing STATIC ${tracing_files})
+aux_source_directory( ${MILVUS_ENGINE_SRC}/tracing  TRACING_FILES )
 
-set(tracing_lib
-        opentracing
-        opentracing_mocktracer
-        pthread
-        z
-        dl
-        )
-target_link_libraries(tracing ${tracing_lib})
+add_library( tracing STATIC ${TRACING_FILES} )
+
+set( TRACING_LIB    opentracing
+                    opentracing_mocktracer
+                    pthread
+                    z
+                    dl
+                    )
+
+target_link_libraries( tracing ${TRACING_LIB} )

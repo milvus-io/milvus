@@ -9,7 +9,7 @@ from utils import *
 
 collection_id = "info"
 default_fields = gen_default_fields() 
-segment_size = 10
+segment_row_count = 5000
 
 
 class TestInfoBase:
@@ -30,9 +30,9 @@ class TestInfoBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_segment_sizes()
+        params=gen_segment_row_counts()
     )
-    def get_segment_size(self, request):
+    def get_segment_row_count(self, request):
         yield request.param
 
     """
@@ -53,7 +53,7 @@ class TestInfoBase:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_size": segment_size
+                "segment_row_count": segment_row_count
         }
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
@@ -64,15 +64,15 @@ class TestInfoBase:
         # assert dimension
 
     # TODO
-    def test_create_collection_segment_size(self, connect, get_segment_size):
+    def test_create_collection_segment_row_count(self, connect, get_segment_row_count):
         '''
         target: test create normal collection with different fields
-        method: create collection with diff segment_size
+        method: create collection with diff segment_row_count
         expected: no exception raised
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields["segment_size"] = get_segment_size
+        fields["segment_row_count"] = get_segment_row_count
         connect.create_collection(collection_name, fields)
         # assert segment size
 
@@ -141,7 +141,7 @@ class TestInfoBase:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_size": segment_size
+                "segment_row_count": segment_row_count
         }
         connect.create_collection(collection_name, fields)
         # insert
@@ -153,15 +153,15 @@ class TestInfoBase:
         # assert dimension
 
     # TODO
-    def test_create_collection_segment_size_after_insert(self, connect, get_segment_size):
+    def test_create_collection_segment_row_count_after_insert(self, connect, get_segment_row_count):
         '''
         target: test create normal collection with different fields
-        method: create collection with diff segment_size
+        method: create collection with diff segment_row_count
         expected: no exception raised
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields["segment_size"] = get_segment_size
+        fields["segment_row_count"] = get_segment_row_count
         connect.create_collection(collection_name, fields)
         # insert
         # assert segment size

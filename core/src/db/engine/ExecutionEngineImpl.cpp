@@ -101,20 +101,24 @@ ExecutionEngineImpl::CreateStructuredIndex(const milvus::engine::meta::DataType 
             index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
             break;
         }
+        case engine::meta::DataType::UID:
         case engine::meta::DataType::INT64: {
             auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
                 raw_data.size(), reinterpret_cast<const int64_t*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
+            break;
         }
         case engine::meta::DataType::FLOAT: {
             auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
                 raw_data.size(), reinterpret_cast<const float*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
+            break;
         }
         case engine::meta::DataType::DOUBLE: {
             auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
                 raw_data.size(), reinterpret_cast<const double*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
+            break;
         }
         default: { return Status(DB_ERROR, "Field is not structured type"); }
     }
@@ -187,6 +191,84 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
     return Status::OK();
 }
 
+void
+MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::segment::doc_id_t>& uids, int64_t nq,
+                 int64_t k, float* distances, int64_t* labels) {
+    int64_t* res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
+    float* res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
+
+    memcpy(distances, res_dist, sizeof(float) * nq * k);
+
+    /* map offsets to ids */
+    int64_t num = nq * k;
+    for (int64_t i = 0; i < num; ++i) {
+        int64_t offset = res_ids[i];
+        if (offset != -1) {
+            labels[i] = uids[offset];
+        } else {
+            labels[i] = -1;
+        }
+    }
+
+    free(res_ids);
+    free(res_dist);
+}
+
+Status
+ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
+                               const query::VectorQueryPtr& vector_param, knowhere::VecIndexPtr& vec_index,
+                               bool hybrid) {
+    TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search", "search", 0));
+
+    if (vec_index == nullptr) {
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
+        return Status(DB_ERROR, "index is null");
+    }
+
+    uint64_t nq = 0;
+    auto query_vector = vector_param->query_vector;
+    if (!query_vector.float_data.empty()) {
+        nq = vector_param->query_vector.float_data.size() / vec_index->Dim();
+    } else if (!query_vector.binary_data.empty()) {
+        nq = vector_param->query_vector.binary_data.size() * 8 / vec_index->Dim();
+    }
+    uint64_t topk = vector_param->topk;
+
+    context.query_result_ = std::make_shared<QueryResult>();
+    context.query_result_->result_ids_.resize(topk * nq);
+    context.query_result_->result_distances_.resize(topk * nq);
+
+    milvus::json conf = vector_param->extra_params;
+    conf[knowhere::meta::TOPK] = topk;
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(vec_index->index_type());
+    if (!adapter->CheckSearch(conf, vec_index->index_type(), vec_index->index_mode())) {
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
+        throw Exception(DB_ERROR, "Illegal search params");
+    }
+
+    if (hybrid) {
+        //        HybridLoad();
+    }
+
+    rc.RecordSection("query prepare");
+    knowhere::DatasetPtr dataset;
+    if (!query_vector.float_data.empty()) {
+        dataset = knowhere::GenDataset(nq, vec_index->Dim(), query_vector.float_data.data());
+    } else {
+        dataset = knowhere::GenDataset(nq, vec_index->Dim(), query_vector.binary_data.data());
+    }
+    auto result = vec_index->Query(dataset, conf);
+
+    MapAndCopyResult(result, vec_index->GetUids(), nq, topk, context.query_result_->result_distances_.data(),
+                     context.query_result_->result_ids_.data());
+
+    if (hybrid) {
+        //        HybridUnset();
+    }
+
+    return Status::OK();
+}
+
 Status
 ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
     try {
@@ -208,7 +290,6 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             if (field->GetFtype() == (int)engine::meta::DataType::VECTOR_FLOAT ||
                 field->GetFtype() == (int)engine::meta::DataType::VECTOR_BINARY) {
                 segment_ptr->GetVectorIndex(field->GetName(), vec_index);
-                break;
             } else if (type == (int)engine::meta::DataType::UID) {
                 continue;
             } else {
@@ -232,8 +313,14 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         }
         vec_index->SetBlacklist(list);
 
-        auto vector_query = context.query_ptr_->vectors.at(vector_placeholder);
+        auto& vector_param = context.query_ptr_->vectors.at(vector_placeholder);
+        if (!vector_param->query_vector.float_data.empty()) {
+            vector_param->nq = vector_param->query_vector.float_data.size() / vec_index->Dim();
+        } else if (!vector_param->query_vector.binary_data.empty()) {
+            vector_param->nq = vector_param->query_vector.binary_data.size() * 8 / vec_index->Dim();
+        }
 
+        status = VecSearch(context, context.query_ptr_->vectors.at(vector_placeholder), vec_index);
         if (!status.ok()) {
             return status;
         }
@@ -487,11 +574,11 @@ ExecutionEngineImpl::BuildIndex() {
     auto collection = snapshot->GetCollection();
     auto& segment = segment_visitor->GetSegment();
 
-    for (auto& field_name : target_fields_) {
-        snapshot::OperationContext context;
-        context.prev_partition = snapshot->GetResource<snapshot::Partition>(segment->GetPartitionId());
-        auto build_op = std::make_shared<snapshot::ChangeSegmentFileOperation>(context, snapshot);
+    snapshot::OperationContext context;
+    context.prev_partition = snapshot->GetResource<snapshot::Partition>(segment->GetPartitionId());
+    auto build_op = std::make_shared<snapshot::ChangeSegmentFileOperation>(context, snapshot);
 
+    for (auto& field_name : target_fields_) {
         // create snapshot segment files
         CollectionIndex index_info;
         auto status = CreateSnapshotIndexFile(build_op, field_name, index_info);
@@ -504,7 +591,9 @@ ExecutionEngineImpl::BuildIndex() {
         auto& field = field_visitor->GetField();
 
         auto root_path = segment_reader_->GetRootPath();
-        auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(root_path, segment_visitor);
+        auto op_ctx = build_op->GetContext();
+        auto new_visitor = SegmentVisitor::Build(snapshot, segment, op_ctx.new_segment_files);
+        auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(root_path, new_visitor);
         if (IsVectorField(field)) {
             knowhere::VecIndexPtr new_index;
             status = BuildKnowhereIndex(field_name, index_info, new_index);
@@ -512,24 +601,35 @@ ExecutionEngineImpl::BuildIndex() {
                 return status;
             }
             segment_writer_ptr->SetVectorIndex(field_name, new_index);
-            rc.RecordSection("build index");
+
+            rc.RecordSection("build vector index for field: " + field_name);
+
+            // serialze index files
+            status = segment_writer_ptr->WriteVectorIndex(field_name);
+            if (!status.ok()) {
+                return status;
+            }
+
+            rc.RecordSection("serialize vector index for field: " + field_name);
         } else {
             knowhere::IndexPtr index_ptr;
             segment_ptr->GetStructuredIndex(field_name, index_ptr);
             segment_writer_ptr->SetStructuredIndex(field_name, index_ptr);
-            rc.RecordSection("build index");
-        }
 
-        // serialze index files
-        status = segment_writer_ptr->WriteVectorIndex(field_name);
-        if (!status.ok()) {
-            return status;
-        }
-        rc.RecordSection("serialize index");
+            rc.RecordSection("build structured index for field: " + field_name);
 
-        // finish transaction
-        build_op->Push();
+            // serialze index files
+            status = segment_writer_ptr->WriteStructuredIndex(field_name);
+            if (!status.ok()) {
+                return status;
+            }
+
+            rc.RecordSection("serialize structured index for field: " + field_name);
+        }
     }
+
+    // finish transaction
+    build_op->Push();
 
     return Status::OK();
 }
@@ -541,18 +641,30 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
     auto& segment = segment_visitor->GetSegment();
     auto field_visitor = segment_visitor->GetFieldVisitor(field_name);
     auto& field = field_visitor->GetField();
+    bool is_vector = IsVectorField(field);
 
     auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-    auto& index_element = element_visitor->GetElement();
     if (element_visitor == nullptr) {
         return Status(DB_ERROR, "Could not build index: index not specified");  // no index specified
+    }
+
+    auto& index_element = element_visitor->GetElement();
+    index_info.index_name_ = index_element->GetName();
+    auto params = index_element->GetParams();
+    if (params.find(engine::PARAM_INDEX_METRIC_TYPE) != params.end()) {
+        index_info.metric_name_ = params[engine::PARAM_INDEX_METRIC_TYPE];
+    }
+    if (params.find(engine::PARAM_INDEX_EXTRA_PARAMS) != params.end()) {
+        index_info.extra_params_ = params[engine::PARAM_INDEX_EXTRA_PARAMS];
     }
 
     snapshot::SegmentFilePtr seg_file = element_visitor->GetFile();
     if (seg_file != nullptr) {
         // index already build?
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(segment_reader_->GetRootPath(), seg_file);
+        std::string file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(
+            segment_reader_->GetCollectionsPath(), seg_file);
+        file_path +=
+            (is_vector ? codec::VectorIndexFormat::FilePostfix() : codec::StructuredIndexFormat::FilePostfix());
         if (CommonUtil::IsFileExist(file_path)) {
             return Status(DB_ERROR, "Could not build index: Index file already exist");  // index already build
         }
@@ -563,6 +675,7 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
         sf_context.field_element_name = index_element->GetName();
         sf_context.collection_id = segment->GetCollectionId();
         sf_context.partition_id = segment->GetPartitionId();
+        sf_context.segment_id = segment->GetID();
 
         auto status = operation->CommitNewSegmentFile(sf_context, seg_file);
         if (!status.ok()) {
@@ -589,6 +702,7 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
             sf_context.field_element_name = compress_element->GetName();
             sf_context.collection_id = segment->GetCollectionId();
             sf_context.partition_id = segment->GetPartitionId();
+            sf_context.segment_id = segment->GetID();
 
             auto status = operation->CommitNewSegmentFile(sf_context, seg_file);
             if (!status.ok()) {
@@ -617,8 +731,8 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
 
     // build index by knowhere
-    auto to_index = CreateVecIndex(index_info.index_name_);
-    if (!to_index) {
+    new_index = CreateVecIndex(index_info.index_name_);
+    if (!new_index) {
         throw Exception(DB_ERROR, "Unsupported index type");
     }
 
@@ -628,24 +742,20 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     auto field_visitor = segment_visitor->GetFieldVisitor(field_name);
     auto& field = field_visitor->GetField();
 
-    auto element_json = index_info.extra_params_;
-    auto metric_type = element_json[engine::PARAM_INDEX_METRIC_TYPE];
-    auto index_params = element_json[engine::PARAM_INDEX_EXTRA_PARAMS];
-
     auto field_json = field->GetParams();
     auto dimension = field_json[milvus::knowhere::meta::DIM];
 
     auto segment_commit = snapshot->GetSegmentCommitBySegmentId(segment->GetID());
     auto row_count = segment_commit->GetRowCount();
 
-    milvus::json conf = index_params;
+    milvus::json conf = index_info.extra_params_;
     conf[knowhere::meta::DIM] = dimension;
     conf[knowhere::meta::ROWS] = row_count;
     conf[knowhere::meta::DEVICEID] = gpu_num_;
-    conf[knowhere::Metric::TYPE] = metric_type;
+    conf[knowhere::Metric::TYPE] = index_info.metric_name_;
     LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(to_index->index_type());
-    if (!adapter->CheckTrain(conf, to_index->index_mode())) {
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(new_index->index_type());
+    if (!adapter->CheckTrain(conf, new_index->index_mode())) {
         throw Exception(DB_ERROR, "Illegal index params");
     }
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
@@ -655,28 +765,28 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     if (from_index) {
         auto dataset =
             knowhere::GenDatasetWithIds(row_count, dimension, from_index->GetRawVectors(), from_index->GetRawIds());
-        to_index->BuildAll(dataset, conf);
+        new_index->BuildAll(dataset, conf);
         uids = from_index->GetUids();
         blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {
         auto dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
                                                    bin_from_index->GetRawIds());
-        to_index->BuildAll(dataset, conf);
+        new_index->BuildAll(dataset, conf);
         uids = bin_from_index->GetUids();
         blacklist = bin_from_index->GetBlacklist();
     }
 
 #ifdef MILVUS_GPU_VERSION
     /* for GPU index, need copy back to CPU */
-    if (to_index->index_mode() == knowhere::IndexMode::MODE_GPU) {
-        auto device_index = std::dynamic_pointer_cast<knowhere::GPUIndex>(to_index);
-        to_index = device_index->CopyGpuToCpu(conf);
+    if (new_index->index_mode() == knowhere::IndexMode::MODE_GPU) {
+        auto device_index = std::dynamic_pointer_cast<knowhere::GPUIndex>(new_index);
+        new_index = device_index->CopyGpuToCpu(conf);
     }
 #endif
 
-    to_index->SetUids(uids);
+    new_index->SetUids(uids);
     if (blacklist != nullptr) {
-        to_index->SetBlacklist(blacklist);
+        new_index->SetBlacklist(blacklist);
     }
 
     return Status::OK();

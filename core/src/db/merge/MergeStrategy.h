@@ -25,8 +25,6 @@
 namespace milvus {
 namespace engine {
 
-const int64_t DEFAULT_ROW_COUNT_PER_SEGMENT = 500000;
-
 using Partition2SegmentsMap = std::map<snapshot::ID_TYPE, snapshot::IDS_TYPE>;
 using SegmentGroups = std::vector<snapshot::IDS_TYPE>;
 

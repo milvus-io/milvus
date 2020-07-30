@@ -30,7 +30,7 @@ class DeletedDocsFormat {
  public:
     DeletedDocsFormat() = default;
 
-    std::string
+    static std::string
     FilePostfix();
 
     void
