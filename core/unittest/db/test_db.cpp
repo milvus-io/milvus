@@ -55,7 +55,7 @@ CreateCollection2(std::shared_ptr<DBImpl> db, const std::string& collection_name
     auto collection_schema = std::make_shared<Collection>(collection_name);
     context.collection = collection_schema;
 
-    nlohmann::json params;
+    milvus::json params;
     params[milvus::knowhere::meta::DIM] = COLLECTION_DIM;
     auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR_FLOAT, params);
     context.fields_schema[vector_field] = {};
@@ -557,7 +557,7 @@ TEST_F(DBTest, StatsTest) {
         ASSERT_TRUE(status.ok());
     }
 
-    nlohmann::json json_stats;
+    milvus::json json_stats;
     status = db_->GetCollectionStats(collection_name, json_stats);
     int64_t row_count = json_stats[milvus::engine::JSON_ROW_COUNT];
     ASSERT_EQ(row_count, entity_count * 2);

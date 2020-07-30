@@ -51,7 +51,7 @@ SetSnapshotIndex(const std::string& collection_name, const std::string& field_na
     if (IsVectorField(field)) {
         auto new_element = std::make_shared<snapshot::FieldElement>(
             ss->GetCollectionId(), field->GetID(), index_info.index_name_, milvus::engine::FieldElementType::FET_INDEX);
-        nlohmann::json json;
+        milvus::json json;
         json[engine::PARAM_INDEX_METRIC_TYPE] = index_info.metric_name_;
         json[engine::PARAM_INDEX_EXTRA_PARAMS] = index_info.extra_params_;
         new_element->SetParams(json);
@@ -147,7 +147,7 @@ IsVectorField(const engine::snapshot::FieldPtr& field) {
 }
 
 Status
-GetSnapshotInfo(const std::string& collection_name, nlohmann::json& json_info) {
+GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 

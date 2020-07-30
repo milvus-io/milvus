@@ -292,7 +292,7 @@ DBImpl::GetCollectionInfo(const std::string& collection_name, snapshot::Collecti
 }
 
 Status
-DBImpl::GetCollectionStats(const std::string& collection_name, nlohmann::json& collection_stats) {
+DBImpl::GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) {
     CHECK_INITIALIZED;
 
     STATUS_CHECK(GetSnapshotInfo(collection_name, collection_stats));

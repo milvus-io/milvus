@@ -13,7 +13,7 @@
 
 #include "db/Types.h"
 #include "db/snapshot/Resources.h"
-#include "thirdparty/nlohmann/json.hpp"
+#include "utils/Json.h"
 
 #include <string>
 
@@ -47,7 +47,7 @@ bool
 IsVectorField(const engine::snapshot::FieldPtr& field);
 
 Status
-GetSnapshotInfo(const std::string& collection_name, nlohmann::json& json_info);
+GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info);
 
 }  // namespace engine
 }  // namespace milvus
