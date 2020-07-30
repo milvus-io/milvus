@@ -19,7 +19,7 @@
 #include <string>
 #include <thread>
 #include <utility>
-#include <fiu-local.h>
+#include <fiu-control.h>
 #include <random>
 
 #include "cache/CpuCacheMgr.h"
@@ -182,10 +182,13 @@ BaseTest::SnapshotStop() {
 void
 BaseTest::SetUp() {
     InitLog();
+    fiu_init(0);
+    fiu_enable_random("Store.ApplyOperation.mock_timeout", 1, nullptr, 0, 0.2);
 }
 
 void
 BaseTest::TearDown() {
+    fiu_disable("Store.ApplyOperation.mock_timeout");
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
