@@ -16,15 +16,21 @@
 namespace milvus {
 namespace scheduler {
 
-SearchJob::SearchJob(const server::ContextPtr& context, engine::DBOptions options, const query::QueryPtr& query_ptr)
-    : Job(JobType::SEARCH), context_(context), options_(options), query_ptr_(query_ptr) {
-    GetSegmentsFromQuery(query_ptr, segment_ids_);
+SearchJob::SearchJob(const server::ContextPtr& context, const engine::snapshot::ScopedSnapshotT& snapshot,
+                     engine::DBOptions options, const query::QueryPtr& query_ptr,
+                     const engine::snapshot::IDS_TYPE& segment_ids)
+    : Job(JobType::SEARCH),
+      context_(context),
+      snapshot_(snapshot),
+      options_(options),
+      query_ptr_(query_ptr),
+      segment_ids_(segment_ids) {
 }
 
 void
 SearchJob::OnCreateTasks(JobTasks& tasks) {
     for (auto& id : segment_ids_) {
-        auto task = std::make_shared<SearchTask>(context_, options_, query_ptr_, id, nullptr);
+        auto task = std::make_shared<SearchTask>(context_, snapshot_, options_, query_ptr_, id, nullptr);
         task->job_ = this;
         tasks.emplace_back(task);
     }
@@ -38,11 +44,6 @@ SearchJob::Dump() const {
     auto base = Job::Dump();
     ret.insert(base.begin(), base.end());
     return ret;
-}
-
-void
-SearchJob::GetSegmentsFromQuery(const query::QueryPtr& query_ptr, engine::snapshot::IDS_TYPE& segment_ids) {
-    // TODO
 }
 
 }  // namespace scheduler
