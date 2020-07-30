@@ -111,7 +111,8 @@ extern const char* PARAM_INDEX_METRIC_TYPE;
 extern const char* PARAM_INDEX_EXTRA_PARAMS;
 extern const char* PARAM_SEGMENT_ROW_COUNT;
 
-constexpr int64_t DEFAULT_SEGMENT_ROW_COUNT = 100000;
+constexpr int64_t DEFAULT_SEGMENT_ROW_COUNT = 100000;  // default row count per segment when creating collection
+constexpr int64_t BUILD_INDEX_THRESHOLD = 4096;        // row count threshold when building index
 
 enum FieldElementType {
     FET_NONE = 0,

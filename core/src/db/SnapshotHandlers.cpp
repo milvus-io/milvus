@@ -12,7 +12,6 @@
 #include "db/SnapshotHandlers.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
-#include "db/meta/MetaConsts.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshot.h"
@@ -91,7 +90,7 @@ SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss,
 
 Status
 SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
-    if (segment_commit->GetRowCount() < meta::BUILD_INDEX_THRESHOLD) {
+    if (segment_commit->GetRowCount() < engine::BUILD_INDEX_THRESHOLD) {
         return Status::OK();
     }
 
