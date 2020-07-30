@@ -21,10 +21,6 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <memory>
-#include <unordered_map>
-#include <vector>
-
 namespace milvus {
 namespace server {
 

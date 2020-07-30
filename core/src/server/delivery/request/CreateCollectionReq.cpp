@@ -13,17 +13,10 @@
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
-#include "server/delivery/request/BaseReq.h"
-#include "server/web_impl/Constants.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
 #include <fiu-local.h>
-#include <src/db/snapshot/Context.h>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <vector>
 
 namespace milvus {
 namespace server {
