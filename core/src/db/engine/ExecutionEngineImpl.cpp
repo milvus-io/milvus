@@ -89,8 +89,8 @@ ExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
 }
 
 Status
-ExecutionEngineImpl::CreateStructuredIndex(const DataType field_type,
-                                           std::vector<uint8_t>& raw_data, knowhere::IndexPtr& index_ptr) {
+ExecutionEngineImpl::CreateStructuredIndex(const DataType field_type, std::vector<uint8_t>& raw_data,
+                                           knowhere::IndexPtr& index_ptr) {
     switch (field_type) {
         case engine::DataType::INT32: {
             auto size = raw_data.size() / sizeof(int32_t);

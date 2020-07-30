@@ -71,12 +71,12 @@ class ExecutionEngineImpl : public ExecutionEngine {
                      milvus::json& term_values_json);
 
     Status
-    ProcessRangeQuery(const std::unordered_map<std::string, DataType>& attr_type,
-                      faiss::ConcurrentBitsetPtr& bitset, const query::RangeQueryPtr& range_query);
+    ProcessRangeQuery(const std::unordered_map<std::string, DataType>& attr_type, faiss::ConcurrentBitsetPtr& bitset,
+                      const query::RangeQueryPtr& range_query);
 
     Status
-    IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const DataType& data_type,
-                      knowhere::IndexPtr& index_ptr, milvus::json& range_values_json);
+    IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const DataType& data_type, knowhere::IndexPtr& index_ptr,
+                      milvus::json& range_values_json);
 
     using AddSegmentFileOperation = std::shared_ptr<snapshot::ChangeSegmentFileOperation>;
     Status

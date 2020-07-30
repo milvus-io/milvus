@@ -22,7 +22,6 @@
 #include <utility>
 #include <vector>
 
-
 #include "db/Types.h"
 #include "utils/Json.h"
 
@@ -31,15 +30,15 @@ namespace engine {
 
 using DateT = int;
 
-typedef int64_t IDNumber;
-typedef IDNumber* IDNumberPtr;
-typedef std::vector<IDNumber> IDNumbers;
+using IDNumber = int64_t;
+using IDNumberPtr = IDNumber*;
+using IDNumbers = std::vector<IDNumber>;
 
-typedef faiss::Index::distance_t VectorDistance;
-typedef std::vector<VectorDistance> VectorDistances;
+using VectorDistance = faiss::Index::distance_t;
+using VectorDistances = std::vector<VectorDistance>;
 
-typedef std::vector<faiss::Index::idx_t> ResultIds;
-typedef std::vector<faiss::Index::distance_t> ResultDistances;
+using ResultIds = std::vector<faiss::Index::idx_t>;
+using ResultDistances = std::vector<faiss::Index::distance_t>;
 
 enum DataType {
     NONE = 0,

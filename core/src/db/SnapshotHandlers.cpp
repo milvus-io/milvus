@@ -33,8 +33,7 @@ LoadVectorFieldElementHandler::LoadVectorFieldElementHandler(const std::shared_p
 
 Status
 LoadVectorFieldElementHandler::Handle(const snapshot::FieldElementPtr& field_element) {
-    if (field_->GetFtype() != engine::DataType::VECTOR_FLOAT &&
-        field_->GetFtype() != engine::DataType::VECTOR_BINARY) {
+    if (field_->GetFtype() != engine::DataType::VECTOR_FLOAT && field_->GetFtype() != engine::DataType::VECTOR_BINARY) {
         return Status(DB_ERROR, "Should be VECTOR field");
     }
     if (field_->GetID() != field_element->GetFieldId()) {

@@ -21,9 +21,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include "db/Types.h"
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngine.h"
-#include "db/Types.h"
 
 namespace milvus {
 namespace scheduler {

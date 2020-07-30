@@ -13,8 +13,8 @@
 
 #include <string>
 
-#include "db/merge/MergeManager.h"
 #include "db/Types.h"
+#include "db/merge/MergeManager.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshot.h"
 #include "utils/Status.h"

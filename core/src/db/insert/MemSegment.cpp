@@ -19,8 +19,8 @@
 
 #include "config/ServerConfig.h"
 #include "db/Constants.h"
-#include "db/Utils.h"
 #include "db/Types.h"
+#include "db/Utils.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/Snapshots.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
