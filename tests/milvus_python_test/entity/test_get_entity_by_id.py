@@ -11,7 +11,7 @@ from utils import *
 
 
 dim = 128
-segment_size = 10
+segment_row_count = 5000
 collection_id = "test_get"
 DELETE_TIMEOUT = 60
 tag = "1970-01-01"
