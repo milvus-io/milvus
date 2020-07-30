@@ -9,7 +9,7 @@ from milvus import DataType
 from utils import *
 
 dim = 128
-segment_size = 10
+segment_row_count = 5000
 collection_id = "test_insert"
 ADD_TIMEOUT = 60
 tag = "1970-01-01"
@@ -209,7 +209,7 @@ class TestInsertBase:
         collection_name = gen_unique_str("test_collection")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_size": segment_size
+            "segment_row_count": segment_row_count
         }
         connect.create_collection(collection_name, fields)
         ids = [i for i in range(nb)]
@@ -283,7 +283,7 @@ class TestInsertBase:
         collection_name = gen_unique_str("test_collection")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_size": segment_size
+            "segment_row_count": segment_row_count
         }
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], nb, dim)

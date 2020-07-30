@@ -7,7 +7,7 @@ import pytest
 from utils import *
 
 dim = 128
-segment_size = 10
+segment_row_count = 5000
 index_file_size = 10
 collection_id = "test_flush"
 DELETE_TIMEOUT = 60
@@ -155,7 +155,7 @@ class TestFlushBase:
         collection_new = gen_unique_str("test_flush")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_size": segment_size
+            "segment_row_count": segment_row_count
         }
         connect.create_collection(collection_new, fields)
         connect.create_partition(collection, tag)

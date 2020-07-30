@@ -8,7 +8,7 @@ from utils import *
 
 dim = 128
 collection_id = "test_wal"
-segment_size = 10
+segment_row_count = 5000
 WAL_TIMEOUT = 60
 tag = "1970-01-01"
 insert_interval_time = 1.5

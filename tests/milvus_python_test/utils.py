@@ -16,7 +16,7 @@ epsilon = 0.000001
 default_flush_interval = 1
 big_flush_interval = 1000
 dimension = 128
-segment_size = 10
+segment_row_count = 5000
 
 # TODO:
 all_index_types = [
@@ -199,14 +199,9 @@ def gen_single_filter_fields():
 
 def gen_single_vector_fields():
     fields = []
-    for metric_type in ['HAMMING', 'IP', 'JACCARD', 'L2', 'SUBSTRUCTURE', 'SUPERSTRUCTURE', 'TANIMOTO']:
-        for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
-            if metric_type in ["L2", "IP"] and data_type == DataType.BINARY_VECTOR:
-                continue
-            if metric_type not in ["L2", "IP"] and data_type == DataType.FLOAT_VECTOR:
-                continue
-            field = {"field": data_type.name, "type": data_type, "params": {"metric_type": metric_type, "dim": dimension}}
-            fields.append(field)
+    for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
+        field = {"field": data_type.name, "type": data_type, "params": {"dim": dimension}}
+        fields.append(field)
     return fields
 
 
@@ -215,9 +210,9 @@ def gen_default_fields():
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": "vector", "type": DataType.FLOAT_VECTOR, "params": {"metric_type": "L2", "dim": dimension}}
+            {"field": "vector", "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}}
         ],
-        "segment_size": segment_size
+        "segment_row_count": segment_row_count
     }
     return default_fields
 
@@ -311,14 +306,14 @@ def add_vector_field(entities, is_normal=False):
     return entities
 
 
-def update_fields_metric_type(fields, metric_type):
-    tmp_fields = copy.deepcopy(fields)
-    if metric_type in ["L2", "IP"]:
-        tmp_fields["fields"][-1]["type"] = DataType.FLOAT_VECTOR
-    else:
-        tmp_fields["fields"][-1]["type"] = DataType.BINARY_VECTOR
-    tmp_fields["fields"][-1]["params"]["metric_type"] = metric_type
-    return tmp_fields
+# def update_fields_metric_type(fields, metric_type):
+#     tmp_fields = copy.deepcopy(fields)
+#     if metric_type in ["L2", "IP"]:
+#         tmp_fields["fields"][-1]["type"] = DataType.FLOAT_VECTOR
+#     else:
+#         tmp_fields["fields"][-1]["type"] = DataType.BINARY_VECTOR
+#     tmp_fields["fields"][-1]["params"]["metric_type"] = metric_type
+#     return tmp_fields
 
 
 def remove_field(entities):
@@ -363,7 +358,7 @@ def add_vector_field(nb, dimension=dimension):
     return field_name
         
 
-def gen_segment_sizes():
+def gen_segment_row_counts():
     sizes = [
             1,
             2,
