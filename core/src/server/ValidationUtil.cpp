@@ -26,12 +26,6 @@ namespace server {
 
 namespace {
 
-constexpr size_t NAME_SIZE_LIMIT = 255;
-constexpr int64_t MAX_DIMENSION = 32768;
-constexpr int32_t MAX_SEGMENT_ROW_COUNT = 4 * 1024 * 1024;
-constexpr int64_t M_BYTE = 1024 * 1024;
-constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
-
 Status
 CheckParameterRange(const milvus::json& json_params, const std::string& param_name, int64_t min, int64_t max,
                     bool min_close = true, bool max_closed = true) {
@@ -102,7 +96,7 @@ ValidateCollectionName(const std::string& collection_name) {
 
     std::string invalid_msg = "Invalid collection name: " + collection_name + ". ";
     // Collection name size shouldn't exceed 255.
-    if (collection_name.size() > NAME_SIZE_LIMIT) {
+    if (collection_name.size() > engine::MAX_NAME_LENGTH) {
         std::string msg = invalid_msg + "The length of a collection name must be less than 255 characters.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
@@ -140,7 +134,7 @@ ValidateFieldName(const std::string& field_name) {
 
     std::string invalid_msg = "Invalid field name: " + field_name + ". ";
     // Field name size shouldn't exceed 255.
-    if (field_name.size() > NAME_SIZE_LIMIT) {
+    if (field_name.size() > engine::MAX_NAME_LENGTH) {
         std::string msg = invalid_msg + "The length of a field name must be less than 255 characters.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_FIELD_NAME, msg);
@@ -203,9 +197,9 @@ ValidateIndexType(const std::string& index_type) {
 
 Status
 ValidateDimension(int64_t dim, bool is_binary) {
-    if (dim <= 0 || dim > MAX_DIMENSION) {
+    if (dim <= 0 || dim > engine::MAX_DIMENSION) {
         std::string msg = "Invalid dimension: " + std::to_string(dim) + ". Should be in range 1 ~ " +
-                          std::to_string(MAX_DIMENSION) + ".";
+                          std::to_string(engine::MAX_DIMENSION) + ".";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
     }
@@ -306,9 +300,9 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 
 Status
 ValidateSegmentRowCount(int64_t segment_row_count) {
-    if (segment_row_count <= 0 || segment_row_count > MAX_SEGMENT_ROW_COUNT) {
+    if (segment_row_count <= 0 || segment_row_count > engine::MAX_SEGMENT_ROW_COUNT) {
         std::string msg = "Invalid segment row count: " + std::to_string(segment_row_count) + ". " +
-                          "Should be in range 1 ~ " + std::to_string(MAX_SEGMENT_ROW_COUNT) + ".";
+                          "Should be in range 1 ~ " + std::to_string(engine::MAX_SEGMENT_ROW_COUNT) + ".";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_SEGMENT_ROW_COUNT, msg);
     }
@@ -357,7 +351,7 @@ ValidatePartitionName(const std::string& partition_name) {
 
     std::string invalid_msg = "Invalid partition name: " + partition_name + ". ";
     // Collection name size shouldn't exceed 255.
-    if (partition_name.size() > NAME_SIZE_LIMIT) {
+    if (partition_name.size() > engine::MAX_NAME_LENGTH) {
         std::string msg = invalid_msg + "The length of a partition name must be less than 255 characters.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
