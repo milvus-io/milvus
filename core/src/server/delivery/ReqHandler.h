@@ -32,9 +32,7 @@ class ReqHandler {
 
     Status
     CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                     std::unordered_map<std::string, engine::meta::DataType>& field_types,
-                     std::unordered_map<std::string, milvus::json>& field_index_params,
-                     std::unordered_map<std::string, std::string>& field_params, milvus::json& json_params);
+                     std::unordered_map<std::string, FieldSchema>& fields, milvus::json& json_params);
 
     Status
     DropCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);

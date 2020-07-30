@@ -73,10 +73,16 @@ DBImpl::DBImpl(const DBOptions& options)
         //        mxlog_config.mxlog_path = options_.mxlog_path_;
         //        wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
     }
+
+    /* watch on storage.auto_flush_interval */
+    ConfigMgr::GetInstance().Attach("storage.auto_flush_interval", this);
+
     Start();
 }
 
 DBImpl::~DBImpl() {
+    ConfigMgr::GetInstance().Detach("storage.auto_flush_interval", this);
+
     Stop();
 }
 
@@ -1281,6 +1287,13 @@ DBImpl::ResumeIfLast() {
     if (--live_search_num_ == 0) {
         LOG_ENGINE_TRACE_ << "live_search_num_: " << live_search_num_;
         knowhere::BuildResume();
+    }
+}
+
+void
+DBImpl::ConfigUpdate(const std::string& name) {
+    if (name == "storage.auto_flush_interval") {
+        options_.auto_flush_interval_ = config.storage.auto_flush_interval();
     }
 }
 
