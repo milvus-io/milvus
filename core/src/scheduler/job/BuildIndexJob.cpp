@@ -20,11 +20,11 @@ namespace milvus {
 namespace scheduler {
 
 namespace {
-
-// each vector field in one group
+// each vector field create one group
 // all structured fields put into one group
 void
-WhichFieldsToBuild(const engine::snapshot::ScopedSnapshotT& snapshot, std::vector<engine::TargetFields>& field_groups) {
+WhichFieldsToBuild(const engine::snapshot::ScopedSnapshotT& snapshot, engine::snapshot::ID_TYPE segment_id,
+                   std::vector<engine::TargetFields>& field_groups) {
     auto field_names = snapshot->GetFieldNames();
     engine::TargetFields structured_fields;
     for (auto& field_name : field_names) {
@@ -33,15 +33,21 @@ WhichFieldsToBuild(const engine::snapshot::ScopedSnapshotT& snapshot, std::vecto
         bool is_vector = (ftype == engine::FIELD_TYPE::VECTOR_FLOAT || ftype == engine::FIELD_TYPE::VECTOR_BINARY);
         auto elements = snapshot->GetFieldElementsByField(field_name);
         for (auto& element : elements) {
-            if (element->GetFtype() == engine::FieldElementType::FET_INDEX) {
-                // index has been defined
-                if (is_vector) {
-                    engine::TargetFields fields = {field_name};
-                    field_groups.emplace_back(fields);
-                } else {
-                    structured_fields.insert(field_name);
-                }
-                break;
+            if (element->GetFtype() != engine::FieldElementType::FET_INDEX) {
+                continue;  // only check index element
+            }
+
+            auto element_file = snapshot->GetSegmentFile(segment_id, element->GetID());
+            if (element_file != nullptr) {
+                continue;  // index file has been created, no need to build index for this field
+            }
+
+            // index has been defined, but index file not yet created, this field need to be build index
+            if (is_vector) {
+                engine::TargetFields fields = {field_name};
+                field_groups.emplace_back(fields);
+            } else {
+                structured_fields.insert(field_name);
             }
         }
     }
@@ -60,11 +66,11 @@ BuildIndexJob::BuildIndexJob(const engine::snapshot::ScopedSnapshotT& snapshot, 
 
 void
 BuildIndexJob::OnCreateTasks(JobTasks& tasks) {
-    std::vector<engine::TargetFields> field_groups;
-    WhichFieldsToBuild(snapshot_, field_groups);
-    for (auto& id : segment_ids_) {
+    for (auto& segment_id : segment_ids_) {
+        std::vector<engine::TargetFields> field_groups;
+        WhichFieldsToBuild(snapshot_, segment_id, field_groups);
         for (auto& group : field_groups) {
-            auto task = std::make_shared<BuildIndexTask>(snapshot_, options_, id, group, nullptr);
+            auto task = std::make_shared<BuildIndexTask>(snapshot_, options_, segment_id, group, nullptr);
             task->job_ = this;
             tasks.emplace_back(task);
         }
@@ -80,6 +86,5 @@ BuildIndexJob::Dump() const {
     ret.insert(base.begin(), base.end());
     return ret;
 }
-
 }  // namespace scheduler
 }  // namespace milvus
