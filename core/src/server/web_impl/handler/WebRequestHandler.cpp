@@ -20,6 +20,7 @@
 #include <fiu-local.h>
 
 #include "config/ServerConfig.h"
+#include "db/Utils.h"
 #include "metrics/SystemInfo.h"
 #include "query/BinaryQuery.h"
 #include "server/delivery/request/BaseReq.h"
@@ -60,7 +61,7 @@ WebErrorMap(ErrorCode code) {
         {SERVER_INVALID_NPROBE, StatusCode::ILLEGAL_ARGUMENT},
         {SERVER_INVALID_INDEX_NLIST, StatusCode::ILLEGAL_NLIST},
         {SERVER_INVALID_INDEX_METRIC_TYPE, StatusCode::ILLEGAL_METRIC_TYPE},
-        {SERVER_INVALID_INDEX_FILE_SIZE, StatusCode::ILLEGAL_ARGUMENT},
+        {SERVER_INVALID_SEGMENT_ROW_COUNT, StatusCode::ILLEGAL_ARGUMENT},
         {SERVER_ILLEGAL_VECTOR_ID, StatusCode::ILLEGAL_VECTOR_ID},
         {SERVER_ILLEGAL_SEARCH_RESULT, StatusCode::ILLEGAL_SEARCH_RESULT},
         {SERVER_CACHE_FULL, StatusCode::CACHE_FAILED},
@@ -108,10 +109,8 @@ WebRequestHandler::IsBinaryCollection(const std::string& collection_name, bool& 
     CollectionSchema schema;
     auto status = req_handler_.GetCollectionInfo(context_ptr_, collection_name, schema);
     if (status.ok()) {
-        auto metric = engine::MetricType(schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE].get<int64_t>());
-        bin = (metric == engine::MetricType::HAMMING || metric == engine::MetricType::JACCARD ||
-               metric == engine::MetricType::TANIMOTO || metric == engine::MetricType::SUPERSTRUCTURE ||
-               metric == engine::MetricType::SUBSTRUCTURE);
+        std::string metric_type = schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE];
+        bin = engine::utils::IsBinaryMetricType(metric_type);
     }
 
     return status;
@@ -158,8 +157,8 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
     STATUS_CHECK(req_handler_.CountEntities(context_ptr_, collection_name, count));
 
     json_out["collection_name"] = schema.collection_name_;
-    json_out["dimension"] = schema.extra_params_[engine::PARAM_COLLECTION_DIMENSION].get<int64_t>();
-    json_out["index_file_size"] = schema.extra_params_[engine::PARAM_SEGMENT_SIZE].get<int64_t>();
+    json_out["dimension"] = schema.extra_params_[engine::PARAM_DIMENSION].get<int64_t>();
+    json_out["segment_row_count"] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT].get<int64_t>();
     json_out["metric_type"] = schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE].get<int64_t>();
     json_out["index_params"] = schema.extra_params_[engine::PARAM_INDEX_EXTRA_PARAMS].get<std::string>();
     json_out["count"] = count;
@@ -699,7 +698,6 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
     if (!status.ok()) {
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }
-    field_type_ = collection_schema.field_types_;
 
     milvus::json extra_params;
     if (json.contains("fields")) {
@@ -1202,38 +1200,38 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
     std::string collection_name = json_str["collection_name"];
 
     // TODO(yukun): do checking
-    std::unordered_map<std::string, engine::meta::DataType> field_types;
-    std::unordered_map<std::string, milvus::json> field_index_params;
-    std::unordered_map<std::string, std::string> field_extra_params;
+    std::unordered_map<std::string, FieldSchema> fields;
     for (auto& field : json_str["fields"]) {
+        FieldSchema field_schema;
         std::string field_name = field["field_name"];
-        std::string field_type = field["field_type"];
-        auto extra_params = field["extra_params"];
+
+        field_schema.field_params_ = field["extra_params"];
+
+        const std::string& field_type = field["field_type"];
         if (field_type == "int8") {
-            field_types.insert(std::make_pair(field_name, engine::meta::DataType::INT8));
+            field_schema.field_type_ = engine::FieldType::INT8;
         } else if (field_type == "int16") {
-            field_types.insert(std::make_pair(field_name, engine::meta::DataType::INT16));
+            field_schema.field_type_ = engine::FieldType::INT16;
         } else if (field_type == "int32") {
-            field_types.insert(std::make_pair(field_name, engine::meta::DataType::INT32));
+            field_schema.field_type_ = engine::FieldType::INT32;
         } else if (field_type == "int64") {
-            field_types.insert(std::make_pair(field_name, engine::meta::DataType::INT64));
+            field_schema.field_type_ = engine::FieldType::INT64;
         } else if (field_type == "float") {
-            field_types.insert(std::make_pair(field_name, engine::meta::DataType::FLOAT));
+            field_schema.field_type_ = engine::FieldType::FLOAT;
         } else if (field_type == "double") {
-            field_types.insert(std::make_pair(field_name, engine::meta::DataType::DOUBLE));
+            field_schema.field_type_ = engine::FieldType::DOUBLE;
         } else if (field_type == "vector") {
         } else {
             std::string msg = field_name + " has wrong field_type";
             RETURN_STATUS_DTO(BODY_PARSE_FAIL, msg.c_str());
         }
 
-        field_extra_params.insert(std::make_pair(field_name, extra_params.dump()));
+        fields[field_name] = field_schema;
     }
 
     milvus::json json_params;
 
-    auto status = req_handler_.CreateCollection(context_ptr_, collection_name, field_types, field_index_params,
-                                                field_extra_params, json_params);
+    auto status = req_handler_.CreateCollection(context_ptr_, collection_name, fields, json_params);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }

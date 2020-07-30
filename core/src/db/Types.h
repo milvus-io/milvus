@@ -82,13 +82,20 @@ extern const char* DEFAULT_UID_NAME;
 extern const char* DEFAULT_RAW_DATA_NAME;
 extern const char* DEFAULT_BLOOM_FILTER_NAME;
 extern const char* DEFAULT_DELETED_DOCS_NAME;
-extern const char* DEFAULT_INDEX_NAME;
 extern const char* DEFAULT_INDEX_COMPRESS_NAME;
+extern const char* DEFAULT_STRUCTURED_INDEX_NAME;
 
-extern const char* PARAM_COLLECTION_DIMENSION;
+extern const char* PARAM_DIMENSION;
 extern const char* PARAM_INDEX_METRIC_TYPE;
 extern const char* PARAM_INDEX_EXTRA_PARAMS;
-extern const char* PARAM_SEGMENT_SIZE;
+extern const char* PARAM_SEGMENT_ROW_COUNT;
+
+constexpr int64_t MAX_NAME_LENGTH = 255;
+constexpr int64_t MAX_DIMENSION = 32768;
+constexpr int32_t MAX_SEGMENT_ROW_COUNT = 4 * 1024 * 1024;
+constexpr int64_t DEFAULT_SEGMENT_ROW_COUNT = 100000;
+constexpr int64_t M_BYTE = 1024 * 1024;
+constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
 
 using FieldType = meta::DataType;
 

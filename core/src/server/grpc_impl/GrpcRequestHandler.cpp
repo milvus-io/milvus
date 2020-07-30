@@ -60,7 +60,7 @@ ErrorMap(ErrorCode code) {
         {SERVER_INVALID_NPROBE, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
         {SERVER_INVALID_INDEX_NLIST, ::milvus::grpc::ErrorCode::ILLEGAL_NLIST},
         {SERVER_INVALID_INDEX_METRIC_TYPE, ::milvus::grpc::ErrorCode::ILLEGAL_METRIC_TYPE},
-        {SERVER_INVALID_INDEX_FILE_SIZE, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
+        {SERVER_INVALID_SEGMENT_ROW_COUNT, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
         {SERVER_ILLEGAL_VECTOR_ID, ::milvus::grpc::ErrorCode::ILLEGAL_VECTOR_ID},
         {SERVER_ILLEGAL_SEARCH_RESULT, ::milvus::grpc::ErrorCode::ILLEGAL_SEARCH_RESULT},
         {SERVER_CACHE_FULL, ::milvus::grpc::ErrorCode::CACHE_FAILED},
@@ -626,34 +626,33 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-    std::unordered_map<std::string, engine::meta::DataType> field_types;
-    std::unordered_map<std::string, milvus::json> field_index_params;
-    std::unordered_map<std::string, std::string> field_params;
+    std::unordered_map<std::string, FieldSchema> fields;
+
     if (request->fields_size() > MAXIMUM_FIELD_NUM) {
         Status status = Status{SERVER_INVALID_FIELD_NUM, "Maximum field's number should be limited to 64"};
         LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
         SET_RESPONSE(response, status, context);
         return ::grpc::Status::OK;
     }
+
     for (int i = 0; i < request->fields_size(); ++i) {
         const auto& field = request->fields(i);
-        auto field_name = field.name();
-        field_types.insert(std::make_pair(field_name, (engine::meta::DataType)field.type()));
 
-        milvus::json index_param;
-        for (int j = 0; j < field.index_params_size(); j++) {
-            index_param[field.index_params(j).key()] = field.index_params(j).value();
-        }
-        field_index_params.insert(std::make_pair(field_name, index_param));
+        FieldSchema field_schema;
+        field_schema.field_type_ = (engine::FieldType)field.type();
 
         // Currently only one extra_param
-        if (request->fields(i).extra_params_size() != 0) {
-            auto extra_params = std::make_pair(request->fields(i).name(), request->fields(i).extra_params(0).value());
-            field_params.insert(extra_params);
-        } else {
-            auto extra_params = std::make_pair(request->fields(i).name(), "");
-            field_params.insert(extra_params);
+        if (field.extra_params_size() != 0) {
+            if (!field.extra_params(0).value().empty()) {
+                field_schema.field_params_ = json::parse(field.extra_params(0).value());
+            }
         }
+
+        for (int j = 0; j < field.index_params_size(); j++) {
+            field_schema.index_params_[field.index_params(j).key()] = field.index_params(j).value();
+        }
+
+        fields[field.name()] = field_schema;
     }
 
     milvus::json json_params;
@@ -664,8 +663,7 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
         }
     }
 
-    Status status = req_handler_.CreateCollection(GetContext(context), request->collection_name(), field_types,
-                                                  field_index_params, field_params, json_params);
+    Status status = req_handler_.CreateCollection(GetContext(context), request->collection_name(), fields, json_params);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context)
@@ -981,20 +979,25 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
         }
 
         response->set_collection_name(request->collection_name());
-        auto field_it = collection_schema.field_types_.begin();
-        for (; field_it != collection_schema.field_types_.end(); field_it++) {
+        for (auto& field_kv : collection_schema.fields_) {
             auto field = response->add_fields();
-            field->set_name(field_it->first);
-            field->set_type((milvus::grpc::DataType)field_it->second);
-            for (auto& json_param : collection_schema.index_params_.at(field_it->first).items()) {
-                auto grpc_index_param = field->add_index_params();
-                grpc_index_param->set_key(json_param.key());
-                grpc_index_param->set_value(json_param.value());
-            }
+            auto& field_name = field_kv.first;
+            auto& field_schema = field_kv.second;
+
+            field->set_name(field_name);
+            field->set_type((milvus::grpc::DataType)field_schema.field_type_);
+
             auto grpc_field_param = field->add_extra_params();
             grpc_field_param->set_key(EXTRA_PARAM_KEY);
-            grpc_field_param->set_value(collection_schema.field_params_.at(field_it->first).dump());
+            grpc_field_param->set_value(field_schema.field_params_.dump());
+
+            for (auto& item : field_schema.index_params_.items()) {
+                auto grpc_index_param = field->add_index_params();
+                grpc_index_param->set_key(item.key());
+                grpc_index_param->set_value(item.value());
+            }
         }
+
         auto grpc_extra_param = response->add_extra_params();
         grpc_extra_param->set_key(EXTRA_PARAM_KEY);
         grpc_extra_param->set_value(collection_schema.extra_params_.dump());
@@ -1698,8 +1701,6 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     CollectionSchema collection_schema;
     status = req_handler_.GetCollectionInfo(GetContext(context), request->collection_name(), collection_schema);
-
-    field_type_ = collection_schema.field_types_;
 
     auto grpc_entity = response->mutable_entities();
     if (!status.ok()) {

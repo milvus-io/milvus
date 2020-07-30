@@ -12,6 +12,7 @@
 #pragma once
 
 #include "ExecutionEngine.h"
+#include "db/snapshot/Snapshots.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
 
@@ -23,13 +24,7 @@ namespace engine {
 class EngineFactory {
  public:
     static ExecutionEnginePtr
-    Build(const std::string& dir_root, const std::string& collection_name, int64_t segment_id);
-
-    // this method distribute fields to multiple groups:
-    // put structured fields into one group
-    // each vector field as a group
-    static void
-    GroupFieldsForIndex(const std::string& collection_name, TargetFieldGroups& field_groups);
+    Build(const engine::snapshot::ScopedSnapshotT& snapshot, const std::string& dir_root, int64_t segment_id);
 };
 
 }  // namespace engine

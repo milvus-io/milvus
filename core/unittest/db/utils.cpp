@@ -253,6 +253,8 @@ DBTest::SetUp() {
 
 void
 DBTest::TearDown() {
+    db_ = nullptr; // db must be stopped before JobMgr and Snapshot
+
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
     milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
@@ -260,7 +262,6 @@ DBTest::TearDown() {
     milvus::scheduler::ResMgrInst::GetInstance()->Clear();
 
     BaseTest::SnapshotStop();
-    db_ = nullptr;
     auto options = GetOptions();
     boost::filesystem::remove_all(options.meta_.path_);
 
@@ -333,13 +334,14 @@ SchedulerTest::SetUp() {
 
 void
 SchedulerTest::TearDown() {
+    db_ = nullptr; // db must be stopped before JobMgr and Snapshot
+
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
     milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
     milvus::scheduler::ResMgrInst::GetInstance()->Stop();
     milvus::scheduler::ResMgrInst::GetInstance()->Clear();
 
-    db_ = nullptr;
     BaseTest::SnapshotStop();
     BaseTest::TearDown();
 }

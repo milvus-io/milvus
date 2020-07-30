@@ -7,9 +7,9 @@ from multiprocessing import Process
 from utils import *
 
 dim = 128
-default_segment_size = 1024
+default_segment_row_count = 100000
 drop_collection_interval_time = 3
-segment_size = 10
+segment_row_count = 5000
 collection_id = "logic"
 vectors = gen_vectors(100, dim)
 default_fields = gen_default_fields() 

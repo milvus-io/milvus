@@ -39,16 +39,14 @@ namespace scheduler {
 
 class SearchJob : public Job {
  public:
-    SearchJob(const server::ContextPtr& context, engine::DBOptions options, const query::QueryPtr& query_ptr);
+    SearchJob(const server::ContextPtr& context, const engine::snapshot::ScopedSnapshotT& snapshot,
+              engine::DBOptions options, const query::QueryPtr& query_ptr,
+              const engine::snapshot::IDS_TYPE& segment_ids);
 
  public:
-    JobTasks
-    CreateTasks() override;
-
     json
     Dump() const override;
 
- public:
     const server::ContextPtr&
     GetContext() const {
         return context_;
@@ -74,13 +72,13 @@ class SearchJob : public Job {
         return segment_ids_;
     }
 
- private:
+ protected:
     void
-    GetSegmentsFromQuery(const query::QueryPtr& query_ptr, engine::snapshot::IDS_TYPE& segment_ids);
+    OnCreateTasks(JobTasks& tasks) override;
 
  private:
     const server::ContextPtr context_;
-
+    engine::snapshot::ScopedSnapshotT snapshot_;
     engine::DBOptions options_;
 
     query::QueryPtr query_ptr_;
