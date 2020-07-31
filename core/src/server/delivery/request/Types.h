@@ -107,6 +107,7 @@ enum class ReqType {
     /* index operations */
     kCreateIndex = 300,
     kDropIndex,
+    kDescribeIndex,
 
     /* data operations */
     kInsert = 400,
