@@ -18,6 +18,7 @@
 #include "db/snapshot/Snapshots.h"
 #include "segment/Segment.h"
 
+#include <algorithm>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -152,6 +153,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     size_t total_row_count = 0;
+    size_t total_data_size = 0;
 
     std::unordered_map<snapshot::ID_TYPE, milvus::json> partitions;
     auto partition_names = ss->GetPartitionNames();
@@ -165,6 +167,8 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
         auto partition_commit = ss->GetPartitionCommitByPartitionId(partition->GetID());
         json_partition[JSON_ROW_COUNT] = partition_commit->GetRowCount();
         total_row_count += partition_commit->GetRowCount();
+        json_partition[JSON_DATA_SIZE] = partition_commit->GetSize();
+        total_data_size += partition_commit->GetSize();
 
         partitions.insert(std::make_pair(partition->GetID(), json_partition));
     }
@@ -172,6 +176,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
     snapshot::IDS_TYPE segment_ids;
     auto handler = std::make_shared<SegmentsToSearchCollector>(ss, segment_ids);
     handler->Iterate();
+    std::sort(segment_ids.begin(), segment_ids.end());
 
     std::unordered_map<snapshot::ID_TYPE, std::vector<milvus::json>> json_partition_segments;
     for (auto id : segment_ids) {
@@ -225,6 +230,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
     }
 
     json_info[JSON_ROW_COUNT] = total_row_count;
+    json_info[JSON_DATA_SIZE] = total_data_size;
     json_info[JSON_PARTITIONS] = json_partitions;
 
     return Status::OK();
