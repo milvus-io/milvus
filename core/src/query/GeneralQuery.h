@@ -17,7 +17,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "db/meta/MetaTypes.h"
+
+#include "db/Types.h"
 #include "utils/Json.h"
 
 namespace milvus {

@@ -273,7 +273,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
 
         auto single_size = data.size() / id_size;
 
-        if (type == engine::meta::DataType::UID) {
+        if (type == engine::DataType::UID) {
             int64_t int64_value;
             auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
             for (int i = 0; i < id_size; i++) {
@@ -290,7 +290,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
         field_value->set_field_name(name);
         field_value->set_type(static_cast<milvus::grpc::DataType>(type));
         // general data
-        if (type == engine::meta::DataType::VECTOR_BINARY) {
+        if (type == engine::DataType::VECTOR_BINARY) {
             // add binary vector data
             std::vector<int8_t> binary_vector;
             auto vector_size = single_size * sizeof(int8_t) / sizeof(int8_t);
@@ -303,7 +303,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
                 memcpy(vector_row_record->mutable_binary_data()->data(), binary_vector.data(), binary_vector.size());
             }
 
-        } else if (type == engine::meta::DataType::VECTOR_FLOAT) {
+        } else if (type == engine::DataType::VECTOR_FLOAT) {
             // add float vector data
             std::vector<float> float_vector;
             auto vector_size = single_size * sizeof(int8_t) / sizeof(float);
@@ -319,7 +319,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
         } else {
             // add attribute data
             auto attr_record = field_value->mutable_attr_record();
-            if (type == engine::meta::DataType::INT32) {
+            if (type == engine::DataType::INT32) {
                 // add int32 data
                 int32_t int32_value;
                 auto int32_size = single_size * sizeof(int8_t) / sizeof(int32_t);
@@ -328,7 +328,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
                     memcpy(&int32_value, data.data() + offset, single_size);
                     attr_record->add_int32_value(int32_value);
                 }
-            } else if (type == engine::meta::DataType::INT64) {
+            } else if (type == engine::DataType::INT64) {
                 // add int64 data
                 int64_t int64_value;
                 auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
@@ -337,7 +337,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
                     memcpy(&int64_value, data.data() + offset, single_size);
                     attr_record->add_int64_value(int64_value);
                 }
-            } else if (type == engine::meta::DataType::DOUBLE) {
+            } else if (type == engine::DataType::DOUBLE) {
                 // add double data
                 double double_value;
                 auto int32_size = single_size * sizeof(int8_t) / sizeof(double);
@@ -346,7 +346,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
                     memcpy(&double_value, data.data() + offset, single_size);
                     attr_record->add_double_value(double_value);
                 }
-            } else if (type == engine::meta::DataType::FLOAT) {
+            } else if (type == engine::DataType::FLOAT) {
                 // add float data
                 float float_value;
                 auto float_size = single_size * sizeof(int8_t) / sizeof(float);
@@ -408,7 +408,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
                     float grpc_float_data;
                     double grpc_double_data;
                     switch (attr.attr_type_.at(field_name)) {
-                        case engine::meta::DataType::INT8: {
+                        case engine::DataType::INT8: {
                             if (attr_data.size() == sizeof(int8_t)) {
                                 grpc_int32_data = attr_data[0];
                                 int32_data.emplace_back(grpc_int32_data);
@@ -418,7 +418,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
                             }
                             break;
                         }
-                        case engine::meta::DataType::INT16: {
+                        case engine::DataType::INT16: {
                             if (attr_data.size() == sizeof(int16_t)) {
                                 int16_t value;
                                 memcpy(&value, attr_data.data(), sizeof(int16_t));
@@ -430,7 +430,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
                             }
                             break;
                         }
-                        case engine::meta::DataType::INT32: {
+                        case engine::DataType::INT32: {
                             if (attr_data.size() == sizeof(int32_t)) {
                                 memcpy(&grpc_int32_data, attr_data.data(), sizeof(int32_t));
                                 int32_data.emplace_back(grpc_int32_data);
@@ -440,7 +440,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
                             }
                             break;
                         }
-                        case engine::meta::DataType::INT64: {
+                        case engine::DataType::INT64: {
                             if (attr_data.size() == sizeof(int64_t)) {
                                 memcpy(&grpc_int64_data, attr_data.data(), sizeof(int64_t));
                                 int64_data.emplace_back(grpc_int64_data);
@@ -450,7 +450,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
                             }
                             break;
                         }
-                        case engine::meta::DataType::FLOAT: {
+                        case engine::DataType::FLOAT: {
                             if (attr_data.size() == sizeof(float)) {
                                 float value;
                                 memcpy(&value, attr_data.data(), sizeof(float));
@@ -462,7 +462,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
                             }
                             break;
                         }
-                        case engine::meta::DataType::DOUBLE: {
+                        case engine::DataType::DOUBLE: {
                             if (attr_data.size() == sizeof(double)) {
                                 memcpy(&grpc_double_data, attr_data.data(), sizeof(double));
                                 double_data.emplace_back(grpc_double_data);
@@ -737,7 +737,7 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
         const auto& field = request->fields(i);
 
         FieldSchema field_schema;
-        field_schema.field_type_ = (engine::FieldType)field.type();
+        field_schema.field_type_ = (engine::DataType)field.type();
 
         // Currently only one extra_param
         if (field.extra_params_size() != 0) {
@@ -1421,7 +1421,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
 #if 0
 Status
 ParseTermQuery(const nlohmann::json& term_json,
-               std::unordered_map<std::string, engine::meta::DataType> field_type,
+               std::unordered_map<std::string, engine::DataType> field_type,
                query::TermQueryPtr& term_query) {
     std::string field_name = term_json["field"].get<std::string>();
     auto term_value_json = term_json["values"];
@@ -1435,7 +1435,7 @@ ParseTermQuery(const nlohmann::json& term_json,
     term_query->field_value.resize(term_size * sizeof(int64_t));
 
     switch (field_type.at(field_name)) {
-        case engine::meta::DataType::INT8: {
+        case engine::DataType::INT8: {
             std::vector<int64_t> term_value(term_size, 0);
             for (uint64_t i = 0; i < term_size; i++) {
                 term_value[i] = term_value_json[i].get<int8_t>();
@@ -1443,7 +1443,7 @@ ParseTermQuery(const nlohmann::json& term_json,
             memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(int64_t));
             break;
         }
-        case engine::meta::DataType::INT16: {
+        case engine::DataType::INT16: {
             std::vector<int64_t> term_value(term_size, 0);
             for (uint64_t i = 0; i < term_size; i++) {
                 term_value[i] = term_value_json[i].get<int16_t>();
@@ -1451,7 +1451,7 @@ ParseTermQuery(const nlohmann::json& term_json,
             memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(int64_t));
             break;
         }
-        case engine::meta::DataType::INT32: {
+        case engine::DataType::INT32: {
             std::vector<int64_t> term_value(term_size, 0);
             for (uint64_t i = 0; i < term_size; i++) {
                 term_value[i] = term_value_json[i].get<int32_t>();
@@ -1459,7 +1459,7 @@ ParseTermQuery(const nlohmann::json& term_json,
             memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(int64_t));
             break;
         }
-        case engine::meta::DataType::INT64: {
+        case engine::DataType::INT64: {
             std::vector<int64_t> term_value(term_size, 0);
             for (uint64_t i = 0; i < term_size; ++i) {
                 term_value[i] = term_value_json[i].get<int64_t>();
@@ -1467,7 +1467,7 @@ ParseTermQuery(const nlohmann::json& term_json,
             memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(int64_t));
             break;
         }
-        case engine::meta::DataType::FLOAT: {
+        case engine::DataType::FLOAT: {
             std::vector<double> term_value(term_size, 0);
             for (uint64_t i = 0; i < term_size; ++i) {
                 term_value[i] = term_value_json[i].get<float>();
@@ -1475,7 +1475,7 @@ ParseTermQuery(const nlohmann::json& term_json,
             memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(double));
             break;
         }
-        case engine::meta::DataType::DOUBLE: {
+        case engine::DataType::DOUBLE: {
             std::vector<double> term_value(term_size, 0);
             for (uint64_t i = 0; i < term_size; ++i) {
                 term_value[i] = term_value_json[i].get<double>();

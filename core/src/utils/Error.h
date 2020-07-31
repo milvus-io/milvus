@@ -132,5 +132,7 @@ constexpr ErrorCode SS_NOT_ACTIVE_ERROR = ToSSErrorCode(6);
 constexpr ErrorCode SS_CONSTRAINT_CHECK_ERROR = ToSSErrorCode(7);
 constexpr ErrorCode SS_INVALID_ARGUMENT_ERROR = ToSSErrorCode(8);
 constexpr ErrorCode SS_OPERATION_PENDING = ToSSErrorCode(9);
+constexpr ErrorCode SS_TIMEOUT = ToSSErrorCode(10);
+constexpr ErrorCode SS_NOT_COMMITED = ToSSErrorCode(11);
 
 }  // namespace milvus
