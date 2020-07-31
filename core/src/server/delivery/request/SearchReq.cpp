@@ -60,7 +60,7 @@ SearchReq::OnExecute() {
         fiu_do_on("SearchReq.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(query_ptr_->collection_id));
+                return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + query_ptr_->collection_id);
             } else {
                 return status;
             }

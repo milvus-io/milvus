@@ -50,7 +50,7 @@ HasPartitionReq::OnExecute() {
         bool exists = false;
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exists));
         if (!exists) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
         STATUS_CHECK(DBWrapper::DB()->HasPartition(collection_name_, partition_tag_, has_partition_));

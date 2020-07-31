@@ -31,8 +31,7 @@ CreatePartitionReq::CreatePartitionReq(const ContextPtr& context, const std::str
 }
 
 BaseReqPtr
-CreatePartitionReq::Create(const ContextPtr& context, const std::string& collection_name,
-                           const std::string& tag) {
+CreatePartitionReq::Create(const ContextPtr& context, const std::string& collection_name, const std::string& tag) {
     return std::shared_ptr<BaseReq>(new CreatePartitionReq(context, collection_name, tag));
 }
 
@@ -57,7 +56,7 @@ CreatePartitionReq::OnExecute() {
         bool exist = false;
         status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
         // check partition total count

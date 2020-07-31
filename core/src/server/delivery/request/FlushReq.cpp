@@ -58,7 +58,7 @@ FlushReq::OnExecute() {
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(name, exist);
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(name));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + name);
         }
 
         STATUS_CHECK(DBWrapper::DB()->Flush(name));

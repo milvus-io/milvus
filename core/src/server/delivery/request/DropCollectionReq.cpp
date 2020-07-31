@@ -38,7 +38,7 @@ DropCollectionReq::OnExecute() {
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
         STATUS_CHECK(DBWrapper::DB()->DropCollection(collection_name_));

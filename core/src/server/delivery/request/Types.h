@@ -121,7 +121,8 @@ enum class ReqType {
     kCompact,
 };
 
-extern std::string GetReqGroup(ReqType type);
+extern std::string
+GetReqGroup(ReqType type);
 
 }  // namespace server
 }  // namespace milvus

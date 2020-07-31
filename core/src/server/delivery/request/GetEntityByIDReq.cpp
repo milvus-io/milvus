@@ -45,7 +45,7 @@ GetEntityByIDReq::GetEntityByIDReq(const ContextPtr& context, const std::string&
 
 BaseReqPtr
 GetEntityByIDReq::Create(const ContextPtr& context, const std::string& collection_name,
-                         const engine::IDNumbers& id_array,std::vector<std::string>& field_names_,
+                         const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
                          std::vector<bool>& valid_row, engine::snapshot::CollectionMappings& field_mappings,
                          engine::DataChunkPtr& data_chunk) {
     return std::shared_ptr<BaseReq>(
@@ -77,7 +77,7 @@ GetEntityByIDReq::OnExecute() {
         engine::snapshot::CollectionMappings collection_mappings;
         STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collectionPtr, collection_mappings));
         if (collectionPtr == nullptr) {
-            return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_INVALID_COLLECTION_NAME, "Collection not exist: " + collection_name_);
         }
 
         if (field_names_.empty()) {

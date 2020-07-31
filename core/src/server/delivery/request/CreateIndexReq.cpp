@@ -61,7 +61,7 @@ CreateIndexReq::OnExecute() {
         auto status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
             } else {
                 return status;
             }
