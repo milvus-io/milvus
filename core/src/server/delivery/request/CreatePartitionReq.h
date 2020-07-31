@@ -21,12 +21,10 @@ namespace server {
 class CreatePartitionReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const std::string& tag);
+    Create(const ContextPtr& context, const std::string& collection_name, const std::string& tag);
 
  protected:
-    CreatePartitionReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                       const std::string& tag);
+    CreatePartitionReq(const ContextPtr& context, const std::string& collection_name, const std::string& tag);
 
     Status
     OnExecute() override;

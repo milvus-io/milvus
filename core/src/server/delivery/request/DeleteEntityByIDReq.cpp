@@ -30,13 +30,13 @@
 namespace milvus {
 namespace server {
 
-DeleteEntityByIDReq::DeleteEntityByIDReq(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name, const engine::IDNumbers& entity_ids)
-    : BaseReq(context, BaseReq::kDeleteEntityByID), collection_name_(collection_name), entity_ids_(entity_ids) {
+DeleteEntityByIDReq::DeleteEntityByIDReq(const ContextPtr& context, const std::string& collection_name,
+                                         const engine::IDNumbers& entity_ids)
+    : BaseReq(context, ReqType::kDeleteEntityByID), collection_name_(collection_name), entity_ids_(entity_ids) {
 }
 
 BaseReqPtr
-DeleteEntityByIDReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+DeleteEntityByIDReq::Create(const ContextPtr& context, const std::string& collection_name,
                             const engine::IDNumbers& entity_ids) {
     return std::shared_ptr<BaseReq>(new DeleteEntityByIDReq(context, collection_name, entity_ids));
 }
@@ -53,6 +53,7 @@ DeleteEntityByIDReq::OnExecute() {
         }
 
         STATUS_CHECK(DBWrapper::DB()->DeleteEntityByID(collection_name_, entity_ids_));
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

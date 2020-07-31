@@ -32,10 +32,9 @@
 namespace milvus {
 namespace server {
 
-InsertReq::InsertReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                     const std::string& partition_name, const int64_t& row_count,
-                     std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data)
-    : BaseReq(context, BaseReq::kInsert),
+InsertReq::InsertReq(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
+                     const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data)
+    : BaseReq(context, ReqType::kInsert),
       collection_name_(collection_name),
       partition_name_(partition_name),
       row_count_(row_count),
@@ -43,9 +42,8 @@ InsertReq::InsertReq(const std::shared_ptr<milvus::server::Context>& context, co
 }
 
 BaseReqPtr
-InsertReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                  const std::string& partition_name, const int64_t& row_count,
-                  std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
+InsertReq::Create(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
+                  const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
     return std::shared_ptr<BaseReq>(new InsertReq(context, collection_name, partition_name, row_count, chunk_data));
 }
 
@@ -77,8 +75,7 @@ InsertReq::OnExecute() {
         }
         chunk_data_[engine::DEFAULT_UID_NAME] = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
 
-        rc.RecordSection("add entities");
-        rc.ElapseFromBegin("total cost");
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

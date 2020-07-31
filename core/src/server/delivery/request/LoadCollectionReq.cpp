@@ -23,13 +23,12 @@
 namespace milvus {
 namespace server {
 
-LoadCollectionReq::LoadCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
-                                     const std::string& collection_name)
-    : BaseReq(context, BaseReq::kLoadCollection), collection_name_(collection_name) {
+LoadCollectionReq::LoadCollectionReq(const ContextPtr& context, const std::string& collection_name)
+    : BaseReq(context, ReqType::kLoadCollection), collection_name_(collection_name) {
 }
 
 BaseReqPtr
-LoadCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+LoadCollectionReq::Create(const ContextPtr& context, const std::string& collection_name) {
     return std::shared_ptr<BaseReq>(new LoadCollectionReq(context, collection_name));
 }
 

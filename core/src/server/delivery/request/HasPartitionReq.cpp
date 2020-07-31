@@ -22,17 +22,17 @@
 namespace milvus {
 namespace server {
 
-HasPartitionReq::HasPartitionReq(const std::shared_ptr<milvus::server::Context>& context,
-                                 const std::string& collection_name, const std::string& tag, bool& has_partition)
-    : BaseReq(context, BaseReq::kHasCollection),
+HasPartitionReq::HasPartitionReq(const ContextPtr& context, const std::string& collection_name, const std::string& tag,
+                                 bool& has_partition)
+    : BaseReq(context, ReqType::kHasCollection),
       collection_name_(collection_name),
       partition_tag_(tag),
       has_partition_(has_partition) {
 }
 
 BaseReqPtr
-HasPartitionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                        const std::string& tag, bool& has_partition) {
+HasPartitionReq::Create(const ContextPtr& context, const std::string& collection_name, const std::string& tag,
+                        bool& has_partition) {
     return std::shared_ptr<BaseReq>(new HasPartitionReq(context, collection_name, tag, has_partition));
 }
 
@@ -45,10 +45,7 @@ HasPartitionReq::OnExecute() {
         has_partition_ = false;
 
         // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
 
         bool exists = false;
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exists));
@@ -57,6 +54,7 @@ HasPartitionReq::OnExecute() {
         }
 
         STATUS_CHECK(DBWrapper::DB()->HasPartition(collection_name_, partition_tag_, has_partition_));
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

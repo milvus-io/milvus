@@ -24,14 +24,12 @@
 namespace milvus {
 namespace server {
 
-CountEntitiesReq::CountEntitiesReq(const std::shared_ptr<milvus::server::Context>& context,
-                                   const std::string& collection_name, int64_t& row_count)
-    : BaseReq(context, BaseReq::kCountEntities), collection_name_(collection_name), row_count_(row_count) {
+CountEntitiesReq::CountEntitiesReq(const ContextPtr& context, const std::string& collection_name, int64_t& row_count)
+    : BaseReq(context, ReqType::kCountEntities), collection_name_(collection_name), row_count_(row_count) {
 }
 
 BaseReqPtr
-CountEntitiesReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         int64_t& row_count) {
+CountEntitiesReq::Create(const ContextPtr& context, const std::string& collection_name, int64_t& row_count) {
     return std::shared_ptr<BaseReq>(new CountEntitiesReq(context, collection_name, row_count));
 }
 

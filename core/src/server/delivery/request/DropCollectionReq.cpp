@@ -18,13 +18,12 @@
 namespace milvus {
 namespace server {
 
-DropCollectionReq::DropCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
-                                     const std::string& collection_name)
-    : BaseReq(context, BaseReq::kDropCollection), collection_name_(collection_name) {
+DropCollectionReq::DropCollectionReq(const ContextPtr& context, const std::string& collection_name)
+    : BaseReq(context, ReqType::kDropCollection), collection_name_(collection_name) {
 }
 
 BaseReqPtr
-DropCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+DropCollectionReq::Create(const ContextPtr& context, const std::string& collection_name) {
     return std::shared_ptr<BaseReq>(new DropCollectionReq(context, collection_name));
 }
 
