@@ -96,7 +96,7 @@ DBImpl::DBImpl(const DBOptions& options)
     SetIdentity("DBImpl");
     AddCacheInsertDataListener();
     AddUseBlasThresholdListener();
-    knowhere::enable_faiss_logging(true);
+    knowhere::enable_faiss_logging();
 
     Start();
 }

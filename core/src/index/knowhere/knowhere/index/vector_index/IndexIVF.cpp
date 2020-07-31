@@ -35,6 +35,7 @@
 #include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
@@ -327,6 +328,7 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
     } else {
         ivf_index->parallel_mode = 0;
     }
+    enable_faiss_logging();
     ivf_index->search(n, (float*)data, k, distances, labels, bitset_);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();

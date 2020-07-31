@@ -48,7 +48,7 @@ struct MemoryIOReader : public faiss::IOReader {
 };
 
 void
-enable_faiss_logging(bool);
+enable_faiss_logging();
 
 }  // namespace knowhere
 }  // namespace milvus

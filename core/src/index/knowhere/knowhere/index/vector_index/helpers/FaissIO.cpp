@@ -62,10 +62,8 @@ MemoryIOReader::operator()(void* ptr, size_t size, size_t nitems) {
 }
 
 void
-enable_faiss_logging(bool trigger) {
-    if (trigger) {
-        faiss::LOG_DEBUG_ = &log_debug_;
-    }
+enable_faiss_logging() {
+    faiss::LOG_DEBUG_ = &log_debug_;
 }
 
 }  // namespace knowhere

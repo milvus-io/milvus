@@ -317,6 +317,7 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     indexIVF_stats.search_time += getmillisecs() - t0;
 
     // string
+    auto ids = idx.get();
     for (size_t i = 0; i < n; i++) {
         std::stringstream ss;
         ss << "Query #" << i << ", nprobe list: ";
@@ -324,7 +325,7 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
             if (j != 0) {
                 ss << ",";
             }
-            ss << idx[i * nprobe + j];
+            ss << ids[i * nprobe + j];
         }
         (*LOG_DEBUG_)(ss.str());
     }
