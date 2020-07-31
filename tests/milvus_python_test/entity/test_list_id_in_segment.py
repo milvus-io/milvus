@@ -103,6 +103,7 @@ class TestListIdInSegmentBase:
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection, seg_id + 10000)
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_without_index_A(self, connect, collection):
         '''
         target: get vector ids when there is no index
@@ -116,6 +117,7 @@ class TestListIdInSegmentBase:
         assert len(vector_ids) == nb
         assert vector_ids[0] == ids[0]
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_without_index_B(self, connect, collection):
         '''
         target: get vector ids when there is no index but with partition
@@ -145,6 +147,7 @@ class TestListIdInSegmentBase:
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_with_index_A(self, connect, collection, get_simple_index):
         '''
         target: get vector ids when there is index
@@ -158,6 +161,7 @@ class TestListIdInSegmentBase:
             assert False, str(e)
         # TODO: 
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_with_index_B(self, connect, collection, get_simple_index):
         '''
         target: get vector ids when there is index and with partition
@@ -176,6 +180,7 @@ class TestListIdInSegmentBase:
         # vector_ids should match ids
         # TODO
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_after_delete_vectors(self, connect, collection):
         '''
         target: get vector ids after vectors are deleted
@@ -199,6 +204,7 @@ class TestListIdInSegmentIP:
       The following cases are used to test `list_id_in_segment` function
     ******************************************************************
     """
+    @pytest.mark.level(2)
     def test_list_id_in_segment_without_index_A(self, connect, ip_collection):
         '''
         target: get vector ids when there is no index
@@ -216,6 +222,7 @@ class TestListIdInSegmentIP:
         for i in range(nb):
             assert vector_ids[i] == ids[i]
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_without_index_B(self, connect, ip_collection):
         '''
         target: get vector ids when there is no index but with partition
@@ -245,6 +252,7 @@ class TestListIdInSegmentIP:
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_with_index_A(self, connect, ip_collection, get_simple_index):
         '''
         target: get vector ids when there is index
@@ -255,6 +263,7 @@ class TestListIdInSegmentIP:
         vector_ids = connect.list_id_in_segment(ip_collection, seg_id)
         # TODO: 
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_with_index_B(self, connect, ip_collection, get_simple_index):
         '''
         target: get vector ids when there is index and with partition
@@ -270,6 +279,7 @@ class TestListIdInSegmentIP:
         # vector_ids should match ids
         # TODO
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_after_delete_vectors(self, connect, ip_collection):
         '''
         target: get vector ids after vectors are deleted
@@ -293,6 +303,7 @@ class TestListIdInSegmentJAC:
       The following cases are used to test `list_id_in_segment` function
     ******************************************************************
     """
+    @pytest.mark.level(2)
     def test_list_id_in_segment_without_index_A(self, connect, jac_collection):
         '''
         target: get vector ids when there is no index
@@ -310,6 +321,7 @@ class TestListIdInSegmentJAC:
         for i in range(nb):
             assert vector_ids[i] == ids[i]
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_without_index_B(self, connect, jac_collection):
         '''
         target: get vector ids when there is no index but with partition
