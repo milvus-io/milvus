@@ -53,11 +53,11 @@ template <typename T>
 knowhere::IndexPtr
 CreateSortedIndex(std::vector<uint8_t>& raw_data) {
     auto count = raw_data.size() / sizeof(T);
-    auto index_ptr = std::make_shared<knowhere::StructuredIndexSort<T>>(
-        count, reinterpret_cast<const T*>(raw_data.data()));
+    auto index_ptr =
+        std::make_shared<knowhere::StructuredIndexSort<T>>(count, reinterpret_cast<const T*>(raw_data.data()));
     return std::static_pointer_cast<knowhere::Index>(index_ptr);
 }
-} //namespace
+}  // namespace
 
 ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
     : gpu_enable_(config.gpu.enable()) {
