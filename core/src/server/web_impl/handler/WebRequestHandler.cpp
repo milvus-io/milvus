@@ -423,10 +423,10 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
         //        term_query->field_value.resize(term_size * sizeof(int64_t));
         //
         //        switch (field_type_.at(field_name)) {
-        //            case engine::meta::DataType::INT8:
-        //            case engine::meta::DataType::INT16:
-        //            case engine::meta::DataType::INT32:
-        //            case engine::meta::DataType::INT64: {
+        //            case engine::DataType::INT8:
+        //            case engine::DataType::INT16:
+        //            case engine::DataType::INT32:
+        //            case engine::DataType::INT64: {
         //                std::vector<int64_t> term_value(term_size, 0);
         //                for (uint64_t i = 0; i < term_size; ++i) {
         //                    term_value[i] = term_value_json[i].get<int64_t>();
@@ -434,8 +434,8 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
         //                memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(int64_t));
         //                break;
         //            }
-        //            case engine::meta::DataType::FLOAT:
-        //            case engine::meta::DataType::DOUBLE: {
+        //            case engine::DataType::FLOAT:
+        //            case engine::DataType::DOUBLE: {
         //                std::vector<double> term_value(term_size, 0);
         //                for (uint64_t i = 0; i < term_size; ++i) {
         //                    term_value[i] = term_value_json[i].get<double>();
@@ -606,35 +606,35 @@ ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, const st
             double double_value;
             auto attr_data = attr.attr_data_.at(field_names[i]);
             switch (attr.attr_type_.at(field_names[i])) {
-                case engine::meta::DataType::INT8: {
+                case engine::DataType::INT8: {
                     if (attr_data.size() == sizeof(int8_t)) {
                         int_value = attr_data[0];
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::DataType::INT16: {
+                case engine::DataType::INT16: {
                     if (attr_data.size() == sizeof(int16_t)) {
                         memcpy(&int_value, attr_data.data(), sizeof(int16_t));
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::DataType::INT32: {
+                case engine::DataType::INT32: {
                     if (attr_data.size() == sizeof(int32_t)) {
                         memcpy(&int_value, attr_data.data(), sizeof(int32_t));
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::DataType::INT64: {
+                case engine::DataType::INT64: {
                     if (attr_data.size() == sizeof(int64_t)) {
                         memcpy(&int_value, attr_data.data(), sizeof(int64_t));
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::DataType::FLOAT: {
+                case engine::DataType::FLOAT: {
                     if (attr_data.size() == sizeof(float)) {
                         float float_value;
                         memcpy(&float_value, attr_data.data(), sizeof(float));
@@ -643,7 +643,7 @@ ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, const st
                     }
                     break;
                 }
-                case engine::meta::DataType::DOUBLE: {
+                case engine::DataType::DOUBLE: {
                     if (attr_data.size() == sizeof(double)) {
                         memcpy(&double_value, attr_data.data(), sizeof(double));
                         double_data.emplace_back(double_value);
@@ -819,19 +819,19 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
         std::string name = it.first->GetName();
         uint64_t type = it.first->GetFtype();
         std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
-        if (type == engine::FieldType::VECTOR_BINARY) {
+        if (type == engine::DataType::VECTOR_BINARY) {
             engine::VectorsData vectors_data;
             memcpy(vectors_data.binary_data_.data(), data.data(), data.size());
             memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
             vector_batch.emplace_back(vectors_data);
-        } else if (type == engine::FieldType::VECTOR_FLOAT) {
+        } else if (type == engine::DataType::VECTOR_FLOAT) {
             engine::VectorsData vectors_data;
             memcpy(vectors_data.float_data_.data(), data.data(), data.size());
             memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
             vector_batch.emplace_back(vectors_data);
         } else {
             engine::AttrsData attrs_data;
-            attrs_data.attr_type_[name] = static_cast<engine::meta::DataType>(type);
+            attrs_data.attr_type_[name] = static_cast<engine::DataType>(type);
             attrs_data.attr_data_[name] = data;
             memcpy(attrs_data.id_array_.data(), id_array.data(), id_array.size());
             attr_batch.emplace_back(attrs_data);
@@ -1209,17 +1209,17 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
 
         const std::string& field_type = field["field_type"];
         if (field_type == "int8") {
-            field_schema.field_type_ = engine::FieldType::INT8;
+            field_schema.field_type_ = engine::DataType::INT8;
         } else if (field_type == "int16") {
-            field_schema.field_type_ = engine::FieldType::INT16;
+            field_schema.field_type_ = engine::DataType::INT16;
         } else if (field_type == "int32") {
-            field_schema.field_type_ = engine::FieldType::INT32;
+            field_schema.field_type_ = engine::DataType::INT32;
         } else if (field_type == "int64") {
-            field_schema.field_type_ = engine::FieldType::INT64;
+            field_schema.field_type_ = engine::DataType::INT64;
         } else if (field_type == "float") {
-            field_schema.field_type_ = engine::FieldType::FLOAT;
+            field_schema.field_type_ = engine::DataType::FLOAT;
         } else if (field_type == "double") {
-            field_schema.field_type_ = engine::FieldType::DOUBLE;
+            field_schema.field_type_ = engine::DataType::DOUBLE;
         } else if (field_type == "vector") {
         } else {
             std::string msg = field_name + " has wrong field_type";
@@ -1582,7 +1582,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     std::string partition_name = body_json["partition_tag"];
     int32_t row_num = body_json["row_num"];
 
-    std::unordered_map<std::string, engine::meta::DataType> field_types;
+    std::unordered_map<std::string, engine::DataType> field_types;
     auto status = Status::OK();
     // auto status = req_handler_.DescribeHybridCollection(context_ptr_, collection_name->c_str(), field_types);
 
@@ -1603,23 +1603,23 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 
         std::vector<uint8_t> temp_data;
         switch (field_types.at(field_name)) {
-            case engine::meta::DataType::INT32: {
+            case engine::DataType::INT32: {
                 CopyStructuredData<int32_t>(field_value, temp_data);
                 break;
             }
-            case engine::meta::DataType::INT64: {
+            case engine::DataType::INT64: {
                 CopyStructuredData<int64_t>(field_value, temp_data);
                 break;
             }
-            case engine::meta::DataType::FLOAT: {
+            case engine::DataType::FLOAT: {
                 CopyStructuredData<float>(field_value, temp_data);
                 break;
             }
-            case engine::meta::DataType::DOUBLE: {
+            case engine::DataType::DOUBLE: {
                 CopyStructuredData<double>(field_value, temp_data);
                 break;
             }
-            case engine::meta::DataType::VECTOR_FLOAT: {
+            case engine::DataType::VECTOR_FLOAT: {
                 bool bin_flag;
                 status = IsBinaryCollection(collection_name->c_str(), bin_flag);
                 if (!status.ok()) {

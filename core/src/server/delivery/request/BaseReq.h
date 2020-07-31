@@ -12,7 +12,6 @@
 #pragma once
 
 #include "db/Types.h"
-#include "db/meta/MetaTypes.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
@@ -33,7 +32,7 @@ namespace milvus {
 namespace server {
 
 struct FieldSchema {
-    engine::FieldType field_type_;
+    engine::DataType field_type_;
     milvus::json field_params_;
     milvus::json index_params_;
 };
