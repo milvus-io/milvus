@@ -317,17 +317,17 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     indexIVF_stats.search_time += getmillisecs() - t0;
 
     // string
-    auto ids = idx.get();
-    for (size_t i = 0; i < n; i++) {
-        std::stringstream ss;
-        ss << "Query #" << i << ", nprobe list: ";
-        for (size_t j = 0; j < nprobe; j++) {
-            if (j != 0) {
-                ss << ",";
+    if (LOG_DEBUG_) {
+        auto ids = idx.get();
+        for (size_t i = 0; i < n; i++) {
+            std::stringstream ss;
+            ss << "Query #" << i << ", nprobe list: ";
+            for (size_t j = 0; j < nprobe; j++) {
+                if (j != 0) {
+                    ss << ",";
+                }
+                ss << ids[i * nprobe + j];
             }
-            ss << ids[i * nprobe + j];
-        }
-        if (!faiss::LOG_DEBUG_) {
             (*LOG_DEBUG_)(ss.str());
         }
     }
