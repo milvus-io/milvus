@@ -74,6 +74,10 @@ class ReqHandler {
                 const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
 
     Status
+    DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                  const std::string& field_name, std::string& index_name, milvus::json& json_params);
+
+    Status
     DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
               const std::string& field_name, const std::string& index_name);
 

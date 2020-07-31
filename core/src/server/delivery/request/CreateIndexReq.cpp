@@ -87,8 +87,8 @@ CreateIndexReq::OnExecute() {
 
             // validate index type
             std::string index_type = 0;
-            if (json_params_.contains("index_type")) {
-                index_type = json_params_["index_type"].get<std::string>();
+            if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
+                index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
             }
             status = ValidateIndexType(index_type);
             if (!status.ok()) {
@@ -97,8 +97,8 @@ CreateIndexReq::OnExecute() {
 
             // validate metric type
             std::string metric_type = 0;
-            if (json_params_.contains("metric_type")) {
-                metric_type = json_params_["metric_type"].get<std::string>();
+            if (json_params_.contains(engine::PARAM_INDEX_METRIC_TYPE)) {
+                metric_type = json_params_[engine::PARAM_INDEX_METRIC_TYPE].get<std::string>();
             }
             status = ValidateIndexMetricType(metric_type);
             if (!status.ok()) {
@@ -113,9 +113,11 @@ CreateIndexReq::OnExecute() {
 
             rc.RecordSection("check validation");
 
-            index.index_name_ = index_name_;
+            index.index_name_ = index_type;
             index.metric_name_ = metric_type;
-            index.extra_params_ = json_params_;
+            if (json_params_.contains(engine::PARAM_INDEX_EXTRA_PARAMS)) {
+                index.extra_params_ = json_params_[engine::PARAM_INDEX_EXTRA_PARAMS];
+            }
         } else {
             index.index_name_ = index_name_;
         }

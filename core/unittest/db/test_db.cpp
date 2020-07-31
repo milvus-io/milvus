@@ -28,13 +28,15 @@
 using SegmentVisitor = milvus::engine::SegmentVisitor;
 
 namespace {
+const char* VECTOR_FIELD_NAME = "vector";
+
 milvus::Status
 CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
     CreateCollectionContext context;
     context.lsn = lsn;
     auto collection_schema = std::make_shared<Collection>(collection_name);
     context.collection = collection_schema;
-    auto vector_field = std::make_shared<Field>("vector", 0,
+    auto vector_field = std::make_shared<Field>(VECTOR_FIELD_NAME, 0,
                                                 milvus::engine::DataType::VECTOR_FLOAT);
     auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
                                                                milvus::engine::FieldElementType::FET_INDEX);
@@ -57,7 +59,7 @@ CreateCollection2(std::shared_ptr<DBImpl> db, const std::string& collection_name
 
     milvus::json params;
     params[milvus::knowhere::meta::DIM] = COLLECTION_DIM;
-    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::DataType::VECTOR_FLOAT, params);
+    auto vector_field = std::make_shared<Field>(VECTOR_FIELD_NAME, 0, milvus::engine::DataType::VECTOR_FLOAT, params);
     context.fields_schema[vector_field] = {};
 
     std::unordered_map<std::string, milvus::engine::DataType> attr_type = {
@@ -93,7 +95,7 @@ BuildEntities(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& da
         vectors.id_array_.push_back(n * batch_index + i);
     }
 
-    milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["vector"];
+    milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_[VECTOR_FIELD_NAME];
     raw.resize(vectors.float_data_.size() * sizeof(float));
     memcpy(raw.data(), vectors.float_data_.data(), vectors.float_data_.size() * sizeof(float));
 
@@ -500,8 +502,15 @@ TEST_F(DBTest, IndexTest) {
         index.index_name_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
         index.metric_name_ = milvus::knowhere::Metric::L2;
         index.extra_params_["nlist"] = 2048;
-        status = db_->CreateIndex(dummy_context_, collection_name, "vector", index);
+        status = db_->CreateIndex(dummy_context_, collection_name, VECTOR_FIELD_NAME, index);
         ASSERT_TRUE(status.ok());
+
+        milvus::engine::CollectionIndex index_get;
+        status = db_->DescribeIndex(collection_name, VECTOR_FIELD_NAME, index_get);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(index.index_name_, index_get.index_name_);
+        ASSERT_EQ(index.metric_name_, index_get.metric_name_);
+        ASSERT_EQ(index.extra_params_, index_get.extra_params_);
     }
 
     {
@@ -513,6 +522,29 @@ TEST_F(DBTest, IndexTest) {
         ASSERT_TRUE(status.ok());
         status = db_->CreateIndex(dummy_context_, collection_name, "field_2", index);
         ASSERT_TRUE(status.ok());
+
+        milvus::engine::CollectionIndex index_get;
+        status = db_->DescribeIndex(collection_name, "field_0", index_get);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(index.index_name_, index_get.index_name_);
+    }
+
+    {
+        status = db_->DropIndex(collection_name, VECTOR_FIELD_NAME);
+        ASSERT_TRUE(status.ok());
+
+        milvus::engine::CollectionIndex index_get;
+        status = db_->DescribeIndex(collection_name, VECTOR_FIELD_NAME, index_get);
+        ASSERT_TRUE(index_get.index_name_.empty());
+    }
+
+    {
+        status = db_->DropIndex(collection_name, "field_0");
+        ASSERT_TRUE(status.ok());
+
+        milvus::engine::CollectionIndex index_get;
+        status = db_->DescribeIndex(collection_name, "field_0", index_get);
+        ASSERT_TRUE(index_get.index_name_.empty());
     }
 }
 
@@ -543,7 +575,7 @@ TEST_F(DBTest, StatsTest) {
         index.index_name_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
         index.metric_name_ = milvus::knowhere::Metric::L2;
         index.extra_params_["nlist"] = 2048;
-        status = db_->CreateIndex(dummy_context_, collection_name, "vector", index);
+        status = db_->CreateIndex(dummy_context_, collection_name, VECTOR_FIELD_NAME, index);
         ASSERT_TRUE(status.ok());
     }
 
@@ -563,6 +595,6 @@ TEST_F(DBTest, StatsTest) {
     int64_t row_count = json_stats[milvus::engine::JSON_ROW_COUNT];
     ASSERT_EQ(row_count, entity_count * 2);
 
-    std::string ss = json_stats.dump();
-    std::cout << ss << std::endl;
+//    std::string ss = json_stats.dump();
+//    std::cout << ss << std::endl;
 }

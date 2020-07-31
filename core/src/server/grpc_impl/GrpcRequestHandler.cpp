@@ -822,6 +822,43 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
 }
 
 ::grpc::Status
+GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
+                                  ::milvus::grpc::IndexParam* response) {
+    CHECK_NULLPTR_RETURN(request)
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
+
+    std::string index_name;
+    milvus::json index_params;
+    Status status = req_handler_.DescribeIndex(GetContext(context), request->collection_name(), request->field_name(),
+                                               index_name, index_params);
+
+    response->set_collection_name(request->collection_name());
+    response->set_field_name(request->field_name());
+    ::milvus::grpc::KeyValuePair* kv = response->add_extra_params();
+    kv->set_key(EXTRA_PARAM_KEY);
+    kv->set_value(index_params.dump());
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
+    SET_RESPONSE(response->mutable_status(), status, context);
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
+                              ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
+
+    Status status = req_handler_.DropIndex(GetContext(context), request->collection_name(), request->field_name(),
+                                           request->index_name());
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
+    SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
 GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus::grpc::EntityIdentity* request,
                                   ::milvus::grpc::Entities* response) {
     CHECK_NULLPTR_RETURN(request);
@@ -1130,27 +1167,6 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     Status status = req_handler_.LoadCollection(GetContext(context), request->collection_name());
-
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
-    SET_RESPONSE(response, status, context);
-
-    return ::grpc::Status::OK;
-}
-
-::grpc::Status
-GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
-                                  ::milvus::grpc::IndexParam* response) {
-    return ::grpc::Status::OK;
-}
-
-::grpc::Status
-GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
-                              ::milvus::grpc::Status* response) {
-    CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
-
-    Status status = req_handler_.DropIndex(GetContext(context), request->collection_name(), request->field_name(),
-                                           request->index_name());
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
