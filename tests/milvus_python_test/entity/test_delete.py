@@ -121,6 +121,7 @@ class TestDeleteBase:
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status
 
+    @pytest.mark.level(2)
     def test_insert_delete_A(self, connect, collection):
         '''
         target: test delete entity
@@ -136,6 +137,7 @@ class TestDeleteBase:
         res_count = connect.count_entities(collection)
         assert res_count == nb - 1
 
+    @pytest.mark.level(2)
     def test_insert_delete_B(self, connect, collection):
         '''
         target: test delete entity
@@ -152,6 +154,7 @@ class TestDeleteBase:
         res_count = connect.count_entities(collection)
         assert res_count == 0
 
+    @pytest.mark.level(2)
     def test_delete_exceed_limit(self, connect, collection):
         '''
         target: test delete entity
@@ -167,6 +170,7 @@ class TestDeleteBase:
         assert res_count == 0
 
     # TODO
+    @pytest.mark.level(2)
     def test_flush_after_delete(self, connect, collection):
         '''
         target: test delete entity
@@ -183,6 +187,7 @@ class TestDeleteBase:
         assert res_count == nb - len(delete_ids)
 
     # TODO
+    @pytest.mark.level(2)
     def test_flush_after_delete_ip(self, connect, ip_collection):
         '''
         target: test delete entity
@@ -199,6 +204,7 @@ class TestDeleteBase:
         assert res_count == nb - len(delete_ids)
 
     # TODO
+    @pytest.mark.level(2)
     def test_flush_after_delete_jac(self, connect, jac_collection):
         '''
         target: test delete entity
@@ -215,6 +221,7 @@ class TestDeleteBase:
         assert res_count == nb - len(delete_ids)
 
     # TODO
+    @pytest.mark.level(2)
     def test_insert_same_ids_after_delete(self, connect, collection):
         '''
         method: add entities and delete
@@ -252,6 +259,7 @@ class TestDeleteBase:
         assert res_count == nb - 1
 
     # TODO
+    @pytest.mark.level(2)
     def test_insert_same_ids_after_delete_jac(self, connect, jac_collection):
         '''
         method: add entities, with the same id and delete the ids
@@ -270,6 +278,7 @@ class TestDeleteBase:
         assert res_count == nb - 1
 
     # TODO:
+    @pytest.mark.level(2)
     def test_search_after_delete(self, connect, collection):
         '''
         target: test delete entity
@@ -291,6 +300,7 @@ class TestDeleteBase:
         assert res[2]._distances[0] < epsilon
 
     # TODO
+    @pytest.mark.level(2)
     def test_create_index_after_delete(self, connect, collection, get_simple_index):
         '''
         method: add entitys and delete, then create index
@@ -320,6 +330,7 @@ class TestDeleteBase:
             assert status
 
     # TODO
+    @pytest.mark.level(2)
     def test_index_insert_batch_delete_get(self, connect, collection, get_simple_index):
         '''
         method: create index, insert entities, and delete
@@ -338,6 +349,7 @@ class TestDeleteBase:
         assert res_get[0] is None
 
     # TODO
+    @pytest.mark.level(2)
     def test_index_insert_single_delete_get(self, connect, collection, get_simple_index):
         '''
         method: create index, insert entities, and delete
@@ -387,6 +399,7 @@ class TestDeleteBase:
         assert status
 
     # TODO:
+    @pytest.mark.level(2)
     def test_insert_tags_delete(self, connect, collection):
         '''
         method: add entitys with given two tags, delete entities with the return ids
@@ -406,6 +419,7 @@ class TestDeleteBase:
         assert res_count == 2 * (nb - 1)
 
     # TODO:
+    @pytest.mark.level(2)
     def test_insert_tags_index_delete(self, connect, collection, get_simple_index):
         '''
         method: add entitys with given tag, create index, delete entities with the return ids
