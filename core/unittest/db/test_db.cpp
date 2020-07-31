@@ -456,8 +456,9 @@ TEST_F(DBTest, MergeTest) {
     std::set<std::string> segment_file_paths;
     auto sf_executor = [&] (const SegmentFilePtr& segment_file, SegmentFileIterator* handler) -> Status {
         std::string res_path = milvus::engine::snapshot::GetResPath<SegmentFile>(root_path, segment_file);
-        if (boost::filesystem::is_regular_file(res_path) ||
-                boost::filesystem::is_regular_file(res_path + ".bf")) {
+        if (boost::filesystem::is_regular_file(res_path)
+            || boost::filesystem::is_regular_file(res_path + milvus::codec::IdBloomFilterFormat::FilePostfix())
+            || boost::filesystem::is_regular_file(res_path + milvus::codec::DeletedDocsFormat::FilePostfix())) {
             segment_file_paths.insert(res_path);
             std::cout << res_path << std::endl;
         }

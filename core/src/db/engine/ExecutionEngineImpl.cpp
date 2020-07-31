@@ -40,16 +40,24 @@
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 #ifdef MILVUS_GPU_VERSION
-
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/gpu/Quantizer.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
-
 #endif
 
 namespace milvus {
 namespace engine {
+namespace {
+template <typename T>
+knowhere::IndexPtr
+CreateSortedIndex(std::vector<uint8_t>& raw_data) {
+    auto count = raw_data.size() / sizeof(T);
+    auto index_ptr =
+        std::make_shared<knowhere::StructuredIndexSort<T>>(count, reinterpret_cast<const T*>(raw_data.data()));
+    return std::static_pointer_cast<knowhere::Index>(index_ptr);
+}
+}  // namespace
 
 ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
     : gpu_enable_(config.gpu.enable()) {
@@ -93,31 +101,20 @@ ExecutionEngineImpl::CreateStructuredIndex(const DataType field_type, std::vecto
                                            knowhere::IndexPtr& index_ptr) {
     switch (field_type) {
         case engine::DataType::INT32: {
-            auto size = raw_data.size() / sizeof(int32_t);
-            std::vector<int32_t> int32_data(size, 0);
-            memcpy(int32_data.data(), raw_data.data(), size);
-            auto int32_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int32_t>>(
-                raw_data.size(), reinterpret_cast<const int32_t*>(raw_data.data()));
-            index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
+            index_ptr = CreateSortedIndex<int32_t>(raw_data);
             break;
         }
         case engine::DataType::UID:
         case engine::DataType::INT64: {
-            auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
-                raw_data.size(), reinterpret_cast<const int64_t*>(raw_data.data()));
-            index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
+            index_ptr = CreateSortedIndex<int64_t>(raw_data);
             break;
         }
         case engine::DataType::FLOAT: {
-            auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
-                raw_data.size(), reinterpret_cast<const float*>(raw_data.data()));
-            index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
+            index_ptr = CreateSortedIndex<float>(raw_data);
             break;
         }
         case engine::DataType::DOUBLE: {
-            auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
-                raw_data.size(), reinterpret_cast<const double*>(raw_data.data()));
-            index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
+            index_ptr = CreateSortedIndex<double>(raw_data);
             break;
         }
         default: { return Status(DB_ERROR, "Field is not structured type"); }

@@ -55,9 +55,6 @@ class SegmentWriter {
     Merge(const SegmentReaderPtr& segment_reader);
 
     size_t
-    Size();
-
-    size_t
     RowCount();
 
     Status

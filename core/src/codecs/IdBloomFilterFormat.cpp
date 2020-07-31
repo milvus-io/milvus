@@ -27,7 +27,7 @@
 namespace milvus {
 namespace codec {
 
-const char* BLOOM_FILTER_POSTFIX = ".bf";
+const char* BLOOM_FILTER_POSTFIX = ".blf";
 
 constexpr unsigned int BLOOM_FILTER_CAPACITY = 500000;
 constexpr double BLOOM_FILTER_ERROR_RATE = 0.01;
