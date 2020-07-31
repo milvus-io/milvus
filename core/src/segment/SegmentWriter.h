@@ -17,13 +17,13 @@
 
 #pragma once
 
-#include <src/db/meta/MetaTypes.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "db/SnapshotVisitor.h"
+#include "db/Types.h"
 #include "segment/Segment.h"
 #include "segment/SegmentReader.h"
 #include "storage/FSHandler.h"

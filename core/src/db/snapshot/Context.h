@@ -16,7 +16,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "db/meta/MetaTypes.h"
+
+#include "db/Types.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshot.h"
 
