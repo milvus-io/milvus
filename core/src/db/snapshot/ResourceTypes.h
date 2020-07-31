@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-#include "db/meta/MetaTypes.h"
+#include "db/Types.h"
 
 namespace milvus {
 namespace engine {

@@ -39,7 +39,7 @@ CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name,
     int64_t field_id = 0;
     /* field uid */
     auto uid_field = std::make_shared<Field>(milvus::engine::DEFAULT_UID_NAME, 0,
-            milvus::engine::FieldType::UID, milvus::engine::snapshot::JEmpty, field_id);
+            milvus::engine::DataType::UID, milvus::engine::snapshot::JEmpty, field_id);
     auto uid_field_element_blt = std::make_shared<FieldElement>(collection_id, field_id,
             milvus::engine::DEFAULT_BLOOM_FILTER_NAME, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
     auto uid_field_element_del = std::make_shared<FieldElement>(collection_id, field_id,
@@ -48,7 +48,7 @@ CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name,
     field_id++;
     /* field vector */
     milvus::json vector_param = {{milvus::knowhere::meta::DIM, 4}};
-    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR_FLOAT, vector_param,
+    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::DataType::VECTOR_FLOAT, vector_param,
             field_id);
     auto vector_field_element_index = std::make_shared<FieldElement>(collection_id, field_id,
             milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::engine::FieldElementType::FET_INDEX);

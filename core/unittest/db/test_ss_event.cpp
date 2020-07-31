@@ -23,7 +23,7 @@ using SegmentCommitPtr = milvus::engine::snapshot::SegmentCommitPtr;
 using SchemaCommit = milvus::engine::snapshot::SchemaCommit;
 using FieldCommit = milvus::engine::snapshot::FieldCommit;
 
-using FType = milvus::engine::FieldType;
+using FType = milvus::engine::DataType;
 using FEType = milvus::engine::FieldElementType;
 
 using InActiveResourcesGCEvent = milvus::engine::snapshot::InActiveResourcesGCEvent;

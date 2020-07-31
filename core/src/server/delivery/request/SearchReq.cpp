@@ -66,12 +66,12 @@ SearchReq::OnExecute() {
         int64_t dimension = 0;
 
         // step 4: Get field info
-        std::unordered_map<std::string, engine::meta::DataType> field_types;
+        std::unordered_map<std::string, engine::DataType> field_types;
         for (auto& schema : fields_schema) {
             auto field = schema.first;
-            field_types.insert(std::make_pair(field->GetName(), (engine::meta::DataType)field->GetFtype()));
-            if (field->GetFtype() == (int)engine::meta::DataType::VECTOR_FLOAT ||
-                field->GetFtype() == (int)engine::meta::DataType::VECTOR_BINARY) {
+            field_types.insert(std::make_pair(field->GetName(), (engine::DataType)field->GetFtype()));
+            if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
+                field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
                 dimension = field->GetParams()[engine::PARAM_DIMENSION];
             }
         }

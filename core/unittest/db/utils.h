@@ -215,11 +215,11 @@ CreateCollection(const std::string& collection_name, const LSN_TYPE& lsn) {
     auto collection_schema = std::make_shared<Collection>(collection_name);
     context.collection = collection_schema;
     auto vector_field = std::make_shared<Field>("vector", 0,
-            milvus::engine::FieldType::VECTOR_FLOAT);
+            milvus::engine::DataType::VECTOR_FLOAT);
     auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
             milvus::engine::FieldElementType::FET_INDEX);
     auto int_field = std::make_shared<Field>("int", 0,
-            milvus::engine::FieldType::INT32);
+            milvus::engine::DataType::INT32);
     context.fields_schema[vector_field] = {vector_field_element};
     context.fields_schema[int_field] = {};
 

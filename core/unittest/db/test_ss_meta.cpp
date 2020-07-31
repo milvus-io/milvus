@@ -19,7 +19,7 @@ using ResourceContext = milvus::engine::snapshot::ResourceContext<T>;
 template <typename T>
 using ResourceContextBuilder = milvus::engine::snapshot::ResourceContextBuilder<T>;
 
-using FType = milvus::engine::FieldType;
+using FType = milvus::engine::DataType;
 using FEType = milvus::engine::FieldElementType;
 using Op = milvus::engine::meta::MetaContextOp;
 

@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "db/Types.h"
-#include "db/meta/MetaTypes.h"
 #include "query/GeneralQuery.h"
 #include "utils/Status.h"
 

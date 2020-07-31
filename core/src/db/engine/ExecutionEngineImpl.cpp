@@ -89,10 +89,10 @@ ExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
 }
 
 Status
-ExecutionEngineImpl::CreateStructuredIndex(const milvus::engine::meta::DataType field_type,
-                                           std::vector<uint8_t>& raw_data, knowhere::IndexPtr& index_ptr) {
+ExecutionEngineImpl::CreateStructuredIndex(const DataType field_type, std::vector<uint8_t>& raw_data,
+                                           knowhere::IndexPtr& index_ptr) {
     switch (field_type) {
-        case engine::meta::DataType::INT32: {
+        case engine::DataType::INT32: {
             auto size = raw_data.size() / sizeof(int32_t);
             std::vector<int32_t> int32_data(size, 0);
             memcpy(int32_data.data(), raw_data.data(), size);
@@ -101,20 +101,20 @@ ExecutionEngineImpl::CreateStructuredIndex(const milvus::engine::meta::DataType 
             index_ptr = std::static_pointer_cast<knowhere::Index>(int32_index_ptr);
             break;
         }
-        case engine::meta::DataType::UID:
-        case engine::meta::DataType::INT64: {
+        case engine::DataType::UID:
+        case engine::DataType::INT64: {
             auto int64_index_ptr = std::make_shared<knowhere::StructuredIndexSort<int64_t>>(
                 raw_data.size(), reinterpret_cast<const int64_t*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(int64_index_ptr);
             break;
         }
-        case engine::meta::DataType::FLOAT: {
+        case engine::DataType::FLOAT: {
             auto float_index_ptr = std::make_shared<knowhere::StructuredIndexSort<float>>(
                 raw_data.size(), reinterpret_cast<const float*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(float_index_ptr);
             break;
         }
-        case engine::meta::DataType::DOUBLE: {
+        case engine::DataType::DOUBLE: {
             auto double_index_ptr = std::make_shared<knowhere::StructuredIndexSort<double>>(
                 raw_data.size(), reinterpret_cast<const double*>(raw_data.data()));
             index_ptr = std::static_pointer_cast<knowhere::Index>(double_index_ptr);
@@ -279,7 +279,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         SegmentPtr segment_ptr;
         segment_reader_->GetSegment(segment_ptr);
         knowhere::VecIndexPtr vec_index = nullptr;
-        std::unordered_map<std::string, engine::meta::DataType> attr_type;
+        std::unordered_map<std::string, engine::DataType> attr_type;
 
         auto segment_visitor = segment_reader_->GetSegmentVisitor();
         auto field_visitors = segment_visitor->GetFieldVisitors();
@@ -287,13 +287,13 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             auto& field_visitor = pair.second;
             auto& field = field_visitor->GetField();
             auto type = field->GetFtype();
-            if (field->GetFtype() == (int)engine::meta::DataType::VECTOR_FLOAT ||
-                field->GetFtype() == (int)engine::meta::DataType::VECTOR_BINARY) {
+            if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
+                field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
                 segment_ptr->GetVectorIndex(field->GetName(), vec_index);
-            } else if (type == (int)engine::meta::DataType::UID) {
+            } else if (type == (int)engine::DataType::UID) {
                 continue;
             } else {
-                attr_type.insert(std::make_pair(field->GetName(), (engine::meta::DataType)type));
+                attr_type.insert(std::make_pair(field->GetName(), (engine::DataType)type));
             }
         }
 
@@ -334,7 +334,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
 Status
 ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& general_query,
                                      faiss::ConcurrentBitsetPtr& bitset,
-                                     std::unordered_map<std::string, meta::DataType>& attr_type,
+                                     std::unordered_map<std::string, DataType>& attr_type,
                                      std::string& vector_placeholder) {
     Status status = Status::OK();
     if (general_query->leaf == nullptr) {
@@ -432,33 +432,33 @@ ProcessIndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr& 
 
 Status
 ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const std::string& field_name,
-                                      const meta::DataType& data_type, milvus::json& term_values_json) {
+                                      const DataType& data_type, milvus::json& term_values_json) {
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
     knowhere::IndexPtr index_ptr = nullptr;
     auto attr_index = segment_ptr->GetStructuredIndex(field_name, index_ptr);
     switch (data_type) {
-        case meta::DataType::INT8: {
+        case DataType::INT8: {
             ProcessIndexedTermQuery<int8_t>(bitset, index_ptr, term_values_json);
             break;
         }
-        case meta::DataType::INT16: {
+        case DataType::INT16: {
             ProcessIndexedTermQuery<int16_t>(bitset, index_ptr, term_values_json);
             break;
         }
-        case meta::DataType::INT32: {
+        case DataType::INT32: {
             ProcessIndexedTermQuery<int32_t>(bitset, index_ptr, term_values_json);
             break;
         }
-        case meta::DataType::INT64: {
+        case DataType::INT64: {
             ProcessIndexedTermQuery<int64_t>(bitset, index_ptr, term_values_json);
             break;
         }
-        case meta::DataType::FLOAT: {
+        case DataType::FLOAT: {
             ProcessIndexedTermQuery<float>(bitset, index_ptr, term_values_json);
             break;
         }
-        case meta::DataType::DOUBLE: {
+        case DataType::DOUBLE: {
             ProcessIndexedTermQuery<double>(bitset, index_ptr, term_values_json);
             break;
         }
@@ -469,7 +469,7 @@ ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const 
 
 Status
 ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, const query::TermQueryPtr& term_query,
-                                      std::unordered_map<std::string, meta::DataType>& attr_type) {
+                                      std::unordered_map<std::string, DataType>& attr_type) {
     auto status = Status::OK();
     auto term_query_json = term_query->json_obj;
     auto term_it = term_query_json.begin();
@@ -510,31 +510,31 @@ ProcessIndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr&
 }
 
 Status
-ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const meta::DataType& data_type,
+ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const DataType& data_type,
                                        knowhere::IndexPtr& index_ptr, milvus::json& range_values_json) {
     auto status = Status::OK();
     switch (data_type) {
-        case meta::DataType::INT8: {
+        case DataType::INT8: {
             ProcessIndexedRangeQuery<int8_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case meta::DataType::INT16: {
+        case DataType::INT16: {
             ProcessIndexedRangeQuery<int16_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case meta::DataType::INT32: {
+        case DataType::INT32: {
             ProcessIndexedRangeQuery<int32_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case meta::DataType::INT64: {
+        case DataType::INT64: {
             ProcessIndexedRangeQuery<int64_t>(bitset, index_ptr, range_values_json);
             break;
         }
-        case meta::DataType::FLOAT: {
+        case DataType::FLOAT: {
             ProcessIndexedRangeQuery<float>(bitset, index_ptr, range_values_json);
             break;
         }
-        case meta::DataType::DOUBLE: {
+        case DataType::DOUBLE: {
             ProcessIndexedRangeQuery<double>(bitset, index_ptr, range_values_json);
             break;
         }
@@ -545,7 +545,7 @@ ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const
 }
 
 Status
-ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, meta::DataType>& attr_type,
+ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, DataType>& attr_type,
                                        faiss::ConcurrentBitsetPtr& bitset, const query::RangeQueryPtr& range_query) {
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);

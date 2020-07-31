@@ -19,9 +19,8 @@
 
 #include "config/ServerConfig.h"
 #include "db/Constants.h"
+#include "db/Types.h"
 #include "db/Utils.h"
-#include "db/engine/EngineFactory.h"
-#include "db/meta/MetaTypes.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/Snapshots.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -126,32 +125,32 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
     std::vector<std::string> field_names = ss->GetFieldNames();
     for (auto& name : field_names) {
         snapshot::FieldPtr field = ss->GetField(name);
-        meta::DataType ftype = static_cast<meta::DataType>(field->GetFtype());
+        DataType ftype = static_cast<DataType>(field->GetFtype());
         switch (ftype) {
-            case meta::DataType::BOOL:
+            case DataType::BOOL:
                 single_size += sizeof(bool);
                 break;
-            case meta::DataType::DOUBLE:
+            case DataType::DOUBLE:
                 single_size += sizeof(double);
                 break;
-            case meta::DataType::FLOAT:
+            case DataType::FLOAT:
                 single_size += sizeof(float);
                 break;
-            case meta::DataType::INT8:
+            case DataType::INT8:
                 single_size += sizeof(uint8_t);
                 break;
-            case meta::DataType::INT16:
+            case DataType::INT16:
                 single_size += sizeof(uint16_t);
                 break;
-            case meta::DataType::INT32:
+            case DataType::INT32:
                 single_size += sizeof(uint32_t);
                 break;
-            case meta::DataType::UID:
-            case meta::DataType::INT64:
+            case DataType::UID:
+            case DataType::INT64:
                 single_size += sizeof(uint64_t);
                 break;
-            case meta::DataType::VECTOR_FLOAT:
-            case meta::DataType::VECTOR_BINARY: {
+            case DataType::VECTOR_FLOAT:
+            case DataType::VECTOR_BINARY: {
                 json params = field->GetParams();
                 if (params.find(knowhere::meta::DIM) == params.end()) {
                     std::string msg = "Vector field params must contain: dimension";
@@ -160,7 +159,7 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
                 }
 
                 int64_t dimension = params[knowhere::meta::DIM];
-                if (ftype == meta::DataType::VECTOR_BINARY) {
+                if (ftype == DataType::VECTOR_BINARY) {
                     single_size += (dimension / 8);
                 } else {
                     single_size += (dimension * sizeof(float));

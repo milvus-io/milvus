@@ -35,11 +35,11 @@ CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name,
     auto collection_schema = std::make_shared<Collection>(collection_name);
     context.collection = collection_schema;
     auto vector_field = std::make_shared<Field>("vector", 0,
-                                                milvus::engine::FieldType::VECTOR_FLOAT);
+                                                milvus::engine::DataType::VECTOR_FLOAT);
     auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
                                                                milvus::engine::FieldElementType::FET_INDEX);
     auto int_field = std::make_shared<Field>("int", 0,
-                                             milvus::engine::FieldType::INT32);
+                                             milvus::engine::DataType::INT32);
     context.fields_schema[vector_field] = {vector_field_element};
     context.fields_schema[int_field] = {};
 
@@ -57,13 +57,13 @@ CreateCollection2(std::shared_ptr<DBImpl> db, const std::string& collection_name
 
     milvus::json params;
     params[milvus::knowhere::meta::DIM] = COLLECTION_DIM;
-    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR_FLOAT, params);
+    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::DataType::VECTOR_FLOAT, params);
     context.fields_schema[vector_field] = {};
 
-    std::unordered_map<std::string, milvus::engine::meta::DataType> attr_type = {
-        {"field_0", milvus::engine::FieldType::INT32},
-        {"field_1", milvus::engine::FieldType::INT64},
-        {"field_2", milvus::engine::FieldType::DOUBLE},
+    std::unordered_map<std::string, milvus::engine::DataType> attr_type = {
+        {"field_0", milvus::engine::DataType::INT32},
+        {"field_1", milvus::engine::DataType::INT64},
+        {"field_2", milvus::engine::DataType::DOUBLE},
     };
 
     std::vector<std::string> field_names;
@@ -380,7 +380,7 @@ TEST_F(DBTest, QueryTest) {
     milvus::query::GeneralQueryPtr general_query;
     milvus::query::QueryPtr query_ptr;
     std::vector<std::string> field_names;
-    std::unordered_map<std::string, milvus::engine::meta::DataType> attr_type;
+    std::unordered_map<std::string, milvus::engine::DataType> attr_type;
     milvus::engine::QueryResult result;
     //db_->Query(ctx1, c1, partition_patterns, general_query, query_ptr, field_names, attr_type, result);
 }
@@ -562,6 +562,6 @@ TEST_F(DBTest, StatsTest) {
     int64_t row_count = json_stats[milvus::engine::JSON_ROW_COUNT];
     ASSERT_EQ(row_count, entity_count * 2);
 
-//    std::string ss = json_stats.dump();
-//    std::cout << ss << std::endl;
+    std::string ss = json_stats.dump();
+    std::cout << ss << std::endl;
 }

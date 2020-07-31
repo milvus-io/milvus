@@ -13,6 +13,7 @@
 #include "config/ConfigMgr.h"
 #include "metrics/SystemInfo.h"
 #include "scheduler/SchedInst.h"
+#include "src/version.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 

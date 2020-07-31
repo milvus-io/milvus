@@ -22,21 +22,42 @@
 #include <utility>
 #include <vector>
 
-#include "db/meta/MetaTypes.h"
+#include "db/Types.h"
 #include "utils/Json.h"
 
 namespace milvus {
 namespace engine {
 
-typedef int64_t IDNumber;
-typedef IDNumber* IDNumberPtr;
-typedef std::vector<IDNumber> IDNumbers;
+using DateT = int;
 
-typedef faiss::Index::distance_t VectorDistance;
-typedef std::vector<VectorDistance> VectorDistances;
+using IDNumber = int64_t;
+using IDNumberPtr = IDNumber*;
+using IDNumbers = std::vector<IDNumber>;
 
-typedef std::vector<faiss::Index::idx_t> ResultIds;
-typedef std::vector<faiss::Index::distance_t> ResultDistances;
+using VectorDistance = faiss::Index::distance_t;
+using VectorDistances = std::vector<VectorDistance>;
+
+using ResultIds = std::vector<faiss::Index::idx_t>;
+using ResultDistances = std::vector<faiss::Index::distance_t>;
+
+enum DataType {
+    NONE = 0,
+    BOOL = 1,
+    INT8 = 2,
+    INT16 = 3,
+    INT32 = 4,
+    INT64 = 5,
+
+    FLOAT = 10,
+    DOUBLE = 11,
+
+    STRING = 20,
+
+    UID = 30,
+
+    VECTOR_BINARY = 100,
+    VECTOR_FLOAT = 101,
+};
 
 struct CollectionIndex {
     std::string index_name_;
@@ -60,7 +81,7 @@ struct Entity {
 
 struct AttrsData {
     uint64_t attr_count_ = 0;
-    std::unordered_map<std::string, engine::meta::DataType> attr_type_;
+    std::unordered_map<std::string, engine::DataType> attr_type_;
     std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
     IDNumbers id_array_;
 };
@@ -90,14 +111,13 @@ extern const char* PARAM_INDEX_METRIC_TYPE;
 extern const char* PARAM_INDEX_EXTRA_PARAMS;
 extern const char* PARAM_SEGMENT_ROW_COUNT;
 
+constexpr int64_t BUILD_INDEX_THRESHOLD = 4096;  // row count threshold when building index
 constexpr int64_t MAX_NAME_LENGTH = 255;
 constexpr int64_t MAX_DIMENSION = 32768;
 constexpr int32_t MAX_SEGMENT_ROW_COUNT = 4 * 1024 * 1024;
-constexpr int64_t DEFAULT_SEGMENT_ROW_COUNT = 100000;
+constexpr int64_t DEFAULT_SEGMENT_ROW_COUNT = 100000;  // default row count per segment when creating collection
 constexpr int64_t M_BYTE = 1024 * 1024;
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
-
-using FieldType = meta::DataType;
 
 enum FieldElementType {
     FET_NONE = 0,
