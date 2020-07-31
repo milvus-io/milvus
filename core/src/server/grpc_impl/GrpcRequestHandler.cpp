@@ -849,7 +849,7 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     int valid_size = 0;
     for (auto it : valid_row) {
         response->add_valid_row(it);
-        if(it)
+        if (it)
             valid_size++;
     }
 
