@@ -667,6 +667,9 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     auto read_visitor = engine::SegmentVisitor::Build(ss, segment_id);
+    if (!read_visitor) {
+        return Status(SERVER_FILE_NOT_FOUND, "Segment not exist");
+    }
     segment::SegmentReaderPtr segment_reader =
         std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
 
