@@ -29,7 +29,7 @@ namespace server {
 DescribeIndexReq::DescribeIndexReq(const std::shared_ptr<milvus::server::Context>& context,
                                    const std::string& collection_name, const std::string& field_name,
                                    std::string& index_name, milvus::json& json_params)
-    : BaseReq(context, BaseReq::kCreateIndex),
+    : BaseReq(context, ReqType::kDescribeIndex),
       collection_name_(collection_name),
       field_name_(field_name),
       index_name_(index_name),
@@ -65,7 +65,7 @@ DescribeIndexReq::OnExecute() {
         status = DBWrapper::DB()->DescribeIndex(collection_name_, field_name_, index);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
             } else {
                 return status;
             }
