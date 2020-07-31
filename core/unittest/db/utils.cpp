@@ -19,7 +19,7 @@
 #include <string>
 #include <thread>
 #include <utility>
-#include <fiu-local.h>
+#include <fiu-control.h>
 #include <random>
 
 #include "cache/CpuCacheMgr.h"
@@ -182,10 +182,13 @@ BaseTest::SnapshotStop() {
 void
 BaseTest::SetUp() {
     InitLog();
+    fiu_init(0);
+    fiu_enable_random("Store.ApplyOperation.mock_timeout", 1, nullptr, 0, 0.2);
 }
 
 void
 BaseTest::TearDown() {
+    fiu_disable("Store.ApplyOperation.mock_timeout");
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -250,6 +253,8 @@ DBTest::SetUp() {
 
 void
 DBTest::TearDown() {
+    db_ = nullptr; // db must be stopped before JobMgr and Snapshot
+
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
     milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
@@ -257,7 +262,6 @@ DBTest::TearDown() {
     milvus::scheduler::ResMgrInst::GetInstance()->Clear();
 
     BaseTest::SnapshotStop();
-    db_ = nullptr;
     auto options = GetOptions();
     boost::filesystem::remove_all(options.meta_.path_);
 
@@ -330,13 +334,14 @@ SchedulerTest::SetUp() {
 
 void
 SchedulerTest::TearDown() {
+    db_ = nullptr; // db must be stopped before JobMgr and Snapshot
+
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
     milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
     milvus::scheduler::ResMgrInst::GetInstance()->Stop();
     milvus::scheduler::ResMgrInst::GetInstance()->Clear();
 
-    db_ = nullptr;
     BaseTest::SnapshotStop();
     BaseTest::TearDown();
 }

@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "db/Types.h"
-#include "db/meta/MetaTypes.h"
 #include "query/GeneralQuery.h"
 #include "utils/Status.h"
 
@@ -27,7 +26,6 @@ namespace milvus {
 namespace engine {
 
 using TargetFields = std::set<std::string>;
-using TargetFieldGroups = std::vector<TargetFields>;
 
 struct ExecutionEngineContext {
     query::QueryPtr query_ptr_;

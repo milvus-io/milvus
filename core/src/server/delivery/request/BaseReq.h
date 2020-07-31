@@ -12,7 +12,6 @@
 #pragma once
 
 #include "db/Types.h"
-#include "db/meta/MetaTypes.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
@@ -32,11 +31,15 @@
 namespace milvus {
 namespace server {
 
+struct FieldSchema {
+    engine::DataType field_type_;
+    milvus::json field_params_;
+    milvus::json index_params_;
+};
+
 struct CollectionSchema {
     std::string collection_name_;
-    std::unordered_map<std::string, engine::meta::DataType> field_types_;
-    std::unordered_map<std::string, milvus::json> index_params_;
-    std::unordered_map<std::string, milvus::json> field_params_;
+    std::unordered_map<std::string, FieldSchema> fields_;
     milvus::json extra_params_;
 };
 

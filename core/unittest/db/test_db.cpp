@@ -19,6 +19,7 @@
 
 #include "segment/Segment.h"
 #include "db/utils.h"
+#include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/ResourceHelper.h"
@@ -34,11 +35,11 @@ CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name,
     auto collection_schema = std::make_shared<Collection>(collection_name);
     context.collection = collection_schema;
     auto vector_field = std::make_shared<Field>("vector", 0,
-                                                milvus::engine::FieldType::VECTOR_FLOAT);
+                                                milvus::engine::DataType::VECTOR_FLOAT);
     auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
                                                                milvus::engine::FieldElementType::FET_INDEX);
     auto int_field = std::make_shared<Field>("int", 0,
-                                             milvus::engine::FieldType::INT32);
+                                             milvus::engine::DataType::INT32);
     context.fields_schema[vector_field] = {vector_field_element};
     context.fields_schema[int_field] = {};
 
@@ -54,15 +55,15 @@ CreateCollection2(std::shared_ptr<DBImpl> db, const std::string& collection_name
     auto collection_schema = std::make_shared<Collection>(collection_name);
     context.collection = collection_schema;
 
-    nlohmann::json params;
+    milvus::json params;
     params[milvus::knowhere::meta::DIM] = COLLECTION_DIM;
-    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::FieldType::VECTOR_FLOAT, params);
+    auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::DataType::VECTOR_FLOAT, params);
     context.fields_schema[vector_field] = {};
 
-    std::unordered_map<std::string, milvus::engine::meta::DataType> attr_type = {
-        {"field_0", milvus::engine::FieldType::INT32},
-        {"field_1", milvus::engine::FieldType::INT64},
-        {"field_2", milvus::engine::FieldType::DOUBLE},
+    std::unordered_map<std::string, milvus::engine::DataType> attr_type = {
+        {"field_0", milvus::engine::DataType::INT32},
+        {"field_1", milvus::engine::DataType::INT64},
+        {"field_2", milvus::engine::DataType::DOUBLE},
     };
 
     std::vector<std::string> field_names;
@@ -379,7 +380,7 @@ TEST_F(DBTest, QueryTest) {
     milvus::query::GeneralQueryPtr general_query;
     milvus::query::QueryPtr query_ptr;
     std::vector<std::string> field_names;
-    std::unordered_map<std::string, milvus::engine::meta::DataType> attr_type;
+    std::unordered_map<std::string, milvus::engine::DataType> attr_type;
     milvus::engine::QueryResult result;
     //db_->Query(ctx1, c1, partition_patterns, general_query, query_ptr, field_names, attr_type, result);
 }
@@ -493,10 +494,74 @@ TEST_F(DBTest, IndexTest) {
     status = db_->Flush();
     ASSERT_TRUE(status.ok());
 
-//    milvus::engine::CollectionIndex index;
-//    index.index_name_ = "IVFLAT";
-//    index.metric_name_ = "L2";
-//    index.extra_params_["nlist"] = 2048;
-//    status = db_->CreateIndex(dummy_context_, collection_name, "vector", index);
-//    ASSERT_TRUE(status.ok());
+    {
+        milvus::engine::CollectionIndex index;
+        index.index_name_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+        index.metric_name_ = milvus::knowhere::Metric::L2;
+        index.extra_params_["nlist"] = 2048;
+        status = db_->CreateIndex(dummy_context_, collection_name, "vector", index);
+        ASSERT_TRUE(status.ok());
+    }
+
+    {
+        milvus::engine::CollectionIndex index;
+        index.index_name_ = "SORTED";
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
+        ASSERT_TRUE(status.ok());
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);
+        ASSERT_TRUE(status.ok());
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_2", index);
+        ASSERT_TRUE(status.ok());
+    }
+}
+
+TEST_F(DBTest, StatsTest) {
+    std::string collection_name = "STATS_TEST";
+    auto status = CreateCollection2(db_, collection_name, 0);
+    ASSERT_TRUE(status.ok());
+
+    std::string partition_name = "p1";
+    status = db_->CreatePartition(collection_name, partition_name);
+    ASSERT_TRUE(status.ok());
+
+    const uint64_t entity_count = 10000;
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities(entity_count, 0, data_chunk);
+
+    status = db_->Insert(collection_name, "", data_chunk);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->Insert(collection_name, partition_name, data_chunk);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok());
+
+    {
+        milvus::engine::CollectionIndex index;
+        index.index_name_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+        index.metric_name_ = milvus::knowhere::Metric::L2;
+        index.extra_params_["nlist"] = 2048;
+        status = db_->CreateIndex(dummy_context_, collection_name, "vector", index);
+        ASSERT_TRUE(status.ok());
+    }
+
+    {
+        milvus::engine::CollectionIndex index;
+        index.index_name_ = "SORTED";
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
+        ASSERT_TRUE(status.ok());
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);
+        ASSERT_TRUE(status.ok());
+        status = db_->CreateIndex(dummy_context_, collection_name, "field_2", index);
+        ASSERT_TRUE(status.ok());
+    }
+
+    milvus::json json_stats;
+    status = db_->GetCollectionStats(collection_name, json_stats);
+    int64_t row_count = json_stats[milvus::engine::JSON_ROW_COUNT];
+    ASSERT_EQ(row_count, entity_count * 2);
+
+    std::string ss = json_stats.dump();
+    std::cout << ss << std::endl;
 }

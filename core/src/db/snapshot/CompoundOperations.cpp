@@ -26,6 +26,158 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+CompoundSegmentsOperation::CompoundSegmentsOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+    for (auto& stale_segment_file : context_.stale_segment_files) {
+        stale_segment_files_[stale_segment_file->GetSegmentId()].push_back(stale_segment_file);
+        modified_segments_.insert(stale_segment_file->GetSegmentId());
+    }
+}
+
+Status
+CompoundSegmentsOperation::CommitRowCountDelta(ID_TYPE segment_id, SIZE_TYPE delta, bool sub) {
+    if (context_.new_segment && (context_.new_segment->GetID() == segment_id)) {
+        delta_[segment_id] = {delta, sub};
+    } else if (modified_segments_.find(segment_id) != modified_segments_.end()) {
+        delta_[segment_id] = {delta, sub};
+    } else {
+        return Status(SS_ERROR, "Cannot commit row count delta for segment " + std::to_string(segment_id));
+    }
+    return Status::OK();
+}
+
+Status
+CompoundSegmentsOperation::CommitNewSegment(const OperationContext& context, SegmentPtr& created) {
+    if (context_.new_segment) {
+        return Status(SS_DUPLICATED_ERROR, "Only one new segment could be created");
+    }
+    auto op = std::make_shared<SegmentOperation>(context, GetStartedSS());
+    STATUS_CHECK(op->Push());
+    STATUS_CHECK(op->GetResource(context_.new_segment));
+    created = context_.new_segment;
+    auto s_ctx_p = ResourceContextBuilder<Segment>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, s_ctx_p);
+    return Status::OK();
+}
+
+Status
+CompoundSegmentsOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
+    auto segment = GetStartedSS()->GetResource<Segment>(context.segment_id);
+    if (!segment) {
+        segment = context_.new_segment;
+    }
+
+    if (!segment || segment->GetID() != context.segment_id) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Invalid segment " << context.segment_id << " in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    }
+
+    auto ctx = context;
+    ctx.partition_id = segment->GetPartitionId();
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
+    STATUS_CHECK(new_sf_op->Push());
+    STATUS_CHECK(new_sf_op->GetResource(created));
+    new_segment_files_[created->GetSegmentId()].push_back(created);
+    modified_segments_.insert(created->GetSegmentId());
+    auto sf_ctx_p = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, sf_ctx_p);
+
+    return Status::OK();
+}
+
+Status
+CompoundSegmentsOperation::DoExecute(StorePtr store) {
+    if (!context_.new_segment && stale_segment_files_.size() == 0 && new_segment_files_.size() == 0) {
+        return Status(SS_INVALID_CONTEX_ERROR, "Nothing to do");
+    }
+    if (context_.new_segment && context_.new_segment->IsActive()) {
+        return Status(SS_INVALID_CONTEX_ERROR, "New segment should not be active");
+    }
+
+    auto update_size = [&](SegmentFilePtr& file) {
+        auto update_ctx = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
+        update_ctx->AddAttr(SizeField::Name);
+        AddStepWithLsn(*file, context_.lsn, update_ctx);
+    };
+
+    for (auto& kv : new_segment_files_) {
+        for (auto& new_file : kv.second) {
+            update_size(new_file);
+        }
+    }
+
+    if (context_.new_segment) {
+        modified_segments_.insert(context_.new_segment->GetID());
+    }
+
+    std::map<ID_TYPE, SegmentCommit::VecT> new_sc_map;
+    for (auto& m_seg_id : modified_segments_) {
+        OperationContext context;
+        context.lsn = context_.lsn;
+        auto itstale = stale_segment_files_.find(m_seg_id);
+        if (itstale != stale_segment_files_.end()) {
+            context.stale_segment_files = std::move(itstale->second);
+            stale_segment_files_.erase(itstale);
+        }
+        auto itnew = new_segment_files_.find(m_seg_id);
+        if (itnew != new_segment_files_.end()) {
+            context.new_segment_files = std::move(itnew->second);
+            new_segment_files_.erase(itnew);
+        }
+
+        if (context_.new_segment && context_.new_segment->GetID() == m_seg_id) {
+            context.new_segment = context_.new_segment;
+        }
+
+        SegmentCommitOperation sc_op(context, GetAdjustedSS());
+        STATUS_CHECK(sc_op(store));
+        SegmentCommitPtr new_sc;
+        STATUS_CHECK(sc_op.GetResource(new_sc));
+        auto segc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(meta::oUpdate).CreatePtr();
+        auto it_delta = delta_.find(m_seg_id);
+        if (it_delta != delta_.end()) {
+            auto delta = std::get<0>(it_delta->second);
+            auto is_sub = std::get<1>(it_delta->second);
+            if (delta != 0) {
+                auto new_row_cnt = 0;
+                if (is_sub && new_sc->GetRowCount() < delta) {
+                    return Status(SS_ERROR, "Invalid row count delta for segment " + std::to_string(m_seg_id));
+                } else if (is_sub) {
+                    new_row_cnt = new_sc->GetRowCount() - delta;
+                } else {
+                    new_row_cnt = new_sc->GetRowCount() + delta;
+                }
+                new_sc->SetRowCount(new_row_cnt);
+                segc_ctx_p->AddAttr(RowCountField::Name);
+            }
+        }
+
+        AddStepWithLsn(*new_sc, context.lsn, segc_ctx_p);
+        new_sc_map[new_sc->GetPartitionId()].push_back(new_sc);
+    }
+
+    for (auto& kv : new_sc_map) {
+        auto& partition_id = kv.first;
+        auto context = context_;
+        context.new_segment_commits = kv.second;
+        PartitionCommitOperation pc_op(context, GetAdjustedSS());
+        STATUS_CHECK(pc_op(store));
+        STATUS_CHECK(pc_op.GetResource(context.new_partition_commit));
+        auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(meta::oUpdate).CreatePtr();
+        AddStepWithLsn(*context.new_partition_commit, context.lsn, pc_ctx_p);
+        context_.new_partition_commits.push_back(context.new_partition_commit);
+    }
+
+    CollectionCommitOperation cc_op(context_, GetAdjustedSS());
+    STATUS_CHECK(cc_op(store));
+    STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn, cc_ctx_p);
+
+    return Status::OK();
+}
+
 ChangeSegmentFileOperation::ChangeSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
 }

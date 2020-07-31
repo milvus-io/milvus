@@ -203,6 +203,9 @@ SegmentCommitOperation::SegmentCommitOperation(const OperationContext& context, 
 
 SegmentCommit::Ptr
 SegmentCommitOperation::GetPrevResource() const {
+    if (context_.new_segment) {
+        return nullptr;
+    }
     if (context_.new_segment_files.size() > 0) {
         return GetStartedSS()->GetSegmentCommitBySegmentId(context_.new_segment_files[0]->GetSegmentId());
     } else if (context_.stale_segment_files.size() > 0) {
@@ -225,9 +228,9 @@ SegmentCommitOperation::DoExecute(StorePtr store) {
             size -= stale_segment_file->GetSize();
         }
     } else {
-        resource_ = std::make_shared<SegmentCommit>(GetStartedSS()->GetLatestSchemaCommitId(),
-                                                    context_.new_segment_files[0]->GetPartitionId(),
-                                                    context_.new_segment_files[0]->GetSegmentId());
+        resource_ =
+            std::make_shared<SegmentCommit>(GetStartedSS()->GetLatestSchemaCommitId(),
+                                            context_.new_segment->GetPartitionId(), context_.new_segment->GetID());
     }
     for (auto& new_segment_file : context_.new_segment_files) {
         resource_->GetMappings().insert(new_segment_file->GetID());
@@ -240,9 +243,9 @@ SegmentCommitOperation::DoExecute(StorePtr store) {
 
 Status
 SegmentCommitOperation::PreCheck() {
-    if (context_.stale_segment_files.size() == 0 && context_.new_segment_files.size() == 0) {
+    if (context_.stale_segment_files.size() == 0 && context_.new_segment_files.size() == 0 && !context_.new_segment) {
         std::stringstream emsg;
-        emsg << GetRepr() << ". new_segment_files should not be empty in context";
+        emsg << GetRepr() << ". Segment files should not be empty in context";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     return Status::OK();

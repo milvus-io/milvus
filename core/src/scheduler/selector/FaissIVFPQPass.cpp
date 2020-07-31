@@ -47,9 +47,6 @@ FaissIVFPQPass::Run(const TaskPtr& task) {
     }
 
     auto search_task = std::static_pointer_cast<SearchTask>(task);
-    //    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_PQ) {
-    //        return false;
-    //    }
 
     ResourcePtr res_ptr;
     if (!gpu_enable_) {

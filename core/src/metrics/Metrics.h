@@ -12,7 +12,7 @@
 #pragma once
 
 #include "MetricBase.h"
-#include "db/meta/MetaTypes.h"
+#include "db/Types.h"
 
 namespace milvus {
 namespace server {

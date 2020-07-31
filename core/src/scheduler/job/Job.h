@@ -55,8 +55,8 @@ class Job : public interface::dumpable {
     json
     Dump() const override;
 
-    virtual JobTasks
-    CreateTasks() = 0;
+    JobTasks
+    CreateTasks();
 
     void
     TaskDone(Task* task);
@@ -72,6 +72,9 @@ class Job : public interface::dumpable {
  protected:
     explicit Job(JobType type);
 
+    virtual void
+    OnCreateTasks(JobTasks& tasks) = 0;
+
  protected:
     Status status_;
     std::mutex mutex_;
@@ -82,6 +85,7 @@ class Job : public interface::dumpable {
     JobType type_;
 
     JobTasks tasks_;
+    bool tasks_created_ = false;
 };
 
 using JobPtr = std::shared_ptr<Job>;

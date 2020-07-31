@@ -73,10 +73,16 @@ DBImpl::DBImpl(const DBOptions& options)
         //        mxlog_config.mxlog_path = options_.mxlog_path_;
         //        wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
     }
+
+    /* watch on storage.auto_flush_interval */
+    ConfigMgr::GetInstance().Attach("storage.auto_flush_interval", this);
+
     Start();
 }
 
 DBImpl::~DBImpl() {
+    ConfigMgr::GetInstance().Detach("storage.auto_flush_interval", this);
+
     Stop();
 }
 
@@ -206,7 +212,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     // check uid existence/validation
     bool has_uid = false;
     for (auto& pair : ctx.fields_schema) {
-        if (pair.first->GetFtype() == meta::DataType::UID) {
+        if (pair.first->GetFtype() == DataType::UID) {
             has_uid = true;
             break;
         }
@@ -214,7 +220,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 
     // add uid field if not specified
     if (!has_uid) {
-        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, milvus::engine::FieldType::UID);
+        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, milvus::engine::DataType::UID);
         auto bloom_filter_element = std::make_shared<snapshot::FieldElement>(
             0, 0, DEFAULT_BLOOM_FILTER_NAME, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
         auto delete_doc_element = std::make_shared<snapshot::FieldElement>(
@@ -258,7 +264,7 @@ DBImpl::HasCollection(const std::string& collection_name, bool& has_or_not) {
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
     has_or_not = status.ok();
 
-    return status;
+    return Status::OK();
 }
 
 Status
@@ -286,13 +292,10 @@ DBImpl::GetCollectionInfo(const std::string& collection_name, snapshot::Collecti
 }
 
 Status
-DBImpl::GetCollectionStats(const std::string& collection_name, std::string& collection_stats) {
+DBImpl::GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) {
     CHECK_INITIALIZED;
 
-    nlohmann::json json;
-    STATUS_CHECK(GetSnapshotInfo(collection_name, json));
-
-    collection_stats = json.dump();
+    STATUS_CHECK(GetSnapshotInfo(collection_name, collection_stats));
     return Status::OK();
 }
 
@@ -570,7 +573,52 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
     TimeRecorder rc("DBImpl::Query");
 
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr);
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, query_ptr->collection_id));
+    auto ss_id = ss->GetID();
+
+    /* collect all valid segment */
+    std::vector<SegmentVisitor::Ptr> segment_visitors;
+    auto exec = [&](const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
+        auto p_id = segment->GetPartitionId();
+        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
+        auto& p_name = p_ptr->GetName();
+
+        /* check partition match pattern */
+        bool match = false;
+        if (query_ptr->partitions.empty()) {
+            match = true;
+        } else {
+            for (auto& pattern : query_ptr->partitions) {
+                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
+                    match = true;
+                    break;
+                }
+            }
+        }
+
+        if (match) {
+            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
+            if (!visitor) {
+                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
+            }
+            segment_visitors.push_back(visitor);
+        }
+        return Status::OK();
+    };
+
+    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
+    segment_iter->Iterate();
+    STATUS_CHECK(segment_iter->GetStatus());
+
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
+
+    engine::snapshot::IDS_TYPE segment_ids;
+    for (auto& sv : segment_visitors) {
+        segment_ids.emplace_back(sv->GetSegment()->GetID());
+    }
+
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, ss, options_, query_ptr, segment_ids);
 
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);
@@ -580,61 +628,8 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
         return job->status();
     }
 
-    //    snapshot::ScopedSnapshotT ss;
-    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-    //
-    //    /* collect all valid segment */
-    //    std::vector<SegmentVisitor::Ptr> segment_visitors;
-    //    auto exec = [&] (const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
-    //        auto p_id = segment->GetPartitionId();
-    //        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
-    //        auto& p_name = p_ptr->GetName();
-    //
-    //        /* check partition match pattern */
-    //        bool match = false;
-    //        if (partition_patterns.empty()) {
-    //            match = true;
-    //        } else {
-    //            for (auto &pattern : partition_patterns) {
-    //                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
-    //                    match = true;
-    //                    break;
-    //                }
-    //            }
-    //        }
-    //
-    //        if (match) {
-    //            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
-    //            if (!visitor) {
-    //                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
-    //            }
-    //            segment_visitors.push_back(visitor);
-    //        }
-    //        return Status::OK();
-    //    };
-    //
-    //    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
-    //    segment_iter->Iterate();
-    //    STATUS_CHECK(segment_iter->GetStatus());
-    //
-    //    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
-    //
-    //    VectorsData vectors;
-    //    scheduler::SearchJobPtr job =
-    //        std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
-    //    for (auto& sv : segment_visitors) {
-    //        job->AddSegmentVisitor(sv);
-    //    }
-    //
-    //    // step 2: put search job to scheduler and wait result
-    //    scheduler::JobMgrInst::GetInstance()->Put(job);
-    //    job->WaitResult();
-    //
-    //    if (!job->GetStatus().ok()) {
-    //        return job->GetStatus();
-    //    }
-    //
-    //    // step 3: construct results
+    result = job->query_result();
+    // step 3: construct results
     //    result.row_num_ = job->vector_count();
     //    result.result_ids_ = job->GetResultIds();
     //    result.result_distances_ = job->GetResultDistances();
@@ -944,14 +939,21 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
     std::unique_lock<std::mutex> lock(build_index_mutex_);
 
     for (auto collection_name : collection_names) {
-        SnapshotVisitor ss_visitor(collection_name);
+        snapshot::ScopedSnapshotT latest_ss;
+        auto status = snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
+        if (!status.ok()) {
+            return;
+        }
+        SnapshotVisitor ss_visitor(latest_ss);
 
         snapshot::IDS_TYPE segment_ids;
         ss_visitor.SegmentsToIndex("", segment_ids);
+        if (segment_ids.empty()) {
+            continue;
+        }
 
-        scheduler::BuildIndexJobPtr job =
-            std::make_shared<scheduler::BuildIndexJob>(options_, collection_name, segment_ids);
-
+        LOG_ENGINE_DEBUG_ << "Create BuildIndexJob for " << segment_ids.size() << " segments of " << collection_name;
+        scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_ids);
         scheduler::JobMgrInst::GetInstance()->Put(job);
         job->WaitFinish();
 
@@ -1284,6 +1286,13 @@ DBImpl::ResumeIfLast() {
     if (--live_search_num_ == 0) {
         LOG_ENGINE_TRACE_ << "live_search_num_: " << live_search_num_;
         knowhere::BuildResume();
+    }
+}
+
+void
+DBImpl::ConfigUpdate(const std::string& name) {
+    if (name == "storage.auto_flush_interval") {
+        options_.auto_flush_interval_ = config.storage.auto_flush_interval();
     }
 }
 

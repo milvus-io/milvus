@@ -13,12 +13,24 @@
 
 #include "db/Types.h"
 #include "db/snapshot/Resources.h"
-#include "thirdparty/nlohmann/json.hpp"
+#include "utils/Json.h"
 
 #include <string>
 
 namespace milvus {
 namespace engine {
+
+extern const char* JSON_ROW_COUNT;
+extern const char* JSON_ID;
+extern const char* JSON_PARTITIONS;
+extern const char* JSON_PARTITION_TAG;
+extern const char* JSON_SEGMENTS;
+extern const char* JSON_FIELD;
+extern const char* JSON_NAME;
+extern const char* JSON_FILES;
+extern const char* JSON_INDEX_NAME;
+extern const char* JSON_DATA_SIZE;
+extern const char* JSON_PATH;
 
 Status
 SetSnapshotIndex(const std::string& collection_name, const std::string& field_name,
@@ -35,7 +47,7 @@ bool
 IsVectorField(const engine::snapshot::FieldPtr& field);
 
 Status
-GetSnapshotInfo(const std::string& collection_name, nlohmann::json& json_info);
+GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info);
 
 }  // namespace engine
 }  // namespace milvus
