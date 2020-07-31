@@ -11,7 +11,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-cmake_minimum_required( VERSION 3.15 )
+cmake_minimum_required( VERSION 3.14 )
 message( STATUS "Building using CMake version: ${CMAKE_VERSION}" )
 
 # cmake_policy( SET CMP0079 NEW )
