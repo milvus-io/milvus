@@ -78,6 +78,7 @@ class TestCompactBase:
             status = connect.compact(collection_name)
             # assert not status.OK()
     
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_entity_and_compact(self, connect, collection):
         '''
@@ -322,6 +323,7 @@ class TestCompactBase:
             status = connect.compact(collection_list[i])
             assert status.OK()
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_entity_after_compact(self, connect, collection):
         '''
@@ -622,6 +624,7 @@ class TestCompactJAC:
             status = connect.drop_collection(collection_list[i])
             assert status.OK()
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_entity_after_compact(self, connect, jac_collection):
         '''
@@ -871,6 +874,7 @@ class TestCompactIP:
             status = connect.compact(collection_list[i])
             assert status.OK()
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_entity_after_compact(self, connect, ip_collection):
         '''
