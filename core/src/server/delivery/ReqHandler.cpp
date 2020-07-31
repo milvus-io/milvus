@@ -172,8 +172,9 @@ ReqHandler::DeleteEntityByID(const std::shared_ptr<Context>& context, const std:
 
 Status
 ReqHandler::Search(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                   const milvus::json& json_params, engine::QueryResultPtr& result) {
-    BaseReqPtr req_ptr = SearchReq::Create(context, query_ptr, json_params, result);
+                   const milvus::json& json_params, engine::snapshot::CollectionMappings& collection_mappings,
+                   engine::QueryResultPtr& result) {
+    BaseReqPtr req_ptr = SearchReq::Create(context, query_ptr, json_params, collection_mappings, result);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }

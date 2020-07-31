@@ -23,7 +23,6 @@
 #include <vector>
 
 #include "db/Types.h"
-#include "knowhere/index/vector_index/VecIndex.h"
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
 
@@ -31,24 +30,6 @@ namespace milvus {
 namespace engine {
 
 extern const char* COLLECTIONS_FOLDER;
-
-using FIELD_TYPE = engine::DataType;
-using FIELD_TYPE_MAP = std::unordered_map<std::string, FIELD_TYPE>;
-using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;
-using FIXED_FIELD_DATA = std::vector<uint8_t>;
-using FIXEDX_FIELD_MAP = std::unordered_map<std::string, FIXED_FIELD_DATA>;
-using VARIABLE_FIELD_DATA = std::vector<std::string>;
-using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VARIABLE_FIELD_DATA>;
-using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;
-using STRUCTURED_INDEX_MAP = std::unordered_map<std::string, knowhere::IndexPtr>;
-
-struct DataChunk {
-    int64_t count_ = 0;
-    FIXEDX_FIELD_MAP fixed_fields_;
-    VARIABLE_FIELD_MAP variable_fields_;
-};
-
-using DataChunkPtr = std::shared_ptr<DataChunk>;
 
 class Segment {
  public:
