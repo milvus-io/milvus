@@ -7,12 +7,13 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#2890 Fix the index size caculation in cache
 -   \#2952 Fix the result merging of IVF_PQ IP
--   \#2975 Fix config ut failed
+-   \#2975 Fix config UT failed
 
 ## Feature
 
 ## Improvement
 -   \#2653 Improve IVF search performance when NQ and nProbe are both large
+-   \#2828 Let Faiss not to compile half float by default
 
 ## Task
 
