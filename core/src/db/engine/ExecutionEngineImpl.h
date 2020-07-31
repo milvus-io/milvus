@@ -123,6 +123,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
  protected:
     knowhere::VecIndexPtr index_ = nullptr;
+#ifdef MILVUS_GPU_VERSION
+    knowhere::VecIndexPtr index_reserve_ = nullptr;  // reserve the cpu index before copying it to gpu
+#endif
     std::string location_;
     int64_t dim_;
     EngineType index_type_;
