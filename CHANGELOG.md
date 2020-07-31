@@ -8,6 +8,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#2890 Fix the index size caculation in cache
 -   \#2952 Fix the result merging of IVF_PQ IP
 -   \#2975 Fix config UT failed
+-   \#3012 If the cache is too small, queries using multiple GPUs will cause to crash
 
 ## Feature
 
