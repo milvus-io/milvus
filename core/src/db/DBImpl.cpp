@@ -1118,7 +1118,6 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
         }
 
         case wal::MXLogType::Delete: {
-            auto& snapshots = snapshot::Snapshots::GetInstance();
             snapshot::ScopedSnapshotT ss;
             status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
             if (!status.ok()) {
@@ -1126,21 +1125,13 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            auto partition_names = ss->GetPartitionNames();
-            std::vector<int64_t> partition_ids;
-            for (auto & name: partition_names) {
-                int64_t id;
-                ss->GetPartitionId(name, id);
-                partition_ids.emplace_back(id);
-            }
-
             if (record.length == 1) {
-                status = mem_mgr_->DeleteEntity(ss->GetCollectionId(), partition_ids, *record.ids, record.lsn);
+                status = mem_mgr_->DeleteEntity(ss->GetCollectionId(), *record.ids, record.lsn);
                 if (!status.ok()) {
                     return status;
                 }
             } else {
-                status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), partition_ids, record.length, record.ids, record.lsn);
+                status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), record.length, record.ids, record.lsn);
                 if (!status.ok()) {
                     return status;
                 }
