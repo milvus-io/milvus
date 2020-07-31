@@ -275,7 +275,12 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
     auto block = dim3(kThreadsPerBlock);
 
     // pq centroid distances
-    auto smem = useFloat16Lookup ? sizeof(half) : sizeof(float);
+
+#ifdef FAISS_USE_FLOAT16
+    auto smem = (sizeof(float)== useFloat16Lookup) ? sizeof(half) : sizeof(float);
+#else
+    auto smem = sizeof(float);
+#endif
 
     smem *= numSubQuantizers * numSubQuantizerCodes;
     FAISS_ASSERT(smem <= getMaxSharedMemPerBlockCurrentDevice());
@@ -296,6 +301,7 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
           allDistances);                                                \
     } while (0)
 
+#ifdef FAISS_USE_FLOAT16
 #define RUN_PQ(NUM_SUB_Q)                       \
     do {                                        \
       if (useFloat16Lookup) {                   \
@@ -304,6 +310,12 @@ runMultiPassTile(Tensor<float, 2, true>& queries,
         RUN_PQ_OPT(NUM_SUB_Q, float, float4);   \
       }                                         \
     } while (0)
+#else
+#define RUN_PQ(NUM_SUB_Q)                       \
+    do {                                        \
+        RUN_PQ_OPT(NUM_SUB_Q, float, float4);   \
+    } while (0)
+#endif
 
     switch (bytesPerCode) {
       case 1:
@@ -499,7 +511,12 @@ runPQScanMultiPassNoPrecomputed(Tensor<float, 2, true>& queries,
                               sizeof(int),
                               stream));
 
-  int codeDistanceTypeSize = useFloat16Lookup ? sizeof(half) : sizeof(float);
+  int codeDistanceTypeSize = sizeof(float);
+#ifdef FAISS_USE_FLOAT16
+  if (useFloat16Lookup) {
+        codeDistanceTypeSize = sizeof(half);
+  }
+#endif
 
   int totalCodeDistancesSize =
     queryTileSize * nprobe * numSubQuantizers * numSubQuantizerCodes *
