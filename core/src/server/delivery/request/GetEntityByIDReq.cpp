@@ -78,21 +78,24 @@ GetEntityByIDReq::OnExecute() {
 
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collectionPtr;
-        status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collectionPtr, field_mappings_);
+        engine::snapshot::CollectionMappings collection_mappings;
+        status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collectionPtr, collection_mappings);
         if (collectionPtr == nullptr) {
             return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
         }
 
         if (field_names_.empty()) {
-            for (const auto& schema : field_mappings_) {
+            for (const auto& schema : collection_mappings) {
                 field_names_.emplace_back(schema.first->GetName());
             }
+            field_mappings_ = collection_mappings;
         } else {
             for (const auto& name : field_names_) {
                 bool find_field_name = false;
-                for (const auto& schema : field_mappings_) {
+                for (const auto& schema : collection_mappings) {
                     if (name == schema.first->GetName()) {
                         find_field_name = true;
+                        field_mappings_.insert(schema);
                         break;
                     }
                 }

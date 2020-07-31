@@ -19,12 +19,12 @@
 
 #include "server/delivery/request/BaseReq.h"
 
-#include <src/db/snapshot/Context.h>
-#include <src/db/snapshot/Resources.h>
-#include <src/segment/Segment.h>
 #include <memory>
 #include <string>
 #include <vector>
+#include "db/snapshot/Context.h"
+#include "db/snapshot/Resources.h"
+#include "segment/Segment.h"
 
 namespace milvus {
 namespace server {

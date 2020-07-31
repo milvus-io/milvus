@@ -31,14 +31,20 @@ namespace milvus {
 namespace server {
 
 SearchReq::SearchReq(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                     const milvus::json& json_params, engine::QueryResultPtr& result)
-    : BaseReq(context, BaseReq::kSearch), query_ptr_(query_ptr), json_params_(json_params), result_(result) {
+                     const milvus::json& json_params, engine::snapshot::CollectionMappings& collection_mappings,
+                     engine::QueryResultPtr& result)
+    : BaseReq(context, BaseReq::kSearch),
+      query_ptr_(query_ptr),
+      json_params_(json_params),
+      collection_mappings_(collection_mappings),
+      result_(result) {
 }
 
 BaseReqPtr
 SearchReq::Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                  const milvus::json& json_params, engine::QueryResultPtr& result) {
-    return std::shared_ptr<BaseReq>(new SearchReq(context, query_ptr, json_params, result));
+                  const milvus::json& json_params, engine::snapshot::CollectionMappings& collection_mappings,
+                  engine::QueryResultPtr& result) {
+    return std::shared_ptr<BaseReq>(new SearchReq(context, query_ptr, json_params, collection_mappings, result));
 }
 
 Status
@@ -85,9 +91,10 @@ SearchReq::OnExecute() {
                         return status;
                     }
                     bool find_field_name = false;
-                    for (const auto& schema : field_types) {
-                        if (name.get<std::string>() == schema.first) {
+                    for (const auto& schema : fields_schema) {
+                        if (name.get<std::string>() == schema.first->GetName()) {
                             find_field_name = true;
+                            collection_mappings_.insert(schema);
                             break;
                         }
                     }
