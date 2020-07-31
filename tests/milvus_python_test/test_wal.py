@@ -14,7 +14,6 @@ tag = "1970-01-01"
 insert_interval_time = 1.5
 nb = 6000
 field_name = "float_vector"
-default_index_name = "insert_index"
 entity = gen_entities(1)
 binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
