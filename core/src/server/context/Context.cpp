@@ -54,13 +54,13 @@ Context::IsConnectionBroken() const {
     return context_->IsConnectionBroken();
 }
 
-BaseReq::ReqType
+ReqType
 Context::GetReqType() const {
     return req_type_;
 }
 
 void
-Context::SetReqType(BaseReq::ReqType type) {
+Context::SetReqType(ReqType type) {
     req_type_ = type;
 }
 

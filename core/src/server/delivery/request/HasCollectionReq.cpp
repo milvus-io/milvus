@@ -20,14 +20,12 @@
 namespace milvus {
 namespace server {
 
-HasCollectionReq::HasCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
-                                   const std::string& collection_name, bool& exist)
-    : BaseReq(context, BaseReq::kHasCollection), collection_name_(collection_name), exist_(exist) {
+HasCollectionReq::HasCollectionReq(const ContextPtr& context, const std::string& collection_name, bool& exist)
+    : BaseReq(context, ReqType::kHasCollection), collection_name_(collection_name), exist_(exist) {
 }
 
 BaseReqPtr
-HasCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         bool& exist) {
+HasCollectionReq::Create(const ContextPtr& context, const std::string& collection_name, bool& exist) {
     return std::shared_ptr<BaseReq>(new HasCollectionReq(context, collection_name, exist));
 }
 

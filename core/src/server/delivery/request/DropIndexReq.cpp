@@ -23,17 +23,17 @@
 namespace milvus {
 namespace server {
 
-DropIndexReq::DropIndexReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                           const std::string& field_name, const std::string& index_name)
-    : BaseReq(context, BaseReq::kDropIndex),
+DropIndexReq::DropIndexReq(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+                           const std::string& index_name)
+    : BaseReq(context, ReqType::kDropIndex),
       collection_name_(collection_name),
       field_name_(field_name),
       index_name_(index_name) {
 }
 
 BaseReqPtr
-DropIndexReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                     const std::string& field_name, const std::string& index_name) {
+DropIndexReq::Create(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+                     const std::string& index_name) {
     return std::shared_ptr<BaseReq>(new DropIndexReq(context, collection_name, field_name, index_name));
 }
 
@@ -47,7 +47,7 @@ DropIndexReq::OnExecute() {
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
         // step 2: drop index
@@ -56,6 +56,7 @@ DropIndexReq::OnExecute() {
         if (!status.ok()) {
             return status;
         }
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
