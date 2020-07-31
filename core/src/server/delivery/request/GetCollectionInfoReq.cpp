@@ -51,7 +51,7 @@ GetCollectionInfoReq::OnExecute() {
         collection_schema_.extra_params_ = collection->GetParams();
         for (auto& field_kv : collection_mappings) {
             auto field = field_kv.first;
-            if (field->GetFtype() == (engine::snapshot::FTYPE_TYPE)engine::meta::DataType::UID) {
+            if (field->GetFtype() == (engine::snapshot::FTYPE_TYPE)engine::DataType::UID) {
                 continue;
             }
 
@@ -66,7 +66,7 @@ GetCollectionInfoReq::OnExecute() {
 
             auto field_name = field->GetName();
             FieldSchema field_schema;
-            field_schema.field_type_ = (engine::FieldType)field->GetFtype();
+            field_schema.field_type_ = (engine::DataType)field->GetFtype();
             field_schema.field_params_ = field->GetParams();
             field_schema.index_params_ = field_index_param;
 
