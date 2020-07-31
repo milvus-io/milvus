@@ -34,6 +34,10 @@ GpuIndexIVFPQ::GpuIndexIVFPQ(GpuResources* resources,
     bitsPerCode_(0),
     reserveMemoryVecs_(0),
     index_(nullptr) {
+#ifndef FAISS_USE_FLOAT16
+    FAISS_ASSERT(!ivfpqConfig_.useFloat16LookupTables);
+#endif
+
   copyFrom(index);
 }
 
@@ -55,6 +59,10 @@ GpuIndexIVFPQ::GpuIndexIVFPQ(GpuResources* resources,
     bitsPerCode_(bitsPerCode),
     reserveMemoryVecs_(0),
     index_(nullptr) {
+#ifndef FAISS_USE_FLOAT16
+    FAISS_ASSERT(!config.useFloat16LookupTables);
+#endif
+
   verifySettings_();
 
   // We haven't trained ourselves, so don't construct the PQ index yet
@@ -424,9 +432,11 @@ GpuIndexIVFPQ::verifySettings_() const {
   // We must have enough shared memory on the current device to store
   // our lookup distances
   int lookupTableSize = sizeof(float);
+#ifdef FAISS_USE_FLOAT16
   if (ivfpqConfig_.useFloat16LookupTables) {
     lookupTableSize = sizeof(half);
   }
+#endif
 
   // 64 bytes per code is only supported with usage of float16, at 2^8
   // codes per subquantizer

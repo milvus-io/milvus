@@ -438,6 +438,7 @@ runPQCodeDistancesMM(Tensor<float, 3, true>& pqCentroids,
 
   runSumAlongColumns(pqCentroidsNorm, outDistancesCodeViewCols, stream);
 
+#ifdef FAISS_USE_FLOAT16
   if (useFloat16Lookup) {
     // Need to convert back
     auto outCodeDistancesH = outCodeDistances.toTensor<half>();
@@ -445,6 +446,7 @@ runPQCodeDistancesMM(Tensor<float, 3, true>& pqCentroids,
                                   outCodeDistancesF,
                                   outCodeDistancesH);
   }
+#endif
 }
 
 template <typename CentroidT>
@@ -477,6 +479,7 @@ runPQCodeDistances(Tensor<float, 3, true>& pqCentroids,
   auto smem = (3 * dimsPerSubQuantizer) * sizeof(float)
     + topQueryToCentroid.getSize(1) * sizeof(int);
 
+#ifdef FAISS_USE_FLOAT16
 #define RUN_CODE(DIMS, L2)                                              \
   do {                                                                  \
     if (useFloat16Lookup) {                                             \
@@ -495,6 +498,16 @@ runPQCodeDistances(Tensor<float, 3, true>& pqCentroids,
         topQueryToCentroid, outCodeDistancesT);                         \
     }                                                                   \
   } while (0)
+#else
+#define RUN_CODE(DIMS, L2)                                               \
+    do {                                                                 \
+      auto outCodeDistancesT = outCodeDistances.toTensor<float>();      \
+      pqCodeDistances<float, CentroidT, DIMS, L2><<<grid, block, smem, stream>>>( \
+        queries, kQueriesPerBlock,                                      \
+        coarseCentroids, pqCentroids,                                   \
+        topQueryToCentroid, outCodeDistancesT);                         \
+    } while (0)
+#endif
 
 #define CODE_L2(DIMS)                           \
   do {                                          \

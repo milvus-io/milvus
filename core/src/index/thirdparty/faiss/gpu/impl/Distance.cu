@@ -370,6 +370,7 @@ runIPDistance(GpuResources* resources,
                        outIndices);
 }
 
+#ifdef FAISS_USE_FLOAT16
 void
 runIPDistance(GpuResources* resources,
               Tensor<half, 2, true>& vectors,
@@ -390,6 +391,7 @@ runIPDistance(GpuResources* resources,
                       outDistances,
                       outIndices);
 }
+#endif
 
 void
 runL2Distance(GpuResources* resources,
@@ -416,6 +418,7 @@ runL2Distance(GpuResources* resources,
                        ignoreOutDistances);
 }
 
+#ifdef FAISS_USE_FLOAT16
 void
 runL2Distance(GpuResources* resources,
               Tensor<half, 2, true>& vectors,
@@ -440,5 +443,6 @@ runL2Distance(GpuResources* resources,
                       outIndices,
                       ignoreOutDistances);
 }
+#endif
 
 } } // namespace

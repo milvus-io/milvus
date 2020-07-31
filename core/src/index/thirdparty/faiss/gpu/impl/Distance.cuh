@@ -57,6 +57,7 @@ void runIPDistance(GpuResources* resources,
                    Tensor<float, 2, true>& outDistances,
                    Tensor<int, 2, true>& outIndices);
 
+
 void runL2Distance(GpuResources* resources,
                    Tensor<half, 2, true>& vectors,
                    bool vectorsRowMajor,

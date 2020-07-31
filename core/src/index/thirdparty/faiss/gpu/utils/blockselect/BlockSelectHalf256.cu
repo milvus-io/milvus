@@ -9,7 +9,9 @@
 
 namespace faiss { namespace gpu {
 
+#ifdef FAISS_USE_FLOAT16
 BLOCK_SELECT_IMPL(half, true, 256, 4);
 BLOCK_SELECT_IMPL(half, false, 256, 4);
+#endif
 
 } } // namespace

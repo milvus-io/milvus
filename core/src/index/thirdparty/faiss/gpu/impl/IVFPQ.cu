@@ -60,6 +60,10 @@ IVFPQ::IVFPQ(GpuResources* resources,
   FAISS_ASSERT(dim_ % numSubQuantizers_ == 0);
   FAISS_ASSERT(isSupportedPQCodeLength(bytesPerVector_));
 
+#ifndef FAISS_USE_FLOAT16
+    FAISS_ASSERT(!useFloat16LookupTables_);
+#endif
+
   setPQCentroids_(pqCentroidData);
 }
 
@@ -112,7 +116,9 @@ IVFPQ::setPrecomputedCodes(bool enable) {
     } else {
       // Clear out old precomputed code data
       precomputedCode_ = std::move(DeviceTensor<float, 3, true>());
+#ifdef FAISS_USE_FLOAT16
       precomputedCodeHalf_ = std::move(DeviceTensor<half, 3, true>());
+#endif
     }
   }
 }
@@ -156,6 +162,7 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
   DeviceTensor<float, 2, true> residuals(
     mem, {vecs.getSize(0), vecs.getSize(1)}, stream);
 
+#ifdef FAISS_USE_FLOAT16
   if (quantizer_->getUseFloat16()) {
     auto& coarseCentroids = quantizer_->getVectorsFloat16Ref();
     runCalcResidual(vecs, coarseCentroids, listIds, residuals, stream);
@@ -163,6 +170,10 @@ IVFPQ::classifyAndAddVectors(Tensor<float, 2, true>& vecs,
     auto& coarseCentroids = quantizer_->getVectorsFloat32Ref();
     runCalcResidual(vecs, coarseCentroids, listIds, residuals, stream);
   }
+#else
+    auto& coarseCentroids = quantizer_->getVectorsFloat32Ref();
+    runCalcResidual(vecs, coarseCentroids, listIds, residuals, stream);
+#endif
 
   // Residuals are in the form
   // (vec x numSubQuantizer x dimPerSubQuantizer)
@@ -519,6 +530,7 @@ IVFPQ::precomputeCodesT_() {
 
   // We added into the view, so `coarsePQProductTransposed` is now our
   // precomputed term 2.
+#ifdef FAISS_USE_FLOAT16
   if (useFloat16LookupTables_) {
     precomputedCodeHalf_ =
       convertTensor<float, half, 3>(resources_,
@@ -527,15 +539,23 @@ IVFPQ::precomputeCodesT_() {
   } else {
     precomputedCode_ = std::move(coarsePQProductTransposed);
   }
+#else
+  precomputedCode_ = std::move(coarsePQProductTransposed);
+#endif
+
 }
 
 void
 IVFPQ::precomputeCodes_() {
+#ifdef FAISS_USE_FLOAT16
   if (quantizer_->getUseFloat16()) {
     precomputeCodesT_<half>();
   } else {
     precomputeCodesT_<float>();
   }
+#else
+  precomputeCodesT_<float>();
+#endif
 }
 
 void
@@ -678,6 +698,7 @@ IVFPQ::runPQPrecomputedCodes_(
 
   NoTypeTensor<3, true> term2;
   NoTypeTensor<3, true> term3;
+#ifdef FAISS_USE_FLOAT16
   DeviceTensor<half, 3, true> term3Half;
 
   if (useFloat16LookupTables_) {
@@ -686,7 +707,10 @@ IVFPQ::runPQPrecomputedCodes_(
 
     term2 = NoTypeTensor<3, true>(precomputedCodeHalf_);
     term3 = NoTypeTensor<3, true>(term3Half);
-  } else {
+  }
+#endif
+
+  if (!useFloat16LookupTables_) {
     term2 = NoTypeTensor<3, true>(precomputedCode_);
     term3 = NoTypeTensor<3, true>(term3Transposed);
   }
@@ -754,6 +778,7 @@ IVFPQ::runPQNoPrecomputedCodes_(
   int k,
   Tensor<float, 2, true>& outDistances,
   Tensor<long, 2, true>& outIndices) {
+#ifdef FAISS_USE_FLOAT16
   if (quantizer_->getUseFloat16()) {
     runPQNoPrecomputedCodesT_<half>(queries,
                                     bitset,
@@ -770,7 +795,17 @@ IVFPQ::runPQNoPrecomputedCodes_(
                                      k,
                                      outDistances,
                                      outIndices);
-  }
+    }
+#else
+    runPQNoPrecomputedCodesT_<float>(queries,
+                                     bitset,
+                                     coarseDistances,
+                                     coarseIndices,
+                                     k,
+                                     outDistances,
+                                     outIndices);
+#endif
+
 }
 
 } } // namespace
