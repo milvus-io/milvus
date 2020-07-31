@@ -22,6 +22,7 @@
 #include "server/delivery/request/CreateIndexReq.h"
 #include "server/delivery/request/CreatePartitionReq.h"
 #include "server/delivery/request/DeleteEntityByIDReq.h"
+#include "server/delivery/request/DescribeIndexReq.h"
 #include "server/delivery/request/DropCollectionReq.h"
 #include "server/delivery/request/DropIndexReq.h"
 #include "server/delivery/request/DropPartitionReq.h"
@@ -130,6 +131,14 @@ Status
 ReqHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
                         const std::string& field_name, const std::string& index_name, const milvus::json& json_params) {
     BaseReqPtr req_ptr = CreateIndexReq::Create(context, collection_name, field_name, index_name, json_params);
+    ReqScheduler::ExecReq(req_ptr);
+    return req_ptr->status();
+}
+
+Status
+ReqHandler::DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                          const std::string& field_name, std::string& index_name, milvus::json& json_params) {
+    BaseReqPtr req_ptr = DescribeIndexReq::Create(context, collection_name, field_name, index_name, json_params);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }

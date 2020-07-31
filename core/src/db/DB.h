@@ -86,10 +86,10 @@ class DB {
                 const CollectionIndex& index) = 0;
 
     virtual Status
-    DropIndex(const std::string& collection_name, const std::string& field_name) = 0;
+    DropIndex(const std::string& collection_name, const std::string& field_name = "") = 0;
 
     virtual Status
-    DropIndex(const std::string& collection_id) = 0;
+    DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) = 0;
 
     virtual Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) = 0;
