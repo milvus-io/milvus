@@ -734,7 +734,8 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         query_ptr_->root = general_query;
 
         engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-        status = req_handler_.Search(context_ptr_, query_ptr_, extra_params, result);
+        engine::snapshot::CollectionMappings collection_mappings;
+        status = req_handler_.Search(context_ptr_, query_ptr_, extra_params, collection_mappings, result);
 
         if (!status.ok()) {
             return status;
@@ -761,7 +762,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
             search_result_json.emplace_back(raw_result_json);
         }
         nlohmann::json attr_json;
-        ConvertRowToColumnJson(result->attrs_, query_ptr_->field_names, result->row_num_, attr_json);
+        //        ConvertRowToColumnJson(result->attrs_, query_ptr_->field_names, result->row_num_, attr_json);
         result_json["Entity"] = attr_json;
         result_json["result"] = search_result_json;
         result_str = result_json.dump();

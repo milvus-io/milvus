@@ -263,6 +263,104 @@ ConstructResults(const TopKQueryResult& result, ::milvus::grpc::QueryResult* res
 }
 
 void
+CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
+                      const engine::snapshot::CollectionMappings& field_mappings, int64_t id_size,
+                      ::milvus::grpc::Entities* response) {
+    for (const auto& it : field_mappings) {
+        auto type = it.first->GetFtype();
+        std::string name = it.first->GetName();
+        std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
+
+        auto single_size = data.size() / id_size;
+
+        if (type == engine::DataType::UID) {
+            int64_t int64_value;
+            auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
+            for (int i = 0; i < id_size; i++) {
+                auto offset = i * single_size;
+                memcpy(&int64_value, data.data() + offset, single_size);
+                response->add_ids(int64_value);
+            }
+            continue;
+        }
+
+        auto field_value = response->add_fields();
+        auto vector_record = field_value->mutable_vector_record();
+
+        field_value->set_field_name(name);
+        field_value->set_type(static_cast<milvus::grpc::DataType>(type));
+        // general data
+        if (type == engine::DataType::VECTOR_BINARY) {
+            // add binary vector data
+            std::vector<int8_t> binary_vector;
+            auto vector_size = single_size * sizeof(int8_t) / sizeof(int8_t);
+            binary_vector.resize(vector_size);
+            for (int i = 0; i < id_size; i++) {
+                auto vector_row_record = vector_record->add_records();
+                auto offset = i * single_size;
+                memcpy(binary_vector.data(), data.data() + offset, single_size);
+                vector_row_record->mutable_binary_data()->resize(binary_vector.size());
+                memcpy(vector_row_record->mutable_binary_data()->data(), binary_vector.data(), binary_vector.size());
+            }
+
+        } else if (type == engine::DataType::VECTOR_FLOAT) {
+            // add float vector data
+            std::vector<float> float_vector;
+            auto vector_size = single_size * sizeof(int8_t) / sizeof(float);
+            float_vector.resize(vector_size);
+            for (int i = 0; i < id_size; i++) {
+                auto vector_row_record = vector_record->add_records();
+                auto offset = i * single_size;
+                memcpy(float_vector.data(), data.data() + offset, single_size);
+                vector_row_record->mutable_float_data()->Resize(vector_size, 0.0);
+                memcpy(vector_row_record->mutable_float_data()->mutable_data(), float_vector.data(),
+                       float_vector.size() * sizeof(float));
+            }
+        } else {
+            // add attribute data
+            auto attr_record = field_value->mutable_attr_record();
+            if (type == engine::DataType::INT32) {
+                // add int32 data
+                int32_t int32_value;
+                auto int32_size = single_size * sizeof(int8_t) / sizeof(int32_t);
+                for (int i = 0; i < id_size; i++) {
+                    auto offset = i * single_size;
+                    memcpy(&int32_value, data.data() + offset, single_size);
+                    attr_record->add_int32_value(int32_value);
+                }
+            } else if (type == engine::DataType::INT64) {
+                // add int64 data
+                int64_t int64_value;
+                auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
+                for (int i = 0; i < id_size; i++) {
+                    auto offset = i * single_size;
+                    memcpy(&int64_value, data.data() + offset, single_size);
+                    attr_record->add_int64_value(int64_value);
+                }
+            } else if (type == engine::DataType::DOUBLE) {
+                // add double data
+                double double_value;
+                auto int32_size = single_size * sizeof(int8_t) / sizeof(double);
+                for (int i = 0; i < id_size; i++) {
+                    auto offset = i * single_size;
+                    memcpy(&double_value, data.data() + offset, single_size);
+                    attr_record->add_double_value(double_value);
+                }
+            } else if (type == engine::DataType::FLOAT) {
+                // add float data
+                float float_value;
+                auto float_size = single_size * sizeof(int8_t) / sizeof(float);
+                for (int i = 0; i < id_size; i++) {
+                    auto offset = i * single_size;
+                    memcpy(&float_value, data.data() + offset, single_size);
+                    attr_record->add_float_value(float_value);
+                }
+            }
+        }
+    }
+}
+
+void
 ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::vector<engine::VectorsData>& vectors,
                        std::vector<std::string>& field_names, ::milvus::grpc::Entities* response) {
     if (!response) {
@@ -743,8 +841,6 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     engine::DataChunkPtr data_chunk;
     engine::snapshot::CollectionMappings field_mappings;
 
-    std::vector<engine::AttrsData> attrs;
-    std::vector<engine::VectorsData> vectors;
     std::vector<bool> valid_row;
 
     Status status = req_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, field_names,
@@ -754,99 +850,7 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
         response->add_valid_row(it);
     }
 
-    auto id_size = vector_ids.size();
-    for (const auto& it : field_mappings) {
-        auto type = it.first->GetFtype();
-        std::string name = it.first->GetName();
-        std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
-
-        auto single_size = data.size() / id_size;
-
-        if (type == engine::DataType::UID) {
-            int64_t int64_value;
-            auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
-            for (int i = 0; i < id_size; i++) {
-                auto offset = i * single_size;
-                memcpy(&int64_value, data.data() + offset, single_size);
-                response->add_ids(int64_value);
-            }
-            continue;
-        }
-
-        auto field_value = response->add_fields();
-        auto vector_record = field_value->mutable_vector_record();
-
-        field_value->set_field_name(name);
-        field_value->set_type(static_cast<milvus::grpc::DataType>(type));
-        // general data
-        if (type == engine::DataType::VECTOR_BINARY) {
-            // add binary vector data
-            std::vector<int8_t> binary_vector;
-            auto vector_size = single_size * sizeof(int8_t) / sizeof(int8_t);
-            binary_vector.resize(vector_size);
-            for (int i = 0; i < id_size; i++) {
-                auto vector_row_record = vector_record->add_records();
-                auto offset = i * single_size;
-                memcpy(binary_vector.data(), data.data() + offset, single_size);
-                vector_row_record->mutable_binary_data()->resize(binary_vector.size());
-                memcpy(vector_row_record->mutable_binary_data()->data(), binary_vector.data(), binary_vector.size());
-            }
-
-        } else if (type == engine::DataType::VECTOR_FLOAT) {
-            // add float vector data
-            std::vector<float> float_vector;
-            auto vector_size = single_size * sizeof(int8_t) / sizeof(float);
-            float_vector.resize(vector_size);
-            for (int i = 0; i < id_size; i++) {
-                auto vector_row_record = vector_record->add_records();
-                auto offset = i * single_size;
-                memcpy(float_vector.data(), data.data() + offset, single_size);
-                vector_row_record->mutable_float_data()->Resize(vector_size, 0.0);
-                memcpy(vector_row_record->mutable_float_data()->mutable_data(), float_vector.data(),
-                       float_vector.size() * sizeof(float));
-            }
-        } else {
-            // add attribute data
-            auto attr_record = field_value->mutable_attr_record();
-            if (type == engine::DataType::INT32) {
-                // add int32 data
-                int32_t int32_value;
-                auto int32_size = single_size * sizeof(int8_t) / sizeof(int32_t);
-                for (int i = 0; i < id_size; i++) {
-                    auto offset = i * single_size;
-                    memcpy(&int32_value, data.data() + offset, single_size);
-                    attr_record->add_int32_value(int32_value);
-                }
-            } else if (type == engine::DataType::INT64) {
-                // add int64 data
-                int64_t int64_value;
-                auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
-                for (int i = 0; i < id_size; i++) {
-                    auto offset = i * single_size;
-                    memcpy(&int64_value, data.data() + offset, single_size);
-                    attr_record->add_int64_value(int64_value);
-                }
-            } else if (type == engine::DataType::DOUBLE) {
-                // add double data
-                double double_value;
-                auto int32_size = single_size * sizeof(int8_t) / sizeof(double);
-                for (int i = 0; i < id_size; i++) {
-                    auto offset = i * single_size;
-                    memcpy(&double_value, data.data() + offset, single_size);
-                    attr_record->add_double_value(double_value);
-                }
-            } else if (type == engine::DataType::FLOAT) {
-                // add float data
-                float float_value;
-                auto float_size = single_size * sizeof(int8_t) / sizeof(float);
-                for (int i = 0; i < id_size; i++) {
-                    auto offset = i * single_size;
-                    memcpy(&float_value, data.data() + offset, single_size);
-                    attr_record->add_float_value(float_value);
-                }
-            }
-        }
-    }
+    CopyDataChunkToEntity(data_chunk, field_mappings, vector_ids.size(), response);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -1393,12 +1397,13 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
     std::vector<std::string> field_names;
-    status = req_handler_.Search(GetContext(context), query_ptr, json_params, result);
+    engine::snapshot::CollectionMappings collection_mappings;
+    status = req_handler_.Search(GetContext(context), query_ptr, json_params, collection_mappings, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
     auto grpc_entity = response->mutable_entities();
-    ConstructEntityResults(result->attrs_, result->vectors_, field_names, grpc_entity);
+    //    ConstructEntityResults(result->attrs_, result->vectors_, field_names, grpc_entity);
     grpc_entity->mutable_ids()->Resize(static_cast<int>(result->result_ids_.size()), 0);
     memcpy(grpc_entity->mutable_ids()->mutable_data(), result->result_ids_.data(),
            result->result_ids_.size() * sizeof(int64_t));
@@ -1751,11 +1756,16 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     }
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-    status = req_handler_.Search(GetContext(context), query_ptr, json_params, result);
+    engine::snapshot::CollectionMappings collection_mappings;
+
+    status = req_handler_.Search(GetContext(context), query_ptr, json_params, collection_mappings, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
-    ConstructEntityResults(result->attrs_, result->vectors_, query_ptr->field_names, grpc_entity);
+    int64_t id_size = result->result_ids_.size();
+    grpc_entity->mutable_valid_row()->Resize(id_size, true);
+
+    CopyDataChunkToEntity(result->data_chunk_, collection_mappings, id_size, grpc_entity);
 
     grpc_entity->mutable_ids()->Resize(static_cast<int>(result->result_ids_.size()), 0);
     memcpy(grpc_entity->mutable_ids()->mutable_data(), result->result_ids_.data(),
