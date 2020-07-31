@@ -28,12 +28,10 @@ namespace server {
 class CompactReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           double compact_threshold);
+    Create(const ContextPtr& context, const std::string& collection_name, double compact_threshold);
 
  protected:
-    CompactReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-               double compact_threshold);
+    CompactReq(const ContextPtr& context, const std::string& collection_name, double compact_threshold);
 
     Status
     OnExecute() override;

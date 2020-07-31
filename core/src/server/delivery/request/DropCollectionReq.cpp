@@ -18,13 +18,12 @@
 namespace milvus {
 namespace server {
 
-DropCollectionReq::DropCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
-                                     const std::string& collection_name)
-    : BaseReq(context, BaseReq::kDropCollection), collection_name_(collection_name) {
+DropCollectionReq::DropCollectionReq(const ContextPtr& context, const std::string& collection_name)
+    : BaseReq(context, ReqType::kDropCollection), collection_name_(collection_name) {
 }
 
 BaseReqPtr
-DropCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+DropCollectionReq::Create(const ContextPtr& context, const std::string& collection_name) {
     return std::shared_ptr<BaseReq>(new DropCollectionReq(context, collection_name));
 }
 
@@ -39,7 +38,7 @@ DropCollectionReq::OnExecute() {
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
         STATUS_CHECK(DBWrapper::DB()->DropCollection(collection_name_));

@@ -23,11 +23,10 @@ namespace server {
 class ListCollectionsReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, std::vector<std::string>& collection_list);
+    Create(const ContextPtr& context, std::vector<std::string>& collection_list);
 
  protected:
-    ListCollectionsReq(const std::shared_ptr<milvus::server::Context>& context,
-                       std::vector<std::string>& collection_name_list);
+    ListCollectionsReq(const ContextPtr& context, std::vector<std::string>& collection_list);
 
     Status
     OnExecute() override;

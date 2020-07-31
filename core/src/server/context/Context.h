@@ -18,7 +18,7 @@
 #include <grpcpp/server_context.h>
 
 #include "server/context/ConnectionContext.h"
-#include "server/delivery/request/BaseReq.h"
+#include "server/delivery/request/Types.h"
 #include "tracing/TraceContext.h"
 
 namespace milvus {
@@ -51,15 +51,15 @@ class Context {
     bool
     IsConnectionBroken() const;
 
-    BaseReq::ReqType
+    ReqType
     GetReqType() const;
 
     void
-    SetReqType(BaseReq::ReqType type);
+    SetReqType(ReqType type);
 
  private:
     std::string req_id_;
-    BaseReq::ReqType req_type_;
+    ReqType req_type_;
     std::shared_ptr<tracing::TraceContext> trace_context_;
     ConnectionContextPtr context_;
 };

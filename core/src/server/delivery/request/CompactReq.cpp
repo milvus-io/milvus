@@ -28,14 +28,12 @@
 namespace milvus {
 namespace server {
 
-CompactReq::CompactReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                       double compact_threshold)
-    : BaseReq(context, BaseReq::kCompact), collection_name_(collection_name), compact_threshold_(compact_threshold) {
+CompactReq::CompactReq(const ContextPtr& context, const std::string& collection_name, double compact_threshold)
+    : BaseReq(context, ReqType::kCompact), collection_name_(collection_name), compact_threshold_(compact_threshold) {
 }
 
 BaseReqPtr
-CompactReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                   double compact_threshold) {
+CompactReq::Create(const ContextPtr& context, const std::string& collection_name, double compact_threshold) {
     return std::shared_ptr<BaseReq>(new CompactReq(context, collection_name, compact_threshold));
 }
 
@@ -48,7 +46,7 @@ CompactReq::OnExecute() {
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
         STATUS_CHECK(DBWrapper::DB()->Compact(context_, collection_name_, compact_threshold_));

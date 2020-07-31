@@ -77,10 +77,10 @@ ErrorMap(ErrorCode code) {
 }
 
 std::string
-RequestMap(BaseReq::ReqType req_type) {
-    static const std::unordered_map<BaseReq::ReqType, std::string> req_map = {
-        {BaseReq::kInsert, "Insert"}, {BaseReq::kCreateIndex, "CreateIndex"},     {BaseReq::kSearch, "Search"},
-        {BaseReq::kFlush, "Flush"},   {BaseReq::kGetEntityByID, "GetEntityByID"}, {BaseReq::kCompact, "Compact"},
+RequestMap(ReqType req_type) {
+    static const std::unordered_map<ReqType, std::string> req_map = {
+        {ReqType::kInsert, "Insert"}, {ReqType::kCreateIndex, "CreateIndex"},     {ReqType::kSearch, "Search"},
+        {ReqType::kFlush, "Flush"},   {ReqType::kGetEntityByID, "GetEntityByID"}, {ReqType::kCompact, "Compact"},
     };
 
     if (req_map.find(req_type) != req_map.end()) {

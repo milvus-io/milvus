@@ -27,14 +27,12 @@
 namespace milvus {
 namespace server {
 
-FlushReq::FlushReq(const std::shared_ptr<milvus::server::Context>& context,
-                   const std::vector<std::string>& collection_names)
-    : BaseReq(context, BaseReq::kFlush), collection_names_(collection_names) {
+FlushReq::FlushReq(const ContextPtr& context, const std::vector<std::string>& collection_names)
+    : BaseReq(context, ReqType::kFlush), collection_names_(collection_names) {
 }
 
 BaseReqPtr
-FlushReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                 const std::vector<std::string>& collection_names) {
+FlushReq::Create(const ContextPtr& context, const std::vector<std::string>& collection_names) {
     return std::shared_ptr<BaseReq>(new FlushReq(context, collection_names));
 }
 
@@ -60,7 +58,7 @@ FlushReq::OnExecute() {
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(name, exist);
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(name));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + name);
         }
 
         STATUS_CHECK(DBWrapper::DB()->Flush(name));

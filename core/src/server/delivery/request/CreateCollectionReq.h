@@ -23,12 +23,12 @@ namespace server {
 class CreateCollectionReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::unordered_map<std::string, FieldSchema>& fields, milvus::json& extra_params);
+    Create(const ContextPtr& context, const std::string& collection_name, FieldsType& fields,
+           milvus::json& extra_params);
 
  protected:
-    CreateCollectionReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                        std::unordered_map<std::string, FieldSchema>& fields, milvus::json& extra_params);
+    CreateCollectionReq(const ContextPtr& context, const std::string& collection_name, FieldsType& fields,
+                        milvus::json& extra_params);
 
     Status
     OnExecute() override;

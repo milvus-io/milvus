@@ -22,40 +22,46 @@
 namespace milvus {
 namespace server {
 
-DropPartitionReq::DropPartitionReq(const std::shared_ptr<milvus::server::Context>& context,
-                                   const std::string& collection_name, const std::string& tag)
-    : BaseReq(context, BaseReq::kDropPartition), collection_name_(collection_name), tag_(tag) {
+DropPartitionReq::DropPartitionReq(const ContextPtr& context, const std::string& collection_name,
+                                   const std::string& tag)
+    : BaseReq(context, ReqType::kDropPartition), collection_name_(collection_name), tag_(tag) {
 }
 
 BaseReqPtr
-DropPartitionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         const std::string& tag) {
+DropPartitionReq::Create(const ContextPtr& context, const std::string& collection_name, const std::string& tag) {
     return std::shared_ptr<BaseReq>(new DropPartitionReq(context, collection_name, tag));
 }
 
 Status
 DropPartitionReq::OnExecute() {
-    std::string hdr = "DropPartitionReq(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
-    TimeRecorderAuto rc(hdr);
+    try {
+        std::string hdr = "DropPartitionReq(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
+        TimeRecorderAuto rc(hdr);
 
-    /* check partition tag */
-    if (tag_ == milvus::engine::DEFAULT_PARTITON_TAG) {
-        std::string msg = "Default partition cannot be dropped.";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_COLLECTION_NAME, msg);
+        /* check partition tag */
+        if (tag_ == milvus::engine::DEFAULT_PARTITON_TAG) {
+            std::string msg = "Default partition cannot be dropped.";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_COLLECTION_NAME, msg);
+        }
+
+        /* check collection */
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
+        }
+
+        rc.RecordSection("check validation");
+
+        /* drop partition */
+        STATUS_CHECK(DBWrapper::DB()->DropPartition(collection_name_, tag_));
+        rc.ElapseFromBegin("done");
+    } catch (std::exception& ex) {
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    /* check collection */
-    bool exist = false;
-    auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
-    if (!exist) {
-        return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-    }
-
-    rc.RecordSection("check validation");
-
-    /* drop partition */
-    return DBWrapper::DB()->DropPartition(collection_name_, tag_);
+    return Status::OK();
 }
 
 }  // namespace server

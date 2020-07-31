@@ -17,19 +17,17 @@
 
 #include <fiu-local.h>
 #include <memory>
-#include <unordered_map>
 #include <vector>
 
 namespace milvus {
 namespace server {
 
-LoadCollectionReq::LoadCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
-                                     const std::string& collection_name)
-    : BaseReq(context, BaseReq::kLoadCollection), collection_name_(collection_name) {
+LoadCollectionReq::LoadCollectionReq(const ContextPtr& context, const std::string& collection_name)
+    : BaseReq(context, ReqType::kLoadCollection), collection_name_(collection_name) {
 }
 
 BaseReqPtr
-LoadCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name) {
+LoadCollectionReq::Create(const ContextPtr& context, const std::string& collection_name) {
     return std::shared_ptr<BaseReq>(new LoadCollectionReq(context, collection_name));
 }
 
@@ -44,7 +42,7 @@ LoadCollectionReq::OnExecute() {
         auto status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
             } else {
                 return status;
             }

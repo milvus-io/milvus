@@ -22,12 +22,12 @@ namespace server {
 class DropIndexReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const std::string& field_name, const std::string& index_name);
+    Create(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+           const std::string& index_name);
 
  protected:
-    DropIndexReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                 const std::string& field_name, const std::string& index_name);
+    DropIndexReq(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+                 const std::string& index_name);
 
     Status
     OnExecute() override;

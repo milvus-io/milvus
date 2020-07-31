@@ -25,7 +25,6 @@ namespace server {
 namespace {
 Status
 ScheduleReq(const BaseReqPtr& req, std::queue<BaseReqPtr>& queue) {
-#if 1
     if (req == nullptr) {
         return Status(SERVER_NULL_POINTER, "request schedule cannot handle null object");
     }
@@ -35,8 +34,7 @@ ScheduleReq(const BaseReqPtr& req, std::queue<BaseReqPtr>& queue) {
         return Status::OK();
     }
 
-    static std::map<BaseReq::ReqType, ReqStrategyPtr> s_schedulers = {
-        {BaseReq::kSearch, std::make_shared<SearchReqStrategy>()}};
+    static std::map<ReqType, ReqStrategyPtr> s_schedulers = {{ReqType::kSearch, std::make_shared<SearchReqStrategy>()}};
 
     auto iter = s_schedulers.find(req->type());
     if (iter == s_schedulers.end() || iter->second == nullptr) {
@@ -44,9 +42,6 @@ ScheduleReq(const BaseReqPtr& req, std::queue<BaseReqPtr>& queue) {
     } else {
         iter->second->ReScheduleQueue(req, queue);
     }
-#else
-    queue.push(request);
-#endif
 
     return Status::OK();
 }

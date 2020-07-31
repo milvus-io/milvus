@@ -32,7 +32,8 @@ const char* JSON_ID = "id";
 const char* JSON_PARTITIONS = "partitions";
 const char* JSON_SEGMENTS = "segments";
 const char* JSON_FIELD = "field";
-const char* JSON_NAME = "name";
+const char* JSON_FIELD_ELEMENT = "field_element";
+const char* JSON_PARTITION_TAG = "tag";
 const char* JSON_FILES = "files";
 const char* JSON_INDEX_NAME = "index_name";
 const char* JSON_DATA_SIZE = "data_size";
@@ -161,7 +162,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
         auto partition = ss->GetPartition(name);
 
         milvus::json json_partition;
-        json_partition[JSON_NAME] = name;
+        json_partition[JSON_PARTITION_TAG] = name;
         json_partition[JSON_ID] = partition->GetID();
 
         auto partition_commit = ss->GetPartitionCommitByPartitionId(partition->GetID());
@@ -204,7 +205,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
                     json_file[JSON_PATH] =
                         engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", pair.second->GetFile());
                     json_file[JSON_FIELD] = field->GetName();
-                    json_file[JSON_NAME] = element->GetName();
+                    json_file[JSON_FIELD_ELEMENT] = element->GetName();
                 }
                 json_files.push_back(json_file);
             }
