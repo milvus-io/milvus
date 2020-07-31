@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-#include "db/Types.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 #include "utils/Json.h"
 
 namespace milvus {
@@ -59,6 +59,24 @@ enum DataType {
     VECTOR_FLOAT = 101,
 };
 
+using FIELD_TYPE = engine::DataType;
+using FIELD_TYPE_MAP = std::unordered_map<std::string, FIELD_TYPE>;
+using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;
+using FIXED_FIELD_DATA = std::vector<uint8_t>;
+using FIXEDX_FIELD_MAP = std::unordered_map<std::string, FIXED_FIELD_DATA>;
+using VARIABLE_FIELD_DATA = std::vector<std::string>;
+using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VARIABLE_FIELD_DATA>;
+using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;
+using STRUCTURED_INDEX_MAP = std::unordered_map<std::string, knowhere::IndexPtr>;
+
+struct DataChunk {
+    int64_t count_ = 0;
+    FIXEDX_FIELD_MAP fixed_fields_;
+    VARIABLE_FIELD_MAP variable_fields_;
+};
+
+using DataChunkPtr = std::shared_ptr<DataChunk>;
+
 struct CollectionIndex {
     std::string index_name_;
     std::string metric_name_;
@@ -90,8 +108,7 @@ struct QueryResult {
     uint64_t row_num_;
     engine::ResultIds result_ids_;
     engine::ResultDistances result_distances_;
-    std::vector<engine::VectorsData> vectors_;
-    std::vector<engine::AttrsData> attrs_;
+    engine::DataChunkPtr data_chunk_;
 };
 using QueryResultPtr = std::shared_ptr<QueryResult>;
 
