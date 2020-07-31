@@ -30,10 +30,9 @@
 namespace milvus {
 namespace server {
 
-SearchReq::SearchReq(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                     const milvus::json& json_params, engine::snapshot::CollectionMappings& collection_mappings,
-                     engine::QueryResultPtr& result)
-    : BaseReq(context, BaseReq::kSearch),
+SearchReq::SearchReq(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
+                     engine::snapshot::CollectionMappings& collection_mappings, engine::QueryResultPtr& result)
+    : BaseReq(context, ReqType::kSearch),
       query_ptr_(query_ptr),
       json_params_(json_params),
       collection_mappings_(collection_mappings),
@@ -41,9 +40,8 @@ SearchReq::SearchReq(const std::shared_ptr<milvus::server::Context>& context, co
 }
 
 BaseReqPtr
-SearchReq::Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                  const milvus::json& json_params, engine::snapshot::CollectionMappings& collection_mappings,
-                  engine::QueryResultPtr& result) {
+SearchReq::Create(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
+                  engine::snapshot::CollectionMappings& collection_mappings, engine::QueryResultPtr& result) {
     return std::shared_ptr<BaseReq>(new SearchReq(context, query_ptr, json_params, collection_mappings, result));
 }
 
@@ -52,7 +50,6 @@ SearchReq::OnExecute() {
     try {
         fiu_do_on("SearchReq.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "SearchReq(table=" + query_ptr_->collection_id;
-
         TimeRecorder rc(hdr);
 
         // step 2: check table existence
@@ -63,7 +60,7 @@ SearchReq::OnExecute() {
         fiu_do_on("SearchReq.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(query_ptr_->collection_id));
+                return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + query_ptr_->collection_id);
             } else {
                 return status;
             }
@@ -135,7 +132,7 @@ SearchReq::OnExecute() {
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");
-        rc.ElapseFromBegin("totally cost");
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
