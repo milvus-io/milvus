@@ -79,12 +79,12 @@ CreateCollectionReq::OnExecute() {
                 index_name = index_params["name"];
             }
 
-            if (field_type == engine::FieldType::VECTOR_FLOAT || field_type == engine::FieldType::VECTOR_BINARY) {
+            if (field_type == engine::DataType::VECTOR_FLOAT || field_type == engine::DataType::VECTOR_BINARY) {
                 if (!field_params.contains(engine::PARAM_DIMENSION)) {
                     return Status(SERVER_INVALID_VECTOR_DIMENSION, "Dimension not defined in field_params");
                 } else {
                     auto dim = field_params[engine::PARAM_DIMENSION].get<int64_t>();
-                    if (field_type == engine::FieldType::VECTOR_FLOAT) {
+                    if (field_type == engine::DataType::VECTOR_FLOAT) {
                         STATUS_CHECK(ValidateDimension(dim, false));
                     } else {
                         STATUS_CHECK(ValidateDimension(dim, true));

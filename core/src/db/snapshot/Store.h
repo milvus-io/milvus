@@ -284,7 +284,7 @@ class Store : public std::enable_shared_from_this<Store> {
                 std::stringstream fname;
                 fname << "f_" << fi << "_" << ++id_map[FieldElement::Name];
 
-                Field temp_f(fname.str(), fi, FieldType::VECTOR_FLOAT);
+                Field temp_f(fname.str(), fi, DataType::VECTOR_FLOAT);
                 FieldPtr field;
 
                 temp_f.Activate();
