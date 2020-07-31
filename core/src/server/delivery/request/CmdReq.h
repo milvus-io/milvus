@@ -23,10 +23,10 @@ namespace server {
 class CmdReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& cmd, std::string& result);
+    Create(const ContextPtr& context, const std::string& cmd, std::string& result);
 
  protected:
-    CmdReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& cmd, std::string& result);
+    CmdReq(const ContextPtr& context, const std::string& cmd, std::string& result);
 
     Status
     OnExecute() override;
