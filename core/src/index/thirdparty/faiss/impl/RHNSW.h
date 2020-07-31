@@ -221,6 +221,49 @@ struct RHNSW {
     std::vector<NodeDistFarther>& output,
     int max_size);
 
+
+  // reimplementations of hnswlib
+  /** add point pt_id on all levels <= pt_level and build the link
+    * structure for them. inspired by implementation of hnswlib */
+  void addPoint(DistanceComputer& ptdis, int pt_level, int pt_id,
+                      std::vector<omp_lock_t>& locks,
+                      DistanceComputer& inner_dis,
+                      const Index* storage,
+                      VisitedTable& vt);
+
+  std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> >
+  search_layer (DistanceComputer& ptdis,
+                storage_idx_t pt_id,
+                storage_idx_t nearest,
+                float d_nearest,
+                int level,
+                omp_lock_t *locks,
+                VisitedTable &vt);
+
+  std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> >
+  search_base_layer (DistanceComputer& ptdis,
+                     storage_idx_t nearest,
+                     float d_nearest,
+                     VisitedTable &vt) const;
+
+  void make_connection(DistanceComputer& ptdis,
+                       storage_idx_t pt_id,
+                       std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> > &cand,
+                       omp_lock_t *locks,
+                       DistanceComputer& inner_dis,
+                       const Index* storage,
+                       int level);
+
+  void prune_neighbors(std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> > &cand,
+                       DistanceComputer& inner_dis,
+                       const Index* storage,
+                       const int maxM, int *ret, int &ret_len);
+
+  /// search interface inspired by hnswlib
+  void searchKnn(DistanceComputer& qdis, int k,
+              idx_t *I, float *D,
+              VisitedTable& vt) const;
+
 };
 
 

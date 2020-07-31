@@ -790,5 +790,280 @@ int RHNSW::MinimaxHeap::count_below(float thresh) {
   return n_below;
 }
 
+/**************************************************************
+ * new implementation of hnsw ispired by hnswlib
+ * by cmli@zilliz   July 30, 2020
+ **************************************************************/
+void RHNSW::addPoint(DistanceComputer& ptdis, int pt_level, int pt_id,
+                     std::vector<omp_lock_t>& locks,
+                     DistanceComputer& inner_dis,
+                     const Index* storage,
+                     VisitedTable& vt) {
+  storage_idx_t nearest;
+#pragma omp critical
+  {
+    nearest = entry_point;
+
+    if (nearest == -1) {
+      max_level = pt_level;
+      entry_point = pt_id;
+    }
+  }
+
+  if (nearest < 0) {
+    return;
+  }
+
+  omp_set_lock(&locks[pt_id]);
+
+  int level = max_level; // level at which we start adding neighbors
+  float d_nearest = ptdis(nearest);
+
+  for(; level > pt_level; level--) {
+    greedy_update_nearest(*this, ptdis, level, nearest, d_nearest);
+  }
+
+  for(; level >= 0; level--) {
+//    add_links_starting_from(ptdis, pt_id, nearest, d_nearest,
+//                            level, locks.data(), vt);
+    std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> > top_cand =
+            search_layer(ptdis, pt_id, nearest, d_nearest, level, locks.data(), vt);
+    nearest = top_cand.top().id;
+    d_nearest = ptdis(nearest);
+    make_connection(ptdis, pt_id, top_cand, locks.data(), inner_dis, storage, level);
+    vt.advance();
+  }
+
+  omp_unset_lock(&locks[pt_id]);
+
+  if (pt_level > max_level) {
+    max_level = pt_level;
+    entry_point = pt_id;
+  }
+}
+
+std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> >
+RHNSW::search_layer(DistanceComputer& ptdis,
+                    storage_idx_t pt_id,
+                    storage_idx_t nearest,
+                    float d_nearest,
+                    int level,
+                    omp_lock_t *locks,
+                    VisitedTable &vt) {
+  std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> > top_candidates;
+  std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> > candidate_set;
+
+  float lb = d_nearest;
+  top_candidates.emplace(d_nearest, nearest);
+  candidate_set.emplace(-d_nearest, nearest);
+  vt.set(nearest);
+  while (!candidate_set.empty()) {
+    NodeDistCloser currNode = candidate_set.top();
+    if ((-currNode.d) > lb)
+      break;
+    candidate_set.pop();
+    int cur_id = currNode.id;
+    omp_set_lock(&locks[cur_id]);
+    int *cur_link = get_neighbor_link(cur_id, level);
+    auto cur_neighbor_num = get_neighbors_num(cur_link);
+    for (auto i = 1; i <= cur_neighbor_num; ++ i) {
+      int candidate_id = cur_link[i];
+      if (vt.get(candidate_id)) continue;
+      vt.set(candidate_id);
+      float dcand = ptdis(candidate_id);
+      if (top_candidates.size() < efConstruction || lb > dcand) {
+        candidate_set.emplace(-dcand, candidate_id);
+        top_candidates.emplace(dcand, candidate_id);
+        if (top_candidates.size() > efConstruction)
+          top_candidates.pop();
+        if (!top_candidates.empty())
+          lb = top_candidates.top().d;
+      }
+    }
+    omp_unset_lock(&locks[cur_id]);
+  }
+  return top_candidates;
+}
+
+std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> >
+RHNSW::search_base_layer(DistanceComputer& ptdis,
+                         storage_idx_t nearest,
+                         float d_nearest,
+                         VisitedTable &vt) const {
+  std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> > top_candidates;
+  std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> > candidate_set;
+
+  float lb = d_nearest;
+  top_candidates.emplace(d_nearest, nearest);
+  candidate_set.emplace(-d_nearest, nearest);
+  vt.set(nearest);
+  while (!candidate_set.empty()) {
+    NodeDistCloser currNode = candidate_set.top();
+    if ((-currNode.d) > lb)
+      break;
+    candidate_set.pop();
+    int cur_id = currNode.id;
+    int *cur_link = get_neighbor_link(cur_id, 0);
+    auto cur_neighbor_num = get_neighbors_num(cur_link);
+    for (auto i = 1; i <= cur_neighbor_num; ++ i) {
+      int candidate_id = cur_link[i];
+      if (vt.get(candidate_id)) continue;
+      vt.set(candidate_id);
+      float dcand = ptdis(candidate_id);
+      if (top_candidates.size() < efSearch || lb > dcand) {
+        candidate_set.emplace(-dcand, candidate_id);
+        top_candidates.emplace(dcand, candidate_id);
+        if (top_candidates.size() > efSearch)
+          top_candidates.pop();
+        if (!top_candidates.empty())
+          lb = top_candidates.top().d;
+      }
+    }
+  }
+  return top_candidates;
+}
+
+void
+RHNSW::make_connection(DistanceComputer& ptdis,
+                       storage_idx_t pt_id,
+                       std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> > &cand,
+                       omp_lock_t *locks,
+                       DistanceComputer& inner_dis,
+                       const Index* storage,
+                       int level) {
+  int maxM = level ? M : M << 1;
+  int *selectedNeighbors = (int*)malloc(sizeof(int) * maxM);
+  int selectedNeighborsNum = 0;
+  prune_neighbors(cand, inner_dis, storage, maxM, selectedNeighbors, selectedNeighborsNum);
+  if (selectedNeighborsNum > maxM)
+    throw std::runtime_error("Wrong size of candidates returned by prune_neighbors!");
+
+  int *cur_link = get_neighbor_link(pt_id, level);
+  if (*cur_link)
+    throw std::runtime_error("The newly inserted element should have blank link");
+
+  set_neighbors_num(cur_link, selectedNeighborsNum);
+  for (auto i = 1; i <= selectedNeighborsNum; ++ i) {
+    if (cur_link[i])
+      throw std::runtime_error("Possible memory corruption.");
+    if (level > levels[selectedNeighbors[i - 1]])
+      throw std::runtime_error("Trying to make a link on a non-exisitent level.");
+    cur_link[i] = selectedNeighbors[i - 1];
+  }
+
+  float *tmp = (float*)malloc(storage->d * sizeof(float));
+  for (auto i = 0; i < selectedNeighborsNum; ++ i) {
+    omp_set_lock(&locks[selectedNeighbors[i]]);
+    int *selected_link = get_neighbor_link(selectedNeighbors[i], level);
+    auto selected_neighbor_num = get_neighbors_num(selected_link);
+    if (selected_neighbor_num > maxM)
+      throw std::runtime_error("Bad value of selected_neighbor_num.");
+    if (selectedNeighbors[i] == pt_id)
+      throw std::runtime_error("Trying to connect an element to itself.");
+    if (level > levels[selectedNeighbors[i]])
+      throw std::runtime_error("Trying to make a link on a non-exisitent level.");
+    if (selected_neighbor_num < maxM) {
+      selected_link[selected_neighbor_num + 1] = pt_id;
+      set_neighbors_num(selected_link, selected_neighbor_num + 1);
+    } else {
+      double d_max = ptdis(selectedNeighbors[i]);
+      std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> > candi;
+      candi.emplace(d_max, pt_id);
+      storage->reconstruct(selectedNeighbors[i], tmp);
+      inner_dis.set_query(tmp);
+      for (auto j = 1; j <= selected_neighbor_num; ++ j)
+        candi.emplace(inner_dis(selected_link[j]), selected_link[j]);
+      int indx = 0;
+      prune_neighbors(candi, inner_dis, storage, maxM, selected_link + 1, indx);
+      set_neighbors_num(selected_link, indx);
+    }
+    omp_unset_lock(&locks[selectedNeighbors[i]]);
+  }
+
+  free(selectedNeighbors);
+  free(tmp);
+}
+
+void RHNSW::prune_neighbors(std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> > &cand,
+                            DistanceComputer& inner_dis,
+                            const Index* storage,
+                            const int maxM, int *ret, int &ret_len) {
+  if (cand.size() < maxM) {
+    while (!cand.empty()) {
+      ret[ret_len ++] = cand.top().id;
+      cand.pop();
+    }
+    return;
+  }
+  std::priority_queue<NodeDistCloser> closest;
+
+  while (!cand.empty()) {
+    closest.emplace(-cand.top().d, cand.top().id);
+    cand.pop();
+  }
+
+  float *tmp = (float*)malloc(storage->d * sizeof(float));
+  while (closest.size()) {
+    if (ret_len >= maxM)
+      break;
+    NodeDistCloser curr = closest.top();
+    float dist_to_query = -curr.d;
+    closest.pop();
+    bool good = true;
+    storage->reconstruct(curr.id, tmp);
+    inner_dis.set_query(tmp);
+    for (auto i = 0; i < ret_len; ++ i) {
+      float cur_dist = inner_dis(ret[i]);
+      if (cur_dist < dist_to_query) {
+        good = false;
+        break;
+      }
+    }
+    if (good) {
+      ret[ret_len ++] = curr.id;
+    }
+  }
+  free(tmp);
+}
+
+void RHNSW::searchKnn(DistanceComputer& qdis, int k,
+            idx_t *I, float *D,
+            VisitedTable& vt) const {
+  if (levels.size() == 0)
+    return;
+  int ep = entry_point;
+  float dist = qdis(ep);
+
+  for (auto i = max_level; i > 0; -- i) {
+    bool good = true;
+    while (good) {
+      good = false;
+      int *ep_link = get_neighbor_link(ep, i);
+      auto ep_neighbors_cnt = get_neighbors_num(ep_link);
+      for (auto j = 1; j <= ep_neighbors_cnt; ++ j) {
+        int cand = ep_link[j];
+        if (cand < 0 || cand > levels.size())
+          throw std::runtime_error("cand error");
+        float d = qdis(cand);
+        if (d < dist) {
+          dist = d;
+          ep = cand;
+          good = true;
+        }
+      }
+    }
+  }
+  std::priority_queue<NodeDistCloser, std::vector<NodeDistCloser> > top_candidates = search_base_layer(qdis, ep, dist, vt);
+  while (top_candidates.size() > k)
+    top_candidates.pop();
+  int i = 0;
+  while (!top_candidates.empty()) {
+    I[i] = top_candidates.top().id;
+    D[i] = top_candidates.top().d;
+    i ++;
+    top_candidates.pop();
+  }
+  vt.advance();
+}
 
 }  // namespace faiss

@@ -10,9 +10,8 @@
 #include <cstdlib>
 #include <cassert>
 #include <chrono>
-#include <gperftools/profiler.h>
 
-#include "../../../hnswlib/hnswalg_nm.h"
+#include <faiss/IndexRHNSW.h>
 #include "/usr/include/hdf5/serial/hdf5.h"
 #include "/usr/include/hdf5/serial/H5Cpp.h"
 
@@ -33,13 +32,12 @@ void LoadData(const std::string file_location, float *&data, const std::string d
     status = H5Fclose(fd);
 }
 
-using namespace hnswlib_nm;
 int main() {
     int d = 128;                            // dimension
-//    int nb = 1000000;                       // database size
-    int nb = 100000;                       // database size
-    int nq = 10000;                        // nb of queries
-//    int nq = 10;                        // nb of queries
+    int nb = 1000000;                       // database size
+//    int nb = 100;                       // database size
+//    int nq = 10000;                        // nb of queries
+    int nq = 100;                        // nb of queries
     int M = 16;
     int efConstruction = 200;
     int efSearch = 100;
@@ -54,6 +52,7 @@ int main() {
             xb[d * i + j] = drand48();
         xb[d * i] += i / 1000.;
     }
+
     /*
     std::string data_location = "/home/zilliz/workspace/data/sift-128-euclidean.hdf5";
     std::cout << "start load sift data ..." << std::endl;
@@ -71,47 +70,39 @@ int main() {
     }
 
 
-    hnswlib_nm::L2Space *space = new hnswlib_nm::L2Space(d);
-    std::shared_ptr<HierarchicalNSW_NM<float>> hnsw = std::make_shared<HierarchicalNSW_NM<float>>(space, nb, M, efConstruction);
+    std::shared_ptr<faiss::IndexRHNSWFlat> hnsw = std::make_shared<faiss::IndexRHNSWFlat>(d, M);
+    hnsw->hnsw.efConstruction = efConstruction;
+    hnsw->hnsw.efSearch = efSearch;
 
+//    hnsw->verbose = true;
+
+    std::cout << "start to build" << std::endl;
     auto ts = std::chrono::high_resolution_clock::now();
-    ProfilerStart("milvus.profile");
-    hnsw->addPoint(xb, 0, 0, 0);
-#pragma omp parallel for
-    for (int i = 1; i < nb; ++ i) {
-        hnsw->addPoint(xb, i, 0, i);
-    }
-    ProfilerStop();
+    hnsw->add(nb, xb);
     auto te = std::chrono::high_resolution_clock::now();
     std::cout << "build index costs: " << std::chrono::duration_cast<std::chrono::milliseconds>(te - ts).count() << "ms " << std::endl;
-//    hnsw->show_stats();
-//    hnsw->print_stats();
 
     {       // search xq
-//        long *I = new long[k * nq];
-//        float *D = new float[k * nq];
-
-        using P = std::pair<float, int64_t>;
-        auto compare = [](const P& v1, const P& v2) { return v1.first < v2.first; };
-        hnsw->setEf(efSearch);
+        long *I = new long[topk * nq];
+        float *D = new float[topk * nq];
 
         ts = std::chrono::high_resolution_clock::now();
         int correct_cnt = 0;
-#pragma omp parallel for
-        for (int i = 0; i < nq; ++ i) {
-            std::vector<P> ret;
-            ret = hnsw->searchKnn_NM((void*)(xb + i * d), topk, compare, nullptr, xb);
-//            {
-//                if (i == ret[0].second || ret[0].first < 1e-5)
-//                    correct_cnt ++;
-//            }
+        hnsw->search(nq, xb, topk, D, I, nullptr);
+        {
+            for (auto i = 0; i < nq; ++ i) {
+                if (i == I[i * topk] || D[i * topk] < 1e-5)
+                    correct_cnt ++;
+                for (auto j = 0; j < topk; ++ j)
+                    std::cout << "query " << i << ", topk " << j << ": id = " << I[i * topk + j] << ", dis = " << D[i * topk + j] << std::endl;
+            }
         }
         te = std::chrono::high_resolution_clock::now();
         std::cout << "search " << nq << " times costs: " << std::chrono::duration_cast<std::chrono::milliseconds>(te - ts).count() << "ms " << std::endl;
         std::cout << "correct query of top" << topk << " is " << correct_cnt << std::endl;
 
-//        delete [] I;
-//        delete [] D;
+        delete [] I;
+        delete [] D;
     }
 
 
@@ -121,5 +112,4 @@ int main() {
 
     return 0;
 }
-
 

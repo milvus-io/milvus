@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cassert>
 #include <chrono>
+#include <gperftools/profiler.h>
 
 #include <faiss/IndexRHNSW.h>
 #include "/usr/include/hdf5/serial/hdf5.h"
@@ -35,9 +36,9 @@ void LoadData(const std::string file_location, float *&data, const std::string d
 int main() {
     int d = 128;                            // dimension
     int nb = 1000000;                       // database size
-//    int nb = 100;                       // database size
-//    int nq = 10000;                        // nb of queries
-    int nq = 100;                        // nb of queries
+//    int nb = 100000;                       // database size
+    int nq = 10000;                        // nb of queries
+//    int nq = 10;                        // nb of queries
     int M = 16;
     int efConstruction = 200;
     int efSearch = 100;
@@ -78,7 +79,9 @@ int main() {
 
     std::cout << "start to build" << std::endl;
     auto ts = std::chrono::high_resolution_clock::now();
+    ProfilerStart("cmli.profile");
     hnsw->add(nb, xb);
+    ProfilerStop();
     auto te = std::chrono::high_resolution_clock::now();
     std::cout << "build index costs: " << std::chrono::duration_cast<std::chrono::milliseconds>(te - ts).count() << "ms " << std::endl;
 
@@ -89,14 +92,14 @@ int main() {
         ts = std::chrono::high_resolution_clock::now();
         int correct_cnt = 0;
         hnsw->search(nq, xb, topk, D, I, nullptr);
-        {
-            for (auto i = 0; i < nq; ++ i) {
-                if (i == I[i * topk] || D[i * topk] < 1e-5)
-                    correct_cnt ++;
-                for (auto j = 0; j < topk; ++ j)
-                    std::cout << "query " << i << ", topk " << j << ": id = " << I[i * topk + j] << ", dis = " << D[i * topk + j] << std::endl;
-            }
-        }
+//        {
+//            for (auto i = 0; i < nq; ++ i) {
+//                if (i == I[i * topk] || D[i * topk] < 1e-5)
+//                    correct_cnt ++;
+//                for (auto j = 0; j < topk; ++ j)
+//                    std::cout << "query " << i << ", topk " << j << ": id = " << I[i * topk + j] << ", dis = " << D[i * topk + j] << std::endl;
+//            }
+//        }
         te = std::chrono::high_resolution_clock::now();
         std::cout << "search " << nq << " times costs: " << std::chrono::duration_cast<std::chrono::milliseconds>(te - ts).count() << "ms " << std::endl;
         std::cout << "correct query of top" << topk << " is " << correct_cnt << std::endl;

@@ -108,7 +108,6 @@ DistanceComputer *storage_distance_computer(const Index *storage)
 }
 
 
-
 void hnsw_add_vertices(IndexRHNSW &index_hnsw,
                        size_t n0,
                        size_t n, const float *x,
@@ -152,23 +151,11 @@ void hnsw_add_vertices(IndexRHNSW &index_hnsw,
                 hist.push_back(0);
             hist[pt_level] ++;
         }
-        if (verbose) {
-            printf("size of histogram is %d\n elements of histogram is:\n", hist.size());
-            for (auto i = 0; i < hist.size(); ++ i)
-                printf("%d ", hist[i]);
-            printf("\n");
-        }
 
         // accumulate
         std::vector<int> offsets(hist.size() + 1, 0);
         for (int i = 0; i < hist.size() - 1; i++) {
             offsets[i + 1] = offsets[i] + hist[i];
-        }
-        if (verbose) {
-            printf("size of offsets is %d\n elements of offsets is:\n", offsets.size());
-            for (auto i = 0; i < offsets.size(); ++ i)
-                printf("%d ", offsets[i]);
-            printf("\n");
         }
 
         // bucket sort
@@ -177,18 +164,13 @@ void hnsw_add_vertices(IndexRHNSW &index_hnsw,
             int pt_level = hnsw.levels[pt_id];
             order[offsets[pt_level]++] = pt_id;
         }
-        if (verbose) {
-            printf("size of order is %d\n elements of order is:\n", order.size());
-            for (auto i = 0; i < order.size(); ++ i)
-                printf("%d ", order[i]);
-            printf("\n");
-        }
     }
 
     idx_t check_period = InterruptCallback::get_period_hint
         (max_level * index_hnsw.d * hnsw.efConstruction);
 
     { // perform add
+        auto tas = getmillisecs();
         RandomGenerator rng2(789);
 
         int i1 = n;
@@ -214,6 +196,9 @@ void hnsw_add_vertices(IndexRHNSW &index_hnsw,
                 DistanceComputer *dis =
                     storage_distance_computer (index_hnsw.storage);
                 ScopeDeleter1<DistanceComputer> del(dis);
+                DistanceComputer *inner_dis =
+                        storage_distance_computer (index_hnsw.storage);
+                ScopeDeleter1<DistanceComputer> del2(inner_dis);
                 int prev_display = verbose && omp_get_thread_num() == 0 ? 0 : -1;
                 size_t counter = 0;
 
@@ -231,15 +216,8 @@ void hnsw_add_vertices(IndexRHNSW &index_hnsw,
                     }
 
 //                    vt.set(pt_id);
-                    hnsw.add_with_locks(*dis, pt_level, pt_id, locks, vt);
-
-//                    int *cur_links = hnsw.get_neighbor_link(pt_id, 0);
-//                    int *cur_neighbors = cur_links + 1;
-//                    auto cur_neighbor_num = hnsw.get_neighbors_num(cur_links);
-//                    printf("node %d added, has %d neighbors at level 0:\n", pt_id, cur_neighbor_num);
-//                    for (auto i = 0; i < cur_neighbor_num; ++ i)
-//                        printf("%d ", cur_neighbors[i]);
-//                    printf("\n");
+//                    hnsw.add_with_locks(*dis, pt_level, pt_id, locks, vt);
+                    hnsw.addPoint(*dis, pt_level, pt_id, locks, *inner_dis, index_hnsw.storage, vt);
 
                     if (prev_display >= 0 && i - i0 > prev_display + 10000) {
                         prev_display = i - i0;
@@ -256,6 +234,7 @@ void hnsw_add_vertices(IndexRHNSW &index_hnsw,
                     if (verbose) {
                         printf("end add point %d\n", pt_id);
                     }
+                    vt.advance();
                 }
 
             }
@@ -265,6 +244,7 @@ void hnsw_add_vertices(IndexRHNSW &index_hnsw,
             i1 = i0;
         }
         FAISS_ASSERT(i1 == 0);
+        printf("add actually costs %.2fms\n", getmillisecs() - tas);
     }
     if (verbose) {
         printf("Done in %.3f ms\n", getmillisecs() - t0);
@@ -275,6 +255,152 @@ void hnsw_add_vertices(IndexRHNSW &index_hnsw,
     }
 }
 
+void hnsw_add_vertices2(IndexRHNSW &index_hnsw,
+                       size_t n0,
+                       size_t n, const float *x,
+                       bool verbose,
+                       bool preset_levels = false) {
+    size_t d = index_hnsw.d;
+    RHNSW & hnsw = index_hnsw.hnsw;
+    size_t ntotal = n0 + n;
+    double t0 = getmillisecs();
+    if (verbose) {
+        printf("hnsw_add_vertices: adding %ld elements on top of %ld "
+               "(preset_levels=%d)\n",
+               n, n0, int(preset_levels));
+    }
+
+    if (n == 0) {
+        return;
+    }
+
+    int max_level = hnsw.prepare_level_tab(n, preset_levels);
+
+    if (verbose) {
+        printf("  max_level = %d\n", max_level);
+    }
+
+    std::vector<omp_lock_t> locks(ntotal);
+    for(int i = 0; i < ntotal; i++)
+        omp_init_lock(&locks[i]);
+
+    // add vectors from highest to lowest level
+    std::vector<int> hist;
+    std::vector<int> order(n);
+
+    { // make buckets with vectors of the same level
+
+        // build histogram
+        for (int i = 0; i < n; i++) {
+            storage_idx_t pt_id = i + n0;
+            int pt_level = hnsw.levels[pt_id];
+            while (pt_level >= hist.size())
+                hist.push_back(0);
+            hist[pt_level] ++;
+        }
+
+        // accumulate
+        std::vector<int> offsets(hist.size() + 1, 0);
+        for (int i = 0; i < hist.size() - 1; i++) {
+            offsets[i + 1] = offsets[i] + hist[i];
+        }
+
+        // bucket sort
+        for (int i = 0; i < n; i++) {
+            storage_idx_t pt_id = i + n0;
+            int pt_level = hnsw.levels[pt_id];
+            order[offsets[pt_level]++] = pt_id;
+        }
+    }
+
+    idx_t check_period = InterruptCallback::get_period_hint
+        (max_level * index_hnsw.d * hnsw.efConstruction);
+
+    { // perform add
+        auto tas = getmillisecs();
+        RandomGenerator rng2(789);
+
+        int i1 = n;
+
+        for (int pt_level = hist.size() - 1; pt_level >= 0; pt_level--) {
+            int i0 = i1 - hist[pt_level];
+
+            if (verbose) {
+                printf("Adding %d elements at level %d\n",
+                       i1 - i0, pt_level);
+            }
+
+            // random permutation to get rid of dataset order bias
+            for (int j = i0; j < i1; j++)
+                std::swap(order[j], order[j + rng2.rand_int(i1 - j)]);
+
+            bool interrupt = false;
+
+#pragma omp parallel if(i1 > i0 + 100)
+            {
+                VisitedTable vt (ntotal);
+
+                DistanceComputer *dis =
+                    storage_distance_computer (index_hnsw.storage);
+                ScopeDeleter1<DistanceComputer> del(dis);
+                DistanceComputer *inner_dis =
+                        storage_distance_computer (index_hnsw.storage);
+                ScopeDeleter1<DistanceComputer> del2(inner_dis);
+                int prev_display = verbose && omp_get_thread_num() == 0 ? 0 : -1;
+                size_t counter = 0;
+
+#pragma omp  for schedule(dynamic)
+                for (int i = i0; i < i1; i++) {
+                    storage_idx_t pt_id = order[i];
+                    if (verbose) {
+                        printf("start add point %d\n", pt_id);
+                    }
+                    dis->set_query (x + (pt_id - n0) * d);
+
+                    // cannot break
+                    if (interrupt) {
+                        continue;
+                    }
+
+//                    vt.set(pt_id);
+//                    hnsw.add_with_locks(*dis, pt_level, pt_id, locks, vt);
+                    hnsw.addPoint(*dis, pt_level, pt_id, locks, *inner_dis, index_hnsw.storage, vt);
+
+                    if (prev_display >= 0 && i - i0 > prev_display + 10000) {
+                        prev_display = i - i0;
+                        printf("  %d / %d\r", i - i0, i1 - i0);
+                        fflush(stdout);
+                    }
+
+                    if (counter % check_period == 0) {
+                        if (InterruptCallback::is_interrupted ()) {
+                            interrupt = true;
+                        }
+                    }
+                    counter++;
+                    if (verbose) {
+                        printf("end add point %d\n", pt_id);
+                    }
+                    vt.advance();
+                }
+
+            }
+            if (interrupt) {
+                FAISS_THROW_MSG ("computation interrupted");
+            }
+            i1 = i0;
+        }
+        FAISS_ASSERT(i1 == 0);
+        printf("add actually costs %.2fms\n", getmillisecs() - tas);
+    }
+    if (verbose) {
+        printf("Done in %.3f ms\n", getmillisecs() - t0);
+    }
+
+    for(int i = 0; i < ntotal; i++) {
+        omp_destroy_lock(&locks[i]);
+    }
+}
 
 }  // namespace
 
@@ -344,7 +470,8 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
                 dis->set_query(x + i * d);
 
                 maxheap_heapify (k, simi, idxi);
-                hnsw.search(*dis, k, idxi, simi, vt);
+//                hnsw.search(*dis, k, idxi, simi, vt);
+                hnsw.searchKnn(*dis, k, idxi, simi, vt);
 
                 maxheap_reorder (k, simi, idxi);
 
@@ -387,9 +514,25 @@ void IndexRHNSW::add(idx_t n, const float *x)
     storage->add(n, x);
     ntotal = storage->ntotal;
 
+    auto t0 = faiss::getmillisecs();
     hnsw_add_vertices (*this, n0, n, x, verbose,
                        hnsw.levels.size() == ntotal);
-    printf("after hnsw_add_vertices, sizeof hnsw.levels.size() is %d\n", hnsw.levels.size());
+    printf("hnsw_add_vertices costs: %.2fms\n", faiss::getmillisecs() - t0);
+}
+
+void IndexRHNSW::add2(idx_t n, const float *x)
+{
+    FAISS_THROW_IF_NOT_MSG(storage,
+       "Please use IndexHSNWFlat (or variants) instead of IndexRHNSW directly");
+    FAISS_THROW_IF_NOT(is_trained);
+    int n0 = ntotal;
+    storage->add(n, x);
+    ntotal = storage->ntotal;
+
+    auto t0 = faiss::getmillisecs();
+    hnsw_add_vertices2(*this, n0, n, x, verbose,
+                       hnsw.levels.size() == ntotal);
+    printf("hnsw_add_vertices2 costs: %.2fms\n", faiss::getmillisecs() - t0);
 }
 
 void IndexRHNSW::reset()
