@@ -138,7 +138,7 @@ DeleteSnapshotIndex(const std::string& collection_name, const std::string& field
             if (element->GetFtype() == engine::FieldElementType::FET_INDEX ||
                 element->GetFtype() == engine::FieldElementType::FET_COMPRESS_SQ8) {
                 snapshot::OperationContext context;
-                context.stale_field_element = element;
+                context.stale_field_elements.push_back(element);
                 auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
                 STATUS_CHECK(op->Push());
             }
