@@ -12,7 +12,6 @@
 #-------------------------------------------------------------------------------
 
 # **************************** Engine Source Files ****************************
-aux_source_directory( ${MILVUS_ENGINE_SRC}/cache            CACHE_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db               DB_MAIN_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/engine        DB_ENGINE_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/insert        DB_INSERT_FILES )
@@ -48,8 +47,7 @@ set( THIRDPARTY_FILES   ${THIRDPARTY_EASYLOGGINGPP_FILES}
                         ${THIRDPARTY_DABLOOMS_FILES}
                         )
 
-set( ENGINE_FILES   ${CACHE_FILES}
-                    ${DB_MAIN_FILES}
+set( ENGINE_FILES   ${DB_MAIN_FILES}
                     ${DB_ENGINE_FILES}
                     ${DB_INSERT_FILES}
                     ${DB_META_FILES}
@@ -157,7 +155,8 @@ endif ()
 
 # **************************** Link Libraries with milvus engine ****************************
 target_link_libraries( milvus_engine
-                       PUBLIC  knowhere
-                               ${THIRD_PARTY_LIBS}
-                               ${ENGINE_LIBS}
+                       PUBLIC   knowhere
+                                cache
+                                ${THIRD_PARTY_LIBS}
+                                ${ENGINE_LIBS}
                                )

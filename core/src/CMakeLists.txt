@@ -43,6 +43,7 @@ set( SCHEDULER_FILES  ${SCHEDULER_MAIN_FILES}
                       ${SCHEDULER_TASK_FILES}
                       )
 
+add_subdirectory( cache )
 add_subdirectory( utils )
 add_subdirectory( metrics )
 add_subdirectory( config )
