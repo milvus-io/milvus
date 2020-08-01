@@ -883,11 +883,14 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     Status status = req_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, field_names,
                                                valid_row, field_mappings, data_chunk);
 
+    int valid_size = 0;
     for (auto it : valid_row) {
         response->add_valid_row(it);
+        if (it)
+            valid_size++;
     }
 
-    CopyDataChunkToEntity(data_chunk, field_mappings, vector_ids.size(), response);
+    CopyDataChunkToEntity(data_chunk, field_mappings, valid_size, response);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
