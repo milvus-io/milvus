@@ -18,11 +18,13 @@
 #include <vector>
 
 #include <fiu-local.h>
+#include <mysql++/mysql++.h>
 
 #include "db/Utils.h"
 #include "db/meta/MetaNames.h"
 #include "db/meta/backend/MetaHelper.h"
 #include "db/meta/backend/MetaSchema.h"
+#include "utils//Log.h"
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
 
@@ -276,6 +278,10 @@ Status
 MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+        if (connectionPtr == nullptr || !connectionPtr->connected()) {
+            return Status(SS_TIMEOUT, "Mysql server is not accessed");
+        }
+
         mysqlpp::Transaction trans(*connectionPtr, mysqlpp::Transaction::serializable, mysqlpp::Transaction::session);
 
         std::lock_guard<std::mutex> lock(meta_mutex_);

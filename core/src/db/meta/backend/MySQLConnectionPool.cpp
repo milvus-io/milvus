@@ -15,6 +15,8 @@
 
 #include <fiu-local.h>
 
+#include "utils/Log.h"
+
 namespace milvus::engine::meta {
 
 // Do a simple form of in-use connection limiting: wait to return

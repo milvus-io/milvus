@@ -18,8 +18,6 @@
 
 #include <mysql++/mysql++.h>
 
-#include "utils/Log.h"
-
 namespace milvus {
 namespace engine {
 namespace meta {
