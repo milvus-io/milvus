@@ -162,7 +162,7 @@ MemCollection::ApplyDeletes() {
         STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
 
         std::vector<segment::doc_id_t> delete_ids;
-        for (auto & id: doc_ids_to_delete_) {
+        for (auto& id : doc_ids_to_delete_) {
             if (pre_bloom_filter->Check(id)) {
                 delete_ids.push_back(id);
             }
@@ -183,8 +183,8 @@ MemCollection::ApplyDeletes() {
         }
 
         // TODO(yhz): Update blacklist in cache
-//        std::vector<knowhere::VecIndexPtr> indexes;
-//        std::vector<faiss::ConcurrentBitsetPtr> blacklists;
+        //        std::vector<knowhere::VecIndexPtr> indexes;
+        //        std::vector<faiss::ConcurrentBitsetPtr> blacklists;
         std::string collection_root_path = options_.meta_.path_ + COLLECTIONS_FOLDER;
 
         std::sort(delete_ids.begin(), delete_ids.end());
@@ -202,12 +202,11 @@ MemCollection::ApplyDeletes() {
         del_file_context.collection_id = segment->GetCollectionId();
         del_file_context.partition_id = segment->GetPartitionId();
         del_file_context.segment_id = segment->GetID();
-        snapshot::SegmentFilePtr  delete_file;
+        snapshot::SegmentFilePtr delete_file;
         segments_op->CommitNewSegmentFile(del_file_context, delete_file);
         auto segment_writer = std::make_shared<segment::SegmentWriter>(options_.meta_.path_, seg_visitor);
 
-        std::string del_docs_path =
-            snapshot::GetResPath<snapshot::SegmentFile>(collection_root_path, delete_file);
+        std::string del_docs_path = snapshot::GetResPath<snapshot::SegmentFile>(collection_root_path, delete_file);
 
         // write bloom filter
         auto blm_filter_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_BLOOM_FILTER);

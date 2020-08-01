@@ -845,7 +845,7 @@ DBImpl::TimingFlushThread() {
             break;
         }
 
-//        InternalFlush();
+        InternalFlush();
         if (options_.auto_flush_interval_ > 0) {
             swn_flush_.Wait_For(std::chrono::seconds(options_.auto_flush_interval_));
         } else {

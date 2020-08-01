@@ -207,7 +207,7 @@ SegmentWriter::WriteBloomFilter() {
 }
 
 Status
-SegmentWriter::CreateBloomFilter(const std::string &file_path, IdBloomFilterPtr &bloom_filter_ptr) {
+SegmentWriter::CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr) {
     auto& ss_codec = codec::Codec::instance();
     try {
         ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);

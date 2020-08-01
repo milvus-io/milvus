@@ -71,15 +71,13 @@ static const MetaSchema PARTITIONCOMMIT_SCHEMA(TABLE_PARTITION_COMMIT,
                                                 MetaLSNField, MetaCreatedOnField, MetaUpdatedOnField});
 
 static const MetaSchema SEGMENT_SCHEMA(TABLE_SEGMENT,
-                                       {MetaIdField, MetaCollectionIdField, MetaPartitionIdField,
-                                        MetaNumField, MetaLSNField, MetaStateField,
-                                        MetaCreatedOnField, MetaUpdatedOnField});
+                                       {MetaIdField, MetaCollectionIdField, MetaPartitionIdField, MetaNumField,
+                                        MetaLSNField, MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
 static const MetaSchema SEGMENTCOMMIT_SCHEMA(TABLE_SEGMENT_COMMIT,
-                                             {MetaIdField, MetaSchemaIdField, MetaPartitionIdField,
-                                              MetaSegmentIdField, MetaMappingsField, MetaRowCountField,
-                                              MetaSizeField, MetaLSNField, MetaStateField, MetaCreatedOnField,
-                                              MetaUpdatedOnField});
+                                             {MetaIdField, MetaSchemaIdField, MetaPartitionIdField, MetaSegmentIdField,
+                                              MetaMappingsField, MetaRowCountField, MetaSizeField, MetaLSNField,
+                                              MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
 static const MetaSchema SEGMENTFILE_SCHEMA(TABLE_SEGMENT_FILE,
                                            {MetaIdField, MetaCollectionIdField, MetaPartitionIdField,
@@ -88,9 +86,8 @@ static const MetaSchema SEGMENTFILE_SCHEMA(TABLE_SEGMENT_FILE,
                                             MetaCreatedOnField, MetaUpdatedOnField});
 
 static const MetaSchema SCHEMACOMMIT_SCHEMA(TABLE_SCHEMA_COMMIT,
-                                            {MetaIdField, MetaCollectionIdField, MetaMappingsField,
-                                             MetaLSNField, MetaStateField, MetaCreatedOnField,
-                                             MetaUpdatedOnField});
+                                            {MetaIdField, MetaCollectionIdField, MetaMappingsField, MetaLSNField,
+                                             MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
 static const MetaSchema FIELD_SCHEMA(TABLE_FIELD,
                                      {MetaIdField, MetaNameField, MetaNumField, MetaFtypeField, MetaParamsField,
