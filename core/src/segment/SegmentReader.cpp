@@ -157,7 +157,7 @@ SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
 
         int64_t field_width = 0;
-        segment_ptr_->GetFixedFieldWidth(field_name, field_width);
+        STATUS_CHECK(segment_ptr_->GetFixedFieldWidth(field_name, field_width));
         if (field_width <= 0) {
             return Status(DB_ERROR, "Invalid field width");
         }
@@ -199,7 +199,6 @@ SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, c
             data_chunk->fixed_fields_[name] = raw_data;
         }
     }
-
     return Status::OK();
 }
 
