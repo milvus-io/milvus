@@ -31,18 +31,18 @@ namespace milvus {
 namespace server {
 
 SearchReq::SearchReq(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
-                     engine::snapshot::CollectionMappings& collection_mappings, engine::QueryResultPtr& result)
+                     engine::snapshot::FieldElementMappings& field_mappings, engine::QueryResultPtr& result)
     : BaseReq(context, ReqType::kSearch),
       query_ptr_(query_ptr),
       json_params_(json_params),
-      collection_mappings_(collection_mappings),
+      field_mappings_(field_mappings),
       result_(result) {
 }
 
 BaseReqPtr
 SearchReq::Create(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
-                  engine::snapshot::CollectionMappings& collection_mappings, engine::QueryResultPtr& result) {
-    return std::shared_ptr<BaseReq>(new SearchReq(context, query_ptr, json_params, collection_mappings, result));
+                  engine::snapshot::FieldElementMappings& field_mappings, engine::QueryResultPtr& result) {
+    return std::shared_ptr<BaseReq>(new SearchReq(context, query_ptr, json_params, field_mappings, result));
 }
 
 Status
@@ -55,7 +55,7 @@ SearchReq::OnExecute() {
         // step 2: check table existence
         // only process root table, ignore partition table
         engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings fields_schema;
+        engine::snapshot::FieldElementMappings fields_schema;
         auto status = DBWrapper::DB()->GetCollectionInfo(query_ptr_->collection_id, collection, fields_schema);
         fiu_do_on("SearchReq.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
@@ -91,7 +91,7 @@ SearchReq::OnExecute() {
                     for (const auto& schema : fields_schema) {
                         if (name.get<std::string>() == schema.first->GetName()) {
                             find_field_name = true;
-                            collection_mappings_.insert(schema);
+                            field_mappings_.insert(schema);
                             break;
                         }
                     }
