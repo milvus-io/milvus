@@ -25,14 +25,6 @@ set( DB_META_FILES  ${DB_META_MAIN_FILES}
                     ${DB_META_BACKEND_FILES}
                     )
 
-aux_source_directory( ${MILVUS_ENGINE_SRC}/storage          STORAGE_MAIN_FILES )
-aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/disk     STORAGE_DISK_FILES )
-# aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/s3     STORAGE_S3_FILES )
-set( STORAGE_FILES  ${STORAGE_MAIN_FILES}
-                    ${STORAGE_DISK_FILES}
-                    # ${STORAGE_S3_FILES}
-                    )
-
 aux_source_directory( ${MILVUS_ENGINE_SRC}/index/archive    WRAPPER_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/codecs           CODECS_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/segment          SEGMENT_FILES )
@@ -54,7 +46,6 @@ set( ENGINE_FILES   ${DB_MAIN_FILES}
                     ${DB_MERGE_FILES}
                     ${DB_WAL_FILES}
                     ${DB_SNAPSHOT_FILES}
-                    ${STORAGE_FILES}
                     ${THIRDPARTY_FILES}
                     ${WRAPPER_FILES}
                     ${CODECS_FILES}
@@ -155,8 +146,9 @@ endif ()
 
 # **************************** Link Libraries with milvus engine ****************************
 target_link_libraries( milvus_engine
-                       PUBLIC   knowhere
-                                cache
-                                ${THIRD_PARTY_LIBS}
-                                ${ENGINE_LIBS}
-                               )
+               PUBLIC  knowhere
+                       cache
+                       storage
+                       ${THIRD_PARTY_LIBS}
+                       ${ENGINE_LIBS}
+                       )
