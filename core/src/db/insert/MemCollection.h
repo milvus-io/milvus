@@ -16,6 +16,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "config/ConfigMgr.h"
@@ -28,38 +29,27 @@ namespace engine {
 
 class MemCollection {
  public:
-    using MemCollectionFileList = std::vector<MemSegmentPtr>;
+    using MemSegmentList = std::vector<MemSegmentPtr>;
+    using MemSegmentMap = std::unordered_map<int64_t, MemSegmentList>;  // partition id mapping to segments
 
-    MemCollection(int64_t collection_id, int64_t partition_id, const DBOptions& options);
+    MemCollection(int64_t collection_id, const DBOptions& options);
 
     ~MemCollection() = default;
 
     Status
-    Add(const VectorSourcePtr& source);
-
-    Status
-    Delete(segment::doc_id_t doc_id);
+    Add(int64_t partition_id, const VectorSourcePtr& source);
 
     Status
     Delete(const std::vector<segment::doc_id_t>& doc_ids);
 
-    void
-    GetCurrentMemSegment(MemSegmentPtr& mem_segment);
-
-    size_t
-    GetTableFileCount();
+    Status
+    EraseMem(int64_t partition_id);
 
     Status
     Serialize(uint64_t wal_lsn);
 
-    bool
-    Empty();
-
     int64_t
     GetCollectionId() const;
-
-    int64_t
-    GetPartitionId() const;
 
     size_t
     GetCurrentMem();
@@ -76,9 +66,8 @@ class MemCollection {
 
  private:
     int64_t collection_id_;
-    int64_t partition_id_;
 
-    MemCollectionFileList mem_segment_list_;
+    MemSegmentMap mem_segments_;
 
     DBOptions options_;
 
