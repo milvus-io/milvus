@@ -30,12 +30,11 @@ namespace server {
 
 constexpr uint64_t MAX_COUNT_RETURNED = 1000;
 
-GetEntityByIDReq::GetEntityByIDReq(const std::shared_ptr<milvus::server::Context>& context,
-                                   const std::string& collection_name, const engine::IDNumbers& id_array,
-                                   std::vector<std::string>& field_names, std::vector<bool>& valid_row,
-                                   engine::snapshot::CollectionMappings& field_mappings,
+GetEntityByIDReq::GetEntityByIDReq(const ContextPtr& context, const std::string& collection_name,
+                                   const engine::IDNumbers& id_array, std::vector<std::string>& field_names,
+                                   std::vector<bool>& valid_row, engine::snapshot::CollectionMappings& field_mappings,
                                    engine::DataChunkPtr& data_chunk)
-    : BaseReq(context, BaseReq::kGetEntityByID),
+    : BaseReq(context, ReqType::kGetEntityByID),
       collection_name_(collection_name),
       id_array_(id_array),
       field_names_(field_names),
@@ -45,7 +44,7 @@ GetEntityByIDReq::GetEntityByIDReq(const std::shared_ptr<milvus::server::Context
 }
 
 BaseReqPtr
-GetEntityByIDReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+GetEntityByIDReq::Create(const ContextPtr& context, const std::string& collection_name,
                          const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
                          std::vector<bool>& valid_row, engine::snapshot::CollectionMappings& field_mappings,
                          engine::DataChunkPtr& data_chunk) {
@@ -69,30 +68,30 @@ GetEntityByIDReq::OnExecute() {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
 
         // TODO(yukun) ValidateFieldNames
 
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collectionPtr;
-        status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collectionPtr, field_mappings_);
+        engine::snapshot::CollectionMappings collection_mappings;
+        STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collectionPtr, collection_mappings));
         if (collectionPtr == nullptr) {
-            return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_INVALID_COLLECTION_NAME, "Collection not exist: " + collection_name_);
         }
 
         if (field_names_.empty()) {
-            for (const auto& schema : field_mappings_) {
+            for (const auto& schema : collection_mappings) {
                 field_names_.emplace_back(schema.first->GetName());
             }
+            field_mappings_ = collection_mappings;
         } else {
             for (const auto& name : field_names_) {
                 bool find_field_name = false;
-                for (const auto& schema : field_mappings_) {
+                for (const auto& schema : collection_mappings) {
                     if (name == schema.first->GetName()) {
                         find_field_name = true;
+                        field_mappings_.insert(schema);
                         break;
                     }
                 }
@@ -103,11 +102,9 @@ GetEntityByIDReq::OnExecute() {
         }
 
         // step 2: get vector data, now only support get one id
-        status = DBWrapper::DB()->GetEntityByID(collection_name_, id_array_, field_names_, valid_row_, data_chunk_);
-        if (!status.ok()) {
-            return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-        }
-        return Status::OK();
+        STATUS_CHECK(
+            DBWrapper::DB()->GetEntityByID(collection_name_, id_array_, field_names_, valid_row_, data_chunk_));
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

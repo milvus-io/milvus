@@ -74,6 +74,10 @@ class ReqHandler {
                 const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
 
     Status
+    DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                  const std::string& field_name, std::string& index_name, milvus::json& json_params);
+
+    Status
     DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
               const std::string& field_name, const std::string& index_name);
 
@@ -93,7 +97,8 @@ class ReqHandler {
 
     Status
     Search(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-           const milvus::json& json_params, engine::QueryResultPtr& result);
+           const milvus::json& json_params, engine::snapshot::CollectionMappings& collection_mappings,
+           engine::QueryResultPtr& result);
 
     Status
     ListIDInSegment(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t segment_id,

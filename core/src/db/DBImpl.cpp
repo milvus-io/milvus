@@ -251,7 +251,7 @@ DBImpl::DropCollection(const std::string& name) {
         /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
     }
 
-    mem_mgr_->EraseMemVector(ss->GetCollectionId());  // not allow insert
+    mem_mgr_->EraseMem(ss->GetCollectionId());  // not allow insert
 
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
@@ -342,7 +342,7 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     // SS TODO: Is below step needed? Or How to implement it?
-    /* mem_mgr_->EraseMemVector(partition_name); */
+    /* mem_mgr_->EraseMem(partition_name); */
 
     snapshot::PartitionContext context;
     context.name = partition_name;
@@ -385,6 +385,8 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
                     const std::string& field_name, const CollectionIndex& index) {
     CHECK_INITIALIZED;
 
+    LOG_ENGINE_DEBUG_ << "Create index for collection: " << collection_name << " field: " << field_name;
+
     // step 1: wait merge file thread finished to avoid duplicate data bug
     auto status = Flush();
     WaitMergeFileFinish();  // let merge file thread finish
@@ -399,7 +401,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
     }
 
     // step 3: drop old index
-    DropIndex(collection_name);
+    DropIndex(collection_name, field_name);
     WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
 
     // step 4: create field element for index
@@ -438,35 +440,24 @@ Status
 DBImpl::DropIndex(const std::string& collection_name, const std::string& field_name) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
+    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name << " field: " << field_name;
 
     STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
 
     std::set<std::string> merge_collection_names = {collection_name};
     StartMergeTask(merge_collection_names, true);
+
     return Status::OK();
 }
 
 Status
-DBImpl::DropIndex(const std::string& collection_name) {
+DBImpl::DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
+    LOG_ENGINE_DEBUG_ << "Describe index for collection: " << collection_name << " field: " << field_name;
 
-    std::vector<std::string> field_names;
-    {
-        snapshot::ScopedSnapshotT ss;
-        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-        field_names = ss->GetFieldNames();
-    }
+    STATUS_CHECK(GetSnapshotIndex(collection_name, field_name, index));
 
-    snapshot::OperationContext context;
-    for (auto& field_name : field_names) {
-        STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
-    }
-
-    std::set<std::string> merge_collection_names = {collection_name};
-    StartMergeTask(merge_collection_names, true);
     return Status::OK();
 }
 
@@ -629,13 +620,11 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     }
 
     result = job->query_result();
-    // step 3: construct results
-    //    result.row_num_ = job->vector_count();
-    //    result.result_ids_ = job->GetResultIds();
-    //    result.result_distances_ = job->GetResultDistances();
 
     // step 4: get entities by result ids
-    // STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));
+    std::vector<bool> valid_row;
+    STATUS_CHECK(GetEntityByID(query_ptr->collection_id, result->result_ids_, query_ptr->field_names, valid_row,
+                               result->data_chunk_));
 
     // step 5: filter entities by field names
     //    std::vector<engine::AttrsData> filter_attrs;
@@ -667,6 +656,9 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     auto read_visitor = engine::SegmentVisitor::Build(ss, segment_id);
+    if (!read_visitor) {
+        return Status(SERVER_FILE_NOT_FOUND, "Segment not exist");
+    }
     segment::SegmentReaderPtr segment_reader =
         std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
 
@@ -865,8 +857,8 @@ DBImpl::TimingFlushThread() {
 void
 DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(BACKGROUND_METRIC_INTERVAL);
-    int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
-    int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+    int64_t cache_usage = cache::CpuCacheMgr::GetInstance().CacheUsage();
+    int64_t cache_total = cache::CpuCacheMgr::GetInstance().CacheCapacity();
     fiu_do_on("DBImpl.StartMetricTask.InvalidTotalCache", cache_total = 0);
 
     if (cache_total > 0) {
@@ -1233,17 +1225,10 @@ void
 DBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all) {
     // LOG_ENGINE_TRACE_ << " Background merge thread start";
 
-    Status status;
     for (auto& collection_name : collection_names) {
         const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-        auto old_strategy = merge_mgr_ptr_->Strategy();
-        if (force_merge_all) {
-            merge_mgr_ptr_->UseStrategy(MergeStrategyType::ADAPTIVE);
-        }
-
-        status = merge_mgr_ptr_->MergeFiles(collection_name);
-        merge_mgr_ptr_->UseStrategy(old_strategy);
+        auto status = merge_mgr_ptr_->MergeFiles(collection_name);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_name
                               << " reason:" << status.message();
@@ -1254,8 +1239,6 @@ DBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_merge
             break;
         }
     }
-
-    // TODO: cleanup with ttl
 }
 
 void

@@ -22,6 +22,7 @@
 #include "server/delivery/request/CreateIndexReq.h"
 #include "server/delivery/request/CreatePartitionReq.h"
 #include "server/delivery/request/DeleteEntityByIDReq.h"
+#include "server/delivery/request/DescribeIndexReq.h"
 #include "server/delivery/request/DropCollectionReq.h"
 #include "server/delivery/request/DropIndexReq.h"
 #include "server/delivery/request/DropPartitionReq.h"
@@ -135,6 +136,14 @@ ReqHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::stri
 }
 
 Status
+ReqHandler::DescribeIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                          const std::string& field_name, std::string& index_name, milvus::json& json_params) {
+    BaseReqPtr req_ptr = DescribeIndexReq::Create(context, collection_name, field_name, index_name, json_params);
+    ReqScheduler::ExecReq(req_ptr);
+    return req_ptr->status();
+}
+
+Status
 ReqHandler::DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
                       const std::string& field_name, const std::string& index_name) {
     BaseReqPtr req_ptr = DropIndexReq::Create(context, collection_name, index_name, field_name);
@@ -172,8 +181,9 @@ ReqHandler::DeleteEntityByID(const std::shared_ptr<Context>& context, const std:
 
 Status
 ReqHandler::Search(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                   const milvus::json& json_params, engine::QueryResultPtr& result) {
-    BaseReqPtr req_ptr = SearchReq::Create(context, query_ptr, json_params, result);
+                   const milvus::json& json_params, engine::snapshot::CollectionMappings& collection_mappings,
+                   engine::QueryResultPtr& result) {
+    BaseReqPtr req_ptr = SearchReq::Create(context, query_ptr, json_params, collection_mappings, result);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }

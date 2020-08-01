@@ -16,7 +16,6 @@ tag = "1970-01-01"
 insert_interval_time = 1.5
 nb = 6000
 field_name = "float_vector"
-default_index_name = "insert_index"
 entity = gen_entities(1)
 raw_vector, binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
@@ -26,7 +25,7 @@ default_single_query = {
     "bool": {
         "must": [
             {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),
-                                     "params": {"index_name": default_index_name, "nprobe": 10}}}}
+                                     "params": {"nprobe": 10}}}}
         ]
     }
 }
@@ -127,7 +126,7 @@ class TestInsertBase:
         ids = connect.insert(collection, entities)
         assert len(ids) == nb
         connect.flush([collection])
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
@@ -136,7 +135,7 @@ class TestInsertBase:
         method: insert vector and build index
         expected: no error raised
         '''
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         ids = connect.insert(collection, entities)
         assert len(ids) == nb
 
@@ -692,7 +691,7 @@ class TestInsertMultiCollections:
         '''
         collection_name = gen_unique_str(collection_id)
         connect.create_collection(collection_name, default_fields)
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         ids = connect.insert(collection, entity)
         connect.drop_collection(collection_name)
 
@@ -706,7 +705,7 @@ class TestInsertMultiCollections:
         collection_name = gen_unique_str(collection_id)
         connect.create_collection(collection_name, default_fields)
         ids = connect.insert(collection, entity)
-        connect.create_index(collection_name, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         count = connect.count_entities(collection_name)
         assert count == 0
 
@@ -721,7 +720,7 @@ class TestInsertMultiCollections:
         connect.create_collection(collection_name, default_fields)
         ids = connect.insert(collection, entity)
         connect.flush([collection])
-        connect.create_index(collection_name, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         count = connect.count_entities(collection)
         assert count == 1
 

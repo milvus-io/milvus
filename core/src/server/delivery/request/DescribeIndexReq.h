@@ -13,26 +13,29 @@
 
 #include <memory>
 #include <string>
-#include <vector>
-
 #include "server/delivery/request/BaseReq.h"
 
 namespace milvus {
 namespace server {
 
-class ListCollectionsReq : public BaseReq {
+class DescribeIndexReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const ContextPtr& context, std::vector<std::string>& collection_list);
+    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+           const std::string& field_name, std::string& index_name, milvus::json& json_params);
 
  protected:
-    ListCollectionsReq(const ContextPtr& context, std::vector<std::string>& collection_list);
+    DescribeIndexReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+                     const std::string& field_name, std::string& index_name, milvus::json& json_params);
 
     Status
     OnExecute() override;
 
  private:
-    std::vector<std::string>& collection_list_;
+    const std::string collection_name_;
+    const std::string field_name_;
+    std::string& index_name_;
+    milvus::json& json_params_;
 };
 
 }  // namespace server
