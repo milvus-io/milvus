@@ -19,7 +19,7 @@ entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 default_fields = gen_default_fields()
-field_name = "float_vector"
+field_name = default_float_vec_field_name
 default_single_query = {
     "bool": {
         "must": [

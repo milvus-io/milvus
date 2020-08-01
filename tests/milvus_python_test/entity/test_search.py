@@ -20,7 +20,7 @@ nb = 6000
 top_k = 10
 nprobe = 1
 epsilon = 0.001
-field_name = "float_vector"
+field_name = default_float_vec_field_name
 default_fields = gen_default_fields() 
 search_param = {"nprobe": 1}
 entity = gen_entities(1, is_normal=True)
