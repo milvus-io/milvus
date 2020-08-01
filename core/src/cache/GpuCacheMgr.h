@@ -33,24 +33,23 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
 
     ~GpuCacheMgr();
 
+    static GpuCacheMgrPtr
+    GetInstance(int64_t gpu_id);
+
     DataObjPtr
-    GetIndex(const std::string& key);
+    GetDataObj(const std::string& key);
 
     void
-    InsertItem(const std::string& key, const DataObjPtr& data);
+    SetDataObj(const std::string& key, const DataObjPtr& data);
 
     bool
     Reserve(const int64_t size);
-
-    static GpuCacheMgrPtr
-    GetInstance(int64_t gpu_id);
 
  public:
     void
     ConfigUpdate(const std::string& name) override;
 
  private:
-    bool gpu_enable_ = true;
     int64_t gpu_id_;
     static std::mutex global_mutex_;
     static std::unordered_map<int64_t, GpuCacheMgrPtr> instance_;

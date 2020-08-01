@@ -28,12 +28,14 @@ class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
     ~CpuCacheMgr();
 
  public:
-    // TODO(myh): use smart pointer instead
-    static CpuCacheMgr*
+    static CpuCacheMgr&
     GetInstance();
 
     DataObjPtr
-    GetIndex(const std::string& key);
+    GetDataObj(const std::string& key);
+
+    void
+    SetDataObj(const std::string& key, const DataObjPtr& data);
 
  public:
     void

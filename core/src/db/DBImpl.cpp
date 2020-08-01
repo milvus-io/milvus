@@ -857,8 +857,8 @@ DBImpl::TimingFlushThread() {
 void
 DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(BACKGROUND_METRIC_INTERVAL);
-    int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
-    int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+    int64_t cache_usage = cache::CpuCacheMgr::GetInstance().CacheUsage();
+    int64_t cache_total = cache::CpuCacheMgr::GetInstance().CacheCapacity();
     fiu_do_on("DBImpl.StartMetricTask.InvalidTotalCache", cache_total = 0);
 
     if (cache_total > 0) {

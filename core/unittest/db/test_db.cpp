@@ -392,6 +392,9 @@ TEST_F(DBTest, InsertTest) {
     auto status = CreateCollection2(db_, collection_name, 0);
     ASSERT_TRUE(status.ok());
 
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok());
+
     const uint64_t entity_count = 100;
     milvus::engine::DataChunkPtr data_chunk;
     BuildEntities(entity_count, 0, data_chunk);
@@ -535,6 +538,7 @@ TEST_F(DBTest, IndexTest) {
 
         milvus::engine::CollectionIndex index_get;
         status = db_->DescribeIndex(collection_name, VECTOR_FIELD_NAME, index_get);
+        ASSERT_TRUE(status.ok());
         ASSERT_TRUE(index_get.index_name_.empty());
     }
 
@@ -544,6 +548,7 @@ TEST_F(DBTest, IndexTest) {
 
         milvus::engine::CollectionIndex index_get;
         status = db_->DescribeIndex(collection_name, "field_0", index_get);
+        ASSERT_TRUE(status.ok());
         ASSERT_TRUE(index_get.index_name_.empty());
     }
 }
