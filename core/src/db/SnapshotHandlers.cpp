@@ -135,14 +135,15 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     }
     segment::SegmentReader segment_reader(dir_root_, segment_visitor);
 
-    auto uid_field_visitor = segment_visitor->GetFieldVisitor(DEFAULT_UID_NAME);
+    std::vector<int64_t> uids;
+    STATUS_CHECK(segment_reader.LoadUids(uids));
 
-    // load UID's bloom filter file
     segment::IdBloomFilterPtr id_bloom_filter_ptr;
     STATUS_CHECK(segment_reader.LoadBloomFilter(id_bloom_filter_ptr));
 
-    std::vector<int64_t> uids;
     segment::DeletedDocsPtr deleted_docs_ptr;
+    STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
+
     std::vector<int64_t> offsets;
     for (auto id : ids_) {
         // fast check using bloom filter
@@ -152,9 +153,6 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
         }
 
         // check if id really exists in uids
-        if (uids.empty()) {
-            STATUS_CHECK(segment_reader.LoadUids(uids));  // lazy load
-        }
         auto found = std::find(uids.begin(), uids.end(), id);
         if (found == uids.end()) {
             valid_row_.push_back(false);
@@ -163,9 +161,6 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
 
         // check if this id is deleted
         auto offset = std::distance(uids.begin(), found);
-        if (deleted_docs_ptr == nullptr) {
-            STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));  // lazy load
-        }
         if (deleted_docs_ptr) {
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
