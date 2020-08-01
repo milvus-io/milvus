@@ -11,6 +11,7 @@
 
 #include <cstring>
 
+#include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace milvus {
@@ -58,6 +59,11 @@ MemoryIOReader::operator()(void* ptr, size_t size, size_t nitems) {
     memcpy(ptr, (void*)(data_ + rp), size * nitems);
     rp += size * nitems;
     return nitems;
+}
+
+void
+enable_faiss_logging() {
+    faiss::LOG_DEBUG_ = &log_debug_;
 }
 
 }  // namespace knowhere
