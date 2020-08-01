@@ -251,7 +251,7 @@ DBImpl::DropCollection(const std::string& name) {
         /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
     }
 
-    mem_mgr_->EraseMemVector(ss->GetCollectionId());  // not allow insert
+    mem_mgr_->EraseMem(ss->GetCollectionId());  // not allow insert
 
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
@@ -342,7 +342,7 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     // SS TODO: Is below step needed? Or How to implement it?
-    /* mem_mgr_->EraseMemVector(partition_name); */
+    /* mem_mgr_->EraseMem(partition_name); */
 
     snapshot::PartitionContext context;
     context.name = partition_name;
