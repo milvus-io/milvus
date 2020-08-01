@@ -18,8 +18,8 @@
 #include <mysql++/mysql++.h>
 
 #include "db/Options.h"
-#include "db/meta/MySQLConnectionPool.h"
 #include "db/meta/backend/MetaEngine.h"
+#include "db/meta/backend/MySQLConnectionPool.h"
 
 namespace milvus::engine::meta {
 
