@@ -573,14 +573,14 @@ TEST_F(SnapshotTest, IndexTest) {
 
     OperationContext d_a_i_ctx;
     d_a_i_ctx.lsn = next_lsn();
-    d_a_i_ctx.stale_field_element = ss->GetResource<FieldElement>(field_element_id);
+    d_a_i_ctx.stale_field_elements.push_back(ss->GetResource<FieldElement>(field_element_id));
 
     FieldElement::Ptr fe;
     status = ss->GetFieldElement(sf_context.field_name, sf_context.field_element_name,
             fe);
 
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(fe, d_a_i_ctx.stale_field_element);
+    ASSERT_EQ(fe, d_a_i_ctx.stale_field_elements[0]);
 
     auto drop_all_index_op = std::make_shared<DropAllIndexOperation>(d_a_i_ctx, ss);
     status = drop_all_index_op->Push();
