@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <memory>
 #include <iostream>
+#include <sstream>
 
 #include <faiss/utils/utils.h>
 #include <faiss/utils/hamming.h>
@@ -314,6 +315,22 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
                         distances, labels, false, nullptr, bitset);
     indexIVF_stats.search_time += getmillisecs() - t0;
+
+    // string
+    if (LOG_DEBUG_) {
+        auto ids = idx.get();
+        for (size_t i = 0; i < n; i++) {
+            std::stringstream ss;
+            ss << "Query #" << i << ", nprobe list: ";
+            for (size_t j = 0; j < nprobe; j++) {
+                if (j != 0) {
+                    ss << ",";
+                }
+                ss << ids[i * nprobe + j];
+            }
+            (*LOG_DEBUG_)(ss.str());
+        }
+    }
 }
 
 #if 0
