@@ -32,7 +32,7 @@ constexpr uint64_t MAX_COUNT_RETURNED = 1000;
 
 GetEntityByIDReq::GetEntityByIDReq(const ContextPtr& context, const std::string& collection_name,
                                    const engine::IDNumbers& id_array, std::vector<std::string>& field_names,
-                                   std::vector<bool>& valid_row, engine::snapshot::CollectionMappings& field_mappings,
+                                   std::vector<bool>& valid_row, engine::snapshot::FieldElementMappings& field_mappings,
                                    engine::DataChunkPtr& data_chunk)
     : BaseReq(context, ReqType::kGetEntityByID),
       collection_name_(collection_name),
@@ -46,7 +46,7 @@ GetEntityByIDReq::GetEntityByIDReq(const ContextPtr& context, const std::string&
 BaseReqPtr
 GetEntityByIDReq::Create(const ContextPtr& context, const std::string& collection_name,
                          const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
-                         std::vector<bool>& valid_row, engine::snapshot::CollectionMappings& field_mappings,
+                         std::vector<bool>& valid_row, engine::snapshot::FieldElementMappings& field_mappings,
                          engine::DataChunkPtr& data_chunk) {
     return std::shared_ptr<BaseReq>(
         new GetEntityByIDReq(context, collection_name, id_array, field_names_, valid_row, field_mappings, data_chunk));
@@ -74,24 +74,24 @@ GetEntityByIDReq::OnExecute() {
 
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collectionPtr;
-        engine::snapshot::CollectionMappings collection_mappings;
-        STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collectionPtr, collection_mappings));
+        engine::snapshot::FieldElementMappings field_mappings;
+        STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collectionPtr, field_mappings));
         if (collectionPtr == nullptr) {
             return Status(SERVER_INVALID_COLLECTION_NAME, "Collection not exist: " + collection_name_);
         }
 
         if (field_names_.empty()) {
-            for (const auto& schema : collection_mappings) {
+            for (const auto& schema : field_mappings) {
                 field_names_.emplace_back(schema.first->GetName());
             }
-            field_mappings_ = collection_mappings;
+            field_mappings_ = field_mappings;
         } else {
             for (const auto& name : field_names_) {
                 bool find_field_name = false;
-                for (const auto& schema : collection_mappings) {
-                    if (name == schema.first->GetName()) {
+                for (const auto& kv : field_mappings) {
+                    if (name == kv.first->GetName()) {
                         find_field_name = true;
-                        field_mappings_.insert(schema);
+                        field_mappings_.insert(kv);
                         break;
                     }
                 }

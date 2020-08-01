@@ -734,8 +734,8 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         query_ptr_->root = general_query;
 
         engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-        engine::snapshot::CollectionMappings collection_mappings;
-        status = req_handler_.Search(context_ptr_, query_ptr_, extra_params, collection_mappings, result);
+        engine::snapshot::FieldElementMappings field_mappings;
+        status = req_handler_.Search(context_ptr_, query_ptr_, extra_params, field_mappings, result);
 
         if (!status.ok()) {
             return status;
@@ -805,7 +805,7 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
                                   std::vector<std::string>& field_names, nlohmann::json& json_out) {
     std::vector<bool> valid_row;
     engine::DataChunkPtr data_chunk;
-    engine::snapshot::CollectionMappings field_mappings;
+    engine::snapshot::FieldElementMappings field_mappings;
 
     std::vector<engine::AttrsData> attr_batch;
     std::vector<engine::VectorsData> vector_batch;

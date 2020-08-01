@@ -277,7 +277,7 @@ DBImpl::ListCollections(std::vector<std::string>& names) {
 
 Status
 DBImpl::GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                          snapshot::CollectionMappings& fields_schema) {
+                          snapshot::FieldElementMappings& fields_schema) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;

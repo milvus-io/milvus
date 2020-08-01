@@ -56,7 +56,7 @@ class DBImpl : public DB, public ConfigObserver {
 
     Status
     GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                      snapshot::CollectionMappings& fields_schema) override;
+                      snapshot::FieldElementMappings& fields_schema) override;
 
     Status
     GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) override;

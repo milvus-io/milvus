@@ -57,7 +57,7 @@ CreateIndexReq::OnExecute() {
 
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings fields_schema;
+        engine::snapshot::FieldElementMappings fields_schema;
         auto status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
