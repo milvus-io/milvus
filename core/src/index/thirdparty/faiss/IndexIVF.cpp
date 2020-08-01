@@ -331,6 +331,22 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
                         distances, labels, false, nullptr, bitset);
     indexIVF_stats.search_time += getmillisecs() - t0;
+
+    // nprobe logging
+    if (LOG_DEBUG_) {
+        auto ids = idx.get();
+        for (size_t i = 0; i < n; i++) {
+            std::stringstream ss;
+            ss << "Query #" << i << ", nprobe list: ";
+            for (size_t j = 0; j < nprobe; j++) {
+                if (j != 0) {
+                    ss << ",";
+                }
+                ss << ids[i * nprobe + j];
+            }
+            (*LOG_DEBUG_)(ss.str());
+        }
+    }
 }
 
 void IndexIVF::search_without_codes (idx_t n, const float *x, 
@@ -351,6 +367,22 @@ void IndexIVF::search_without_codes (idx_t n, const float *x,
     search_preassigned_without_codes (n, x, arranged_codes, prefix_sum, is_sq8, k, idx.get(), coarse_dis.get(),
                                       distances, labels, false, nullptr, bitset);
     indexIVF_stats.search_time += getmillisecs() - t0;
+
+    // nprobe loggingss
+    if (LOG_DEBUG_) {
+        auto ids = idx.get();
+        for (size_t i = 0; i < n; i++) {
+            std::stringstream ss;
+            ss << "Query #" << i << ", nprobe list: ";
+            for (size_t j = 0; j < nprobe; j++) {
+                if (j != 0) {
+                    ss << ",";
+                }
+                ss << ids[i * nprobe + j];
+            }
+            (*LOG_DEBUG_)(ss.str());
+        }
+    }
 }
 
 #if 0
