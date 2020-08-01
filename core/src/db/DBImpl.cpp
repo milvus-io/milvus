@@ -251,7 +251,7 @@ DBImpl::DropCollection(const std::string& name) {
         /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
     }
 
-    mem_mgr_->EraseMemVector(ss->GetCollectionId());  // not allow insert
+    mem_mgr_->EraseMem(ss->GetCollectionId());  // not allow insert
 
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
@@ -342,7 +342,7 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     // SS TODO: Is below step needed? Or How to implement it?
-    /* mem_mgr_->EraseMemVector(partition_name); */
+    /* mem_mgr_->EraseMem(partition_name); */
 
     snapshot::PartitionContext context;
     context.name = partition_name;
@@ -385,6 +385,8 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
                     const std::string& field_name, const CollectionIndex& index) {
     CHECK_INITIALIZED;
 
+    LOG_ENGINE_DEBUG_ << "Create index for collection: " << collection_name << " field: " << field_name;
+
     // step 1: wait merge file thread finished to avoid duplicate data bug
     auto status = Flush();
     WaitMergeFileFinish();  // let merge file thread finish
@@ -399,7 +401,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
     }
 
     // step 3: drop old index
-    DropIndex(collection_name);
+    DropIndex(collection_name, field_name);
     WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
 
     // step 4: create field element for index
@@ -438,35 +440,24 @@ Status
 DBImpl::DropIndex(const std::string& collection_name, const std::string& field_name) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
+    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name << " field: " << field_name;
 
     STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
 
     std::set<std::string> merge_collection_names = {collection_name};
     StartMergeTask(merge_collection_names, true);
+
     return Status::OK();
 }
 
 Status
-DBImpl::DropIndex(const std::string& collection_name) {
+DBImpl::DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
+    LOG_ENGINE_DEBUG_ << "Describe index for collection: " << collection_name << " field: " << field_name;
 
-    std::vector<std::string> field_names;
-    {
-        snapshot::ScopedSnapshotT ss;
-        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-        field_names = ss->GetFieldNames();
-    }
+    STATUS_CHECK(GetSnapshotIndex(collection_name, field_name, index));
 
-    snapshot::OperationContext context;
-    for (auto& field_name : field_names) {
-        STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
-    }
-
-    std::set<std::string> merge_collection_names = {collection_name};
-    StartMergeTask(merge_collection_names, true);
     return Status::OK();
 }
 
@@ -866,8 +857,8 @@ DBImpl::TimingFlushThread() {
 void
 DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(BACKGROUND_METRIC_INTERVAL);
-    int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
-    int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+    int64_t cache_usage = cache::CpuCacheMgr::GetInstance().CacheUsage();
+    int64_t cache_total = cache::CpuCacheMgr::GetInstance().CacheCapacity();
     fiu_do_on("DBImpl.StartMetricTask.InvalidTotalCache", cache_total = 0);
 
     if (cache_total > 0) {
