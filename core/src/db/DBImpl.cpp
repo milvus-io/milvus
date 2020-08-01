@@ -149,7 +149,7 @@ DBImpl::Start() {
     // for distribute version, some nodes are read only
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         // background build index thread
-        bg_index_thread_ = std::thread(&DBImpl::TimingIndexThread, this);
+        // bg_index_thread_ = std::thread(&DBImpl::TimingIndexThread, this);
     }
 
     // background metric thread
