@@ -742,8 +742,8 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     auto field_json = field->GetParams();
     auto dimension = field_json[milvus::knowhere::meta::DIM];
 
-    auto segment_commit = snapshot->GetSegmentCommitBySegmentId(segment->GetID());
-    auto row_count = segment_commit->GetRowCount();
+    snapshot::SIZE_TYPE row_count;
+    snapshot->GetSegmentRowCount(segment->GetID(), row_count);
 
     milvus::json conf = index_info.extra_params_;
     conf[knowhere::meta::DIM] = dimension;

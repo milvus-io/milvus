@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "db/meta/MetaAdapter.h"
+#include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Snapshots.h"
@@ -383,18 +384,21 @@ DropAllIndexOperation::DropAllIndexOperation(const OperationContext& context, Sc
 
 Status
 DropAllIndexOperation::PreCheck() {
-    if (context_.stale_field_element == nullptr) {
+    if (context_.stale_field_elements.size() == 0) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Stale field element is requried";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
 
-    if (!GetStartedSS()->GetResource<FieldElement>(context_.stale_field_element->GetID())) {
-        std::stringstream emsg;
-        emsg << GetRepr() << ".  Specified field element " << context_.stale_field_element->GetName();
-        emsg << " is stale";
-        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    for (auto stale_fe : context_.stale_field_elements) {
+        if (!GetStartedSS()->GetResource<FieldElement>(stale_fe->GetID())) {
+            std::stringstream emsg;
+            emsg << GetRepr() << ".  Specified field element " << stale_fe->GetName();
+            emsg << " is stale";
+            return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+        }
     }
+
     // TODO: Check type
     return Status::OK();
 }
@@ -406,7 +410,6 @@ DropAllIndexOperation::DoExecute(StorePtr store) {
     OperationContext cc_context;
     {
         auto context = context_;
-        context.stale_field_elements.push_back(context.stale_field_element);
 
         FieldCommitOperation fc_op(context, GetAdjustedSS());
         STATUS_CHECK(fc_op(store));
@@ -430,20 +433,40 @@ DropAllIndexOperation::DoExecute(StorePtr store) {
     }
 
     std::map<ID_TYPE, std::vector<SegmentCommitPtr>> p_sc_map;
-    for (auto& kv : segment_files) {
-        if (kv.second->GetFieldElementId() != context_.stale_field_element->GetID()) {
-            continue;
-        }
 
+    std::set<ID_TYPE> stale_fe_ids;
+    for (auto& fe : context_.stale_field_elements) {
+        stale_fe_ids.insert(fe->GetID());
+    }
+
+    auto seg_executor = [&](const SegmentPtr& segment, SegmentIterator* handler) -> Status {
+        auto sf_ids = handler->ss_->GetSegmentFileIds(segment->GetID());
+        if (sf_ids.size() == 0) {
+            return Status::OK();
+        }
         auto context = context_;
-        context.stale_segment_files.push_back(kv.second.Get());
+        for (auto& sf_id : sf_ids) {
+            auto sf = handler->ss_->GetResource<SegmentFile>(sf_id);
+            if (stale_fe_ids.find(sf->GetFieldElementId()) == stale_fe_ids.end()) {
+                continue;
+            }
+            context.stale_segment_files.push_back(sf);
+        }
+        if (context.stale_segment_files.size() == 0) {
+            return Status::OK();
+        }
         SegmentCommitOperation sc_op(context, GetAdjustedSS());
         STATUS_CHECK(sc_op(store));
         STATUS_CHECK(sc_op.GetResource(context.new_segment_commit));
         auto segc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(meta::oUpdate).CreatePtr();
         AddStepWithLsn(*context.new_segment_commit, context.lsn, segc_ctx_p);
         p_sc_map[context.new_segment_commit->GetPartitionId()].push_back(context.new_segment_commit);
-    }
+        return Status::OK();
+    };
+
+    auto segment_iter = std::make_shared<SegmentIterator>(GetAdjustedSS(), seg_executor);
+    segment_iter->Iterate();
+    STATUS_CHECK(segment_iter->GetStatus());
 
     for (auto& kv : p_sc_map) {
         auto& partition_id = kv.first;

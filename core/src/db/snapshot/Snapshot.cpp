@@ -130,6 +130,19 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
     RefAll();
 }
 
+Status
+Snapshot::GetSegmentRowCount(ID_TYPE segment_id, SIZE_TYPE& row_cnt) const {
+    auto sc = GetSegmentCommitBySegmentId(segment_id);
+    if (!sc) {
+        std::stringstream emsg;
+        emsg << "Snapshot::GetSegmentRowCount: Specified segment \"" << segment_id;
+        emsg << "\" not found";
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
+    }
+    row_cnt = sc->GetRowCount();
+    return Status::OK();
+}
+
 FieldPtr
 Snapshot::GetField(const std::string& name) const {
     auto it = field_names_map_.find(name);

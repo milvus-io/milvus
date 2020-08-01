@@ -131,7 +131,6 @@ class Snapshot : public ReferenceProxy {
     GetFieldElement(const std::string& field_name, const std::string& field_element_name,
                     FieldElementPtr& field_element) const;
 
-    // PXU TODO: add const. Need to change Scopedxxxx::Get
     SegmentCommitPtr
     GetSegmentCommitBySegmentId(ID_TYPE segment_id) const {
         auto it = seg_segc_map_.find(segment_id);
@@ -139,6 +138,9 @@ class Snapshot : public ReferenceProxy {
             return nullptr;
         return GetResource<SegmentCommit>(it->second);
     }
+
+    Status
+    GetSegmentRowCount(ID_TYPE segment_id, SIZE_TYPE&) const;
 
     std::vector<std::string>
     GetPartitionNames() const {
