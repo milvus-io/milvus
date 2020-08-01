@@ -32,16 +32,21 @@ CpuCacheMgr::~CpuCacheMgr() {
     ConfigMgr::GetInstance().Detach("cache.cache_size", this);
 }
 
-CpuCacheMgr*
+CpuCacheMgr&
 CpuCacheMgr::GetInstance() {
     static CpuCacheMgr s_mgr;
-    return &s_mgr;
+    return s_mgr;
 }
 
 DataObjPtr
-CpuCacheMgr::GetIndex(const std::string& key) {
+CpuCacheMgr::GetDataObj(const std::string& key) {
     DataObjPtr obj = GetItem(key);
     return obj;
+}
+
+void
+CpuCacheMgr::SetDataObj(const std::string& key, const milvus::cache::DataObjPtr& data) {
+    CacheMgr<DataObjPtr>::InsertItem(key, data);
 }
 
 void
