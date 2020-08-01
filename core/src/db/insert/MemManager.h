@@ -24,8 +24,6 @@
 namespace milvus {
 namespace engine {
 
-extern const char* VECTOR_FIELD;
-
 class MemManager {
  public:
     virtual Status
@@ -43,14 +41,11 @@ class MemManager {
     virtual Status
     Flush(std::set<int64_t>& collection_ids) = 0;
 
-    //    virtual Status
-    //    Serialize(std::set<std::string>& table_ids) = 0;
+    virtual Status
+    EraseMem(int64_t collection_id) = 0;
 
     virtual Status
-    EraseMemVector(int64_t collection_id) = 0;
-
-    virtual Status
-    EraseMemVector(int64_t collection_id, int64_t partition_id) = 0;
+    EraseMem(int64_t collection_id, int64_t partition_id) = 0;
 
     virtual size_t
     GetCurrentMutableMem() = 0;
