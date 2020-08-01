@@ -61,7 +61,7 @@ class DB {
 
     virtual Status
     GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                      snapshot::CollectionMappings& fields_schema) = 0;
+                      snapshot::FieldElementMappings& fields_schema) = 0;
 
     virtual Status
     GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) = 0;
