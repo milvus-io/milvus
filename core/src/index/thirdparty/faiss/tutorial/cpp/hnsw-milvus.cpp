@@ -36,9 +36,9 @@ void LoadData(const std::string file_location, float *&data, const std::string d
 using namespace hnswlib_nm;
 int main() {
     int d = 128;                            // dimension
-//    int nb = 1000000;                       // database size
-    int nb = 100000;                       // database size
-    int nq = 10000;                        // nb of queries
+    int nb = 1000000;                       // database size
+//    int nb = 100000;                       // database size
+    int nq = 1000;                        // nb of queries
 //    int nq = 10;                        // nb of queries
     int M = 16;
     int efConstruction = 200;
@@ -97,14 +97,19 @@ int main() {
 
         ts = std::chrono::high_resolution_clock::now();
         int correct_cnt = 0;
-#pragma omp parallel for
+//#pragma omp parallel for
         for (int i = 0; i < nq; ++ i) {
             std::vector<P> ret;
-            ret = hnsw->searchKnn_NM((void*)(xb + i * d), topk, compare, nullptr, xb);
-//            {
-//                if (i == ret[0].second || ret[0].first < 1e-5)
-//                    correct_cnt ++;
-//            }
+            ret = hnsw->searchKnn_NM((void*)(xq + i * d), topk, compare, nullptr, xb);
+            {
+                for (auto j = 0; j < topk; ++ j) {
+                    if (i == ret[j].second || ret[j].first < 1e-5) {
+                        correct_cnt ++;
+                        break;
+                    }
+                    std::cout << "query " << i << ", topk " << j << ": id = " << ret[j].second << ", dis = " << ret[j].first << std::endl;
+                }
+            }
         }
         te = std::chrono::high_resolution_clock::now();
         std::cout << "search " << nq << " times costs: " << std::chrono::duration_cast<std::chrono::milliseconds>(te - ts).count() << "ms " << std::endl;

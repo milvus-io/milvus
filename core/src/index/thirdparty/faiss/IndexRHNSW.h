@@ -98,32 +98,6 @@ struct IndexRHNSW : Index {
 
     void reset () override;
 
-    void shrink_level_0_neighbors(int size);
-
-    /** Perform search only on level 0, given the starting points for
-     * each vertex.
-     *
-     * @param search_type 1:perform one search per nprobe, 2: enqueue
-     *                    all entry points
-     */
-    void search_level_0(idx_t n, const float *x, idx_t k,
-                        const storage_idx_t *nearest, const float *nearest_d,
-                        float *distances, idx_t *labels, int nprobe = 1,
-                        int search_type = 1) const;
-
-    /// alternative graph building
-    void init_level_0_from_knngraph(
-                        int k, const float *D, const idx_t *I);
-
-    /// alternative graph building
-    void init_level_0_from_entry_points(
-                        int npt, const storage_idx_t *points,
-                        const storage_idx_t *nearests);
-
-    // reorder links from nearest to farthest
-    void reorder_links();
-
-    void link_singletons();
 };
 
 

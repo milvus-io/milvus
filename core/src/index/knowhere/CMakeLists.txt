@@ -63,6 +63,10 @@ set(vector_index_srcs
         knowhere/index/IndexType.cpp
         knowhere/index/vector_index/VecIndexFactory.cpp
         knowhere/index/vector_index/IndexAnnoy.cpp
+        knowhere/index/vector_index/IndexRHNSW.cpp
+        knowhere/index/vector_index/IndexRHNSWFlat.cpp
+        knowhere/index/vector_index/IndexRHNSWSQ.cpp
+        knowhere/index/vector_index/IndexRHNSWPQ.cpp
         )
 
 set(vector_offset_index_srcs

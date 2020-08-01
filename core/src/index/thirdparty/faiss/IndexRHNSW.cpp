@@ -107,7 +107,6 @@ DistanceComputer *storage_distance_computer(const Index *storage)
     }
 }
 
-
 void hnsw_add_vertices(IndexRHNSW &index_hnsw,
                        size_t n0,
                        size_t n, const float *x,
@@ -133,273 +132,30 @@ void hnsw_add_vertices(IndexRHNSW &index_hnsw,
         printf("  max_level = %d\n", max_level);
     }
 
-    std::vector<omp_lock_t> locks(ntotal);
-    for(int i = 0; i < ntotal; i++)
-        omp_init_lock(&locks[i]);
-
-    // add vectors from highest to lowest level
-    std::vector<int> hist;
-    std::vector<int> order(n);
-
-    { // make buckets with vectors of the same level
-
-        // build histogram
-        for (int i = 0; i < n; i++) {
-            storage_idx_t pt_id = i + n0;
-            int pt_level = hnsw.levels[pt_id];
-            while (pt_level >= hist.size())
-                hist.push_back(0);
-            hist[pt_level] ++;
-        }
-
-        // accumulate
-        std::vector<int> offsets(hist.size() + 1, 0);
-        for (int i = 0; i < hist.size() - 1; i++) {
-            offsets[i + 1] = offsets[i] + hist[i];
-        }
-
-        // bucket sort
-        for (int i = 0; i < n; i++) {
-            storage_idx_t pt_id = i + n0;
-            int pt_level = hnsw.levels[pt_id];
-            order[offsets[pt_level]++] = pt_id;
-        }
-    }
-
-    idx_t check_period = InterruptCallback::get_period_hint
-        (max_level * index_hnsw.d * hnsw.efConstruction);
 
     { // perform add
         auto tas = getmillisecs();
         RandomGenerator rng2(789);
+        DistanceComputer *dis0 =
+                storage_distance_computer (index_hnsw.storage);
+        ScopeDeleter1<DistanceComputer> del0(dis0);
 
-        int i1 = n;
+        dis0->set_query(x);
+        hnsw.addPoint(*dis0, hnsw.levels[n0], n0);
 
-        for (int pt_level = hist.size() - 1; pt_level >= 0; pt_level--) {
-            int i0 = i1 - hist[pt_level];
-
-            if (verbose) {
-                printf("Adding %d elements at level %d\n",
-                       i1 - i0, pt_level);
-            }
-
-            // random permutation to get rid of dataset order bias
-            for (int j = i0; j < i1; j++)
-                std::swap(order[j], order[j + rng2.rand_int(i1 - j)]);
-
-            bool interrupt = false;
-
-#pragma omp parallel if(i1 > i0 + 100)
-            {
-                VisitedTable vt (ntotal);
-
-                DistanceComputer *dis =
+#pragma omp parallel for
+        for (int i = 1; i < n; ++ i) {
+            DistanceComputer *dis =
                     storage_distance_computer (index_hnsw.storage);
-                ScopeDeleter1<DistanceComputer> del(dis);
-                DistanceComputer *inner_dis =
-                        storage_distance_computer (index_hnsw.storage);
-                ScopeDeleter1<DistanceComputer> del2(inner_dis);
-                int prev_display = verbose && omp_get_thread_num() == 0 ? 0 : -1;
-                size_t counter = 0;
-
-#pragma omp  for schedule(dynamic)
-                for (int i = i0; i < i1; i++) {
-                    storage_idx_t pt_id = order[i];
-                    if (verbose) {
-                        printf("start add point %d\n", pt_id);
-                    }
-                    dis->set_query (x + (pt_id - n0) * d);
-
-                    // cannot break
-                    if (interrupt) {
-                        continue;
-                    }
-
-//                    vt.set(pt_id);
-//                    hnsw.add_with_locks(*dis, pt_level, pt_id, locks, vt);
-                    hnsw.addPoint(*dis, pt_level, pt_id, locks, *inner_dis, index_hnsw.storage, vt);
-
-                    if (prev_display >= 0 && i - i0 > prev_display + 10000) {
-                        prev_display = i - i0;
-                        printf("  %d / %d\r", i - i0, i1 - i0);
-                        fflush(stdout);
-                    }
-
-                    if (counter % check_period == 0) {
-                        if (InterruptCallback::is_interrupted ()) {
-                            interrupt = true;
-                        }
-                    }
-                    counter++;
-                    if (verbose) {
-                        printf("end add point %d\n", pt_id);
-                    }
-                    vt.advance();
-                }
-
-            }
-            if (interrupt) {
-                FAISS_THROW_MSG ("computation interrupted");
-            }
-            i1 = i0;
+            ScopeDeleter1<DistanceComputer> del(dis);
+            dis->set_query(x + i * d);
+            hnsw.addPoint(*dis, hnsw.levels[n0 + i], i + n0);
         }
-        FAISS_ASSERT(i1 == 0);
-        printf("add actually costs %.2fms\n", getmillisecs() - tas);
     }
     if (verbose) {
         printf("Done in %.3f ms\n", getmillisecs() - t0);
     }
 
-    for(int i = 0; i < ntotal; i++) {
-        omp_destroy_lock(&locks[i]);
-    }
-}
-
-void hnsw_add_vertices2(IndexRHNSW &index_hnsw,
-                       size_t n0,
-                       size_t n, const float *x,
-                       bool verbose,
-                       bool preset_levels = false) {
-    size_t d = index_hnsw.d;
-    RHNSW & hnsw = index_hnsw.hnsw;
-    size_t ntotal = n0 + n;
-    double t0 = getmillisecs();
-    if (verbose) {
-        printf("hnsw_add_vertices: adding %ld elements on top of %ld "
-               "(preset_levels=%d)\n",
-               n, n0, int(preset_levels));
-    }
-
-    if (n == 0) {
-        return;
-    }
-
-    int max_level = hnsw.prepare_level_tab(n, preset_levels);
-
-    if (verbose) {
-        printf("  max_level = %d\n", max_level);
-    }
-
-    std::vector<omp_lock_t> locks(ntotal);
-    for(int i = 0; i < ntotal; i++)
-        omp_init_lock(&locks[i]);
-
-    // add vectors from highest to lowest level
-    std::vector<int> hist;
-    std::vector<int> order(n);
-
-    { // make buckets with vectors of the same level
-
-        // build histogram
-        for (int i = 0; i < n; i++) {
-            storage_idx_t pt_id = i + n0;
-            int pt_level = hnsw.levels[pt_id];
-            while (pt_level >= hist.size())
-                hist.push_back(0);
-            hist[pt_level] ++;
-        }
-
-        // accumulate
-        std::vector<int> offsets(hist.size() + 1, 0);
-        for (int i = 0; i < hist.size() - 1; i++) {
-            offsets[i + 1] = offsets[i] + hist[i];
-        }
-
-        // bucket sort
-        for (int i = 0; i < n; i++) {
-            storage_idx_t pt_id = i + n0;
-            int pt_level = hnsw.levels[pt_id];
-            order[offsets[pt_level]++] = pt_id;
-        }
-    }
-
-    idx_t check_period = InterruptCallback::get_period_hint
-        (max_level * index_hnsw.d * hnsw.efConstruction);
-
-    { // perform add
-        auto tas = getmillisecs();
-        RandomGenerator rng2(789);
-
-        int i1 = n;
-
-        for (int pt_level = hist.size() - 1; pt_level >= 0; pt_level--) {
-            int i0 = i1 - hist[pt_level];
-
-            if (verbose) {
-                printf("Adding %d elements at level %d\n",
-                       i1 - i0, pt_level);
-            }
-
-            // random permutation to get rid of dataset order bias
-            for (int j = i0; j < i1; j++)
-                std::swap(order[j], order[j + rng2.rand_int(i1 - j)]);
-
-            bool interrupt = false;
-
-#pragma omp parallel if(i1 > i0 + 100)
-            {
-                VisitedTable vt (ntotal);
-
-                DistanceComputer *dis =
-                    storage_distance_computer (index_hnsw.storage);
-                ScopeDeleter1<DistanceComputer> del(dis);
-                DistanceComputer *inner_dis =
-                        storage_distance_computer (index_hnsw.storage);
-                ScopeDeleter1<DistanceComputer> del2(inner_dis);
-                int prev_display = verbose && omp_get_thread_num() == 0 ? 0 : -1;
-                size_t counter = 0;
-
-#pragma omp  for schedule(dynamic)
-                for (int i = i0; i < i1; i++) {
-                    storage_idx_t pt_id = order[i];
-                    if (verbose) {
-                        printf("start add point %d\n", pt_id);
-                    }
-                    dis->set_query (x + (pt_id - n0) * d);
-
-                    // cannot break
-                    if (interrupt) {
-                        continue;
-                    }
-
-//                    vt.set(pt_id);
-//                    hnsw.add_with_locks(*dis, pt_level, pt_id, locks, vt);
-                    hnsw.addPoint(*dis, pt_level, pt_id, locks, *inner_dis, index_hnsw.storage, vt);
-
-                    if (prev_display >= 0 && i - i0 > prev_display + 10000) {
-                        prev_display = i - i0;
-                        printf("  %d / %d\r", i - i0, i1 - i0);
-                        fflush(stdout);
-                    }
-
-                    if (counter % check_period == 0) {
-                        if (InterruptCallback::is_interrupted ()) {
-                            interrupt = true;
-                        }
-                    }
-                    counter++;
-                    if (verbose) {
-                        printf("end add point %d\n", pt_id);
-                    }
-                    vt.advance();
-                }
-
-            }
-            if (interrupt) {
-                FAISS_THROW_MSG ("computation interrupted");
-            }
-            i1 = i0;
-        }
-        FAISS_ASSERT(i1 == 0);
-        printf("add actually costs %.2fms\n", getmillisecs() - tas);
-    }
-    if (verbose) {
-        printf("Done in %.3f ms\n", getmillisecs() - t0);
-    }
-
-    for(int i = 0; i < ntotal; i++) {
-        omp_destroy_lock(&locks[i]);
-    }
 }
 
 }  // namespace
@@ -470,7 +226,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
                 dis->set_query(x + i * d);
 
                 maxheap_heapify (k, simi, idxi);
-//                hnsw.search(*dis, k, idxi, simi, vt);
+
                 hnsw.searchKnn(*dis, k, idxi, simi, vt);
 
                 maxheap_reorder (k, simi, idxi);
@@ -514,25 +270,8 @@ void IndexRHNSW::add(idx_t n, const float *x)
     storage->add(n, x);
     ntotal = storage->ntotal;
 
-    auto t0 = faiss::getmillisecs();
     hnsw_add_vertices (*this, n0, n, x, verbose,
                        hnsw.levels.size() == ntotal);
-    printf("hnsw_add_vertices costs: %.2fms\n", faiss::getmillisecs() - t0);
-}
-
-void IndexRHNSW::add2(idx_t n, const float *x)
-{
-    FAISS_THROW_IF_NOT_MSG(storage,
-       "Please use IndexHSNWFlat (or variants) instead of IndexRHNSW directly");
-    FAISS_THROW_IF_NOT(is_trained);
-    int n0 = ntotal;
-    storage->add(n, x);
-    ntotal = storage->ntotal;
-
-    auto t0 = faiss::getmillisecs();
-    hnsw_add_vertices2(*this, n0, n, x, verbose,
-                       hnsw.levels.size() == ntotal);
-    printf("hnsw_add_vertices2 costs: %.2fms\n", faiss::getmillisecs() - t0);
 }
 
 void IndexRHNSW::reset()
@@ -547,277 +286,9 @@ void IndexRHNSW::reconstruct (idx_t key, float* recons) const
     storage->reconstruct(key, recons);
 }
 
-void IndexRHNSW::shrink_level_0_neighbors(int new_size)
-{
-#pragma omp parallel
-    {
-        DistanceComputer *dis = storage_distance_computer(storage);
-        ScopeDeleter1<DistanceComputer> del(dis);
-
-#pragma omp for
-        for (idx_t i = 0; i < ntotal; i++) {
-
-            int *cur_links = hnsw.get_neighbor_link(i, 0);
-            int *cur_neighbors = cur_links + 1;
-            auto cur_neighbor_num = hnsw.get_neighbors_num(cur_links);
-
-            std::priority_queue<NodeDistFarther> initial_list;
-
-            for (auto j = 0; j < cur_neighbor_num; ++ j) {
-                int v1 = cur_neighbors[j];
-                if (v1 < 0) break;
-                initial_list.emplace(dis->symmetric_dis(i, v1), v1);
-
-                // initial_list.emplace(qdis(v1), v1);
-            }
-
-            std::vector<NodeDistFarther> shrunk_list;
-            RHNSW::shrink_neighbor_list(*dis, initial_list,
-                                       shrunk_list, new_size);
-
-            for (auto j = 0; j < shrunk_list.size(); ++ j) {
-                cur_neighbors[j] = shrunk_list[j].id;
-            }
-            hnsw.set_neighbors_num(cur_links, shrunk_list.size());
-        }
-    }
-
-}
-
-void IndexRHNSW::search_level_0(
-    idx_t n, const float *x, idx_t k,
-    const storage_idx_t *nearest, const float *nearest_d,
-    float *distances, idx_t *labels, int nprobe,
-    int search_type) const
-{
-
-    storage_idx_t ntotal = hnsw.levels.size();
-    printf("enter IndexRHNSW::search_level_0, ntotal = hnsw.levels.size() = %d\n", hnsw.levels.size());
-#pragma omp parallel
-    {
-        DistanceComputer *qdis = storage_distance_computer(storage);
-        ScopeDeleter1<DistanceComputer> del(qdis);
-
-        VisitedTable vt (ntotal);
-
-#pragma omp for
-        for(idx_t i = 0; i < n; i++) {
-            idx_t * idxi = labels + i * k;
-            float * simi = distances + i * k;
-
-            qdis->set_query(x + i * d);
-            maxheap_heapify (k, simi, idxi);
-
-            if (search_type == 1) {
-
-                int nres = 0;
-
-                for(int j = 0; j < nprobe; j++) {
-                    storage_idx_t cj = nearest[i * nprobe + j];
-
-                    if (cj < 0) break;
-
-                    if (vt.get(cj)) continue;
-
-                    int candidates_size = std::max(hnsw.efSearch, int(k));
-                    MinimaxHeap candidates(candidates_size);
-
-                    candidates.push(cj, nearest_d[i * nprobe + j]);
-
-                    nres = hnsw.search_from_candidates(
-                      *qdis, k, idxi, simi,
-                      candidates, vt, 0, nres
-                    );
-                }
-            } else if (search_type == 2) {
-
-                int candidates_size = std::max(hnsw.efSearch, int(k));
-                candidates_size = std::max(candidates_size, nprobe);
-
-                MinimaxHeap candidates(candidates_size);
-                for(int j = 0; j < nprobe; j++) {
-                    storage_idx_t cj = nearest[i * nprobe + j];
-
-                    if (cj < 0) break;
-                    candidates.push(cj, nearest_d[i * nprobe + j]);
-                }
-                hnsw.search_from_candidates(
-                  *qdis, k, idxi, simi,
-                  candidates, vt, 0
-                );
-
-            }
-            vt.advance();
-
-            maxheap_reorder (k, simi, idxi);
-
-        }
-    }
-
-
-}
-
-void IndexRHNSW::init_level_0_from_knngraph(
-       int k, const float *D, const idx_t *I)
-{
-    int dest_size = hnsw.M << 1;
-
-#pragma omp parallel for
-    for (idx_t i = 0; i < ntotal; i++) {
-        DistanceComputer *qdis = storage_distance_computer(storage);
-        float vec[d];
-        storage->reconstruct(i, vec);
-        qdis->set_query(vec);
-
-        std::priority_queue<NodeDistFarther> initial_list;
-
-        for (size_t j = 0; j < k; j++) {
-            int v1 = I[i * k + j];
-            if (v1 == i) continue;
-            if (v1 < 0) break;
-            initial_list.emplace(D[i * k + j], v1);
-        }
-
-        std::vector<NodeDistFarther> shrunk_list;
-        RHNSW::shrink_neighbor_list(*qdis, initial_list, shrunk_list, dest_size);
-
-        int *cur_links = hnsw.get_neighbor_link(i, 0);
-        int *cur_neighbors = cur_links + 1;
-
-        for (auto j = 0; j < shrunk_list.size(); ++ j) {
-            cur_neighbors[j] = shrunk_list[j].id;
-        }
-        hnsw.set_neighbors_num(cur_links, shrunk_list.size());
-    }
-}
-
-
-
-void IndexRHNSW::init_level_0_from_entry_points(
-          int n, const storage_idx_t *points,
-          const storage_idx_t *nearests)
-{
-
-    std::vector<omp_lock_t> locks(ntotal);
-    for(int i = 0; i < ntotal; i++)
-        omp_init_lock(&locks[i]);
-
-#pragma omp parallel
-    {
-        VisitedTable vt (ntotal);
-
-        DistanceComputer *dis = storage_distance_computer(storage);
-        ScopeDeleter1<DistanceComputer> del(dis);
-        float vec[storage->d];
-
-#pragma omp  for schedule(dynamic)
-        for (int i = 0; i < n; i++) {
-            storage_idx_t pt_id = points[i];
-            storage_idx_t nearest = nearests[i];
-            storage->reconstruct (pt_id, vec);
-            dis->set_query (vec);
-
-            hnsw.add_links_starting_from(*dis, pt_id,
-                                         nearest, (*dis)(nearest),
-                                         0, locks.data(), vt);
-
-            if (verbose && i % 10000 == 0) {
-                printf("  %d / %d\r", i, n);
-                fflush(stdout);
-            }
-        }
-    }
-    if (verbose) {
-        printf("\n");
-    }
-
-    for(int i = 0; i < ntotal; i++)
-        omp_destroy_lock(&locks[i]);
-}
-
-void IndexRHNSW::reorder_links()
-{
-    int M = hnsw.M << 1;
-
-#pragma omp parallel
-    {
-        std::vector<float> distances (M);
-        std::vector<size_t> order (M);
-        std::vector<storage_idx_t> tmp (M);
-        DistanceComputer *dis = storage_distance_computer(storage);
-        ScopeDeleter1<DistanceComputer> del(dis);
-
-#pragma omp for
-        for(storage_idx_t i = 0; i < ntotal; i++) {
-
-            int *cur_links = hnsw.get_neighbor_link(i, 0);
-            int *cur_neighbors = cur_links + 1;
-            auto cur_neighbor_num = hnsw.get_neighbors_num(cur_links);
-
-            for (auto j = 0; j < cur_neighbor_num; ++ j) {
-                storage_idx_t nj = cur_neighbors[j];
-                if (nj < 0) {
-                    break;
-                }
-                distances[j] = dis->symmetric_dis(i, nj);
-                tmp [j] = nj;
-            }
-
-            fvec_argsort (cur_neighbor_num, distances.data(), order.data());
-            for (auto j = 0; j < cur_neighbor_num; ++ j) {
-                cur_neighbors[j] = tmp[order[j]];
-            }
-        }
-
-    }
-}
-
-
-void IndexRHNSW::link_singletons()
-{
-    printf("search for singletons\n");
-
-    std::vector<bool> seen(ntotal);
-
-    for (size_t i = 0; i < ntotal; i++) {
-        int *cur_links = hnsw.get_neighbor_link(i, 0);
-        int *cur_neighbors = cur_links + 1;
-        auto cur_neighbor_num = hnsw.get_neighbors_num(cur_links);
-        for (auto j = 0; j < cur_neighbor_num; ++ j) {
-            storage_idx_t ni = cur_neighbors[j];
-            if (ni >= 0) seen[ni] = true;
-        }
-    }
-
-    int n_sing = 0, n_sing_l1 = 0;
-    std::vector<storage_idx_t> singletons;
-    for (storage_idx_t i = 0; i < ntotal; i++) {
-        if (!seen[i]) {
-            singletons.push_back(i);
-            n_sing++;
-            if (hnsw.levels[i] > 1)
-                n_sing_l1++;
-        }
-    }
-
-    printf("  Found %d / %ld singletons (%d appear in a level above)\n",
-           n_sing, ntotal, n_sing_l1);
-
-    std::vector<float>recons(singletons.size() * d);
-    for (int i = 0; i < singletons.size(); i++) {
-
-        FAISS_ASSERT(!"not implemented");
-
-    }
-
-
-}
-
-
 /**************************************************************
  * ReconstructFromNeighbors implementation
  **************************************************************/
-
 
 ReconstructFromNeighbors2::ReconstructFromNeighbors2(
              const IndexRHNSW & index, size_t k, size_t nsq):
@@ -1260,10 +731,11 @@ void IndexRHNSW2Level::search (idx_t n, const float *x, idx_t k,
                     // reorder from sorted to heap
                     maxheap_heapify (k, simi, idxi, simi, idxi, k);
 
-                    hnsw.search_from_candidates(
-                      *dis, k, idxi, simi,
-                      candidates, vt, 0, k
-                    );
+                    // removed from RHNSW, but still available in HNSW
+//                    hnsw.search_from_candidates(
+//                      *dis, k, idxi, simi,
+//                      candidates, vt, 0, k
+//                    );
 
                     vt.advance();
 
