@@ -16,7 +16,6 @@ collection_id = "test_get"
 DELETE_TIMEOUT = 60
 tag = "1970-01-01"
 nb = 6000
-field_name = "float_entity"
 entity = gen_entities(1)
 binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
@@ -24,7 +23,7 @@ raw_vectors, binary_entities = gen_binary_entities(nb)
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim), "params": {"nprobe": 10}}}}
+            {"vector": {default_float_vec_field_name: {"topk": 10, "query": gen_vectors(1, dim), "params": {"nprobe": 10}}}}
         ]
     }
 }
@@ -69,7 +68,7 @@ class TestGetBase:
         assert res_count == nb
         get_ids = [ids[get_pos]]
         res = connect.get_entity_by_id(collection, get_ids)
-        assert_equal_vector(res[0].get("vector"), entities[-1]["values"][get_pos])
+        assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][get_pos])
 
     def test_get_entity_multi_ids(self, connect, collection, get_pos):
         '''
@@ -82,7 +81,7 @@ class TestGetBase:
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
     def test_get_entity_parts_ids(self, connect, collection):
         '''
@@ -94,8 +93,8 @@ class TestGetBase:
         connect.flush([collection])
         get_ids = [ids[0], 1, ids[-1]]
         res = connect.get_entity_by_id(collection, get_ids)
-        assert_equal_vector(res[0].get("vector"), entities[-1]["values"][0])
-        assert_equal_vector(res[-1].get("vector"), entities[-1]["values"][-1])
+        assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
+        assert_equal_vector(res[-1].get(default_float_vec_field_name), entities[-1]["values"][-1])
         assert res[1] is None
 
     def test_get_entity_limit(self, connect, collection, args):
@@ -124,7 +123,7 @@ class TestGetBase:
         get_ids = [ids[0]]
         res = connect.get_entity_by_id(collection, get_ids)
         assert len(res) == 1
-        assert_equal_vector(res[0].get("vector"), entities[-1]["values"][0])
+        assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
 
     def test_get_entity_params_same_ids(self, connect, collection):
         '''
@@ -140,7 +139,7 @@ class TestGetBase:
         assert len(res) == len(get_ids)
         for i in range(len(get_ids)):
             logging.getLogger().info(i)
-            assert_equal_vector(res[i].get("vector"), entity[-1]["values"][0])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), entity[-1]["values"][0])
 
     def test_get_entities_params_same_ids(self, connect, collection):
         '''
@@ -154,7 +153,7 @@ class TestGetBase:
         res = connect.get_entity_by_id(collection, get_ids)
         assert len(res) == len(get_ids)
         for i in range(len(get_ids)):
-            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][0])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][0])
 
     """
     ******************************************************************
@@ -172,8 +171,8 @@ class TestGetBase:
         connect.flush([ip_collection])
         get_ids = [ids[0], 1, ids[-1]]
         res = connect.get_entity_by_id(ip_collection, get_ids)
-        assert_equal_vector(res[0].get("vector"), entities[-1]["values"][0])
-        assert_equal_vector(res[-1].get("vector"), entities[-1]["values"][-1])
+        assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
+        assert_equal_vector(res[-1].get(default_float_vec_field_name), entities[-1]["values"][-1])
         assert res[1] is None
 
     def test_get_entity_parts_ids_jac(self, connect, jac_collection):
@@ -207,7 +206,7 @@ class TestGetBase:
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
     def test_get_entities_tag_default(self, connect, collection, get_pos):
         '''
@@ -221,7 +220,7 @@ class TestGetBase:
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
     def test_get_entities_tags_default(self, connect, collection, get_pos):
         '''
@@ -237,7 +236,7 @@ class TestGetBase:
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
     def test_get_entities_tags_A(self, connect, collection, get_pos):
         '''
@@ -253,7 +252,7 @@ class TestGetBase:
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
     def test_get_entities_tags_B(self, connect, collection, get_pos):
         '''
@@ -272,9 +271,9 @@ class TestGetBase:
         get_ids.extend(ids_new[:get_pos])
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
         for i in range(get_pos, get_pos*2):
-            assert_equal_vector(res[i].get("vector"), new_entities[-1]["values"][i-get_pos])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), new_entities[-1]["values"][i-get_pos])
 
     def test_get_entities_indexed_tag(self, connect, collection, get_simple_index, get_pos):
         '''
@@ -285,11 +284,11 @@ class TestGetBase:
         connect.create_partition(collection, tag)
         ids = connect.insert(collection, entities, partition_tag=tag)
         connect.flush([collection])
-        connect.create_index(collection, field_name, get_simple_index)
+        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
     """
     ******************************************************************
@@ -320,7 +319,7 @@ class TestGetBase:
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
-        fields = ["int64", "float", "vector"]
+        fields = ["int64", "float", default_float_vec_field_name]
         res = connect.get_entity_by_id(collection, get_ids, fields = fields)
         # assert fields
 
@@ -437,11 +436,11 @@ class TestGetBase:
         '''
         ids = connect.insert(collection, entities)
         connect.flush([collection])
-        connect.create_index(collection, field_name, get_simple_index)
+        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
     def test_get_entities_indexed_single(self, connect, collection, get_simple_index, get_pos):
         '''
@@ -453,11 +452,11 @@ class TestGetBase:
         for i in range(nb):
             ids.append(connect.insert(collection, entity)[0])
         connect.flush([collection])
-        connect.create_index(collection, field_name, get_simple_index)
+        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get("vector"), entity[-1]["values"][0])
+            assert_equal_vector(res[i].get(default_float_vec_field_name), entity[-1]["values"][0])
 
     def test_get_entities_after_delete_disable_autoflush(self, connect, collection, get_pos):
         '''
@@ -474,7 +473,7 @@ class TestGetBase:
             get_ids = ids[:get_pos]
             res = connect.get_entity_by_id(collection, get_ids)
             for i in range(get_pos):
-                assert_equal_vector(res[i].get("vector"), entities[-1]["values"][i])
+                assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
         finally:
             enable_flush(connect)
 
@@ -517,7 +516,7 @@ class TestGetBase:
             res = connect.get_entity_by_id(collection, get_id)
             assert len(res) == len(get_id)
             for i in range(len(res)):
-                assert_equal_vector(res[i].get("vector"), entities[-1]["values"][100+i])
+                assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][100+i])
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_results = {executor.submit(
                 get): i for i in range(10)}
