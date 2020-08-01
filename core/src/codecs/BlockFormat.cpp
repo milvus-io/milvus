@@ -97,8 +97,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 
     int64_t total_bytes = 0;
     for (auto& range : read_ranges) {
-        int64_t offset = range.offset_ + sizeof(size_t);
-        if (offset + range.num_bytes_ > total_num_bytes) {
+        if (range.offset_ > total_num_bytes) {
             std::string err_msg = "Invalid input to read: " + file_path;
             LOG_ENGINE_ERROR_ << err_msg;
             throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
