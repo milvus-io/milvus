@@ -45,6 +45,7 @@ set( SCHEDULER_FILES  ${SCHEDULER_MAIN_FILES}
 
 add_subdirectory( storage )
 add_subdirectory( cache )
+add_subdirectory( codecs )
 add_subdirectory( utils )
 add_subdirectory( metrics )
 add_subdirectory( config )

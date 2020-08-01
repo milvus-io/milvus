@@ -26,7 +26,6 @@ set( DB_META_FILES  ${DB_META_MAIN_FILES}
                     )
 
 aux_source_directory( ${MILVUS_ENGINE_SRC}/index/archive    WRAPPER_FILES )
-aux_source_directory( ${MILVUS_ENGINE_SRC}/codecs           CODECS_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/segment          SEGMENT_FILES )
 
 
@@ -48,7 +47,6 @@ set( ENGINE_FILES   ${DB_MAIN_FILES}
                     ${DB_SNAPSHOT_FILES}
                     ${THIRDPARTY_FILES}
                     ${WRAPPER_FILES}
-                    ${CODECS_FILES}
                     ${SEGMENT_FILES}
                     )
 
@@ -149,6 +147,7 @@ target_link_libraries( milvus_engine
                PUBLIC  knowhere
                        cache
                        storage
+                       codecs
                        ${THIRD_PARTY_LIBS}
                        ${ENGINE_LIBS}
                        )
