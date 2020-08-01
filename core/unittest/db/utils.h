@@ -98,10 +98,15 @@ RandomInt(int start, int end) {
 }
 
 inline void
-SFContextBuilder(SegmentFileContext& ctx, ScopedSnapshotT sss) {
+SFContextBuilder(SegmentFileContext& ctx, ScopedSnapshotT sss,
+        const std::set<std::string>& exclude_field_element_names = {}) {
     auto field = sss->GetResources<Field>().begin()->second;
     ctx.field_name = field->GetName();
     for (auto& kv : sss->GetResources<FieldElement>()) {
+        auto name = kv.second->GetName();
+        if (exclude_field_element_names.find(name) != exclude_field_element_names.end()) {
+            continue;
+        }
         ctx.field_element_name = kv.second->GetName();
         break;
     }
@@ -281,6 +286,30 @@ CreateSegment(ScopedSnapshotT ss, ID_TYPE partition_id, LSN_TYPE lsn, const Segm
     STATUS_CHECK(op->CommitNewSegmentFile(nsf_context, seg_file));
     op->CommitRowCount(row_cnt);
     seg_file->SetSize(row_cnt * 10);
+    STATUS_CHECK(op->Push());
+
+    return op->GetSnapshot(ss);
+}
+
+inline Status
+CreateSegment(ScopedSnapshotT ss, ID_TYPE partition_id, LSN_TYPE lsn,
+        const std::vector<SegmentFileContext>& sfs_context,
+        SIZE_TYPE row_cnt) {
+    OperationContext context;
+    context.lsn = lsn;
+    context.prev_partition = ss->GetResource<Partition>(partition_id);
+    auto op = std::make_shared<NewSegmentOperation>(context, ss);
+    SegmentPtr new_seg;
+    STATUS_CHECK(op->CommitNewSegment(new_seg));
+    for (auto& sf_context : sfs_context) {
+        SegmentFilePtr seg_file;
+        auto nsf_context = sf_context;
+        nsf_context.segment_id = new_seg->GetID();
+        nsf_context.partition_id = new_seg->GetPartitionId();
+        STATUS_CHECK(op->CommitNewSegmentFile(nsf_context, seg_file));
+        seg_file->SetSize(row_cnt * 10);
+    }
+    op->CommitRowCount(row_cnt);
     STATUS_CHECK(op->Push());
 
     return op->GetSnapshot(ss);

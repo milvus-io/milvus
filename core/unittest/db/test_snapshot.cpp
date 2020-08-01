@@ -541,31 +541,41 @@ TEST_F(SnapshotTest, IndexTest) {
     sf_collector->Iterate();
     auto prev_total = sf_collector->segment_files_.size();
 
+    decltype(sf_context) osf_context;
+    SFContextBuilder(osf_context, ss, {sf_context.field_element_name});
+    std::vector<SegmentFileContext> sfs_context = {sf_context, osf_context};
+
     auto new_total = 0;
     auto partitions = ss->GetResources<Partition>();
     for (auto& kv : partitions) {
         num = RandomInt(2, 5);
         auto row_cnt = 1024;
         for (auto i = 0; i < num; ++i) {
-            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
+            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sfs_context, row_cnt).ok());
         }
-        new_total += num;
+        new_total += num * sfs_context.size();
     }
 
     status = Snapshots::GetInstance().GetSnapshot(ss, ss->GetName());
     ASSERT_TRUE(status.ok());
+    std::cout << ss->ToString() << std::endl;
 
     sf_collector = std::make_shared<SegmentFileCollector>(ss, filter2);
     sf_collector->Iterate();
     auto total = sf_collector->segment_files_.size();
     ASSERT_EQ(total, prev_total + new_total);
 
-    auto field_element_id = ss->GetFieldElementId(sf_context.field_name,
-            sf_context.field_element_name);
-    ASSERT_NE(field_element_id, 0);
+    std::set<ID_TYPE> fe_ids;
+
+    for (auto ctx : sfs_context) {
+        auto field_element_id = ss->GetFieldElementId(ctx.field_name,
+                ctx.field_element_name);
+        ASSERT_NE(field_element_id, 0);
+        fe_ids.insert(field_element_id);
+    }
 
     auto filter3 = [&](SegmentFile::Ptr segment_file) -> bool {
-        return segment_file->GetFieldElementId() == field_element_id;
+        return fe_ids.find(segment_file->GetFieldElementId()) != fe_ids.end();
     };
     sf_collector = std::make_shared<SegmentFileCollector>(ss, filter3);
     sf_collector->Iterate();
@@ -573,14 +583,9 @@ TEST_F(SnapshotTest, IndexTest) {
 
     OperationContext d_a_i_ctx;
     d_a_i_ctx.lsn = next_lsn();
-    d_a_i_ctx.stale_field_elements.push_back(ss->GetResource<FieldElement>(field_element_id));
-
-    FieldElement::Ptr fe;
-    status = ss->GetFieldElement(sf_context.field_name, sf_context.field_element_name,
-            fe);
-
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(fe, d_a_i_ctx.stale_field_elements[0]);
+    for (auto fe_id : fe_ids) {
+        d_a_i_ctx.stale_field_elements.push_back(ss->GetResource<FieldElement>(fe_id));
+    }
 
     auto drop_all_index_op = std::make_shared<DropAllIndexOperation>(d_a_i_ctx, ss);
     status = drop_all_index_op->Push();
@@ -605,14 +610,18 @@ TEST_F(SnapshotTest, IndexTest) {
     /*     } */
     /* } */
 
+    std::cout << ss->ToString() << std::endl;
     sf_collector = std::make_shared<SegmentFileCollector>(ss, filter2);
     sf_collector->Iterate();
     ASSERT_EQ(sf_collector->segment_files_.size(), total - specified_segment_files_cnt);
+    std::cout << "sf size = " << sf_collector->segment_files_.size() << std::endl;
+    std::cout << "total = " << total << std::endl;
+    std::cout << "specified_segment_files_cnt = " << specified_segment_files_cnt << std::endl;
 
     {
         auto& field_elements = ss->GetResources<FieldElement>();
         for (auto& kv : field_elements) {
-            ASSERT_NE(kv.second->GetID(), field_element_id);
+            ASSERT_EQ(fe_ids.find(kv.second->GetID()), fe_ids.end());
         }
     }
 }
