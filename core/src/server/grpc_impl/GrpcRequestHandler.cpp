@@ -264,7 +264,7 @@ ConstructResults(const TopKQueryResult& result, ::milvus::grpc::QueryResult* res
 
 void
 CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
-                      const engine::snapshot::CollectionMappings& field_mappings, int64_t id_size,
+                      const engine::snapshot::FieldElementMappings& field_mappings, int64_t id_size,
                       ::milvus::grpc::Entities* response) {
     for (const auto& it : field_mappings) {
         auto type = it.first->GetFtype();
@@ -876,7 +876,7 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     }
 
     engine::DataChunkPtr data_chunk;
-    engine::snapshot::CollectionMappings field_mappings;
+    engine::snapshot::FieldElementMappings field_mappings;
 
     std::vector<bool> valid_row;
 
@@ -1413,8 +1413,8 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
     std::vector<std::string> field_names;
-    engine::snapshot::CollectionMappings collection_mappings;
-    status = req_handler_.Search(GetContext(context), query_ptr, json_params, collection_mappings, result);
+    engine::snapshot::FieldElementMappings field_mappings;
+    status = req_handler_.Search(GetContext(context), query_ptr, json_params, field_mappings, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
@@ -1772,16 +1772,16 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     }
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-    engine::snapshot::CollectionMappings collection_mappings;
+    engine::snapshot::FieldElementMappings field_mappings;
 
-    status = req_handler_.Search(GetContext(context), query_ptr, json_params, collection_mappings, result);
+    status = req_handler_.Search(GetContext(context), query_ptr, json_params, field_mappings, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
     int64_t id_size = result->result_ids_.size();
     grpc_entity->mutable_valid_row()->Resize(id_size, true);
 
-    CopyDataChunkToEntity(result->data_chunk_, collection_mappings, id_size, grpc_entity);
+    CopyDataChunkToEntity(result->data_chunk_, field_mappings, id_size, grpc_entity);
 
     grpc_entity->mutable_ids()->Resize(static_cast<int>(result->result_ids_.size()), 0);
     memcpy(grpc_entity->mutable_ids()->mutable_data(), result->result_ids_.data(),

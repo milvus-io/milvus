@@ -163,7 +163,7 @@ ReqHandler::Insert(const std::shared_ptr<Context>& context, const std::string& c
 Status
 ReqHandler::GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
                           const engine::IDNumbers& ids, std::vector<std::string>& field_names,
-                          std::vector<bool>& valid_row, engine::snapshot::CollectionMappings& field_mappings,
+                          std::vector<bool>& valid_row, engine::snapshot::FieldElementMappings& field_mappings,
                           engine::DataChunkPtr& data_chunk) {
     BaseReqPtr req_ptr =
         GetEntityByIDReq::Create(context, collection_name, ids, field_names, valid_row, field_mappings, data_chunk);
@@ -181,7 +181,7 @@ ReqHandler::DeleteEntityByID(const std::shared_ptr<Context>& context, const std:
 
 Status
 ReqHandler::Search(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                   const milvus::json& json_params, engine::snapshot::CollectionMappings& collection_mappings,
+                   const milvus::json& json_params, engine::snapshot::FieldElementMappings& collection_mappings,
                    engine::QueryResultPtr& result) {
     BaseReqPtr req_ptr = SearchReq::Create(context, query_ptr, json_params, collection_mappings, result);
     ReqScheduler::ExecReq(req_ptr);

@@ -89,7 +89,7 @@ class ReqHandler {
     Status
     GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
                   const engine::IDNumbers& ids, std::vector<std::string>& field_names, std::vector<bool>& valid_row,
-                  engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
+                  engine::snapshot::FieldElementMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
     Status
     DeleteEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
@@ -97,7 +97,7 @@ class ReqHandler {
 
     Status
     Search(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-           const milvus::json& json_params, engine::snapshot::CollectionMappings& collection_mappings,
+           const milvus::json& json_params, engine::snapshot::FieldElementMappings& collection_mappings,
            engine::QueryResultPtr& result);
 
     Status
