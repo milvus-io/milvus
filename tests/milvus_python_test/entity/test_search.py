@@ -21,7 +21,6 @@ top_k = 10
 nprobe = 1
 epsilon = 0.001
 field_name = "float_vector"
-default_index_name = "insert_index"
 default_fields = gen_default_fields() 
 search_param = {"nprobe": 1}
 entity = gen_entities(1, is_normal=True)
@@ -34,7 +33,7 @@ query, query_vecs = gen_query_vectors_inside_entities(field_name, entities, top_
 #         "must": [
 #             {"term": {"A": {"values": [1, 2, 5]}}},
 #             {"range": {"B": {"ranges": {"GT": 1, "LT": 100}}}},
-#             {"vector": {"Vec": {"topk": 10, "query": vec[: 1], "params": {"index_name": "IVFFLAT", "nprobe": 10}}}}
+#             {"vector": {"Vec": {"topk": 10, "query": vec[: 1], "params": {"nprobe": 10}}}}
 #         ],
 #     },
 # }
@@ -206,7 +205,7 @@ class TestSearchBase:
         if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
         entities, ids = init_data(connect, collection)
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
         if top_k > top_k_limit:
@@ -233,7 +232,7 @@ class TestSearchBase:
             pytest.skip("Skip PQ")
         connect.create_partition(collection, tag)
         entities, ids = init_data(connect, collection)
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
         if top_k > top_k_limit:
@@ -262,7 +261,7 @@ class TestSearchBase:
             pytest.skip("Skip PQ")
         connect.create_partition(collection, tag)
         entities, ids = init_data(connect, collection, partition_tags=tag)
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
         for tags in [[tag], [tag, "new_tag"]]:
@@ -312,7 +311,7 @@ class TestSearchBase:
         connect.create_partition(collection, new_tag)
         entities, ids = init_data(connect, collection, partition_tags=tag)
         new_entities, new_ids = init_data(connect, collection, nb=6001, partition_tags=new_tag)
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
         if top_k > top_k_limit:
@@ -347,7 +346,7 @@ class TestSearchBase:
         connect.create_partition(collection, new_tag)
         entities, ids = init_data(connect, collection, partition_tags=tag)
         new_entities, new_ids = init_data(connect, collection, nb=6001, partition_tags=new_tag)
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
         query, vecs = gen_query_vectors_inside_entities(field_name, new_entities, top_k, nq, search_params=search_param)
         if top_k > top_k_limit:
@@ -399,7 +398,8 @@ class TestSearchBase:
         if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
         entities, ids = init_data(connect, ip_collection)
-        connect.create_index(ip_collection, field_name, default_index_name, get_simple_index)
+        get_simple_index["metric_type"] = "IP"
+        connect.create_index(ip_collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
         if top_k > top_k_limit:
@@ -427,8 +427,10 @@ class TestSearchBase:
             pytest.skip("Skip PQ")
         connect.create_partition(ip_collection, tag)
         entities, ids = init_data(connect, ip_collection)
-        connect.create_index(ip_collection, field_name, default_index_name, get_simple_index)
+        get_simple_index["metric_type"] = "IP"
+        connect.create_index(ip_collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
+        search_param["metric_type"] = "IP"
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
         if top_k > top_k_limit:
             with pytest.raises(Exception) as e:
@@ -459,8 +461,10 @@ class TestSearchBase:
         connect.create_partition(ip_collection, new_tag)
         entities, ids = init_data(connect, ip_collection, partition_tags=tag)
         new_entities, new_ids = init_data(connect, ip_collection, nb=6001, partition_tags=new_tag)
-        connect.create_index(ip_collection, field_name, default_index_name, get_simple_index)
+        get_simple_index["metric_type"] = "IP"
+        connect.create_index(ip_collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
+        search_param["metric_type"] = "IP"
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
         if top_k > top_k_limit:
             with pytest.raises(Exception) as e:
@@ -522,7 +526,7 @@ class TestSearchBase:
         index_type = get_simple_index["index_type"]
         nq = 2
         entities, ids = init_data(connect, collection)
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
         query, vecs = gen_query_vectors_rand_entities(field_name, entities, top_k, nq, search_params=search_param)
         inside_vecs = entities[-1]["values"]
@@ -560,8 +564,10 @@ class TestSearchBase:
         index_type = get_simple_index["index_type"]
         nq = 2
         entities, ids = init_data(connect, ip_collection)
-        connect.create_index(ip_collection, field_name, default_index_name, get_simple_index)
+        get_simple_index["metric_type"] = "IP"
+        connect.create_index(ip_collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
+        search_param["metric_type"] = "IP"
         query, vecs = gen_query_vectors_rand_entities(field_name, entities, top_k, nq, search_params=search_param)
         inside_vecs = entities[-1]["values"]
         max_distance = 0
@@ -614,9 +620,10 @@ class TestSearchBase:
         int_vectors, vectors, ids = self.init_binary_data(connect, substructure_collection, nb=2)
         index_type = "FLAT"
         index_param = {
-            "nlist": 16384
+            "nlist": 16384,
+            "metric_type": "SUBSTRUCTURE"
         }
-        connect.create_index(substructure_collection, index_type, index_param)
+        connect.create_index(substructure_collection, binary_field_name, index_param)
         logging.getLogger().info(connect.get_collection_info(substructure_collection))
         logging.getLogger().info(connect.get_index_info(substructure_collection))
         query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, substructure_collection, nb=1, insert=False)
@@ -640,9 +647,10 @@ class TestSearchBase:
         int_vectors, vectors, ids = self.init_binary_data(connect, substructure_collection, nb=2)
         index_type = "FLAT"
         index_param = {
-            "nlist": 16384
+            "nlist": 16384,
+            "metric_type": "SUBSTRUCTURE"
         }
-        connect.create_index(substructure_collection, index_type, index_param)
+        connect.create_index(substructure_collection, binary_field_name, index_param)
         logging.getLogger().info(connect.get_collection_info(substructure_collection))
         logging.getLogger().info(connect.get_index_info(substructure_collection))
         query_int_vectors, query_vecs = gen_binary_sub_vectors(int_vectors, 2)
@@ -668,9 +676,10 @@ class TestSearchBase:
         int_vectors, vectors, ids = self.init_binary_data(connect, superstructure_collection, nb=2)
         index_type = "FLAT"
         index_param = {
-            "nlist": 16384
+            "nlist": 16384,
+            "metric_type": "SUBSTRUCTURE"
         }
-        connect.create_index(superstructure_collection, index_type, index_param)
+        connect.create_index(superstructure_collection, binary_field_name, index_param)
         logging.getLogger().info(connect.get_collection_info(superstructure_collection))
         logging.getLogger().info(connect.get_index_info(superstructure_collection))
         query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, superstructure_collection, nb=1, insert=False)
@@ -694,9 +703,10 @@ class TestSearchBase:
         int_vectors, vectors, ids = self.init_binary_data(connect, superstructure_collection, nb=2)
         index_type = "FLAT"
         index_param = {
-            "nlist": 16384
+            "nlist": 16384,
+            "metric_type": "SUBSTRUCTURE"
         }
-        connect.create_index(superstructure_collection, index_type, index_param)
+        connect.create_index(superstructure_collection, binary_field_name, index_param)
         logging.getLogger().info(connect.get_collection_info(superstructure_collection))
         logging.getLogger().info(connect.get_index_info(superstructure_collection))
         query_int_vectors, query_vecs = gen_binary_super_vectors(int_vectors, 2)
@@ -722,9 +732,10 @@ class TestSearchBase:
         int_vectors, vectors, ids = self.init_binary_data(connect, tanimoto_collection, nb=2)
         index_type = "FLAT"
         index_param = {
-            "nlist": 16384
+            "nlist": 16384,
+            "metric_type": "TANIMOTO"
         }
-        connect.create_index(tanimoto_collection, index_type, index_param)
+        connect.create_index(tanimoto_collection, binary_field_name, index_param)
         logging.getLogger().info(connect.get_collection_info(tanimoto_collection))
         logging.getLogger().info(connect.get_index_info(tanimoto_collection))
         query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, tanimoto_collection, nb=1, insert=False)
@@ -929,7 +940,7 @@ class TestSearchInvalid(object):
         search_params = get_search_params
         index_type = get_simple_index["index_type"]
         entities, ids = init_data(connect, collection)
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         if search_params["index_type"] != index_type:
             pytest.skip("Skip case")
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1, search_params=search_params["search_params"])
@@ -948,7 +959,7 @@ class TestSearchInvalid(object):
         if index_type == "FLAT":
             pytest.skip("skip in FLAT index")
         entities, ids = init_data(connect, collection)
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1, search_params={})
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)

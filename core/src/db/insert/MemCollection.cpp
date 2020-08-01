@@ -26,24 +26,29 @@
 namespace milvus {
 namespace engine {
 
-MemCollection::MemCollection(int64_t collection_id, int64_t partition_id, const DBOptions& options)
-    : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
+MemCollection::MemCollection(int64_t collection_id, const DBOptions& options)
+    : collection_id_(collection_id), options_(options) {
 }
 
 Status
-MemCollection::Add(const milvus::engine::VectorSourcePtr& source) {
+MemCollection::Add(int64_t partition_id, const milvus::engine::VectorSourcePtr& source) {
     while (!source->AllAdded()) {
+        std::lock_guard<std::mutex> lock(mutex_);
         MemSegmentPtr current_mem_segment;
-        if (!mem_segment_list_.empty()) {
-            current_mem_segment = mem_segment_list_.back();
+        auto pair = mem_segments_.find(partition_id);
+        if (pair != mem_segments_.end()) {
+            MemSegmentList& segments = pair->second;
+            if (!segments.empty()) {
+                current_mem_segment = segments.back();
+            }
         }
 
         Status status;
-        if (mem_segment_list_.empty() || current_mem_segment->IsFull()) {
-            MemSegmentPtr new_mem_segment = std::make_shared<MemSegment>(collection_id_, partition_id_, options_);
+        if (current_mem_segment == nullptr || current_mem_segment->IsFull()) {
+            MemSegmentPtr new_mem_segment = std::make_shared<MemSegment>(collection_id_, partition_id, options_);
             status = new_mem_segment->Add(source);
             if (status.ok()) {
-                mem_segment_list_.emplace_back(new_mem_segment);
+                mem_segments_[partition_id].emplace_back(new_mem_segment);
             } else {
                 return status;
             }
@@ -61,22 +66,16 @@ MemCollection::Add(const milvus::engine::VectorSourcePtr& source) {
 }
 
 Status
-MemCollection::Delete(segment::doc_id_t doc_id) {
-    // Locate which collection file the doc id lands in
-    for (auto& mem_segment : mem_segment_list_) {
-        mem_segment->Delete(doc_id);
-    }
-    // Add the id to delete list so it can be applied to other segments on disk during the next flush
-    doc_ids_to_delete_.insert(doc_id);
-
-    return Status::OK();
-}
-
-Status
 MemCollection::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
     // Locate which collection file the doc id lands in
-    for (auto& mem_segment : mem_segment_list_) {
-        mem_segment->Delete(doc_ids);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto partition_segments : mem_segments_) {
+            MemSegmentList& segments = partition_segments.second;
+            for (auto& segment : segments) {
+                segment->Delete(doc_ids);
+            }
+        }
     }
     // Add the id to delete list so it can be applied to other segments on disk during the next flush
     for (auto& id : doc_ids) {
@@ -86,14 +85,15 @@ MemCollection::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
     return Status::OK();
 }
 
-void
-MemCollection::GetCurrentMemSegment(MemSegmentPtr& mem_segment) {
-    mem_segment = mem_segment_list_.back();
-}
+Status
+MemCollection::EraseMem(int64_t partition_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto pair = mem_segments_.find(partition_id);
+    if (pair != mem_segments_.end()) {
+        mem_segments_.erase(pair);
+    }
 
-size_t
-MemCollection::GetTableFileCount() {
-    return mem_segment_list_.size();
+    return Status::OK();
 }
 
 Status
@@ -107,28 +107,23 @@ MemCollection::Serialize(uint64_t wal_lsn) {
         }
     }
 
-    for (auto mem_segment = mem_segment_list_.begin(); mem_segment != mem_segment_list_.end();) {
-        auto status = (*mem_segment)->Serialize(wal_lsn);
-        if (!status.ok()) {
-            return status;
-        }
-
-        LOG_ENGINE_DEBUG_ << "Flushed segment " << (*mem_segment)->GetSegmentId();
-
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            mem_segment = mem_segment_list_.erase(mem_segment);
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto partition_segments : mem_segments_) {
+        MemSegmentList& segments = partition_segments.second;
+        for (auto& segment : segments) {
+            auto status = segment->Serialize(wal_lsn);
+            if (!status.ok()) {
+                return status;
+            }
+            LOG_ENGINE_DEBUG_ << "Flushed segment " << segment->GetSegmentId() << " of collection " << collection_id_;
         }
     }
+
+    mem_segments_.clear();
 
     recorder.RecordSection("Finished flushing");
 
     return Status::OK();
-}
-
-bool
-MemCollection::Empty() {
-    return mem_segment_list_.empty() && doc_ids_to_delete_.empty();
 }
 
 int64_t
@@ -136,17 +131,15 @@ MemCollection::GetCollectionId() const {
     return collection_id_;
 }
 
-int64_t
-MemCollection::GetPartitionId() const {
-    return partition_id_;
-}
-
 size_t
 MemCollection::GetCurrentMem() {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t total_mem = 0;
-    for (auto& mem_table_file : mem_segment_list_) {
-        total_mem += mem_table_file->GetCurrentMem();
+    for (auto& partition_segments : mem_segments_) {
+        MemSegmentList& segments = partition_segments.second;
+        for (auto& segment : segments) {
+            total_mem += segment->GetCurrentMem();
+        }
     }
     return total_mem;
 }
