@@ -17,6 +17,8 @@ default_flush_interval = 1
 big_flush_interval = 1000
 dimension = 128
 segment_row_count = 5000
+default_float_vec_field_name = "float_vector"
+default_binary_vec_field_name = "binary_vector"
 
 # TODO:
 all_index_types = [
@@ -210,7 +212,7 @@ def gen_default_fields():
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": "float_vector", "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}}
+            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}}
         ],
         "segment_row_count": segment_row_count
     }
@@ -222,7 +224,7 @@ def gen_entities(nb, is_normal=False):
     entities = [
         {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
-        {"field": "float_vector", "type": DataType.FLOAT_VECTOR, "values": vectors}
+        {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": vectors}
     ]
     return entities
 
@@ -232,7 +234,7 @@ def gen_binary_entities(nb):
     entities = [
         {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
-        {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "values": vectors}
+        {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "values": vectors}
     ]
     return raw_vectors, entities
 
