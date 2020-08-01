@@ -20,12 +20,11 @@ raw_vector, binary_entity = gen_binary_entities(1)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 default_fields = gen_default_fields()
 field_name = "float_vector"
-default_index_name = "insert_index"
 default_single_query = {
     "bool": {
         "must": [
             {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),
-                                     "params": {"index_name": default_index_name, "nprobe": 10}}}}
+                                     "params": {"nprobe": 10}}}}
         ]
     }
 }
@@ -227,8 +226,7 @@ class TestCompactBase:
         count = 10
         ids = connect.insert(collection, entities)
         connect.flush([collection])
-        status = connect.create_index(collection, field_name, default_index_name, get_simple_index)
-        assert status.OK()
+        connect.create_index(collection, field_name, get_simple_index)
         connect.flush([collection])
         # get collection info before compact
         info = connect.get_collection_stats(collection)
@@ -363,9 +361,7 @@ class TestCompactBase:
         connect.flush([collection])
         status = connect.compact(collection)
         assert status.OK()
-        # index_param = get_simple_index["index_param"]
-        # index_type = get_simple_index["index_type"]
-        status = connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        status = connect.create_index(collection, field_name, get_simple_index)
         assert status.OK()
         # status, result = connect.get_index_info(collection)
 

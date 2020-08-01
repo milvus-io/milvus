@@ -16,7 +16,6 @@ nb = 6000
 nlist = 1024
 collection_id = "collection_stats"
 field_name = "float_vector"
-default_index_name = "stats_index"
 entity = gen_entities(1)
 raw_vector, binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
@@ -55,6 +54,7 @@ class TestStatsBase:
     def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)
         if request.param["index_type"] in binary_support():
+            request.param["metric_type"] = "JACCARD"
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -241,7 +241,7 @@ class TestStatsBase:
         '''
         ids = connect.insert(collection, entities)
         connect.flush([collection])
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
         assert stats["partitions"][0]["segments"][0]["row_count"] == nb
@@ -255,7 +255,8 @@ class TestStatsBase:
         '''
         ids = connect.insert(ip_collection, entities)
         connect.flush([ip_collection])
-        connect.create_index(ip_collection, field_name, default_index_name, get_simple_index)
+        get_simple_index.update({"metric_type": "IP"})
+        connect.create_index(ip_collection, field_name, get_simple_index)
         stats = connect.get_collection_stats(ip_collection)
         logging.getLogger().info(stats)
         assert stats["partitions"][0]["segments"][0]["row_count"] == nb
@@ -269,7 +270,7 @@ class TestStatsBase:
         '''
         ids = connect.insert(jac_collection, binary_entities)
         connect.flush([jac_collection])
-        connect.create_index(jac_collection, "binary_vector", default_index_name, get_jaccard_index)
+        connect.create_index(jac_collection, "binary_vector", get_jaccard_index)
         stats = connect.get_collection_stats(jac_collection)
         logging.getLogger().info(stats)
         assert stats["partitions"][0]["segments"][0]["row_count"] == nb
@@ -284,7 +285,7 @@ class TestStatsBase:
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         for index_type in ["IVF_FLAT", "IVF_SQ8"]:
-            connect.create_index(collection, field_name, default_index_name, {"index_type": index_type, "nlist": 1024})
+            connect.create_index(collection, field_name, {"index_type": index_type, "nlist": 1024, "metric_type": "L2"})
             stats = connect.get_collection_stats(collection)
             logging.getLogger().info(stats)
             assert stats["partitions"][0]["segments"][0]["index_name"] == index_type
@@ -326,9 +327,9 @@ class TestStatsBase:
             res = connect.insert(collection_name, entities)
             connect.flush(collection_list)
             if i % 2:
-                connect.create_index(collection_name, field_name, default_index_name, {"index_type": "IVF_SQ8", "nlist": 1024})
+                connect.create_index(collection_name, field_name, {"index_type": "IVF_SQ8", "nlist": 1024, "metric_type": "L2"})
             else:
-                connect.create_index(collection_name, field_name, default_index_name, {"index_type": "IVF_FLAT", "nlist": 1024})
+                connect.create_index(collection_name, field_name, {"index_type": "IVF_FLAT", "nlist": 1024, "metric_type": "L2"})
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
             assert stats["partitions"][0]["segments"][0]["row_count"] == nb

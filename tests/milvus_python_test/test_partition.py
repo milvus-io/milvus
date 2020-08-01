@@ -17,7 +17,6 @@ TIMEOUT = 120
 nb = 6000
 tag = "partition_tag"
 field_name = "float_vector"
-default_index_name = "partition"
 entity = gen_entities(1)
 entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)

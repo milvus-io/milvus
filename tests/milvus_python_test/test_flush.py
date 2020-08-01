@@ -17,7 +17,6 @@ top_k = 1
 nb = 6000
 tag = "partition_tag"
 field_name = "float_vector"
-default_index_name = "insert_index"
 entity = gen_entities(1)
 entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)
@@ -27,7 +26,7 @@ default_single_query = {
     "bool": {
         "must": [
             {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),
-                                     "params": {"index_name": default_index_name, "nprobe": 10}}}}
+                                     "params": {"nprobe": 10}}}}
         ]
     }
 }

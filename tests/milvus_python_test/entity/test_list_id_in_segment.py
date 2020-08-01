@@ -12,7 +12,6 @@ segment_row_count = 100000
 nb = 6000
 tag = "1970-01-01"
 field_name = "float_vector"
-default_index_name = "list_index"
 collection_id = "list_id_in_segment"
 entity = gen_entities(1)
 raw_vector, binary_entity = gen_binary_entities(1)
@@ -29,7 +28,7 @@ def get_segment_id(connect, collection, nb=1, vec_type='float', index_params=Non
     ids = connect.insert(collection, entities)
     connect.flush([collection])
     if index_params:
-        connect.create_index(collection, field_name, default_index_name, index_params)
+        connect.create_index(collection, field_name, index_params)
     stats = connect.get_collection_stats(collection)
     return ids, stats["partitions"][0]["segments"][0]["id"]
 
@@ -259,6 +258,7 @@ class TestListIdInSegmentIP:
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
+        get_simple_index["metric_type"] = "IP"
         ids, seg_id = get_segment_id(connect, ip_collection, nb=nb, index_params=get_simple_index)
         vector_ids = connect.list_id_in_segment(ip_collection, seg_id)
         # TODO: 
@@ -280,13 +280,14 @@ class TestListIdInSegmentIP:
         # TODO
 
     @pytest.mark.level(2)
-    def test_list_id_in_segment_after_delete_vectors(self, connect, ip_collection):
+    def test_list_id_in_segment_after_delete_vectors(self, connect, ip_collection, get_simple_index):
         '''
         target: get vector ids after vectors are deleted
         method: add vectors and delete a few, call list_id_in_segment
         expected: status ok, vector_ids decreased after vectors deleted
         '''
         nb = 2
+        get_simple_index["metric_type"] = "IP"
         ids, seg_id = get_segment_id(connect, ip_collection, nb=nb)
         delete_ids = [ids[0]]
         status = connect.delete_entity_by_id(ip_collection, delete_ids)
@@ -357,6 +358,7 @@ class TestListIdInSegmentJAC:
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
+        get_jaccard_index["metric_type"] = "JACCARD"
         ids, seg_id = get_segment_id(connect, jac_collection, nb=nb, index_params=get_jaccard_index, vec_type='binary')
         vector_ids = connect.list_id_in_segment(jac_collection, seg_id)
         # TODO: 
@@ -383,6 +385,7 @@ class TestListIdInSegmentJAC:
         expected: status ok, vector_ids decreased after vectors deleted
         '''
         nb = 2
+        get_jaccard_index["metric_type"] = "JACCARD"
         ids, seg_id = get_segment_id(connect, jac_collection, nb=nb, vec_type='binary', index_params=get_jaccard_index)
         delete_ids = [ids[0]]
         status = connect.delete_entity_by_id(jac_collection, delete_ids)

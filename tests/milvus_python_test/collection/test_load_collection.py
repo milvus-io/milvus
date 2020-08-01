@@ -7,7 +7,6 @@ from multiprocessing import Process
 from utils import *
 
 collection_id = "load_collection"
-index_name = "load_index_name"
 nb = 6000
 default_fields = gen_default_fields() 
 entities = gen_entities(nb)
@@ -41,7 +40,7 @@ class TestLoadCollection:
         connect.insert(collection, entities)
         connect.flush([collection])
         logging.getLogger().info(get_simple_index)
-        connect.create_index(collection, field_name, index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         connect.load_collection(collection)
 
     def load_empty_collection(self, connect, collection):
