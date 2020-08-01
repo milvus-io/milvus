@@ -1779,6 +1779,11 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
     status = req_handler_.Search(GetContext(context), query_ptr, json_params, collection_mappings, result);
 
+    if (!status.ok()) {
+        SET_RESPONSE(response->mutable_status(), status, context);
+        return ::grpc::Status::OK;
+    }
+
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
     int64_t id_size = result->result_ids_.size();

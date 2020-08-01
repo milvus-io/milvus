@@ -180,7 +180,7 @@ class TestSearchBase:
         entities, ids = init_data(connect, collection)
         query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq)
         if top_k <= top_k_limit:
-            res = connect.search(collection, query, fields=["vector"])
+            res = connect.search(collection, query, fields=["float_vector"])
             assert len(res[0]) == top_k
             assert res[0]._distances[0] <= epsilon
             assert check_id_result(res[0], ids[0])

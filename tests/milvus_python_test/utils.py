@@ -210,7 +210,7 @@ def gen_default_fields():
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": "vector", "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}}
+            {"field": "float_vector", "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}}
         ],
         "segment_row_count": segment_row_count
     }
@@ -222,7 +222,7 @@ def gen_entities(nb, is_normal=False):
     entities = [
         {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
-        {"field": "vector", "type": DataType.FLOAT_VECTOR, "values": vectors}
+        {"field": "float_vector", "type": DataType.FLOAT_VECTOR, "values": vectors}
     ]
     return entities
 
