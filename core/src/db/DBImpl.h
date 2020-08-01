@@ -81,10 +81,10 @@ class DBImpl : public DB, public ConfigObserver {
                 const std::string& field_name, const CollectionIndex& index) override;
 
     Status
-    DropIndex(const std::string& collection_name, const std::string& field_name) override;
+    DropIndex(const std::string& collection_name, const std::string& field_name = "") override;
 
     Status
-    DropIndex(const std::string& collection_name) override;
+    DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) override;
 
     Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) override;
