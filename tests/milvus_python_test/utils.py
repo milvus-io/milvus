@@ -651,7 +651,7 @@ def gen_simple_index():
     for i in range(len(all_index_types)):
         if all_index_types[i] in binary_support():
             continue
-        dic = {"index_type": all_index_types[i]}
+        dic = {"index_type": all_index_types[i], "metric_type": "L2"}
         dic.update(default_index_params[i])
         index_params.append(dic)
     return index_params
@@ -668,16 +668,19 @@ def gen_binary_index():
 
 
 def get_search_param(index_type):
+    search_params = {"metric_type": "L2"}
     if index_type in ivf() or index_type in binary_support():
-        return {"nprobe": 32}
+        search_params.update({"nprobe": 32})
     elif index_type == "HNSW":
-        return {"ef": 64}
+        search_params.update({"ef": 64})
     elif index_type == "NSG":
-        return {"search_length": 100}
+        search_params.update({"search_length": 100})
     elif index_type == "ANNOY":
-        return {"search_k": 100}
+        search_params.update({"search_k": 100})
     else:
-        logging.getLogger().info("Invalid index_type.")
+        logging.getLogger().error("Invalid index_type.")
+        raise Exception("Invalid index_type.")
+    return search_params
 
 
 def assert_equal_vector(v1, v2):

@@ -49,6 +49,7 @@ class TestCollectionCount:
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in cpu mode")
+        request.param.update({"metric_type": "L2"})
         return request.param
 
     def test_collection_count(self, connect, collection, insert_count):
@@ -153,7 +154,7 @@ class TestCollectionCount:
         entities = gen_entities(insert_count)
         res = connect.insert(collection, entities)
         connect.flush([collection])
-        connect.create_index(collection, field_name, index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         res = connect.count_entities(collection)
         assert res == insert_count
 
@@ -204,6 +205,7 @@ class TestCollectionCountIP:
         if str(connect._cmd("mode")[1]) == "CPU":
             if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("sq8h not support in cpu mode")
+        request.param.update({"metric_type": "IP"})
         return request.param
 
     def test_collection_count(self, connect, ip_collection, insert_count):
@@ -308,7 +310,7 @@ class TestCollectionCountIP:
         entities = gen_entities(insert_count)
         res = connect.insert(ip_collection, entities)
         connect.flush([ip_collection])
-        connect.create_index(ip_collection, field_name, index_name, get_simple_index)
+        connect.create_index(ip_collection, field_name, get_simple_index)
         res = connect.count_entities(ip_collection)
         assert res == insert_count
 
@@ -484,7 +486,7 @@ class TestCollectionCountBinary:
         raw_vectors, entities = gen_binary_entities(insert_count)
         res = connect.insert(jac_collection, entities)
         connect.flush([jac_collection])
-        connect.create_index(jac_collection, field_name, index_name, get_simple_index)
+        connect.create_index(jac_collection, field_name, get_simple_index)
         res = connect.count_entities(jac_collection)
         assert res == insert_count
 

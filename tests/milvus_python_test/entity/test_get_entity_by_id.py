@@ -17,7 +17,6 @@ DELETE_TIMEOUT = 60
 tag = "1970-01-01"
 nb = 6000
 field_name = "float_entity"
-default_index_name = "insert_index"
 entity = gen_entities(1)
 binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
@@ -286,7 +285,7 @@ class TestGetBase:
         connect.create_partition(collection, tag)
         ids = connect.insert(collection, entities, partition_tag=tag)
         connect.flush([collection])
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
@@ -438,7 +437,7 @@ class TestGetBase:
         '''
         ids = connect.insert(collection, entities)
         connect.flush([collection])
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
@@ -454,7 +453,7 @@ class TestGetBase:
         for i in range(nb):
             ids.append(connect.insert(collection, entity)[0])
         connect.flush([collection])
-        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        connect.create_index(collection, field_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
