@@ -88,12 +88,12 @@ struct OperationContext {
     ToString() const;
 };
 
-using CollectionMappings = std::unordered_map<FieldPtr, std::vector<FieldElementPtr>>;
+using FieldElementMappings = std::unordered_map<FieldPtr, std::vector<FieldElementPtr>>;
 
 struct CreateCollectionContext {
     CollectionPtr collection = nullptr;
-    CollectionMappings fields_schema;
     CollectionCommitPtr collection_commit = nullptr;
+    FieldElementMappings fields_schema;
     LSN_TYPE lsn = 0;
 
     std::string
