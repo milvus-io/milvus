@@ -59,6 +59,31 @@ enum DataType {
     VECTOR_FLOAT = 101,
 };
 
+class BinaryData : public cache::DataObj {
+ public:
+    int64_t
+    Size() {
+        return data_.size();
+    }
+
+ public:
+    std::vector<uint8_t> data_;
+};
+using BinaryDataPtr = std::shared_ptr<BinaryData>;
+
+class VaribleData : public cache::DataObj {
+ public:
+    int64_t
+    Size() {
+        return data_.size();
+    }
+
+ public:
+    std::vector<uint8_t> data_;
+    std::vector<int64_t> offset_;
+};
+using VaribleDataPtr = std::shared_ptr<VaribleData>;
+
 using FIELD_TYPE_MAP = std::unordered_map<std::string, DataType>;
 using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;
 using FIXED_FIELD_DATA = std::vector<uint8_t>;
