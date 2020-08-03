@@ -180,12 +180,24 @@ SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int
 Status
 SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, const std::vector<int64_t>& offsets,
                                   engine::DataChunkPtr& data_chunk) {
-    data_chunk = std::make_shared<engine::DataChunk>();
-    data_chunk->count_ = offsets.size();
+    if (data_chunk == nullptr) {
+        data_chunk = std::make_shared<engine::DataChunk>();
+    }
+    data_chunk->count_ += offsets.size();
     for (auto& name : fields_name) {
         engine::FIXED_FIELD_DATA raw_data;
-        STATUS_CHECK(LoadEntities(name, offsets, raw_data));
-        data_chunk->fixed_fields_[name] = raw_data;
+        auto status = LoadEntities(name, offsets, raw_data);
+        if (!status.ok()) {
+            return status;
+        }
+        if (!data_chunk->fixed_fields_[name].empty()) {
+            auto chunk_size = data_chunk->fixed_fields_[name].size();
+            auto raw_data_size = raw_data.size();
+            data_chunk->fixed_fields_[name].resize(chunk_size + raw_data_size);
+            memcpy(data_chunk->fixed_fields_[name].data() + chunk_size, raw_data.data(), raw_data_size);
+        } else {
+            data_chunk->fixed_fields_[name] = raw_data;
+        }
     }
     return Status::OK();
 }

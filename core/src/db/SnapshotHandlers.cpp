@@ -145,17 +145,18 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
 
     std::vector<int64_t> offsets;
+    int i = 0;
     for (auto id : ids_) {
         // fast check using bloom filter
         if (!id_bloom_filter_ptr->Check(id)) {
-            valid_row_.push_back(false);
+            i++;
             continue;
         }
 
         // check if id really exists in uids
         auto found = std::find(uids.begin(), uids.end(), id);
         if (found == uids.end()) {
-            valid_row_.push_back(false);
+            i++;
             continue;
         }
 
@@ -165,12 +166,13 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
             if (deleted != deleted_docs.end()) {
-                valid_row_.push_back(false);
+                i++;
                 continue;
             }
         }
-        valid_row_.push_back(true);
+        valid_row_[i] = true;
         offsets.push_back(offset);
+        i++;
     }
 
     STATUS_CHECK(segment_reader.LoadFieldsEntities(field_names_, offsets, data_chunk_));

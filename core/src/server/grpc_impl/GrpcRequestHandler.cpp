@@ -269,7 +269,11 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
     for (const auto& it : field_mappings) {
         auto type = it.first->GetFtype();
         std::string name = it.first->GetName();
+
+        // judge whether data exists
         std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
+        if (data.empty())
+            continue;
 
         auto single_size = data.size() / id_size;
 
