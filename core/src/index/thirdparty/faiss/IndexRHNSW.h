@@ -98,6 +98,8 @@ struct IndexRHNSW : Index {
 
     void reset () override;
 
+    size_t cal_size();
+
 };
 
 
@@ -108,6 +110,7 @@ struct IndexRHNSW : Index {
 struct IndexRHNSWFlat : IndexRHNSW {
     IndexRHNSWFlat();
     IndexRHNSWFlat(int d, int M, MetricType metric = METRIC_L2);
+    size_t cal_size();
 };
 
 /** PQ index topped with with a HNSW structure to access elements
@@ -117,6 +120,7 @@ struct IndexRHNSWPQ : IndexRHNSW {
     IndexRHNSWPQ();
     IndexRHNSWPQ(int d, int pq_m, int M);
     void train(idx_t n, const float* x) override;
+    size_t cal_size();
 };
 
 /** SQ index topped with with a HNSW structure to access elements
@@ -125,6 +129,7 @@ struct IndexRHNSWPQ : IndexRHNSW {
 struct IndexRHNSWSQ : IndexRHNSW {
     IndexRHNSWSQ();
     IndexRHNSWSQ(int d, QuantizerType qtype, int M, MetricType metric = METRIC_L2);
+    size_t cal_size();
 };
 
 /** 2-level code structure with fast random access
@@ -139,6 +144,7 @@ struct IndexRHNSW2Level : IndexRHNSW {
     void search (idx_t n, const float *x, idx_t k,
                  float *distances, idx_t *labels,
                  ConcurrentBitsetPtr bitset = nullptr) const override;
+    size_t cal_size();
 };
 
 

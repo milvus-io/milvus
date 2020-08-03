@@ -24,14 +24,14 @@ namespace knowhere {
 class IndexRHNSWFlat : public IndexRHNSW {
  public:
     IndexRHNSWFlat() : IndexRHNSW() {
-        index_type_ = IndexEnum::RHNSWFlat;
+        index_type_ = IndexEnum::INDEX_RHNSWFlat;
     }
 
     explicit IndexRHNSWFlat(std::shared_ptr<faiss::Index> index) : IndexRHNSW(std::move(index)) {
-        index_type_ = IndexEnum::RHNSWFlat;
+        index_type_ = IndexEnum::INDEX_RHNSWFlat;
     }
 
-    IndexRHNSWFlat(int d, int M, MetricType metric = METRIC_L2);
+    IndexRHNSWFlat(int d, int M, MetricType metric = Metric::L2);
 
     BinarySet
     Serialize(const Config& config = Config()) override;

@@ -60,6 +60,9 @@ extern const char* INDEX_SPTAG_KDT_RNT;
 extern const char* INDEX_SPTAG_BKT_RNT;
 #endif
 extern const char* INDEX_HNSW;
+extern const char* INDEX_RHNSWFlat;
+extern const char* INDEX_RHNSWPQ;
+extern const char* INDEX_RHNSWSQ;
 extern const char* INDEX_ANNOY;
 extern const char* INDEX_HNSW_SQ8NM;
 }  // namespace IndexEnum

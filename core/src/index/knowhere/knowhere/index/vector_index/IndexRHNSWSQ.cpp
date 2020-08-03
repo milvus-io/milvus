@@ -26,6 +26,11 @@
 namespace milvus {
 namespace knowhere {
 
+IndexRHNSWSQ::IndexRHNSWSQ(int d, faiss::QuantizerType qtype, int M, milvus::knowhere::MetricType metric) {
+    faiss::MetricType mt = metric == Metric::L2 ? faiss::MetricType::METRIC_L2 : faiss::MetricType::METRIC_INNER_PRODUCT;
+    index_ = std::shared_ptr<faiss::Index>(new faiss::IndexRHNSWSQ(d, qtype, M, mt));
+}
+
 BinarySet
 IndexRHNSWSQ::Serialize(const Config& config) {
     if (!index_) {
@@ -33,12 +38,17 @@ IndexRHNSWSQ::Serialize(const Config& config) {
     }
 
     try {
+        auto res_set = IndexRHNSW::Serialize(config);
         MemoryIOWriter writer;
-        index_->saveIndex(writer);
+        writer.name = "Data";
+        auto real_idx = dynamic_cast<faiss::IndexRHNSWSQ*>(index_.get());
+        if (real_idx == nullptr) {
+            KNOWHERE_THROW_MSG("dynamic_cast<faiss::IndexRHNSWSQ*>(index_) failed during Serialize!");
+        }
+        faiss::write_index(real_idx->storage, &writer);
         std::shared_ptr<uint8_t[]> data(writer.data_);
 
-        BinarySet res_set;
-        res_set.Append("HNSW", data, writer.rp);
+        res_set.Append(writer.name, data, writer.rp);
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -48,17 +58,19 @@ IndexRHNSWSQ::Serialize(const Config& config) {
 void
 IndexRHNSWSQ::Load(const BinarySet& index_binary) {
     try {
-        auto binary = index_binary.GetByName("HNSW");
-
+        IndexRHNSW::Load(index_binary);
         MemoryIOReader reader;
-        reader.total = binary->size;
+        reader.name = "Data";
+        auto binary = index_binary.GetByName(reader.name);
+
+        reader.total = (size_t)binary->size;
         reader.data_ = binary->data.get();
 
-        hnswlib::SpaceInterface<float>* space;
-        index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
-        index_->loadIndex(reader);
-
-        normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
+        auto real_idx = dynamic_cast<faiss::IndexRHNSWSQ*>(index_.get());
+        if (real_idx == nullptr) {
+            KNOWHERE_THROW_MSG("dynamic_cast<faiss::IndexRHNSWSQ*>(index_) failed during Load!");
+        }
+        real_idx->storage = faiss::read_index(&reader);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -82,7 +94,7 @@ IndexRHNSWSQ::UpdateIndexSize() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    index_size_ = index_->cal_size();
+    index_size_ = dynamic_cast<faiss::IndexRHNSWSQ*>(index_.get())->cal_size();
 }
 
 }  // namespace knowhere

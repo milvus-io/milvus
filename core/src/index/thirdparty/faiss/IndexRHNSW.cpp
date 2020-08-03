@@ -214,7 +214,6 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
 
 #pragma omp parallel reduction(+ : nreorder)
         {
-            VisitedTable vt (ntotal);
 
             DistanceComputer *dis = storage_distance_computer(storage);
             ScopeDeleter1<DistanceComputer> del(dis);
@@ -227,7 +226,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
 
                 maxheap_heapify (k, simi, idxi);
 
-                hnsw.searchKnn(*dis, k, idxi, simi, vt);
+                hnsw.searchKnn(*dis, k, idxi, simi);
 
                 maxheap_reorder (k, simi, idxi);
 
@@ -284,6 +283,10 @@ void IndexRHNSW::reset()
 void IndexRHNSW::reconstruct (idx_t key, float* recons) const
 {
     storage->reconstruct(key, recons);
+}
+
+size_t IndexRHNSW::cal_size() {
+    return hnsw.cal_size();
 }
 
 /**************************************************************
@@ -533,6 +536,9 @@ IndexRHNSWFlat::IndexRHNSWFlat(int d, int M, MetricType metric):
     is_trained = true;
 }
 
+size_t IndexRHNSWFlat::cal_size() {
+    return IndexRHNSW::cal_size() + dynamic_cast<IndexFlat*>(storage)->cal_size();
+}
 
 /**************************************************************
  * IndexRHNSWPQ implementation
@@ -554,6 +560,9 @@ void IndexRHNSWPQ::train(idx_t n, const float* x)
     (dynamic_cast<IndexPQ*> (storage))->pq.compute_sdc_table();
 }
 
+size_t IndexRHNSWPQ::cal_size() {
+    return IndexRHNSW::cal_size() + dynamic_cast<IndexPQ*>(storage)->cal_size();
+}
 
 /**************************************************************
  * IndexRHNSWSQ implementation
@@ -570,6 +579,9 @@ IndexRHNSWSQ::IndexRHNSWSQ(int d, QuantizerType qtype, int M,
 
 IndexRHNSWSQ::IndexRHNSWSQ() {}
 
+size_t IndexRHNSWSQ::cal_size() {
+    return IndexRHNSW::cal_size() + dynamic_cast<IndexScalarQuantizer *>(storage)->cal_size();
+}
 
 /**************************************************************
  * IndexRHNSW2Level implementation
@@ -585,6 +597,9 @@ IndexRHNSW2Level::IndexRHNSW2Level(Index *quantizer, size_t nlist, int m_pq, int
 
 IndexRHNSW2Level::IndexRHNSW2Level() {}
 
+size_t IndexRHNSW2Level::cal_size() {
+    return IndexRHNSW::cal_size() + dynamic_cast<Index2Layer *>(storage)->cal_size();
+}
 
 namespace {
 
@@ -596,7 +611,7 @@ int search_from_candidates_2(const RHNSW & hnsw,
                              DistanceComputer & qdis, int k,
                              idx_t *I, float * D,
                              MinimaxHeap &candidates,
-                             VisitedTable &vt,
+                             VisitedList &vt,
                              int level, int nres_in = 0)
 {
     int nres = nres_in;
@@ -604,7 +619,7 @@ int search_from_candidates_2(const RHNSW & hnsw,
     for (int i = 0; i < candidates.size(); i++) {
         idx_t v1 = candidates.ids[i];
         FAISS_ASSERT(v1 >= 0);
-        vt.visited[v1] = vt.visno + 1;
+        vt.mass[v1] = vt.curV + 1;
     }
 
     int nstep = 0;
@@ -620,7 +635,7 @@ int search_from_candidates_2(const RHNSW & hnsw,
         for (auto j = 0; j < cur_neighbor_num; ++ j) {
             int v1 = cur_neighbors[j];
             if (v1 < 0) break;
-            if (vt.visited[v1] == vt.visno + 1) {
+            if (vt.mass[v1] == vt.curV + 1) {
                 // nothing to do
             } else {
                 ndis++;
@@ -628,7 +643,7 @@ int search_from_candidates_2(const RHNSW & hnsw,
                 candidates.push(v1, d);
 
                 // never seen before --> add to heap
-                if (vt.visited[v1] < vt.visno) {
+                if (vt.mass[v1] < vt.curV) {
                     if (nres < k) {
                         faiss::maxheap_push (++nres, D, I, d, v1);
                     } else if (d < D[0]) {
@@ -636,7 +651,7 @@ int search_from_candidates_2(const RHNSW & hnsw,
                         faiss::maxheap_push (++nres, D, I, d, v1);
                     }
                 }
-                vt.visited[v1] = vt.visno + 1;
+                vt.mass[v1] = vt.curV + 1;
             }
         }
 
@@ -687,7 +702,7 @@ void IndexRHNSW2Level::search (idx_t n, const float *x, idx_t k,
 
 #pragma omp parallel
         {
-            VisitedTable vt (ntotal);
+            VisitedList vt (ntotal);
             DistanceComputer *dis = storage_distance_computer(storage);
             ScopeDeleter1<DistanceComputer> del(dis);
 

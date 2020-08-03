@@ -33,17 +33,13 @@ IndexRHNSW::Serialize(const Config& config) {
     }
 
     try {
-        MemoryIOWriter writer1, writer2;
-        writer1.name = "IndexData";
-        writer2.name = "RawData";
-        faiss::write_index(index_.get(), &writer1);
-        faiss::write_index(index_.get(), &writer2);
-        std::shared_ptr<uint8_t[]> data1(writer1.data_);
-        std::shared_ptr<uint8_t[]> data2(writer2.data_);
+        MemoryIOWriter writer;
+        writer.name = "Index";
+        faiss::write_index(index_.get(), &writer);
+        std::shared_ptr<uint8_t[]> data(writer.data_);
 
         BinarySet res_set;
-        res_set.Append(writer1.name, data1, writer1.rp);
-        res_set.Append(writer2.name, data2, writer2.rp);
+        res_set.Append(writer.name, data, writer.rp);
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -53,23 +49,15 @@ IndexRHNSW::Serialize(const Config& config) {
 void
 IndexRHNSW::Load(const BinarySet& index_binary) {
     try {
-        MemoryIOReader reader1, reader2;
-        reader1.name = "IndexData";
-        reader2.name = "RawData";
-        auto binary1 = index_binary.GetByName(reader1.name);
-        auto binary2 = index_binary.GetByName(reader2.name);
+        MemoryIOReader reader;
+        reader.name = "Index";
+        auto binary = index_binary.GetByName(reader.name);
 
-        reader1.total = (size_t)binary1->size;
-        reader1.data_ = binary1->data.get();
-        reader2.total = (size_t)binary2->size;
-        reader2.data_ = binary2->data.get();
+        reader.total = (size_t)binary->size;
+        reader.data_ = binary->data.get();
 
-        // todo: add interface in faiss: read_index(faiss::Index, &reader)
-        faiss::Index* index1 = faiss::read_index(&reader1);
-        faiss::Index* index2 = faiss::read_index(&reader2);
-        auto check_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
-
-        index_.reset(index1);
+        auto idx = faiss::read_index(&reader);
+        index_.reset(idx);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -137,10 +125,7 @@ IndexRHNSW::Dim() {
 
 void
 IndexRHNSW::UpdateIndexSize() {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-    index_size_ = index_->cal_size();
+    KNOWHERE_THROW_MSG("IndexRHNSW has no implementation of UpdateIndexSize, please use IndexRHNSW(Flat/SQ/PQ) instead!");
 }
 
 }  // namespace knowhere

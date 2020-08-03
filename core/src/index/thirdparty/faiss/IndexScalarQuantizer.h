@@ -78,6 +78,7 @@ struct IndexScalarQuantizer: Index {
     void sa_decode (idx_t n, const uint8_t *bytes,
                             float *x) const override;
 
+    size_t cal_size() { return codes.size() * sizeof(uint8_t) + sizeof(size_t) + sq.cal_size(); }
 
 };
 

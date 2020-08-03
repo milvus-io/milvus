@@ -36,6 +36,7 @@
 #include <faiss/IndexScalarQuantizer.h>
 #include <faiss/IndexSQHybrid.h>
 #include <faiss/IndexHNSW.h>
+#include <faiss/IndexRHNSW.h>
 #include <faiss/IndexLattice.h>
 
 #include <faiss/OnDiskInvertedLists.h>
@@ -458,6 +459,29 @@ static void read_HNSW (HNSW *hnsw, IOReader *f) {
     READ1 (hnsw->upper_beam);
 }
 
+static void read_RHNSW (RHNSW *rhnsw, IOReader *f) {
+    READ1 (rhnsw->entry_point);
+    READ1 (rhnsw->max_level);
+    READ1 (rhnsw->M);
+    READ1 (rhnsw->level0_link_size);
+    READ1 (rhnsw->link_size);
+    READ1 (rhnsw->level_constant);
+    READ1 (rhnsw->efConstruction);
+    READ1 (rhnsw->efSearch);
+
+    READVECTOR (rhnsw->levels);
+    auto ntotal = rhnsw->levels.size();
+    rhnsw->level0_links = (char*) malloc(ntotal * rhnsw->level0_link_size);
+    READANDCHECK( rhnsw->level0_links, ntotal * rhnsw->level0_link_size);
+    rhnsw->linkLists = (char**) malloc(ntotal * sizeof(void*));
+    for (auto i = 0; i < ntotal; ++ i) {
+        if (rhnsw->levels[i]) {
+            rhnsw->linkLists[i] = (char*)malloc(rhnsw->link_size * rhnsw->levels[i] + 1);
+            READANDCHECK( rhnsw->linkLists[i], rhnsw->link_size * rhnsw->levels[i] + 1);
+        }
+    }
+}
+
 ProductQuantizer * read_ProductQuantizer (const char*fname) {
     FileIOReader reader(fname);
     return read_ProductQuantizer(&reader);
@@ -623,6 +647,9 @@ Index *read_index (IOReader *f, int io_flags) {
         // to L2 when the old format is detected
         if (h == fourcc ("IxPQ") || h == fourcc ("IxPo")) {
             idxp->metric_type = METRIC_L2;
+        }
+        if (h == fourcc("IxPq")) {
+            idxp->pq.compute_sdc_table ();
         }
         idx = idxp;
     } else if (h == fourcc ("IvFl") || h == fourcc("IvFL")) { // legacy
@@ -800,6 +827,17 @@ Index *read_index (IOReader *f, int io_flags) {
             dynamic_cast<IndexPQ*>(idxhnsw->storage)->pq.compute_sdc_table ();
         }
         idx = idxhnsw;
+    } else if(h == fourcc("IRHf") || h == fourcc("IRHp") ||
+              h == fourcc("IRHs") || h == fourcc("IRH2")) {
+        IndexRHNSW *idxrhnsw = nullptr;
+        if (h == fourcc("IRHf")) idxrhnsw = new IndexRHNSWFlat ();
+        if (h == fourcc("IRHp")) idxrhnsw = new IndexRHNSWPQ ();
+        if (h == fourcc("IRHs")) idxrhnsw = new IndexRHNSWSQ ();
+        if (h == fourcc("IRH2")) idxrhnsw = new IndexRHNSW2Level ();
+        read_index_header (idxrhnsw, f);
+        read_RHNSW (&idxrhnsw->hnsw, f);
+        idxrhnsw->own_fields = true;
+        idx = idxrhnsw;
     } else {
         FAISS_THROW_FMT("Index type 0x%08x not supported\n", h);
         idx = nullptr;

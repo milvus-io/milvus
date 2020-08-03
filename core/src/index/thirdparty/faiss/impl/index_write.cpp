@@ -36,6 +36,7 @@
 #include <faiss/IndexScalarQuantizer.h>
 #include <faiss/IndexSQHybrid.h>
 #include <faiss/IndexHNSW.h>
+#include <faiss/IndexRHNSW.h>
 #include <faiss/IndexLattice.h>
 
 #include <faiss/OnDiskInvertedLists.h>
@@ -364,6 +365,24 @@ static void write_HNSW (const HNSW *hnsw, IOWriter *f) {
     WRITE1 (hnsw->upper_beam);
 }
 
+static void write_RHNSW (const RHNSW *rhnsw, IOWriter *f) {
+    WRITE1 (rhnsw->entry_point);
+    WRITE1 (rhnsw->max_level);
+    WRITE1 (rhnsw->M);
+    WRITE1 (rhnsw->level0_link_size);
+    WRITE1 (rhnsw->link_size);
+    WRITE1 (rhnsw->level_constant);
+    WRITE1 (rhnsw->efConstruction);
+    WRITE1 (rhnsw->efSearch);
+
+    WRITEVECTOR (rhnsw->levels);
+    WRITEANDCHECK (rhnsw->level0_links, rhnsw->level0_link_size * rhnsw->levels.size());
+    for (auto i = 0; i < rhnsw->levels.size(); ++ i) {
+        if (rhnsw->levels[i])
+            WRITEANDCHECK (rhnsw->linkLists[i], rhnsw->link_size * rhnsw->levels[i] + 1);
+    }
+}
+
 static void write_direct_map (const DirectMap *dm, IOWriter *f) {
     char maintain_direct_map = (char)dm->type; // for backwards compatibility with bool
     WRITE1 (maintain_direct_map);
@@ -560,6 +579,18 @@ void write_index (const Index *idx, IOWriter *f) {
         write_index_header (idxhnsw, f);
         write_HNSW (&idxhnsw->hnsw, f);
         write_index (idxhnsw->storage, f);
+    } else if (const IndexRHNSW * idxrhnsw =
+            dynamic_cast<const IndexRHNSW *>(idx)) {
+        uint32_t h =
+                dynamic_cast<const IndexRHNSWFlat*>(idx)   ? fourcc("IRHf") :
+                dynamic_cast<const IndexRHNSWPQ*>(idx)     ? fourcc("IRHp") :
+                dynamic_cast<const IndexRHNSWSQ*>(idx)     ? fourcc("IRHs") :
+                dynamic_cast<const IndexRHNSW2Level*>(idx) ? fourcc("IRH2") :
+                0;
+        FAISS_THROW_IF_NOT (h != 0);
+        WRITE1 (h);
+        write_index_header (idxrhnsw, f);
+        write_RHNSW (&idxrhnsw->hnsw, f);
     } else {
       FAISS_THROW_MSG ("don't know how to serialize this type of index");
     }

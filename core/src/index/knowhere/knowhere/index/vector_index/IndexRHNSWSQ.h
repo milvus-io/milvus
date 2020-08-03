@@ -24,14 +24,14 @@ namespace knowhere {
 class IndexRHNSWSQ : public IndexRHNSW {
  public:
     IndexRHNSWSQ() : IndexRHNSW() {
-        index_type_ = IndexEnum::RHNSWSQ;
+        index_type_ = IndexEnum::INDEX_RHNSWSQ;
     }
 
     explicit IndexRHNSWSQ(std::shared_ptr<faiss::Index> index) : IndexRHNSW(std::move(index)) {
-        index_type_ = IndexEnum::RHNSWSQ;
+        index_type_ = IndexEnum::INDEX_RHNSWSQ;
     }
 
-    IndexRHNSWSQ(int d, faiss::QuantizerType qtype, int M, MetricType metric = METRIC_L2);
+    IndexRHNSWSQ(int d, faiss::QuantizerType qtype, int M, MetricType metric = Metric::L2);
 
     BinarySet
     Serialize(const Config& config = Config()) override;

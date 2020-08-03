@@ -370,8 +370,7 @@ void RHNSW::prune_neighbors(DistanceComputer& ptdis,
 }
 
 void RHNSW::searchKnn(DistanceComputer& qdis, int k,
-            idx_t *I, float *D,
-            VisitedTable& vt) const {
+            idx_t *I, float *D) const {
   if (levels.size() == 0)
     return;
   int ep = entry_point;
@@ -406,6 +405,20 @@ void RHNSW::searchKnn(DistanceComputer& qdis, int k,
     i ++;
     top_candidates.pop();
   }
+}
+
+size_t RHNSW::cal_size() {
+  size_t ret = 0;
+  ret += sizeof(*this);
+  ret += visited_list_pool->GetSize();
+  ret += link_list_locks.size() * sizeof(std::mutex);
+  ret += levels.size() * sizeof(int);
+  ret += levels.size() * level0_link_size;
+  ret += levels.size() * sizeof(void*);
+  for (auto i = 0; i < levels.size(); ++ i) {
+    ret += levels[i] ? link_size * levels[i] : 0;
+  }
+  return ret;
 }
 
 }  // namespace faiss

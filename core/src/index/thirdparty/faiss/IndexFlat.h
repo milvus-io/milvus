@@ -85,6 +85,8 @@ struct IndexFlat: Index {
     void sa_decode (idx_t n, const uint8_t *bytes,
                             float *x) const override;
 
+    size_t cal_size() { return xb.size() * sizeof(float); }
+
 };
 
 

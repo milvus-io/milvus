@@ -24,11 +24,11 @@ namespace knowhere {
 class IndexRHNSWPQ : public IndexRHNSW {
  public:
     IndexRHNSWPQ() : IndexRHNSW() {
-        index_type_ = IndexEnum::RHNSWPQ;
+        index_type_ = IndexEnum::INDEX_RHNSWPQ;
     }
 
     explicit IndexRHNSWPQ(std::shared_ptr<faiss::Index> index) : IndexRHNSW(std::move(index)) {
-        index_type_ = IndexEnum::RHNSWPQ;
+        index_type_ = IndexEnum::INDEX_RHNSWPQ;
     }
 
     IndexRHNSWPQ(int d, int pq_m, int M);
