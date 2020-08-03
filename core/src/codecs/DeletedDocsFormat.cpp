@@ -49,37 +49,23 @@ DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& 
                         segment::DeletedDocsPtr& deleted_docs) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
 
-    int del_fd = open(full_file_path.c_str(), O_RDONLY, 00664);
-    if (del_fd == -1) {
-        std::string err_msg = "Failed to open file: " + full_file_path + ", error: " + std::strerror(errno);
+    if (!fs_ptr->reader_ptr_->open(full_file_path)) {
+        std::string err_msg = "Failed to open file: " + full_file_path;  // + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
     size_t num_bytes;
-    if (::read(del_fd, &num_bytes, sizeof(size_t)) == -1) {
-        std::string err_msg = "Failed to read from file: " + full_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 
     auto deleted_docs_size = num_bytes / sizeof(segment::offset_t);
     std::vector<segment::offset_t> deleted_docs_list;
     deleted_docs_list.resize(deleted_docs_size);
 
-    if (::read(del_fd, deleted_docs_list.data(), num_bytes) == -1) {
-        std::string err_msg = "Failed to read from file: " + full_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
+    fs_ptr->reader_ptr_->read(deleted_docs_list.data(), num_bytes);
+    fs_ptr->reader_ptr_->close();
 
     deleted_docs = std::make_shared<segment::DeletedDocs>(deleted_docs_list);
-
-    if (::close(del_fd) == -1) {
-        std::string err_msg = "Failed to close file: " + full_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_WRITE_ERROR, err_msg);
-    }
 }
 
 void
@@ -99,7 +85,7 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     std::vector<segment::offset_t> delete_ids;
     if (exists) {
         if (!fs_ptr->reader_ptr_->open(temp_path)) {
-            std::string err_msg = "Failed to read from file: " + temp_path + ", error: " + std::strerror(errno);
+            std::string err_msg = "Failed to read from file: " + temp_path;  // + ", error: " + std::strerror(errno);
             LOG_ENGINE_ERROR_ << err_msg;
             throw Exception(SERVER_WRITE_ERROR, err_msg);
         }
@@ -118,7 +104,7 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     }
 
     if (!fs_ptr->writer_ptr_->open(temp_path)) {
-        std::string err_msg = "Failed to write from file: " + temp_path + ", error: " + std::strerror(errno);
+        std::string err_msg = "Failed to write from file: " + temp_path;  // + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
@@ -135,7 +121,7 @@ void
 DeletedDocsFormat::ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, size_t& size) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
     if (!fs_ptr->writer_ptr_->open(full_file_path)) {
-        std::string err_msg = "Failed to open file: " + full_file_path + ", error: " + std::strerror(errno);
+        std::string err_msg = "Failed to open file: " + full_file_path;  // + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
