@@ -130,11 +130,11 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
     segment_reader_->GetSegment(segment_ptr);
 
     for (auto& name : field_names) {
-        FIELD_TYPE field_type = FIELD_TYPE::NONE;
+        DataType field_type = DataType::NONE;
         segment_ptr->GetFieldType(name, field_type);
 
         bool index_exist = false;
-        if (field_type == FIELD_TYPE::VECTOR_FLOAT || field_type == FIELD_TYPE::VECTOR_BINARY) {
+        if (field_type == DataType::VECTOR_FLOAT || field_type == DataType::VECTOR_BINARY) {
             knowhere::VecIndexPtr index_ptr;
             segment_reader_->LoadVectorIndex(name, index_ptr);
             index_exist = (index_ptr != nullptr);

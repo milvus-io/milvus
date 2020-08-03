@@ -619,12 +619,16 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
         return job->status();
     }
 
-    result = job->query_result();
+    if (job->query_result()) {
+        result = job->query_result();
+    }
 
     // step 4: get entities by result ids
     std::vector<bool> valid_row;
-    STATUS_CHECK(GetEntityByID(query_ptr->collection_id, result->result_ids_, query_ptr->field_names, valid_row,
-                               result->data_chunk_));
+    if (!query_ptr->field_names.empty()) {
+        STATUS_CHECK(GetEntityByID(query_ptr->collection_id, result->result_ids_, query_ptr->field_names, valid_row,
+                                   result->data_chunk_));
+    }
 
     // step 5: filter entities by field names
     //    std::vector<engine::AttrsData> filter_attrs;

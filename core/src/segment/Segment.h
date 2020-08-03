@@ -34,7 +34,7 @@ extern const char* COLLECTIONS_FOLDER;
 class Segment {
  public:
     Status
-    AddField(const std::string& field_name, FIELD_TYPE field_type, int64_t field_width = 0);
+    AddField(const std::string& field_name, DataType field_type, int64_t field_width = 0);
 
     Status
     AddChunk(const DataChunkPtr& chunk_ptr);
@@ -46,7 +46,7 @@ class Segment {
     DeleteEntity(int64_t offset);
 
     Status
-    GetFieldType(const std::string& field_name, FIELD_TYPE& type);
+    GetFieldType(const std::string& field_name, DataType& type);
 
     Status
     GetFixedFieldWidth(const std::string& field_name, int64_t& width);
