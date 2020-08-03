@@ -18,4 +18,4 @@ add_library( segment STATIC )
 target_sources( segment PRIVATE ${SEGMENT_FILES}
                                 ${THIRDPARTY_DABLOOMS_FILES}
                                 )
-add_dependencies( segment PRIVATE sqlite mysqlpp )
+add_dependencies( segment sqlite mysqlpp )
