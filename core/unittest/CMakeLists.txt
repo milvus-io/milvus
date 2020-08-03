@@ -60,6 +60,13 @@ set( UNITTEST_LIBS  sqlite
                     z
                     )
 
+if ( MILVUS_GPU_VERSION )
+    list( APPEND UNITTEST_LIBS   ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+            cudart
+            cublas
+            )
+endif()
+
 if ( MILVUS_WITH_AWS )
     set( S3_CLIENT_LIB  aws-cpp-sdk-s3
                         aws-cpp-sdk-core
