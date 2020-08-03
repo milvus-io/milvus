@@ -5,6 +5,7 @@ if [[ ! ${jobs+1} ]]; then
     jobs=$(nproc)
 fi
 
+
 BUILD_OUTPUT_DIR="cmake_build"
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="OFF"
