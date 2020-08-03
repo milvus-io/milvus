@@ -304,6 +304,14 @@ MetaSession::Select(const std::string& field, const std::vector<U>& values,
             }
         }
 
+        auto tn_p = std::dynamic_pointer_cast<snapshot::TypeNameField>(resource);
+        if (tn_p != nullptr) {
+            iter = raw.find(F_TYPE_NAME);
+            if (iter != raw.end()) {
+                tn_p->SetTypeName(iter->second);
+            }
+        }
+
         resources.push_back(std::move(resource));
     }
 
