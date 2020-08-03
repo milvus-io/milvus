@@ -9,9 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/meta/MySQLConnectionPool.h"
-#include <fiu-local.h>
+#include "db/meta/backend/MySQLConnectionPool.h"
+
 #include <thread>
+
+#include <fiu-local.h>
+
+#include "utils/Log.h"
 
 namespace milvus::engine::meta {
 
@@ -22,11 +26,11 @@ namespace milvus::engine::meta {
 // we keep our own count; ConnectionPool::size() isn't the same!
 mysqlpp::Connection*
 MySQLConnectionPool::grab() {
-    while (conns_in_use_ > max_pool_size_) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        full_.wait(lock, [this] { return conns_in_use_ < max_pool_size_; });
+        ++conns_in_use_;
     }
-
-    ++conns_in_use_;
     return mysqlpp::ConnectionPool::grab();
 }
 
@@ -34,6 +38,8 @@ MySQLConnectionPool::grab() {
 void
 MySQLConnectionPool::release(const mysqlpp::Connection* pc) {
     mysqlpp::ConnectionPool::release(pc);
+
+    std::lock_guard<std::mutex> lock(mutex_);
     if (conns_in_use_ <= 0) {
         LOG_ENGINE_WARNING_ << "MySQLConnetionPool::release: conns_in_use_ is less than zero.  conns_in_use_ = "
                             << conns_in_use_;
@@ -60,6 +66,7 @@ MySQLConnectionPool::create() {
         // creation.
         auto conn = new mysqlpp::Connection();
         conn->set_option(new mysqlpp::ReconnectOption(true));
+        conn->set_option(new mysqlpp::ConnectTimeoutOption(5));
         conn->connect(db_name_.empty() ? 0 : db_name_.c_str(), server_.empty() ? 0 : server_.c_str(),
                       user_.empty() ? 0 : user_.c_str(), password_.empty() ? 0 : password_.c_str(), port_);
         return conn;
