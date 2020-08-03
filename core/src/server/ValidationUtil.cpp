@@ -165,7 +165,7 @@ Status
 ValidateIndexType(const std::string& index_type) {
     // Index name shouldn't be empty.
     if (index_type.empty()) {
-        std::string msg = "Index name should not be empty.";
+        std::string msg = "Index type should not be empty.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_FIELD_NAME, msg);
     }
@@ -187,7 +187,7 @@ ValidateIndexType(const std::string& index_type) {
     };
 
     if (s_valid_index_names.find(index_type) == s_valid_index_names.end()) {
-        std::string msg = "Invalid index name: " + index_type;
+        std::string msg = "Invalid index type: " + index_type;
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
     }
