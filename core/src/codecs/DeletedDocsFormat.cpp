@@ -95,6 +95,7 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     }
 
     // Write to the temp file, in order to avoid possible race condition with search (concurrent read and write)
+    //    auto ok = fs_ptr->writer_ptr_->open(temp_path);
     int del_fd = open(temp_path.c_str(), O_RDWR | O_CREAT, 00664);
     if (del_fd == -1) {
         std::string err_msg = "Failed to open file: " + temp_path + ", error: " + std::strerror(errno);

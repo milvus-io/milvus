@@ -152,6 +152,10 @@ AttrValue2Str(typename ResourceContext<ResourceT>::ResPtr src, const std::string
         auto name_field = std::dynamic_pointer_cast<snapshot::NameField>(src);
         str_value = name_field->GetName();
         str2str(str_value, value);
+    } else if (F_TYPE_NAME == attr) {
+        auto type_name_field = std::dynamic_pointer_cast<snapshot::TypeNameField>(src);
+        str_value = type_name_field->GetTypeName();
+        str2str(str_value, value);
     } else if (F_PARAMS == attr) {
         auto params_field = std::dynamic_pointer_cast<snapshot::ParamsField>(src);
         json_value = params_field->GetParams();
