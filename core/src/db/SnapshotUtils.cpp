@@ -50,26 +50,23 @@ SetSnapshotIndex(const std::string& collection_name, const std::string& field_na
     }
 
     snapshot::OperationContext ss_context;
+    auto index_element =
+        std::make_shared<snapshot::FieldElement>(ss->GetCollectionId(), field->GetID(), index_info.index_name_,
+                                                 milvus::engine::FieldElementType::FET_INDEX, index_info.index_type_);
+    ss_context.new_field_elements.push_back(index_element);
     if (IsVectorField(field)) {
-        auto new_element = std::make_shared<snapshot::FieldElement>(
-            ss->GetCollectionId(), field->GetID(), index_info.index_name_, milvus::engine::FieldElementType::FET_INDEX);
         milvus::json json;
         json[engine::PARAM_INDEX_METRIC_TYPE] = index_info.metric_name_;
         json[engine::PARAM_INDEX_EXTRA_PARAMS] = index_info.extra_params_;
-        new_element->SetParams(json);
-        ss_context.new_field_elements.push_back(new_element);
+        index_element->SetParams(json);
 
         if (index_info.index_name_ == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
             index_info.index_name_ == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
-            auto new_element = std::make_shared<snapshot::FieldElement>(
+            auto compress_element = std::make_shared<snapshot::FieldElement>(
                 ss->GetCollectionId(), field->GetID(), DEFAULT_INDEX_COMPRESS_NAME,
                 milvus::engine::FieldElementType::FET_COMPRESS_SQ8);
-            ss_context.new_field_elements.push_back(new_element);
+            ss_context.new_field_elements.push_back(compress_element);
         }
-    } else {
-        auto new_element = std::make_shared<snapshot::FieldElement>(
-            ss->GetCollectionId(), field->GetID(), index_info.index_name_, milvus::engine::FieldElementType::FET_INDEX);
-        ss_context.new_field_elements.push_back(new_element);
     }
 
     auto op = std::make_shared<snapshot::AddFieldElementOperation>(ss_context, ss);
@@ -97,6 +94,7 @@ GetSnapshotIndex(const std::string& collection_name, const std::string& field_na
         for (auto& field_element : field_elements) {
             if (field_element->GetFtype() == (int64_t)milvus::engine::FieldElementType::FET_INDEX) {
                 index_info.index_name_ = field_element->GetName();
+                index_info.index_type_ = field_element->GetTypeName();
                 auto json = field_element->GetParams();
                 if (json.find(engine::PARAM_INDEX_METRIC_TYPE) != json.end()) {
                     index_info.metric_name_ = json[engine::PARAM_INDEX_METRIC_TYPE];
@@ -110,7 +108,8 @@ GetSnapshotIndex(const std::string& collection_name, const std::string& field_na
     } else {
         for (auto& field_element : field_elements) {
             if (field_element->GetFtype() == (int64_t)milvus::engine::FieldElementType::FET_INDEX) {
-                index_info.index_name_ = DEFAULT_STRUCTURED_INDEX_NAME;
+                index_info.index_name_ = field_element->GetName();
+                index_info.index_type_ = field_element->GetTypeName();
             }
         }
     }
