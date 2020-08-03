@@ -23,11 +23,10 @@ namespace server {
 class ListPartitionsReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           std::vector<std::string>& partition_list);
+    Create(const ContextPtr& context, const std::string& collection_name, std::vector<std::string>& partition_list);
 
  protected:
-    ListPartitionsReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+    ListPartitionsReq(const ContextPtr& context, const std::string& collection_name,
                       std::vector<std::string>& partition_list);
 
     Status

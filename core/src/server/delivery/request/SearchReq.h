@@ -25,14 +25,12 @@ namespace server {
 class SearchReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-           const milvus::json& json_params, engine::snapshot::CollectionMappings& collection_mappings,
-           engine::QueryResultPtr& result);
+    Create(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
+           engine::snapshot::FieldElementMappings& collection_mappings, engine::QueryResultPtr& result);
 
  protected:
-    SearchReq(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-              const milvus::json& json_params, engine::snapshot::CollectionMappings& collection_mappings,
-              engine::QueryResultPtr& result);
+    SearchReq(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
+              engine::snapshot::FieldElementMappings& collection_mappings, engine::QueryResultPtr& result);
 
     Status
     OnExecute() override;
@@ -40,7 +38,7 @@ class SearchReq : public BaseReq {
  private:
     milvus::query::QueryPtr query_ptr_;
     milvus::json json_params_;
-    engine::snapshot::CollectionMappings& collection_mappings_;
+    engine::snapshot::FieldElementMappings& field_mappings_;
     engine::QueryResultPtr& result_;
 };
 

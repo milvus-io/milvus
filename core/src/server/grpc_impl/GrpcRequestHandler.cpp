@@ -77,10 +77,10 @@ ErrorMap(ErrorCode code) {
 }
 
 std::string
-RequestMap(BaseReq::ReqType req_type) {
-    static const std::unordered_map<BaseReq::ReqType, std::string> req_map = {
-        {BaseReq::kInsert, "Insert"}, {BaseReq::kCreateIndex, "CreateIndex"},     {BaseReq::kSearch, "Search"},
-        {BaseReq::kFlush, "Flush"},   {BaseReq::kGetEntityByID, "GetEntityByID"}, {BaseReq::kCompact, "Compact"},
+RequestMap(ReqType req_type) {
+    static const std::unordered_map<ReqType, std::string> req_map = {
+        {ReqType::kInsert, "Insert"}, {ReqType::kCreateIndex, "CreateIndex"},     {ReqType::kSearch, "Search"},
+        {ReqType::kFlush, "Flush"},   {ReqType::kGetEntityByID, "GetEntityByID"}, {ReqType::kCompact, "Compact"},
     };
 
     if (req_map.find(req_type) != req_map.end()) {
@@ -264,12 +264,16 @@ ConstructResults(const TopKQueryResult& result, ::milvus::grpc::QueryResult* res
 
 void
 CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
-                      const engine::snapshot::CollectionMappings& field_mappings, int64_t id_size,
+                      const engine::snapshot::FieldElementMappings& field_mappings, int64_t id_size,
                       ::milvus::grpc::Entities* response) {
     for (const auto& it : field_mappings) {
         auto type = it.first->GetFtype();
         std::string name = it.first->GetName();
+
+        // judge whether data exists
         std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
+        if (data.empty())
+            continue;
 
         auto single_size = data.size() / id_size;
 
@@ -822,6 +826,43 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
 }
 
 ::grpc::Status
+GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
+                                  ::milvus::grpc::IndexParam* response) {
+    CHECK_NULLPTR_RETURN(request)
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
+
+    std::string index_name;
+    milvus::json index_params;
+    Status status = req_handler_.DescribeIndex(GetContext(context), request->collection_name(), request->field_name(),
+                                               index_name, index_params);
+
+    response->set_collection_name(request->collection_name());
+    response->set_field_name(request->field_name());
+    ::milvus::grpc::KeyValuePair* kv = response->add_extra_params();
+    kv->set_key(EXTRA_PARAM_KEY);
+    kv->set_value(index_params.dump());
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
+    SET_RESPONSE(response->mutable_status(), status, context);
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
+                              ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
+
+    Status status = req_handler_.DropIndex(GetContext(context), request->collection_name(), request->field_name(),
+                                           request->index_name());
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
+    SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
 GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus::grpc::EntityIdentity* request,
                                   ::milvus::grpc::Entities* response) {
     CHECK_NULLPTR_RETURN(request);
@@ -839,18 +880,24 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     }
 
     engine::DataChunkPtr data_chunk;
-    engine::snapshot::CollectionMappings field_mappings;
+    engine::snapshot::FieldElementMappings field_mappings;
 
     std::vector<bool> valid_row;
 
     Status status = req_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, field_names,
                                                valid_row, field_mappings, data_chunk);
 
+    int valid_size = 0;
     for (auto it : valid_row) {
         response->add_valid_row(it);
+        if (it) {
+            valid_size++;
+        }
     }
 
-    CopyDataChunkToEntity(data_chunk, field_mappings, vector_ids.size(), response);
+    if (valid_size > 0) {
+        CopyDataChunkToEntity(data_chunk, field_mappings, valid_size, response);
+    }
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -1138,27 +1185,6 @@ GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::mi
 }
 
 ::grpc::Status
-GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
-                                  ::milvus::grpc::IndexParam* response) {
-    return ::grpc::Status::OK;
-}
-
-::grpc::Status
-GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
-                              ::milvus::grpc::Status* response) {
-    CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
-
-    Status status = req_handler_.DropIndex(GetContext(context), request->collection_name(), request->field_name(),
-                                           request->index_name());
-
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
-    SET_RESPONSE(response, status, context);
-
-    return ::grpc::Status::OK;
-}
-
-::grpc::Status
 GrpcRequestHandler::CreatePartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
                                     ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
@@ -1397,8 +1423,8 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
     std::vector<std::string> field_names;
-    engine::snapshot::CollectionMappings collection_mappings;
-    status = req_handler_.Search(GetContext(context), query_ptr, json_params, collection_mappings, result);
+    engine::snapshot::FieldElementMappings field_mappings;
+    status = req_handler_.Search(GetContext(context), query_ptr, json_params, field_mappings, result);
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
@@ -1756,16 +1782,21 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     }
 
     engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-    engine::snapshot::CollectionMappings collection_mappings;
+    engine::snapshot::FieldElementMappings field_mappings;
 
-    status = req_handler_.Search(GetContext(context), query_ptr, json_params, collection_mappings, result);
+    status = req_handler_.Search(GetContext(context), query_ptr, json_params, field_mappings, result);
+
+    if (!status.ok()) {
+        SET_RESPONSE(response->mutable_status(), status, context);
+        return ::grpc::Status::OK;
+    }
 
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
     int64_t id_size = result->result_ids_.size();
     grpc_entity->mutable_valid_row()->Resize(id_size, true);
 
-    CopyDataChunkToEntity(result->data_chunk_, collection_mappings, id_size, grpc_entity);
+    CopyDataChunkToEntity(result->data_chunk_, field_mappings, id_size, grpc_entity);
 
     grpc_entity->mutable_ids()->Resize(static_cast<int>(result->result_ids_.size()), 0);
     memcpy(grpc_entity->mutable_ids()->mutable_data(), result->result_ids_.data(),

@@ -22,34 +22,34 @@
 namespace milvus {
 namespace server {
 
-GetCollectionInfoReq::GetCollectionInfoReq(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, CollectionSchema& collection_schema)
-    : BaseReq(context, BaseReq::kGetCollectionInfo),
+GetCollectionInfoReq::GetCollectionInfoReq(const ContextPtr& context, const std::string& collection_name,
+                                           CollectionSchema& collection_schema)
+    : BaseReq(context, ReqType::kGetCollectionInfo),
       collection_name_(collection_name),
       collection_schema_(collection_schema) {
 }
 
 BaseReqPtr
-GetCollectionInfoReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, CollectionSchema& collection_schema) {
+GetCollectionInfoReq::Create(const ContextPtr& context, const std::string& collection_name,
+                             CollectionSchema& collection_schema) {
     return std::shared_ptr<BaseReq>(new GetCollectionInfoReq(context, collection_name, collection_schema));
 }
 
 Status
 GetCollectionInfoReq::OnExecute() {
-    std::string hdr = "GetCollectionInfoReq(collection=" + collection_name_ + ")";
-    TimeRecorderAuto rc(hdr);
-
     try {
+        std::string hdr = "GetCollectionInfoReq(collection=" + collection_name_ + ")";
+        TimeRecorderAuto rc(hdr);
+
         STATUS_CHECK(ValidateCollectionName(collection_name_));
 
         engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings collection_mappings;
-        STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, collection_mappings));
+        engine::snapshot::FieldElementMappings field_mappings;
+        STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, field_mappings));
 
         collection_schema_.collection_name_ = collection_name_;
         collection_schema_.extra_params_ = collection->GetParams();
-        for (auto& field_kv : collection_mappings) {
+        for (auto& field_kv : field_mappings) {
             auto field = field_kv.first;
             if (field->GetFtype() == (engine::snapshot::FTYPE_TYPE)engine::DataType::UID) {
                 continue;

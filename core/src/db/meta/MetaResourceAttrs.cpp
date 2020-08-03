@@ -34,6 +34,7 @@ const char* F_NAME = snapshot::NameField::Name;
 const char* F_PARAMS = snapshot::ParamsField::Name;
 const char* F_SIZE = snapshot::SizeField::Name;
 const char* F_ROW_COUNT = snapshot::RowCountField::Name;
+const char* F_TYPE_NAME = snapshot::TypeNameField::Name;
 
 const char* TABLE_COLLECTION = snapshot::Collection::Name;
 const char* TABLE_COLLECTION_COMMIT = snapshot::CollectionCommit::Name;
@@ -72,7 +73,8 @@ ResourceAttrMapOf(const std::string& table, std::vector<std::string>& attrs) {
         {snapshot::FieldCommit::Name,
          {F_COLLECTON_ID, F_FIELD_ID, F_MAPPINGS, F_ID, F_LSN, F_STATE, F_CREATED_ON, F_UPDATED_ON}},
         {snapshot::FieldElement::Name,
-         {F_COLLECTON_ID, F_FIELD_ID, F_NAME, F_FTYPE, F_PARAMS, F_ID, F_LSN, F_STATE, F_CREATED_ON, F_UPDATED_ON}},
+         {F_COLLECTON_ID, F_FIELD_ID, F_NAME, F_FTYPE, F_TYPE_NAME, F_PARAMS, F_ID, F_LSN, F_STATE, F_CREATED_ON,
+          F_UPDATED_ON}},
     };
 
     if (ResourceAttrMap.find(table) == ResourceAttrMap.end()) {

@@ -29,6 +29,7 @@ extern const char* F_NAME;
 extern const char* F_PARAMS;
 extern const char* F_SIZE;
 extern const char* F_ROW_COUNT;
+extern const char* F_TYPE_NAME;
 
 ////////////////////////////////////////////////////////
 // Table names

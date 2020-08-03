@@ -17,6 +17,8 @@ default_flush_interval = 1
 big_flush_interval = 1000
 dimension = 128
 segment_row_count = 5000
+default_float_vec_field_name = "float_vector"
+default_binary_vec_field_name = "binary_vector"
 
 # TODO:
 all_index_types = [
@@ -210,7 +212,7 @@ def gen_default_fields():
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": "vector", "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}}
+            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}}
         ],
         "segment_row_count": segment_row_count
     }
@@ -222,7 +224,7 @@ def gen_entities(nb, is_normal=False):
     entities = [
         {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
-        {"field": "vector", "type": DataType.FLOAT_VECTOR, "values": vectors}
+        {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": vectors}
     ]
     return entities
 
@@ -232,7 +234,7 @@ def gen_binary_entities(nb):
     entities = [
         {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
-        {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "values": vectors}
+        {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "values": vectors}
     ]
     return raw_vectors, entities
 
@@ -651,7 +653,7 @@ def gen_simple_index():
     for i in range(len(all_index_types)):
         if all_index_types[i] in binary_support():
             continue
-        dic = {"index_type": all_index_types[i]}
+        dic = {"index_type": all_index_types[i], "metric_type": "L2"}
         dic.update(default_index_params[i])
         index_params.append(dic)
     return index_params
@@ -668,16 +670,19 @@ def gen_binary_index():
 
 
 def get_search_param(index_type):
+    search_params = {"metric_type": "L2"}
     if index_type in ivf() or index_type in binary_support():
-        return {"nprobe": 32}
+        search_params.update({"nprobe": 32})
     elif index_type == "HNSW":
-        return {"ef": 64}
+        search_params.update({"ef": 64})
     elif index_type == "NSG":
-        return {"search_length": 100}
+        search_params.update({"search_length": 100})
     elif index_type == "ANNOY":
-        return {"search_k": 100}
+        search_params.update({"search_k": 100})
     else:
-        logging.getLogger().info("Invalid index_type.")
+        logging.getLogger().error("Invalid index_type.")
+        raise Exception("Invalid index_type.")
+    return search_params
 
 
 def assert_equal_vector(v1, v2):

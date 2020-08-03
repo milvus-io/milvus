@@ -43,6 +43,7 @@ set( SCHEDULER_FILES  ${SCHEDULER_MAIN_FILES}
                       ${SCHEDULER_TASK_FILES}
                       )
 
+# dependencies of target milvus_engine
 add_subdirectory( storage )
 add_subdirectory( cache )
 add_subdirectory( codecs )

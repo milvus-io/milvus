@@ -21,28 +21,26 @@
 namespace milvus {
 namespace server {
 
-CreateCollectionReq::CreateCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name,
-                                         std::unordered_map<std::string, FieldSchema>& fields,
-                                         milvus::json& extra_params)
-    : BaseReq(context, BaseReq::kCreateCollection),
+CreateCollectionReq::CreateCollectionReq(const ContextPtr& context, const std::string& collection_name,
+                                         FieldsType& fields, milvus::json& extra_params)
+    : BaseReq(context, ReqType::kCreateCollection),
       collection_name_(collection_name),
       fields_(fields),
       extra_params_(extra_params) {
 }
 
 BaseReqPtr
-CreateCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                            std::unordered_map<std::string, FieldSchema>& fields, milvus::json& extra_params) {
+CreateCollectionReq::Create(const ContextPtr& context, const std::string& collection_name, FieldsType& fields,
+                            milvus::json& extra_params) {
     return std::shared_ptr<BaseReq>(new CreateCollectionReq(context, collection_name, fields, extra_params));
 }
 
 Status
 CreateCollectionReq::OnExecute() {
-    std::string hdr = "CreateCollectionReq(collection=" + collection_name_ + ")";
-    TimeRecorderAuto rc(hdr);
-
     try {
+        std::string hdr = "CreateCollectionReq(collection=" + collection_name_ + ")";
+        TimeRecorderAuto rc(hdr);
+
         // step 1: check arguments
         auto status = ValidateCollectionName(collection_name_);
         fiu_do_on("CreateCollectionReq.OnExecute.invalid_collection_name",
