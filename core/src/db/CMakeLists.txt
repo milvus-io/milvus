@@ -86,7 +86,7 @@ set( PROMETHEUS_LIB prometheus-cpp-push
                     )
 
 set( THIRD_PARTY_LIBS   sqlite
-                        yaml-cpp
+                        yaml-cpp # log
                         mysqlpp
                         zlib
                         fiu
