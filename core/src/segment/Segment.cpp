@@ -26,37 +26,37 @@ namespace engine {
 const char* COLLECTIONS_FOLDER = "/collections";
 
 Status
-Segment::AddField(const std::string& field_name, FIELD_TYPE field_type, int64_t field_width) {
+Segment::AddField(const std::string& field_name, DataType field_type, int64_t field_width) {
     if (field_types_.find(field_name) != field_types_.end()) {
         return Status(DB_ERROR, "duplicate field: " + field_name);
     }
 
     int64_t real_field_width = 0;
     switch (field_type) {
-        case FIELD_TYPE::BOOL:
+        case DataType::BOOL:
             real_field_width = sizeof(bool);
             break;
-        case FIELD_TYPE::DOUBLE:
+        case DataType::DOUBLE:
             real_field_width = sizeof(double);
             break;
-        case FIELD_TYPE::FLOAT:
+        case DataType::FLOAT:
             real_field_width = sizeof(float);
             break;
-        case FIELD_TYPE::INT8:
+        case DataType::INT8:
             real_field_width = sizeof(uint8_t);
             break;
-        case FIELD_TYPE::INT16:
+        case DataType::INT16:
             real_field_width = sizeof(uint16_t);
             break;
-        case FIELD_TYPE::INT32:
+        case DataType::INT32:
             real_field_width = sizeof(uint32_t);
             break;
-        case FIELD_TYPE::UID:
-        case FIELD_TYPE::INT64:
+        case DataType::UID:
+        case DataType::INT64:
             real_field_width = sizeof(uint64_t);
             break;
-        case FIELD_TYPE::VECTOR_FLOAT:
-        case FIELD_TYPE::VECTOR_BINARY: {
+        case DataType::VECTOR_FLOAT:
+        case DataType::VECTOR_BINARY: {
             if (field_width <= 0) {
                 std::string msg = "vecor field dimension required: " + field_name;
                 LOG_SERVER_ERROR_ << msg;
@@ -145,7 +145,7 @@ Segment::DeleteEntity(int64_t offset) {
 }
 
 Status
-Segment::GetFieldType(const std::string& field_name, FIELD_TYPE& type) {
+Segment::GetFieldType(const std::string& field_name, DataType& type) {
     auto iter = field_types_.find(field_name);
     if (iter == field_types_.end()) {
         return Status(DB_ERROR, "invalid field name: " + field_name);
