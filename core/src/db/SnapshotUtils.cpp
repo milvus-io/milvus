@@ -154,8 +154,8 @@ IsVectorField(const engine::snapshot::FieldPtr& field) {
         return false;
     }
 
-    engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
-    return ftype == engine::FIELD_TYPE::VECTOR_FLOAT || ftype == engine::FIELD_TYPE::VECTOR_BINARY;
+    engine::DataType ftype = static_cast<engine::DataType>(field->GetFtype());
+    return ftype == engine::DataType::VECTOR_FLOAT || ftype == engine::DataType::VECTOR_BINARY;
 }
 
 Status

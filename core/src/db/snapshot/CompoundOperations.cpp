@@ -921,18 +921,19 @@ CreateCollectionOperation::DoExecute(StorePtr store) {
         AddStepWithLsn(*field, c_context_.lsn, f_ctx_p);
         MappingT element_ids = {};
         FieldElementPtr raw_element;
-        status = store->CreateResource<FieldElement>(
-            FieldElement(collection->GetID(), field->GetID(), DEFAULT_RAW_DATA_NAME, FieldElementType::FET_RAW),
-            raw_element);
+        status =
+            store->CreateResource<FieldElement>(FieldElement(collection->GetID(), field->GetID(), DEFAULT_RAW_DATA_NAME,
+                                                             FieldElementType::FET_RAW, DEFAULT_RAW_DATA_NAME),
+                                                raw_element);
         auto fe_ctx_p = ResourceContextBuilder<FieldElement>().SetOp(meta::oUpdate).CreatePtr();
         AddStepWithLsn(*raw_element, c_context_.lsn, fe_ctx_p);
         element_ids.insert(raw_element->GetID());
         for (auto& element_schema : field_elements) {
             FieldElementPtr element;
-            status =
-                store->CreateResource<FieldElement>(FieldElement(collection->GetID(), field->GetID(),
-                                                                 element_schema->GetName(), element_schema->GetFtype()),
-                                                    element);
+            status = store->CreateResource<FieldElement>(
+                FieldElement(collection->GetID(), field->GetID(), element_schema->GetName(), element_schema->GetFtype(),
+                             element_schema->GetTypeName()),
+                element);
             auto t_fe_ctx_p = ResourceContextBuilder<FieldElement>().SetOp(meta::oUpdate).CreatePtr();
             AddStepWithLsn(*element, c_context_.lsn, t_fe_ctx_p);
             element_ids.insert(element->GetID());
