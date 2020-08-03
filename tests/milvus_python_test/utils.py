@@ -222,8 +222,8 @@ def gen_default_fields():
 def gen_entities(nb, is_normal=False):
     vectors = gen_vectors(nb, dimension, is_normal)
     entities = [
-        {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
-        {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
+        {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
+        {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
         {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": vectors}
     ]
     return entities
@@ -232,8 +232,8 @@ def gen_entities(nb, is_normal=False):
 def gen_binary_entities(nb):
     raw_vectors, vectors = gen_binary_vectors(nb, dimension)
     entities = [
-        {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
-        {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
+        {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
+        {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
         {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "values": vectors}
     ]
     return raw_vectors, entities
@@ -259,7 +259,7 @@ def assert_equal_entity(a, b):
     pass
 
 
-def gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10}):
+def gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10, "metric_type": "L2"}):
     query_vectors = entities[-1]["values"][:nq]
     query = {
         "bool": {
@@ -271,7 +271,7 @@ def gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_pa
     return query, query_vectors
 
 
-def gen_query_vectors_rand_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10}):
+def gen_query_vectors_rand_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10, "metric_type": "L2"}):
     dimension = len(entities[-1]["values"][0])
     query_vectors = gen_vectors(nq, dimension)
     query = {
@@ -282,6 +282,29 @@ def gen_query_vectors_rand_entities(field_name, entities, top_k, nq, search_para
         }
     }
     return query, query_vectors
+
+
+def update_query_expr(src_query, keep_old=True, expr=None):
+    tmp_query = copy.deepcopy(src_query)
+    if expr is not None:
+        tmp_query["bool"].update(expr)
+    if keep_old is not True:
+        tmp_query["bool"].pop("must")
+    return tmp_query
+
+
+def gen_default_term_expr(values=None):
+    if values is None:
+        values = [i for i in range(nb/2)]
+    expr = {"term": {"int64": {"values": values}}}
+    return expr
+
+
+def gen_default_range_expr(ranges=None):
+    if ranges is None:
+        ranges = {"GT": 1, "LT": nb/2}
+    expr = {"range": {"int64": {"ranges": ranges}}}
+    return expr
 
 
 
