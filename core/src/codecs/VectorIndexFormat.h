@@ -44,7 +44,7 @@ class VectorIndexFormat {
     ReadCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinaryPtr& data);
 
     void
-    ConvertRaw(const std::vector<uint8_t>& raw, knowhere::BinaryPtr& data);
+    ConvertRaw(const engine::BinaryDataPtr& raw, knowhere::BinaryPtr& data);
 
     void
     ConstructIndex(const std::string& index_name, knowhere::BinarySet& index_data, knowhere::BinaryPtr& raw_data,

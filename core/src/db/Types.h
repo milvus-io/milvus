@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "cache/DataObj.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "utils/Json.h"
 
@@ -59,12 +60,35 @@ enum DataType {
     VECTOR_FLOAT = 101,
 };
 
+class BinaryData : public cache::DataObj {
+ public:
+    int64_t
+    Size() {
+        return data_.size();
+    }
+
+ public:
+    std::vector<uint8_t> data_;
+};
+using BinaryDataPtr = std::shared_ptr<BinaryData>;
+
+class VaribleData : public cache::DataObj {
+ public:
+    int64_t
+    Size() {
+        return data_.size();
+    }
+
+ public:
+    std::vector<uint8_t> data_;
+    std::vector<int64_t> offset_;
+};
+using VaribleDataPtr = std::shared_ptr<VaribleData>;
+
 using FIELD_TYPE_MAP = std::unordered_map<std::string, DataType>;
 using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;
-using FIXED_FIELD_DATA = std::vector<uint8_t>;
-using FIXEDX_FIELD_MAP = std::unordered_map<std::string, FIXED_FIELD_DATA>;
-using VARIABLE_FIELD_DATA = std::vector<std::string>;
-using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VARIABLE_FIELD_DATA>;
+using FIXEDX_FIELD_MAP = std::unordered_map<std::string, BinaryDataPtr>;
+using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VaribleDataPtr>;
 using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;
 using STRUCTURED_INDEX_MAP = std::unordered_map<std::string, knowhere::IndexPtr>;
 

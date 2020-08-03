@@ -52,7 +52,7 @@ class Segment {
     GetFixedFieldWidth(const std::string& field_name, int64_t& width);
 
     Status
-    GetFixedFieldData(const std::string& field_name, FIXED_FIELD_DATA& data);
+    GetFixedFieldData(const std::string& field_name, BinaryDataPtr& data);
 
     Status
     GetVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index);

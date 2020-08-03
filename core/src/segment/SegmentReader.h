@@ -37,13 +37,13 @@ class SegmentReader {
     Load();
 
     Status
-    LoadField(const std::string& field_name, std::vector<uint8_t>& raw);
+    LoadField(const std::string& field_name, engine::BinaryDataPtr& raw);
 
     Status
     LoadFields();
 
     Status
-    LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets, std::vector<uint8_t>& raw);
+    LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets, engine::BinaryDataPtr& raw);
 
     Status
     LoadFieldsEntities(const std::vector<std::string>& fields_name, const std::vector<int64_t>& offsets,

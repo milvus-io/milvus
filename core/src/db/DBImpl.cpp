@@ -482,9 +482,10 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         IDNumbers ids;
         STATUS_CHECK(id_generator.GetNextIDNumbers(data_chunk->count_, ids));
-        FIXED_FIELD_DATA& id_data = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
-        id_data.resize(ids.size() * sizeof(int64_t));
-        memcpy(id_data.data(), ids.data(), ids.size() * sizeof(int64_t));
+        BinaryDataPtr id_data = std::make_shared<BinaryData>();
+        id_data->data_.resize(ids.size() * sizeof(int64_t));
+        memcpy(id_data->data_.data(), ids.data(), ids.size() * sizeof(int64_t));
+        data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME] = id_data;
     }
 
     if (options_.wal_enable_) {

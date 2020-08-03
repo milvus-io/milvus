@@ -814,12 +814,12 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
     if (!status.ok()) {
         return status;
     }
-    std::vector<uint8_t> id_array = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
+    std::vector<uint8_t> id_array = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME]->data_;
 
     for (const auto& it : field_mappings) {
         std::string name = it.first->GetName();
         uint64_t type = it.first->GetFtype();
-        std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
+        std::vector<uint8_t>& data = data_chunk->fixed_fields_[name]->data_;
         if (type == engine::DataType::VECTOR_BINARY) {
             engine::VectorsData vectors_data;
             memcpy(vectors_data.binary_data_.data(), data.data(), data.size());
