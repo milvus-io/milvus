@@ -53,8 +53,6 @@ CreateIndexReq::OnExecute() {
 
         STATUS_CHECK(ValidateFieldName(field_name_));
 
-        STATUS_CHECK(ValidateIndexType(index_name_));
-
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::FieldElementMappings fields_schema;
