@@ -293,13 +293,17 @@ def update_query_expr(src_query, keep_old=True, expr=None):
     return tmp_query
 
 
-def gen_default_term_expr():
-    expr = {"term": {"int64": {"values": [i for i in range(nb/2)]}}}
+def gen_default_term_expr(values=None):
+    if values is None:
+        values = [i for i in range(nb/2)]
+    expr = {"term": {"int64": {"values": values}}}
     return expr
 
 
-def gen_default_range_expr():
-    expr = {"range": {"int64": {"ranges": {"GT": 1, "LT": nb/2}}}}
+def gen_default_range_expr(ranges=None):
+    if ranges is None:
+        ranges = {"GT": 1, "LT": nb/2}
+    expr = {"range": {"int64": {"ranges": ranges}}}
     return expr
 
 
