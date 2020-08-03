@@ -890,6 +890,77 @@ class TestSearchDSL(object):
             res = connect.search(collection, query)
 
 
+    """
+    ******************************************************************
+    #  The following cases are used to build valid query expr
+    ******************************************************************
+    """
+    def test_query_term_value_not_in(self, connect, collection):
+        '''
+        method: build query with vector and term expr, with no term can be filtered
+        expected: filter pass
+        '''
+        entities, ids = init_data(connect, collection)
+        expr = gen_default_term_expr(values=[100000])
+        query = update_query_expr(default_query, expr=expr):
+        res = connect.search(collection, query)
+        # TODO:
+
+    def test_query_term_value_all_in(self, connect, collection):
+        '''
+        method: build query with vector and term expr, with all term can be filtered
+        expected: filter pass
+        '''
+        entities, ids = init_data(connect, collection)
+        expr = gen_default_term_expr(values=1)
+        query = update_query_expr(default_query, expr=expr):
+        res = connect.search(collection, query)
+        # TODO:
+
+    def test_query_term_values_not_in(self, connect, collection):
+        '''
+        method: build query with vector and term expr, with no term can be filtered
+        expected: filter pass
+        '''
+        entities, ids = init_data(connect, collection)
+        expr = gen_default_term_expr(values=[i for i in range(100000, 100010)])
+        query = update_query_expr(default_query, expr=expr):
+        res = connect.search(collection, query)
+        # TODO:
+
+    def test_query_term_values_all_in(self, connect, collection):
+        '''
+        method: build query with vector and term expr, with all term can be filtered
+        expected: filter pass
+        '''
+        entities, ids = init_data(connect, collection)
+        expr = gen_default_term_expr()
+        query = update_query_expr(default_query, expr=expr):
+        res = connect.search(collection, query)
+        # TODO:
+
+    def test_query_term_values_parts_in(self, connect, collection):
+        '''
+        method: build query with vector and term expr, with parts of term can be filtered
+        expected: filter pass
+        '''
+        entities, ids = init_data(connect, collection)
+        expr = gen_default_term_expr(values=[i for i in range(nb/2, nb+nb/2)])
+        query = update_query_expr(default_query, expr=expr):
+        res = connect.search(collection, query)
+        # TODO:
+
+    def test_query_term_values_repeat(self, connect, collection):
+        '''
+        method: build query with vector and term expr, with the same values
+        expected: filter pass
+        '''
+        entities, ids = init_data(connect, collection)
+        expr = gen_default_term_expr(values=[1 for i in range(1, nb)])
+        query = update_query_expr(default_query, expr=expr):
+        res = connect.search(collection, query)
+        # TODO:
+
 """
 ******************************************************************
 #  The following cases are used to test `search` function 
