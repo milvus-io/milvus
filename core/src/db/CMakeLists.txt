@@ -26,16 +26,13 @@ set( DB_META_FILES  ${DB_META_MAIN_FILES}
                     )
 
 aux_source_directory( ${MILVUS_ENGINE_SRC}/index/archive    WRAPPER_FILES )
-aux_source_directory( ${MILVUS_ENGINE_SRC}/segment          SEGMENT_FILES )
 
 
 aux_source_directory( ${MILVUS_THIRDPARTY_SRC}/easyloggingpp THIRDPARTY_EASYLOGGINGPP_FILES )
 aux_source_directory( ${MILVUS_THIRDPARTY_SRC}/nlohmann      THIRDPARTY_NLOHMANN_FILES )
-aux_source_directory( ${MILVUS_THIRDPARTY_SRC}/dablooms      THIRDPARTY_DABLOOMS_FILES )
 
 set( THIRDPARTY_FILES   ${THIRDPARTY_EASYLOGGINGPP_FILES}
                         ${THIRDPARTY_NLOHMANN_FILES}
-                        ${THIRDPARTY_DABLOOMS_FILES}
                         )
 
 set( ENGINE_FILES   ${DB_MAIN_FILES}
