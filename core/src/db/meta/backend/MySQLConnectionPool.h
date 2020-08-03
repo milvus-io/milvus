@@ -14,15 +14,13 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <string>
 
 #include <mysql++/mysql++.h>
 
-#include "utils/Log.h"
-
-namespace milvus {
-namespace engine {
-namespace meta {
+namespace milvus::engine::meta {
 
 class MySQLConnectionPool : public mysqlpp::ConnectionPool {
  public:
@@ -77,8 +75,9 @@ class MySQLConnectionPool : public mysqlpp::ConnectionPool {
     int max_pool_size_;
 
     unsigned int max_idle_time_ = 10;  // 10 seconds
+
+    std::mutex mutex_;
+    std::condition_variable full_;
 };
 
-}  // namespace meta
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::meta

@@ -62,7 +62,7 @@ SegmentWriter::Initialize() {
     for (auto& iter : field_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
-        engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
+        engine::DataType ftype = static_cast<engine::DataType>(field->GetFtype());
         if (engine::IsVectorField(field)) {
             json params = field->GetParams();
             if (params.find(knowhere::meta::DIM) == params.end()) {
@@ -73,7 +73,7 @@ SegmentWriter::Initialize() {
 
             int64_t field_width = 0;
             int64_t dimension = params[knowhere::meta::DIM];
-            if (ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
+            if (ftype == engine::DataType::VECTOR_BINARY) {
                 field_width += (dimension / 8);
             } else {
                 field_width += (dimension * sizeof(float));
@@ -201,6 +201,18 @@ SegmentWriter::WriteBloomFilter() {
 
         engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
+    }
+
+    return Status::OK();
+}
+
+Status
+SegmentWriter::CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr) {
+    auto& ss_codec = codec::Codec::instance();
+    try {
+        ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
+    } catch (std::exception& er) {
+        return Status(DB_ERROR, "Create a new bloom filter fail");
     }
 
     return Status::OK();
@@ -428,7 +440,7 @@ SegmentWriter::WriteStructuredIndex(const std::string& field_name) {
         // serialize index file
         auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (element_visitor && element_visitor->GetFile()) {
-            engine::FIELD_TYPE field_type;
+            engine::DataType field_type;
             segment_ptr_->GetFieldType(field_name, field_type);
             auto segment_file = element_visitor->GetFile();
             std::string file_path =

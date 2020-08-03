@@ -349,6 +349,27 @@ class SegmentIdField {
     ID_TYPE segment_id_;
 };
 
+class TypeNameField {
+ public:
+    static constexpr const char* Name = "TypeName";
+
+    explicit TypeNameField(std::string val) : type_name_(std::move(val)) {
+    }
+
+    const std::string&
+    GetTypeName() const {
+        return type_name_;
+    }
+
+    void
+    SetTypeName(const std::string& val) {
+        type_name_ = val;
+    }
+
+ protected:
+    std::string type_name_;
+};
+
 class NameField {
  public:
     static constexpr const char* Name = "name";
@@ -709,6 +730,7 @@ class FieldElement : public BaseResource<FieldElement>,
                      public FieldIdField,
                      public NameField,
                      public FtypeField,
+                     public TypeNameField,
                      public ParamsField,
                      public IdField,
                      public LsnField,
@@ -723,8 +745,9 @@ class FieldElement : public BaseResource<FieldElement>,
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "FieldElement";
     FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype,
-                 const json& params = JEmpty, ID_TYPE id = 0, LSN_TYPE lsn = 0, State status = PENDING,
-                 TS_TYPE created_on = GetMicroSecTimeStamp(), TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
+                 const std::string& type_name = "", const json& params = JEmpty, ID_TYPE id = 0, LSN_TYPE lsn = 0,
+                 State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
+                 TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
 
 using FieldElementPtr = FieldElement::Ptr;
