@@ -10,13 +10,12 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
-set(LOG_FILES   ${MILVUS_ENGINE_SRC}/log/Log.cpp
-                ${MILVUS_ENGINE_SRC}/log/Log.h
-                ${MILVUS_ENGINE_SRC}/log/LogMgr.cpp
-                ${MILVUS_ENGINE_SRC}/log/LogMgr.h
-                ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
-                ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.h
-                )
-
-add_library(log STATIC ${LOG_FILES})
-add_dependencies(log fiu)
+aux_source_directory( ${MILVUS_ENGINE_SRC}/storage          STORAGE_MAIN_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/disk     STORAGE_DISK_FILES )
+# aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/s3     STORAGE_S3_FILES )
+set( STORAGE_FILES  ${STORAGE_MAIN_FILES}
+                    ${STORAGE_DISK_FILES}
+                    # ${STORAGE_S3_FILES}
+                    )
+add_library( storage STATIC )
+target_sources( storage PRIVATE ${STORAGE_FILES} )
