@@ -207,6 +207,18 @@ SegmentWriter::WriteBloomFilter() {
 }
 
 Status
+SegmentWriter::CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr) {
+    auto& ss_codec = codec::Codec::instance();
+    try {
+        ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
+    } catch (std::exception& er) {
+        return Status(DB_ERROR, "Create a new bloom filter fail");
+    }
+
+    return Status::OK();
+}
+
+Status
 SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilterPtr& id_bloom_filter_ptr) {
     if (id_bloom_filter_ptr == nullptr) {
         return Status(DB_ERROR, "WriteBloomFilter: null pointer");
