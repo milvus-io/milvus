@@ -47,7 +47,6 @@ set( ENGINE_FILES   ${DB_MAIN_FILES}
                     ${DB_SNAPSHOT_FILES}
                     ${THIRDPARTY_FILES}
                     ${WRAPPER_FILES}
-                    ${SEGMENT_FILES}
                     )
 
 
@@ -145,6 +144,7 @@ endif ()
 # **************************** Link Libraries with milvus engine ****************************
 target_link_libraries( milvus_engine
                PUBLIC  knowhere
+                       segment
                        cache
                        storage
                        codecs
