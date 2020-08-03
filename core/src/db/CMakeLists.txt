@@ -12,7 +12,6 @@
 #-------------------------------------------------------------------------------
 
 # **************************** Engine Source Files ****************************
-aux_source_directory( ${MILVUS_ENGINE_SRC}/cache            CACHE_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db               DB_MAIN_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/engine        DB_ENGINE_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/insert        DB_INSERT_FILES )
@@ -26,41 +25,25 @@ set( DB_META_FILES  ${DB_META_MAIN_FILES}
                     ${DB_META_BACKEND_FILES}
                     )
 
-aux_source_directory( ${MILVUS_ENGINE_SRC}/storage          STORAGE_MAIN_FILES )
-aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/disk     STORAGE_DISK_FILES )
-# aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/s3     STORAGE_S3_FILES )
-set( STORAGE_FILES  ${STORAGE_MAIN_FILES}
-                    ${STORAGE_DISK_FILES}
-                    # ${STORAGE_S3_FILES}
-                    )
-
 aux_source_directory( ${MILVUS_ENGINE_SRC}/index/archive    WRAPPER_FILES )
-aux_source_directory( ${MILVUS_ENGINE_SRC}/codecs           CODECS_FILES )
-aux_source_directory( ${MILVUS_ENGINE_SRC}/segment          SEGMENT_FILES )
 
 
 aux_source_directory( ${MILVUS_THIRDPARTY_SRC}/easyloggingpp THIRDPARTY_EASYLOGGINGPP_FILES )
 aux_source_directory( ${MILVUS_THIRDPARTY_SRC}/nlohmann      THIRDPARTY_NLOHMANN_FILES )
-aux_source_directory( ${MILVUS_THIRDPARTY_SRC}/dablooms      THIRDPARTY_DABLOOMS_FILES )
 
 set( THIRDPARTY_FILES   ${THIRDPARTY_EASYLOGGINGPP_FILES}
                         ${THIRDPARTY_NLOHMANN_FILES}
-                        ${THIRDPARTY_DABLOOMS_FILES}
                         )
 
-set( ENGINE_FILES   ${CACHE_FILES}
-                    ${DB_MAIN_FILES}
+set( ENGINE_FILES   ${DB_MAIN_FILES}
                     ${DB_ENGINE_FILES}
                     ${DB_INSERT_FILES}
                     ${DB_META_FILES}
                     ${DB_MERGE_FILES}
                     ${DB_WAL_FILES}
                     ${DB_SNAPSHOT_FILES}
-                    ${STORAGE_FILES}
                     ${THIRDPARTY_FILES}
                     ${WRAPPER_FILES}
-                    ${CODECS_FILES}
-                    ${SEGMENT_FILES}
                     )
 
 
@@ -103,7 +86,7 @@ set( PROMETHEUS_LIB prometheus-cpp-push
                     )
 
 set( THIRD_PARTY_LIBS   sqlite
-                        yaml-cpp
+                        yaml-cpp # log
                         mysqlpp
                         zlib
                         fiu
@@ -157,7 +140,11 @@ endif ()
 
 # **************************** Link Libraries with milvus engine ****************************
 target_link_libraries( milvus_engine
-                       PUBLIC  knowhere
-                               ${THIRD_PARTY_LIBS}
-                               ${ENGINE_LIBS}
-                               )
+               PUBLIC  knowhere
+                       segment
+                       cache
+                       storage
+                       codecs
+                       ${THIRD_PARTY_LIBS}
+                       ${ENGINE_LIBS}
+                       )
