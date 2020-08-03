@@ -91,9 +91,7 @@ CreateCollectionReq::OnExecute() {
             }
 
             auto field = std::make_shared<engine::snapshot::Field>(field_name, 0, field_type, field_params);
-            auto field_element = std::make_shared<engine::snapshot::FieldElement>(
-                0, 0, index_name, engine::FieldElementType::FET_INDEX, index_params);
-            create_collection_context.fields_schema[field] = {field_element};
+            create_collection_context.fields_schema[field] = {};
         }
 
         // step 3: create collection
