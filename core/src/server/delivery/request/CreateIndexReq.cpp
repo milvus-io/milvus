@@ -84,7 +84,7 @@ CreateIndexReq::OnExecute() {
             int64_t dimension = params[engine::PARAM_DIMENSION].get<int64_t>();
 
             // validate index type
-            std::string index_type = 0;
+            std::string index_type;
             if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
                 index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
             }
@@ -94,7 +94,7 @@ CreateIndexReq::OnExecute() {
             }
 
             // validate metric type
-            std::string metric_type = 0;
+            std::string metric_type;
             if (json_params_.contains(engine::PARAM_INDEX_METRIC_TYPE)) {
                 metric_type = json_params_[engine::PARAM_INDEX_METRIC_TYPE].get<std::string>();
             }
@@ -119,7 +119,7 @@ CreateIndexReq::OnExecute() {
             }
         } else {
             index.index_name_ = index_name_;
-            std::string index_type = 0;
+            std::string index_type;
             if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
                 index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
             }
