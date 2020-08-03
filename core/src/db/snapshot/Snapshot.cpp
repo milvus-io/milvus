@@ -19,13 +19,11 @@ namespace snapshot {
 
 void
 Snapshot::RefAll() {
-    /* std::cout << this << " RefAll SS=" << GetID() << " SS RefCnt=" << ref_count() << std::endl; */
     std::apply([this](auto&... resource) { ((DoRef(resource)), ...); }, resources_);
 }
 
 void
 Snapshot::UnRefAll() {
-    /* std::cout << this << " UnRefAll SS=" << GetID() << " SS RefCnt=" << ref_count() << std::endl; */
     std::apply([this](auto&... resource) { ((DoUnRef(resource)), ...); }, resources_);
 }
 
@@ -249,6 +247,7 @@ Snapshot::ToString() const {
         for (auto& fe_id : fc_m) {
             auto fe = GetResource<FieldElement>(fe_id);
             ss << "\n\tFieldElement: id=" << fe_id << ",name=" << fe->GetName() << " CID=" << fe->GetCollectionId();
+            ss << ",ftype=" << fe->GetFtype() << ",typename=" << fe->GetTypeName();
         }
     }
 
