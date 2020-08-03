@@ -101,7 +101,6 @@ GetEntityByIDReq::OnExecute() {
             }
         }
 
-        valid_row_.resize(id_array_.size(), false);
         // step 2: get vector data, now only support get one id
         STATUS_CHECK(
             DBWrapper::DB()->GetEntityByID(collection_name_, id_array_, field_names_, valid_row_, data_chunk_));
