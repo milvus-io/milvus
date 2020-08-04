@@ -344,8 +344,8 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         }
 
         // for some kinds index(SQ8), read compress file
-        if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
-            index_name == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+        if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
+            index_type == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
             if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8)) {
                 auto file_path =
                     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
@@ -353,7 +353,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             }
         }
 
-        ss_codec.GetVectorIndexFormat()->ConstructIndex(index_name, index_data, raw_data, compress_data, index_ptr);
+        ss_codec.GetVectorIndexFormat()->ConstructIndex(index_type, index_data, raw_data, compress_data, index_ptr);
 
         index_ptr->SetUids(uids);
         index_ptr->SetBlacklist(concurrent_bitset_ptr);
