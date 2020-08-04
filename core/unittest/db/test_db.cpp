@@ -502,7 +502,8 @@ TEST_F(DBTest, IndexTest) {
 
     {
         milvus::engine::CollectionIndex index;
-        index.index_name_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+        index.index_name_ = "my_index1";
+        index.index_type_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
         index.metric_name_ = milvus::knowhere::Metric::L2;
         index.extra_params_["nlist"] = 2048;
         status = db_->CreateIndex(dummy_context_, collection_name, VECTOR_FIELD_NAME, index);
@@ -512,13 +513,15 @@ TEST_F(DBTest, IndexTest) {
         status = db_->DescribeIndex(collection_name, VECTOR_FIELD_NAME, index_get);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(index.index_name_, index_get.index_name_);
+        ASSERT_EQ(index.index_type_, index_get.index_type_);
         ASSERT_EQ(index.metric_name_, index_get.metric_name_);
         ASSERT_EQ(index.extra_params_, index_get.extra_params_);
     }
 
     {
         milvus::engine::CollectionIndex index;
-        index.index_name_ = "SORTED";
+        index.index_name_ = "my_index2";
+        index.index_type_ = milvus::engine::DEFAULT_STRUCTURED_INDEX_NAME;
         status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
         ASSERT_TRUE(status.ok());
         status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);
@@ -530,6 +533,7 @@ TEST_F(DBTest, IndexTest) {
         status = db_->DescribeIndex(collection_name, "field_0", index_get);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(index.index_name_, index_get.index_name_);
+        ASSERT_EQ(index.index_type_, index_get.index_type_);
     }
 
     {
@@ -577,7 +581,7 @@ TEST_F(DBTest, StatsTest) {
 
     {
         milvus::engine::CollectionIndex index;
-        index.index_name_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+        index.index_type_ = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
         index.metric_name_ = milvus::knowhere::Metric::L2;
         index.extra_params_["nlist"] = 2048;
         status = db_->CreateIndex(dummy_context_, collection_name, VECTOR_FIELD_NAME, index);
@@ -586,7 +590,7 @@ TEST_F(DBTest, StatsTest) {
 
     {
         milvus::engine::CollectionIndex index;
-        index.index_name_ = "SORTED";
+        index.index_type_ = milvus::engine::DEFAULT_STRUCTURED_INDEX_NAME;
         status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
         ASSERT_TRUE(status.ok());
         status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);

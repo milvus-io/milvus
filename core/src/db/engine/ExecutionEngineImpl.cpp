@@ -647,6 +647,7 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
 
     auto& index_element = element_visitor->GetElement();
     index_info.index_name_ = index_element->GetName();
+    index_info.index_type_ = index_element->GetTypeName();
     auto params = index_element->GetParams();
     if (params.find(engine::PARAM_INDEX_METRIC_TYPE) != params.end()) {
         index_info.metric_name_ = params[engine::PARAM_INDEX_METRIC_TYPE];
@@ -728,7 +729,7 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
 
     // build index by knowhere
-    new_index = CreateVecIndex(index_info.index_name_);
+    new_index = CreateVecIndex(index_info.index_type_);
     if (!new_index) {
         throw Exception(DB_ERROR, "Unsupported index type");
     }
