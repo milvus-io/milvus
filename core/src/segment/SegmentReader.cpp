@@ -358,7 +358,7 @@ SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::Inde
 
         // read field index
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (index_visitor == nullptr || index_visitor->GetFile() != nullptr) {
+        if (index_visitor && index_visitor->GetFile() != nullptr) {
             std::string file_path =
                 engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, index_visitor->GetFile());
             ss_codec.GetStructuredIndexFormat()->Read(fs_ptr_, file_path, index_ptr);

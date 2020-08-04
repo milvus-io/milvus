@@ -608,6 +608,10 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
     TimeRecorder rc("DBImpl::Query");
 
+    if (!query_ptr->root) {
+        return Status{DB_ERROR, "BinaryQuery is null"};
+    }
+
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, query_ptr->collection_id));
     auto ss_id = ss->GetID();
