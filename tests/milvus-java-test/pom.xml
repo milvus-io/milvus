@@ -79,7 +79,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.10</version>
+            <version>3.11</version>
         </dependency>
 
         <dependency>
