@@ -67,13 +67,17 @@ InsertReq::OnExecute() {
 
         engine::DataChunkPtr data_chunk = std::make_shared<engine::DataChunk>();
         data_chunk->count_ = row_count_;
-        data_chunk->fixed_fields_.swap(chunk_data_);
+        for (auto& pair : chunk_data_) {
+            engine::BinaryDataPtr bin = std::make_shared<engine::BinaryData>();
+            bin->data_.swap(pair.second);
+            data_chunk->fixed_fields_.insert(std::make_pair(pair.first, bin));
+        }
         status = DBWrapper::DB()->Insert(collection_name_, partition_name_, data_chunk);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "Insert", 0, status.message().c_str());
             return status;
         }
-        chunk_data_[engine::DEFAULT_UID_NAME] = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
+        chunk_data_[engine::DEFAULT_UID_NAME] = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME]->data_;
 
         rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {

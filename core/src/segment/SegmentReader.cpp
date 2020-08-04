@@ -101,7 +101,7 @@ SegmentReader::Load() {
 }
 
 Status
-SegmentReader::LoadField(const std::string& field_name, std::vector<uint8_t>& raw) {
+SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& raw) {
     try {
         engine::FIXEDX_FIELD_MAP& field_map = segment_ptr_->GetFixedFields();
         auto pair = field_map.find(field_name);
@@ -133,10 +133,10 @@ SegmentReader::LoadFields() {
     for (auto& iter : field_visitors_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
-        engine::FIXED_FIELD_DATA raw_data;
+        engine::BinaryDataPtr raw_data;
         auto status = segment_ptr_->GetFixedFieldData(name, raw_data);
 
-        if (!status.ok() || raw_data.empty()) {
+        if (!status.ok() || raw_data == nullptr) {
             auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
             std::string file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(
                 dir_collections_, element_visitor->GetFile());
@@ -149,7 +149,7 @@ SegmentReader::LoadFields() {
 
 Status
 SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets,
-                            std::vector<uint8_t>& raw) {
+                            engine::BinaryDataPtr& raw) {
     try {
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
@@ -185,16 +185,18 @@ SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, c
     }
     data_chunk->count_ += offsets.size();
     for (auto& name : fields_name) {
-        engine::FIXED_FIELD_DATA raw_data;
+        engine::BinaryDataPtr raw_data;
         auto status = LoadEntities(name, offsets, raw_data);
-        if (!status.ok()) {
+        if (!status.ok() || raw_data == nullptr) {
             return status;
         }
-        if (!data_chunk->fixed_fields_[name].empty()) {
-            auto chunk_size = data_chunk->fixed_fields_[name].size();
-            auto raw_data_size = raw_data.size();
-            data_chunk->fixed_fields_[name].resize(chunk_size + raw_data_size);
-            memcpy(data_chunk->fixed_fields_[name].data() + chunk_size, raw_data.data(), raw_data_size);
+
+        auto& target_data = data_chunk->fixed_fields_[name];
+        if (target_data != nullptr) {
+            auto chunk_size = target_data->Size();
+            auto raw_data_size = raw_data->Size();
+            target_data->data_.resize(chunk_size + raw_data_size);
+            memcpy(target_data->data_.data() + chunk_size, raw_data->data_.data(), raw_data_size);
         } else {
             data_chunk->fixed_fields_[name] = raw_data;
         }
@@ -204,22 +206,22 @@ SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, c
 
 Status
 SegmentReader::LoadUids(std::vector<int64_t>& uids) {
-    std::vector<uint8_t> raw;
+    engine::BinaryDataPtr raw;
     auto status = LoadField(engine::DEFAULT_UID_NAME, raw);
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << status.message();
         return status;
     }
 
-    if (raw.size() % sizeof(int64_t) != 0) {
+    if (raw->data_.size() % sizeof(int64_t) != 0) {
         std::string err_msg = "Failed to load uids: illegal file size";
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
     uids.clear();
-    uids.resize(raw.size() / sizeof(int64_t));
-    memcpy(uids.data(), raw.data(), raw.size());
+    uids.resize(raw->data_.size() / sizeof(int64_t));
+    memcpy(uids.data(), raw->data_.data(), raw->data_.size());
 
     return Status::OK();
 }
@@ -264,7 +266,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         knowhere::BinaryPtr raw_data, compress_data;
 
         auto read_raw = [&]() -> void {
-            engine::FIXED_FIELD_DATA fixed_data;
+            engine::BinaryDataPtr fixed_data;
             auto status = segment_ptr_->GetFixedFieldData(field_name, fixed_data);
             if (status.ok()) {
                 ss_codec.GetVectorIndexFormat()->ConvertRaw(fixed_data, raw_data);
@@ -283,9 +285,10 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 return Status(DB_ERROR, "Vector field dimension undefined");
             }
             int64_t dimension = json[knowhere::meta::DIM];
-            std::vector<uint8_t> raw;
+            engine::BinaryDataPtr raw;
             STATUS_CHECK(LoadField(field_name, raw));
-            auto dataset = knowhere::GenDataset(segment_commit->GetRowCount(), dimension, raw.data());
+
+            auto dataset = knowhere::GenDataset(segment_commit->GetRowCount(), dimension, raw->data_.data());
 
             knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
             index_ptr =
@@ -355,7 +358,7 @@ SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::Inde
 
         // read field index
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (index_visitor == nullptr || index_visitor->GetFile() != nullptr) {
+        if (index_visitor && index_visitor->GetFile() != nullptr) {
             std::string file_path =
                 engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, index_visitor->GetFile());
             ss_codec.GetStructuredIndexFormat()->Read(fs_ptr_, file_path, index_ptr);

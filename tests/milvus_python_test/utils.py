@@ -295,7 +295,7 @@ def update_query_expr(src_query, keep_old=True, expr=None):
 
 def gen_default_term_expr(values=None):
     if values is None:
-        values = [i for i in range(nb//2)]
+        values = [i for i in range(nb/2)]
     expr = {"term": {"int64": {"values": values}}}
     return expr
 

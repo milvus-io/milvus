@@ -51,7 +51,6 @@ Segment::AddField(const std::string& field_name, DataType field_type, int64_t fi
         case DataType::INT32:
             real_field_width = sizeof(uint32_t);
             break;
-        case DataType::UID:
         case DataType::INT64:
             real_field_width = sizeof(uint64_t);
             break;
@@ -92,12 +91,16 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
 
     // check input
     for (auto& iter : chunk_ptr->fixed_fields_) {
+        if (iter.second == nullptr) {
+            return Status(DB_ERROR, "illegal field: " + iter.first);
+        }
+
         auto width_iter = fixed_fields_width_.find(iter.first);
         if (width_iter == fixed_fields_width_.end()) {
             return Status(DB_ERROR, "field not yet defined: " + iter.first);
         }
 
-        if (iter.second.size() != width_iter->second * chunk_ptr->count_) {
+        if (iter.second->Size() != width_iter->second * chunk_ptr->count_) {
             return Status(DB_ERROR, "illegal field: " + iter.first);
         }
     }
@@ -107,21 +110,27 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
     for (auto& width_iter : fixed_fields_width_) {
         auto input = chunk_ptr->fixed_fields_.find(width_iter.first);
         auto& data = fixed_fields_[width_iter.first];
-        size_t origin_bytes = data.size();
+        if (data == nullptr) {
+            fixed_fields_[width_iter.first] = input->second;
+            continue;
+        }
+
+        size_t origin_bytes = data->data_.size();
         int64_t add_bytes = add_count * width_iter.second;
         int64_t previous_bytes = row_count_ * width_iter.second;
         int64_t target_bytes = previous_bytes + add_bytes;
-        data.resize(target_bytes);
+        data->data_.resize(target_bytes);
         if (input == chunk_ptr->fixed_fields_.end()) {
             // this field is not provided, complicate by 0
-            memset(data.data() + origin_bytes, 0, target_bytes - origin_bytes);
+            memset(data->data_.data() + origin_bytes, 0, target_bytes - origin_bytes);
         } else {
             // complicate by 0
             if (origin_bytes < previous_bytes) {
-                memset(data.data() + origin_bytes, 0, previous_bytes - origin_bytes);
+                memset(data->data_.data() + origin_bytes, 0, previous_bytes - origin_bytes);
             }
             // copy input into this field
-            memcpy(data.data() + previous_bytes, input->second.data() + from * width_iter.second, add_bytes);
+            memcpy(data->data_.data() + previous_bytes, input->second->data_.data() + from * width_iter.second,
+                   add_bytes);
         }
     }
 
@@ -132,12 +141,20 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
 
 Status
 Segment::DeleteEntity(int64_t offset) {
+    if (offset > row_count_) {
+        return Status(DB_ERROR, "Invalid input");
+    }
+
     for (auto& pair : fixed_fields_) {
         int64_t width = fixed_fields_width_[pair.first];
         if (width != 0) {
             auto step = offset * width;
-            FIXED_FIELD_DATA& data = pair.second;
-            data.erase(data.begin() + step, data.begin() + step + width);
+            BinaryDataPtr& data = pair.second;
+            if (data == nullptr) {
+                continue;
+            }
+
+            data->data_.erase(data->data_.begin() + step, data->data_.begin() + step + width);
         }
     }
 
@@ -167,7 +184,7 @@ Segment::GetFixedFieldWidth(const std::string& field_name, int64_t& width) {
 }
 
 Status
-Segment::GetFixedFieldData(const std::string& field_name, FIXED_FIELD_DATA& data) {
+Segment::GetFixedFieldData(const std::string& field_name, BinaryDataPtr& data) {
     auto iter = fixed_fields_.find(field_name);
     if (iter == fixed_fields_.end()) {
         return Status(DB_ERROR, "invalid field name: " + field_name);
