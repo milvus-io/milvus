@@ -49,7 +49,7 @@ GetMicroSecTimeStamp() {
 
 bool
 IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2) {
-    return index1.index_name_ == index2.index_name_ && index1.extra_params_ == index2.extra_params_ &&
+    return index1.index_type_ == index2.index_type_ && index1.extra_params_ == index2.extra_params_ &&
            index1.metric_name_ == index2.metric_name_;
 }
 

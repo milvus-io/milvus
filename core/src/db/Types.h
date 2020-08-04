@@ -78,6 +78,7 @@ using DataChunkPtr = std::shared_ptr<DataChunk>;
 
 struct CollectionIndex {
     std::string index_name_;
+    std::string index_type_;
     std::string metric_name_;
     milvus::json extra_params_ = {{"nlist", 2048}};
 };
