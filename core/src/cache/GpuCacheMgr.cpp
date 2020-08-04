@@ -51,17 +51,6 @@ GpuCacheMgr::GetInstance(int64_t gpu_id) {
     return instance_[gpu_id];
 }
 
-DataObjPtr
-GpuCacheMgr::GetDataObj(const std::string& key) {
-    DataObjPtr obj = GetItem(key);
-    return obj;
-}
-
-void
-GpuCacheMgr::SetDataObj(const std::string& key, const milvus::cache::DataObjPtr& data) {
-    CacheMgr<DataObjPtr>::InsertItem(key, data);
-}
-
 bool
 GpuCacheMgr::Reserve(const int64_t size) {
     return CacheMgr<DataObjPtr>::Reserve(size);

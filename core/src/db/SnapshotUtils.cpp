@@ -36,6 +36,7 @@ const char* JSON_FIELD_ELEMENT = "field_element";
 const char* JSON_PARTITION_TAG = "tag";
 const char* JSON_FILES = "files";
 const char* JSON_INDEX_NAME = "index_name";
+const char* JSON_INDEX_TYPE = "index_type";
 const char* JSON_DATA_SIZE = "data_size";
 const char* JSON_PATH = "path";
 
@@ -165,6 +166,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
     size_t total_row_count = 0;
     size_t total_data_size = 0;
 
+    // get partition information
     std::unordered_map<snapshot::ID_TYPE, milvus::json> partitions;
     auto partition_names = ss->GetPartitionNames();
     for (auto& name : partition_names) {
@@ -183,11 +185,13 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
         partitions.insert(std::make_pair(partition->GetID(), json_partition));
     }
 
+    // just ensure segments listed in id order
     snapshot::IDS_TYPE segment_ids;
     auto handler = std::make_shared<SegmentsToSearchCollector>(ss, segment_ids);
     handler->Iterate();
     std::sort(segment_ids.begin(), segment_ids.end());
 
+    // get segment information and construct segment json nodes
     std::unordered_map<snapshot::ID_TYPE, std::vector<milvus::json>> json_partition_segments;
     for (auto id : segment_ids) {
         auto segment_commit = ss->GetSegmentCommitBySegmentId(id);
@@ -214,7 +218,15 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
                     json_file[JSON_PATH] =
                         engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", pair.second->GetFile());
                     json_file[JSON_FIELD] = field->GetName();
-                    json_file[JSON_FIELD_ELEMENT] = element->GetName();
+
+                    // if the element is index, print index name/type
+                    // else print element name
+                    if (element->GetFtype() == engine::FieldElementType::FET_INDEX) {
+                        json_file[JSON_INDEX_NAME] = element->GetName();
+                        json_file[JSON_INDEX_TYPE] = element->GetTypeName();
+                    } else {
+                        json_file[JSON_FIELD_ELEMENT] = element->GetName();
+                    }
                 }
                 json_files.push_back(json_file);
             }
@@ -228,6 +240,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
         json_partition_segments[segment_commit->GetPartitionId()].push_back(json_segment);
     }
 
+    // construct partition json nodes
     milvus::json json_partitions;
     for (auto pair : partitions) {
         milvus::json json_segments;

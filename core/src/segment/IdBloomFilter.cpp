@@ -76,9 +76,9 @@ IdBloomFilter::Remove(doc_id_t uid) {
 //    return name_;
 //}
 
-size_t
+int64_t
 IdBloomFilter::Size() {
-    return bloom_filter_->num_bytes;
+    return bloom_filter_ ? bloom_filter_->num_bytes : 0;
 }
 
 }  // namespace segment

@@ -39,8 +39,13 @@ DeletedDocs::GetDeletedDocs() const {
 //}
 
 size_t
-DeletedDocs::GetSize() const {
+DeletedDocs::GetCount() const {
     return deleted_doc_offsets_.size();
+}
+
+int64_t
+DeletedDocs::Size() {
+    return deleted_doc_offsets_.size() * sizeof(offset_t);
 }
 
 }  // namespace segment

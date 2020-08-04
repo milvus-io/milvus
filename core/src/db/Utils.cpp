@@ -128,6 +128,24 @@ SendExitSignal() {
     kill(pid, SIGUSR2);
 }
 
+void
+GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids) {
+    ids.clear();
+    if (chunk == nullptr) {
+        return;
+    }
+
+    auto pair = chunk->fixed_fields_.find(engine::DEFAULT_UID_NAME);
+    if (pair == chunk->fixed_fields_.end() || pair->second == nullptr) {
+        return;
+    }
+
+    if (!pair->second->data_.empty()) {
+        ids.resize(pair->second->data_.size() / sizeof(engine::IDNumber));
+        memcpy((void*)(ids.data()), pair->second->data_.data(), pair->second->data_.size());
+    }
+}
+
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

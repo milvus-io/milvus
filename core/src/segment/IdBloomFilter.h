@@ -20,6 +20,7 @@
 #include <memory>
 #include <mutex>
 
+#include "cache/DataObj.h"
 #include "dablooms/dablooms.h"
 #include "utils/Status.h"
 
@@ -28,7 +29,7 @@ namespace segment {
 
 using doc_id_t = int64_t;
 
-class IdBloomFilter {
+class IdBloomFilter : public cache::DataObj {
  public:
     explicit IdBloomFilter(scaling_bloom_t* bloom_filter);
 
@@ -46,8 +47,8 @@ class IdBloomFilter {
     Status
     Remove(doc_id_t uid);
 
-    size_t
-    Size();
+    int64_t
+    Size() override;
 
     //    const std::string&
     //    GetName() const;
