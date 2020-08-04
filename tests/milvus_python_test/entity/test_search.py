@@ -838,21 +838,43 @@ class TestSearchDSL(object):
         expected: error raised
         '''
         # entities, ids = init_data(connect, collection)
-        query = update_query_expr(default_query, keep_old=False):
+        query = update_query_expr(default_query, keep_old=False)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    # TODO: 
+    # TODO:
+    def test_query_vector_only(self, connect, collection):
+        '''
+        method: build query with vector only
+        expected: no error
+        '''
+        res = connect.search(collection, default_query)
+        assert len(res[0]) == top_k
+
+    # TODO:
     def test_query_no_vector_term_only(self, connect, collection):
         '''
-        method: build query without must expr
+        method: build query with term only
         expected: error raised
         '''
         # entities, ids = init_data(connect, collection)
         expr = {
             "must": [gen_default_term_expr]
         }
-        query = update_query_expr(default_query, keep_old=False, expr=expr):
+        query = update_query_expr(default_query, keep_old=False, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    # TODO:
+    def test_query_no_vector_range_only(self, connect, collection):
+        '''
+        method: build query with range only
+        expected: error raised
+        '''
+        expr = {
+            "must": [gen_default_range_expr]
+        }
+        query = update_query_expr(default_query, keep_old=False, expr=expr)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
@@ -865,10 +887,11 @@ class TestSearchDSL(object):
         expr = {
             "must1": [gen_default_term_expr]
         }
-        query = update_query_expr(default_query, keep_old=False, expr=expr):
+        query = update_query_expr(default_query, keep_old=False, expr=expr)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
+    # TODO:
     def test_query_empty(self, connect, collection):
         '''
         method: search with empty query
@@ -883,12 +906,31 @@ class TestSearchDSL(object):
         method: build query with wrong term expr
         expected: error raised
         '''
-        expr = gen_default_term_expr
-        expr["term"] = 1
+        # term_expr = gen_default_term_expr
+        # term_expr["term"] = 1
+        expr = {
+            "must": [{"term": 1}]
+        }
         query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
+    #TODO
+    def test_query_with_term_key_error(self,connect,collection):
+        '''
+        method: build query with wrong term key
+        expected: error raised
+        '''
+        term = {"terrm": {"int64": {"values": [1,2,5]}}}
+        expr = gen_default_term_expr(nb, term)
+        expr = {
+            "must": [{"termm": {}}]
+        }
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
 
     """
     ******************************************************************
@@ -961,6 +1003,17 @@ class TestSearchDSL(object):
         res = connect.search(collection, query)
         # TODO:
 
+    def test_query_with_term_empty_value(self,connect,collection):
+        '''
+        method: build query with term value empty
+        expected: error raised
+        '''
+        term = {"term": {"int64": {"values": []}}}
+        expr = gen_default_term_expr(nb, term)
+        logging.getLogger().info(expr)
+        query = update_query_expr(default_query, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
 """
 ******************************************************************
 #  The following cases are used to test `search` function 
@@ -968,11 +1021,12 @@ class TestSearchDSL(object):
 ******************************************************************
 """
 
-class TestSearchInvalid(object):
 
+class TestSearchInvalid(object):
     """
     Test search collection with invalid collection names
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_strs()
@@ -1031,6 +1085,7 @@ class TestSearchInvalid(object):
     """
     Test search collection with invalid query
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_ints()
@@ -1053,6 +1108,7 @@ class TestSearchInvalid(object):
     """
     Test search collection with invalid search params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invaild_search_params()
