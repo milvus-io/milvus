@@ -21,7 +21,7 @@ namespace milvus {
 /**
  * @brief Entity inserted, currently each entity represent a vector
  */
-struct Entity {
+struct VectorData {
     std::vector<float> float_data;     ///< Vector raw float data
     std::vector<uint8_t> binary_data;  ///< Vector raw binary data
 };
@@ -80,7 +80,7 @@ struct VectorQuery : Query {
     uint64_t topk;
     float distance_limitation;
     float query_boost;
-    std::vector<Entity> query_vector;
+    std::vector<VectorData> query_vector;
     std::string extra_params;
 };
 using VectorQueryPtr = std::shared_ptr<VectorQuery>;

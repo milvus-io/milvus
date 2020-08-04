@@ -111,10 +111,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) override;
 
     Status
-    DeleteVector(const std::string& collection_id, IDNumber vector_id) override;
-
-    Status
-    DeleteVectors(const std::string& collection_id, IDNumbers vector_ids) override;
+    DeleteEntities(const std::string& collection_id, IDNumbers entity_ids) override;
 
     Status
     Flush(const std::string& collection_id) override;
@@ -132,7 +129,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     GetEntitiesByID(const std::string& collection_id, const IDNumbers& id_array,
-                    std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs) override;
+                    const std::vector<std::string>& field_names, std::vector<engine::VectorsData>& vectors,
+                    std::vector<engine::AttrsData>& attrs) override;
 
     Status
     GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) override;
@@ -224,6 +222,7 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     Status
     GetEntitiesByIdHelper(const std::string& collection_id, const IDNumbers& id_array,
+                          const std::vector<std::string>& field_names,
                           std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
                           std::vector<engine::VectorsData>& vectors, std::vector<engine::AttrsData>& attrs,
                           meta::FilesHolder& files_holder);

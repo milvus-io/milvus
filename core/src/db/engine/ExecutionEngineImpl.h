@@ -128,13 +128,20 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Load(const std::string& location);
 
     Status
-    ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::GeneralQueryPtr general_query,
+    ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::TermQueryPtr term_query,
                      std::unordered_map<std::string, meta::hybrid::DataType>& attr_type);
 
     Status
-    ProcessRangeQuery(const meta::hybrid::DataType data_type, const std::string& operand,
-                      const query::CompareOperator& com_operator, knowhere::IndexPtr& index_ptr,
-                      faiss::ConcurrentBitsetPtr& bitset);
+    IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const std::string& field_name,
+                     const meta::hybrid::DataType& data_type, milvus::json& term_values_json);
+
+    Status
+    ProcessRangeQuery(const std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                      faiss::ConcurrentBitsetPtr& bitset, query::RangeQueryPtr range_query);
+
+    Status
+    IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const meta::hybrid::DataType& data_type,
+                      knowhere::IndexPtr& index_ptr, milvus::json& range_values_json);
 
     void
     HybridLoad() const;

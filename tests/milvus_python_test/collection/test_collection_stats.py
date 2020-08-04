@@ -4,278 +4,336 @@ import threading
 import logging
 from multiprocessing import Pool, Process
 import pytest
-from milvus import IndexType, MetricType
 from utils import *
 
 dim = 128
-index_file_size = 10
-INFO_TIMEOUT = 30
+segment_size = 10
 nprobe = 1
 top_k = 1
 epsilon = 0.0001
 tag = "1970-01-01"
 nb = 6000
 nlist = 1024
+collection_id = "collection_stats"
+field_name = "float_vector"
+default_index_name = "stats_index"
+entity = gen_entities(1)
+raw_vector, binary_entity = gen_binary_entities(1)
+entities = gen_entities(nb)
+raw_vectors, binary_entities = gen_binary_entities(nb)
+default_fields = gen_default_fields()
 
 
-class TestCollectionInfoBase:
-    def index_string_convert(self, index_string, index_type):
-        if index_string == "IDMAP" and index_type == IndexType.FLAT:
-            return True
-        if index_string == "IVFSQ8" and index_type == IndexType.IVF_SQ8:
-            return True
-        if index_string == "IVFFLAT" and index_type == IndexType.IVFLAT:
-            return True
-        return False
-
+class TestStatsBase:
     """
     ******************************************************************
-      The following cases are used to test `collection_info` function
+      The following cases are used to test `collection_stats` function
     ******************************************************************
     """
-    @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_collection_info_name_None(self, connect, collection):
-        '''
-        target: get collection info where collection name is None
-        method: call collection_info with the collection_name: None
-        expected: status not ok
-        '''
-        collection_name = None
-        with pytest.raises(Exception) as e:
-            status, info = connect.get_collection_stats(collection_name)
-
-    @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_collection_info_name_not_existed(self, connect, collection):
-        '''
-        target: get collection info where collection name does not exist
-        method: call collection_info with a random collection_name, which is not in db
-        expected: status not ok
-        '''
-        collection_name = gen_unique_str("not_existed_collection")
-        status, info = connect.get_collection_stats(collection_name)
-        assert not status.OK()
     
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_collection_names()
+        params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
-
-    @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_collection_info_name_invalid(self, connect, get_collection_name):
-        '''
-        target: get collection info where collection name is invalid
-        method: call collection_info with invalid collection_name
-        expected: status not ok
-        '''
-        collection_name = get_collection_name
-        status, info = connect.get_collection_stats(collection_name)
-        assert not status.OK()
-
-    @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_collection_info_collection_row_count(self, connect, collection):
-        '''
-        target: get row count with collection_info
-        method: add and delete vectors, check count in collection info
-        expected: status ok, count as expected
-        '''
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status, info = connect.get_collection_stats(collection)
-        assert status.OK()
-        assert info["row_count"] == nb
-        # delete a few vectors
-        delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_entity_by_id(collection, delete_ids)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status, info = connect.get_collection_stats(collection)
-        assert status.OK()
-        assert info["row_count"] == nb - 2
-
-    @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_collection_info_partition_stats_A(self, connect, collection):
-        '''
-        target: get partition info in a collection
-        method: no partition, call collection_info and check partition_stats
-        expected: status ok, "_default" partition is listed
-        '''
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status, info = connect.get_collection_stats(collection)
-        assert status.OK()
-        logging.getLogger().info(info)
-        assert len(info["partitions"]) == 1
-        assert info["partitions"][0]["tag"] == "_default"
-        assert info["partitions"][0]["row_count"] == nb
-
-
-    @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_collection_info_partition_stats_B(self, connect, collection):
-        '''
-        target: get partition info in a collection
-        method: call collection_info after partition created and check partition_stats
-        expected: status ok, vectors added to partition
-        '''
-        vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(collection, tag)
-        status, ids = connect.insert(collection, vectors, partition_tag=tag)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status, info = connect.get_collection_stats(collection)
-        assert status.OK()
-        logging.getLogger().info(info)
-        assert len(info["partitions"]) == 2
-        assert info["partitions"][1]["tag"] == tag
-        assert info["partitions"][1]["row_count"] == nb
-
-    @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_collection_info_partition_stats_C(self, connect, collection):
-        '''
-        target: get partition info in a collection
-        method: create two partitions, add vectors in one of the partitions, call collection_info and check 
-        expected: status ok, vectors added to one partition but not the other
-        '''
-        new_tag = "new_tag"
-        vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(collection, tag)
-        assert status.OK()
-        status = connect.create_partition(collection, new_tag)
-        assert status.OK()
-        status, ids = connect.insert(collection, vectors, partition_tag=tag)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status, info = connect.get_collection_stats(collection)
-        assert status.OK()
-        logging.getLogger().info(info)
-        for partition in info["partitions"]:
-            if partition["tag"] == tag:
-                assert partition["row_count"] == nb
-            else:
-                assert partition["row_count"] == 0
-
-    @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_collection_info_partition_stats_D(self, connect, collection):
-        '''
-        target: get partition info in a collection
-        method: create two partitions, add vectors in both partitions, call collection_info and check 
-        expected: status ok, vectors added to both partitions
-        '''
-        new_tag = "new_tag"
-        vectors = gen_vectors(nb, dim)
-        status = connect.create_partition(collection, tag)
-        assert status.OK()
-        status = connect.create_partition(collection, new_tag)
-        assert status.OK()
-        status, ids = connect.insert(collection, vectors, partition_tag=tag)
-        assert status.OK()
-        status, ids = connect.insert(collection, vectors, partition_tag=new_tag)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status, info = connect.get_collection_stats(collection)
-        assert status.OK()
-        assert info["row_count"] == nb * 2
-        for partition in info["partitions"]:
-            if partition["tag"] == tag:
-                assert partition["row_count"] == nb
-            elif partition["tag"] == new_tag:
-                assert partition["row_count"] == nb
 
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
-                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
-        else:
-            pytest.skip("Only support CPU mode")
+        if str(connect._cmd("mode")) == "CPU":
+            if request.param["index_type"] in index_cpu_not_support():
+                pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_jaccard_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] in binary_support():
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
+
+    def test_get_collection_stats_name_not_existed(self, connect, collection):
+        '''
+        target: get collection stats where collection name does not exist
+        method: call collection_stats with a random collection_name, which is not in db
+        expected: status not ok
+        '''
+        collection_name = gen_unique_str(collection_id)
+        with pytest.raises(Exception) as e:
+            stats = connect.get_collection_stats(collection_name)
+
+    @pytest.mark.level(2)
+    def test_get_collection_stats_name_invalid(self, connect, get_collection_name):
+        '''
+        target: get collection stats where collection name is invalid
+        method: call collection_stats with invalid collection_name
+        expected: status not ok
+        '''
+        collection_name = get_collection_name
+        with pytest.raises(Exception) as e:
+            stats = connect.get_collection_stats(collection_name)
+
+    def test_get_collection_stats_empty(self, connect, collection):
+        '''
+        target: get collection stats where no entity in collection
+        method: call collection_stats in empty collection
+        expected: segment = []
+        '''
+        stats = connect.get_collection_stats(collection)
+        assert stats["row_count"] == 0
+        assert len(stats["partitions"]) == 1
+        assert stats["partitions"][0]["tag"] == "_default"
+        assert stats["partitions"][0]["row_count"] == 0
+
+    def test_get_collection_stats_batch(self, connect, collection):
+        '''
+        target: get row count with collection_stats
+        method: add entities, check count in collection info
+        expected: count as expected
+        '''
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
+        stats = connect.get_collection_stats(collection)
+        assert stats["row_count"] == nb
+        assert len(stats["partitions"]) == 1
+        assert stats["partitions"][0]["tag"] == "_default"
+        assert stats["partitions"][0]["row_count"] == nb
+
+    def test_get_collection_stats_batch_ip(self, connect, ip_collection):
+        '''
+        target: get row count with collection_stats
+        method: add entities, check count in collection info
+        expected: count as expected
+        '''
+        ids = connect.insert(ip_collection, entities)
+        connect.flush([ip_collection])
+        stats = connect.get_collection_stats(ip_collection)
+        assert stats["row_count"] == nb
+        assert len(stats["partitions"]) == 1
+        assert stats["partitions"][0]["tag"] == "_default"
+        assert stats["partitions"][0]["row_count"] == nb
+
+    def test_get_collection_stats_single(self, connect, collection):
+        '''
+        target: get row count with collection_stats
+        method: add entity one by one, check count in collection info
+        expected: count as expected
+        '''
+        nb = 10
+        for i in range(nb):
+            ids = connect.insert(collection, entity)
+            connect.flush([collection])
+        stats = connect.get_collection_stats(collection)
+        assert stats["row_count"] == nb
+        assert len(stats["partitions"]) == 1
+        assert stats["partitions"][0]["tag"] == "_default"
+        assert stats["partitions"][0]["row_count"] == nb
+
+    def test_get_collection_stats_after_delete(self, connect, collection):
+        '''
+        target: get row count with collection_stats
+        method: add and delete entities, check count in collection info
+        expected: status ok, count as expected
+        '''
+        ids = connect.insert(collection, entities)
+        status = connect.flush([collection])
+        delete_ids = [ids[0], ids[-1]]
+        connect.delete_entity_by_id(collection, delete_ids)
+        connect.flush([collection])
+        stats = connect.get_collection_stats(collection)
+        assert stats["row_count"] == nb - 2
+        assert stats["partitions"][0]["segments"][0]["data_size"] > 0
+        assert stats["partitions"][0]["segments"][0]["index_name"] == "FLAT"
+
+    def test_get_collection_stats_after_compact_parts(self, connect, collection):
+        '''
+        target: get row count with collection_stats
+        method: add and delete entities, and compact collection, check count in collection info
+        expected: status ok, count as expected
+        '''
+        ids = connect.insert(collection, entities)
+        status = connect.flush([collection])
+        delete_ids = ids[:3000]
+        connect.delete_entity_by_id(collection, delete_ids)
+        connect.flush([collection])
+        stats = connect.get_collection_stats(collection)
+        logging.getLogger().info(stats)
+        assert stats["row_count"] == nb - 3000
+        compact_before = stats["partitions"][0]["segments"][0]["data_size"]
+        connect.compact(collection)
+        stats = connect.get_collection_stats(collection)
+        logging.getLogger().info(stats)
+        compact_after = stats["partitions"][0]["segments"][0]["data_size"]
+        # pdb.set_trace()
+        assert compact_before > compact_after
+
+    def test_get_collection_stats_after_compact_delete_one(self, connect, collection):
+        '''
+        target: get row count with collection_stats
+        method: add and delete one entity, and compact collection, check count in collection info
+        expected: status ok, count as expected
+        '''
+        ids = connect.insert(collection, entities)
+        status = connect.flush([collection])
+        delete_ids = ids[:1]
+        connect.delete_entity_by_id(collection, delete_ids)
+        connect.flush([collection])
+        stats = connect.get_collection_stats(collection)
+        logging.getLogger().info(stats)
+        compact_before = stats["partitions"][0]["segments"][0]["data_size"]
+        connect.compact(collection)
+        stats = connect.get_collection_stats(collection)
+        logging.getLogger().info(stats)
+        compact_after = stats["partitions"][0]["segments"][0]["data_size"]
+        # pdb.set_trace()
+        assert compact_before == compact_after
+
+    def test_get_collection_stats_partition(self, connect, collection):
+        '''
+        target: get partition info in a collection
+        method: call collection_stats after partition created and check partition_stats
+        expected: status ok, vectors added to partition
+        '''
+        connect.create_partition(collection, tag)
+        ids = connect.insert(collection, entities, partition_tag=tag)
+        connect.flush([collection])
+        stats = connect.get_collection_stats(collection)
+        assert len(stats["partitions"]) == 2
+        assert stats["partitions"][1]["tag"] == tag
+        assert stats["partitions"][1]["row_count"] == nb
+
+    def test_get_collection_stats_partitions(self, connect, collection):
+        '''
+        target: get partition info in a collection
+        method: create two partitions, add vectors in one of the partitions, call collection_stats and check 
+        expected: status ok, vectors added to one partition but not the other
+        '''
+        new_tag = "new_tag"
+        connect.create_partition(collection, tag)
+        connect.create_partition(collection, new_tag)
+        ids = connect.insert(collection, entities, partition_tag=tag)
+        connect.flush([collection])
+        stats = connect.get_collection_stats(collection)
+        for partition in stats["partitions"]:
+            if partition["tag"] == tag:
+                assert partition["row_count"] == nb
+            else:
+                assert partition["row_count"] == 0
+        ids = connect.insert(collection, entities, partition_tag=new_tag)
+        connect.flush([collection])
+        stats = connect.get_collection_stats(collection)
+        for partition in stats["partitions"]:
+            if partition["tag"] in [tag, new_tag]:
+                assert partition["row_count"] == nb
     
-    @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_collection_info_after_index_created(self, connect, collection, get_simple_index):
+    def test_get_collection_stats_after_index_created(self, connect, collection, get_simple_index):
         '''
         target: test collection info after index created
-        method: create collection, add vectors, create index and call collection_info 
+        method: create collection, add vectors, create index and call collection_stats 
         expected: status ok, index created and shown in segments
         '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status = connect.create_index(collection, index_type, index_param) 
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status, info = connect.get_collection_stats(collection)
-        assert status.OK()
-        logging.getLogger().info(info)
-        index_string = info["partitions"][0]["segments"][0]["index_name"]
-        match = self.index_string_convert(index_string, index_type)
-        assert match
-        assert nb == info["partitions"][0]["segments"][0]["row_count"]
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
+        connect.create_index(collection, field_name, default_index_name, get_simple_index)
+        stats = connect.get_collection_stats(collection)
+        logging.getLogger().info(stats)
+        assert stats["partitions"][0]["segments"][0]["row_count"] == nb
+        assert stats["partitions"][0]["segments"][0]["index_name"] == get_simple_index["index_type"]
 
-    @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_collection_info_after_create_same_index_repeatedly(self, connect, collection, get_simple_index):
+    def test_get_collection_stats_after_index_created_ip(self, connect, ip_collection, get_simple_index):
+        '''
+        target: test collection info after index created
+        method: create collection, add vectors, create index and call collection_stats 
+        expected: status ok, index created and shown in segments
+        '''
+        ids = connect.insert(ip_collection, entities)
+        connect.flush([ip_collection])
+        connect.create_index(ip_collection, field_name, default_index_name, get_simple_index)
+        stats = connect.get_collection_stats(ip_collection)
+        logging.getLogger().info(stats)
+        assert stats["partitions"][0]["segments"][0]["row_count"] == nb
+        assert stats["partitions"][0]["segments"][0]["index_name"] == get_simple_index["index_type"]
+
+    def test_get_collection_stats_after_index_created_jac(self, connect, jac_collection, get_jaccard_index):
+        '''
+        target: test collection info after index created
+        method: create collection, add binary entities, create index and call collection_stats 
+        expected: status ok, index created and shown in segments
+        '''
+        ids = connect.insert(jac_collection, binary_entities)
+        connect.flush([jac_collection])
+        connect.create_index(jac_collection, "binary_vector", default_index_name, get_jaccard_index)
+        stats = connect.get_collection_stats(jac_collection)
+        logging.getLogger().info(stats)
+        assert stats["partitions"][0]["segments"][0]["row_count"] == nb
+        assert stats["partitions"][0]["segments"][0]["index_name"] == get_jaccard_index["index_type"]
+
+    def test_get_collection_stats_after_create_different_index(self, connect, collection):
         '''
         target: test collection info after index created repeatedly
-        method: create collection, add vectors, create index and call collection_info multiple times 
+        method: create collection, add vectors, create index and call collection_stats multiple times 
         expected: status ok, index info shown in segments
         '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status = connect.create_index(collection, index_type, index_param)
-        status = connect.create_index(collection, index_type, index_param)
-        status = connect.create_index(collection, index_type, index_param)
-        assert status.OK()
-        status, info = connect.get_collection_stats(collection)
-        assert status.OK()
-        logging.getLogger().info(info)
-        index_string = info["partitions"][0]["segments"][0]["index_name"]
-        match = self.index_string_convert(index_string, index_type)
-        assert match
-        assert nb == info["partitions"][0]["segments"][0]["row_count"]
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
+        for index_type in ["IVF_FLAT", "IVF_SQ8"]:
+            connect.create_index(collection, field_name, default_index_name, {"index_type": index_type, "nlist": 1024})
+            stats = connect.get_collection_stats(collection)
+            logging.getLogger().info(stats)
+            assert stats["partitions"][0]["segments"][0]["index_name"] == index_type
+            assert stats["partitions"][0]["segments"][0]["row_count"] == nb
 
-    @pytest.mark.timeout(INFO_TIMEOUT)
-    def test_get_collection_info_after_create_different_index_repeatedly(self, connect, collection, get_simple_index):
+    def test_collection_count_multi_collections(self, connect):
         '''
-        target: test collection info after index created repeatedly
-        method: create collection, add vectors, create index and call collection_info multiple times 
-        expected: status ok, index info shown in segments
+        target: test collection rows_count is correct or not with multiple collections of L2
+        method: create collection and add entities in it,
+            assert the value returned by count_entities method is equal to length of entities
+        expected: row count in segments
         '''
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        index_param = {"nlist": nlist} 
-        for index_type in [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8]:
-            status = connect.create_index(collection, index_type, index_param)
-            assert status.OK()
-            status, info = connect.get_collection_stats(collection)
-            assert status.OK()
-            logging.getLogger().info(info)
-            index_string = info["partitions"][0]["segments"][0]["index_name"]
-            match = self.index_string_convert(index_string, index_type)
-            assert match
-            assert nb == info["partitions"][0]["segments"][0]["row_count"]
+        collection_list = []
+        collection_num = 10
+        for i in range(collection_num):
+            collection_name = gen_unique_str(collection_id)
+            collection_list.append(collection_name)
+            connect.create_collection(collection_name, default_fields)
+            res = connect.insert(collection_name, entities)
+        connect.flush(collection_list)
+        for i in range(collection_num):
+            stats = connect.get_collection_stats(collection_list[i])
+            assert stats["partitions"][0]["segments"][0]["row_count"] == nb
+            connect.drop_collection(collection_list[i])
+
+    def test_collection_count_multi_collections_indexed(self, connect):
+        '''
+        target: test collection rows_count is correct or not with multiple collections of L2
+        method: create collection and add entities in it,
+            assert the value returned by count_entities method is equal to length of entities
+        expected: row count in segments
+        '''
+        collection_list = []
+        collection_num = 10
+        for i in range(collection_num):
+            collection_name = gen_unique_str(collection_id)
+            collection_list.append(collection_name)
+            connect.create_collection(collection_name, default_fields)
+            res = connect.insert(collection_name, entities)
+            connect.flush(collection_list)
+            if i % 2:
+                connect.create_index(collection_name, field_name, default_index_name, {"index_type": "IVF_SQ8", "nlist": 1024})
+            else:
+                connect.create_index(collection_name, field_name, default_index_name, {"index_type": "IVF_FLAT", "nlist": 1024})
+        for i in range(collection_num):
+            stats = connect.get_collection_stats(collection_list[i])
+            assert stats["partitions"][0]["segments"][0]["row_count"] == nb
+            if i % 2:
+                assert stats["partitions"][0]["segments"][0]["index_name"] == "IVF_SQ8"
+            else:
+                assert stats["partitions"][0]["segments"][0]["index_name"] == "IVF_FLAT"
+            connect.drop_collection(collection_list[i])

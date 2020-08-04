@@ -28,6 +28,12 @@ extern Status
 ValidateCollectionName(const std::string& collection_name);
 
 extern Status
+ValidateFieldName(const std::string& field_name);
+
+extern Status
+ValidateIndexName(const std::string& index_name);
+
+extern Status
 ValidateTableDimension(int64_t dimension, int64_t metric_type);
 
 extern Status

@@ -11,7 +11,9 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
+#include <string>
 #include "faiss/utils/ConcurrentBitset.h"
 #include "knowhere/index/Index.h"
 
@@ -19,6 +21,13 @@ namespace milvus {
 namespace knowhere {
 
 enum OperatorType { LT = 0, LE = 1, GT = 3, GE = 4 };
+
+static std::map<std::string, OperatorType> s_map_operator_type = {
+    {"LT", OperatorType::LT},
+    {"LE", OperatorType::LE},
+    {"GT", OperatorType::GT},
+    {"GE", OperatorType::GE},
+};
 
 template <typename T>
 class StructuredIndex : public Index {

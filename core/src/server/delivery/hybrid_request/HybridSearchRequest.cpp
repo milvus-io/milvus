@@ -40,6 +40,7 @@ HybridSearchRequest::HybridSearchRequest(const std::shared_ptr<milvus::server::C
       partition_list_(partition_list),
       general_query_(general_query),
       query_ptr_(query_ptr),
+      json_params_(json_params),
       field_names_(field_names),
       result_(result) {
 }
@@ -87,24 +88,45 @@ HybridSearchRequest::OnExecute() {
             }
         }
 
+        // step 3: check partition tags
+        status = ValidatePartitionTags(partition_list_);
+        fiu_do_on("HybridSearchRequest.OnExecute.invalid_partition_tags",
+                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        if (!status.ok()) {
+            LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
+            return status;
+        }
+
+        // step 3: check field names
+        if (json_params_.contains("fields")) {
+            if (json_params_["fields"].is_array()) {
+                for (auto& name : json_params_["fields"]) {
+                    status = ValidateFieldName(name.get<std::string>());
+                    if (!status.ok()) {
+                        return status;
+                    }
+                    bool find_field_name = false;
+                    for (const auto& schema : fields_schema.fields_schema_) {
+                        if (name.get<std::string>() == schema.field_name_) {
+                            find_field_name = true;
+                            break;
+                        }
+                    }
+                    if (not find_field_name) {
+                        return Status{SERVER_INVALID_FIELD_NAME, "Field: " + name.get<std::string>() + " not exist"};
+                    }
+                    field_names_.emplace_back(name.get<std::string>());
+                }
+            }
+        }
+
         std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type;
         for (auto& field_schema : fields_schema.fields_schema_) {
             attr_type.insert(
                 std::make_pair(field_schema.field_name_, (engine::meta::hybrid::DataType)field_schema.field_type_));
         }
 
-        if (json_params.contains("field_names")) {
-            if (json_params["field_names"].is_array()) {
-                for (auto& name : json_params["field_names"]) {
-                    field_names_.emplace_back(name.get<std::string>());
-                }
-            }
-        } else {
-            for (auto& field_schema : fields_schema.fields_schema_) {
-                field_names_.emplace_back(field_schema.field_name_);
-            }
-        }
-
+        result_.row_num_ = 0;
         status = DBWrapper::DB()->HybridQuery(context_, collection_name_, partition_list_, general_query_, query_ptr_,
                                               field_names_, attr_type, result_);
 
@@ -118,6 +140,12 @@ HybridSearchRequest::OnExecute() {
         }
         fiu_do_on("HybridSearchRequest.OnExecute.empty_result_ids", result_.result_ids_.clear());
         if (result_.result_ids_.empty()) {
+            auto vector_query = query_ptr_->vectors.begin()->second;
+            if (!vector_query->query_vector.binary_data.empty()) {
+                result_.row_num_ = vector_query->query_vector.binary_data.size() * 8 / collection_schema.dimension_;
+            } else if (!vector_query->query_vector.float_data.empty()) {
+                result_.row_num_ = vector_query->query_vector.float_data.size() / collection_schema.dimension_;
+            }
             return Status::OK();  // empty table
         }
 

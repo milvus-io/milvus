@@ -22,19 +22,20 @@ class CreateIndexRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           int64_t index_type, const milvus::json& json_params);
+           const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
 
  protected:
     CreateIndexRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                       int64_t index_type, const milvus::json& json_params);
+                       const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
 
     Status
     OnExecute() override;
 
  private:
     const std::string collection_name_;
-    const int64_t index_type_;
-    milvus::json json_params_;
+    const std::string field_name_;
+    const std::string index_name_;
+    const milvus::json json_params_;
 };
 
 }  // namespace server

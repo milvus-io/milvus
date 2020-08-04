@@ -409,7 +409,7 @@ TEST_F(MetaTest, HYBRID_COLLECTION_TEST) {
 
     fields_schema.fields_schema_[1].collection_id_ = collection_id;
     fields_schema.fields_schema_[1].field_name_ = "field_1";
-    fields_schema.fields_schema_[1].field_type_ = (int32_t)milvus::engine::meta::hybrid::DataType::VECTOR;
+    fields_schema.fields_schema_[1].field_type_ = (int32_t)milvus::engine::meta::hybrid::DataType::FLOAT_VECTOR;
     fields_schema.fields_schema_[1].field_params_ = "";
 
     auto status = impl_->CreateHybridCollection(collection, fields_schema);

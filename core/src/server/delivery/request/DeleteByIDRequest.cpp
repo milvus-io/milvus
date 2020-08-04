@@ -80,7 +80,7 @@ DeleteByIDRequest::OnExecute() {
 
         rc.RecordSection("check validation");
 
-        status = DBWrapper::DB()->DeleteVectors(collection_name_, vector_ids_);
+        status = DBWrapper::DB()->DeleteEntities(collection_name_, vector_ids_);
         if (!status.ok()) {
             return status;
         }

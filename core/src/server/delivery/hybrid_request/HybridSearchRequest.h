@@ -42,7 +42,7 @@ class HybridSearchRequest : public BaseRequest {
     std::vector<std::string> partition_list_;
     milvus::query::GeneralQueryPtr general_query_;
     milvus::query::QueryPtr query_ptr_;
-    milvus::json json_params;
+    milvus::json json_params_;
     std::vector<std::string>& field_names_;
     engine::QueryResult& result_;
 };

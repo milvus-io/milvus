@@ -30,19 +30,20 @@ class GetEntityByIDRequest : public BaseRequest {
  public:
     static BaseRequestPtr
     Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
-           std::vector<engine::VectorsData>& vectors);
+           std::vector<std::string>& field_names, const std::vector<int64_t>& ids,
+           std::vector<engine::AttrsData>& attrs, std::vector<engine::VectorsData>& vectors);
 
  protected:
     GetEntityByIDRequest(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         const std::vector<int64_t>& ids, std::vector<engine::AttrsData>& attrs,
-                         std::vector<engine::VectorsData>& vectors);
+                         std::vector<std::string>& field_names, const std::vector<int64_t>& ids,
+                         std::vector<engine::AttrsData>& attrs, std::vector<engine::VectorsData>& vectors);
 
     Status
     OnExecute() override;
 
  private:
     std::string collection_name_;
+    std::vector<std::string>& field_names_;
     std::vector<int64_t> ids_;
     std::vector<engine::AttrsData>& attrs_;
     std::vector<engine::VectorsData>& vectors_;

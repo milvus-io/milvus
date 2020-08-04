@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include <string>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -37,22 +37,24 @@ class ClientTest {
     ShowCollections(std::vector<std::string>&);
 
     void
-    CreateCollection(const std::string&, int64_t, milvus::MetricType);
+    CreateCollection(const std::string& collection_name);
 
     void
     GetCollectionInfo(const std::string&);
 
     void
-    InsertEntities(const std::string&, int64_t);
+    InsertEntities(const std::string&);
 
-    void
-    BuildSearchEntities(int64_t, int64_t);
+    void BuildSearchEntities(int64_t, int64_t);
 
     void
     Flush(const std::string&);
 
     void
     GetCollectionStats(const std::string&);
+
+    void
+    BuildVectors(int64_t nq, int64_t dimension);
 
     void
     GetEntityByID(const std::string&, const std::vector<int64_t>&);
@@ -64,7 +66,7 @@ class ClientTest {
     SearchEntitiesByID(const std::string&, int64_t, int64_t);
 
     void
-    CreateIndex(const std::string&, milvus::IndexType, int64_t);
+    CreateIndex(const std::string&, int64_t);
 
     void
     LoadCollection(const std::string&);
@@ -76,13 +78,13 @@ class ClientTest {
     DeleteByIds(const std::string&, const std::vector<int64_t>& id_array);
 
     void
-    DropIndex(const std::string&);
+    DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& index_name);
 
     void
     DropCollection(const std::string&);
 
  private:
     std::shared_ptr<milvus::Connection> conn_;
-    std::vector<std::pair<int64_t, milvus::Entity>> search_entity_array_;
+    std::vector<std::pair<int64_t, milvus::VectorData>> search_entity_array_;
     std::vector<int64_t> search_id_array_;
 };

@@ -85,6 +85,33 @@ MemManagerImpl::InsertEntities(const std::string& collection_id, int64_t length,
 }
 
 Status
+MemManagerImpl::InsertEntities(const std::string& collection_id, int64_t length,
+                               const milvus::engine::IDNumber* vector_ids, int64_t dim, const Vectors vectors,
+                               const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                               const std::unordered_map<std::string, uint64_t>& attr_size,
+                               const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) {
+    VectorsData vectors_data;
+    if (vectors.vector_type_ == Vectors::FLOAT) {
+        vectors_data.vector_count_ = length;
+        vectors_data.float_data_.resize(length * dim);
+        memcpy(vectors_data.float_data_.data(), vectors.float_vector, length * dim * sizeof(float));
+        vectors_data.id_array_.resize(length);
+        memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
+    } else if (vectors.vector_type_ == Vectors::BINARY) {
+        vectors_data.vector_count_ = length;
+        vectors_data.binary_data_.resize(length * dim);
+        memcpy(vectors_data.binary_data_.data(), vectors.binary_vector, length * dim * sizeof(uint8_t));
+        vectors_data.id_array_.resize(length);
+        memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
+    }
+    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data, attr_nbytes, attr_size, attr_data);
+
+    std::unique_lock<std::mutex> lock(mutex_);
+
+    return InsertEntitiesNoLock(collection_id, source, lsn);
+}
+
+Status
 MemManagerImpl::InsertVectorsNoLock(const std::string& collection_id, const VectorSourcePtr& source, uint64_t lsn) {
     MemTablePtr mem = GetMemByTable(collection_id);
     mem->SetLSN(lsn);

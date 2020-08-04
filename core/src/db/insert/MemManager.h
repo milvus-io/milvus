@@ -23,6 +23,17 @@
 namespace milvus {
 namespace engine {
 
+struct Vectors {
+    typedef enum {
+        FLOAT,
+        BINARY,
+    } VECTOR_TYPE;
+
+    VECTOR_TYPE vector_type_;
+    const float* float_vector;
+    const uint8_t* binary_vector;
+};
+
 class MemManager {
  public:
     virtual Status
@@ -36,6 +47,12 @@ class MemManager {
     virtual Status
     InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                    const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                   const std::unordered_map<std::string, uint64_t>& attr_size,
+                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) = 0;
+
+    virtual Status
+    InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                   const Vectors vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                    const std::unordered_map<std::string, uint64_t>& attr_size,
                    const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) = 0;
 

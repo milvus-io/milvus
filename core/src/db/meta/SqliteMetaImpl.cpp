@@ -101,6 +101,8 @@ StoragePrototype(const std::string& path) {
         make_table(META_FIELDS, make_column("collection_id", &hybrid::FieldSchema::collection_id_),
                    make_column("field_name", &hybrid::FieldSchema::field_name_),
                    make_column("field_type", &hybrid::FieldSchema::field_type_),
+                   make_column("index_name", &hybrid::FieldSchema::index_name_),
+                   make_column("index_param", &hybrid::FieldSchema::index_param_),
                    make_column("field_params", &hybrid::FieldSchema::field_params_)),
         make_table(META_TABLEFILES, make_column("id", &SegmentSchema::id_, primary_key()),
                    make_column("table_id", &SegmentSchema::collection_id_),
@@ -846,6 +848,17 @@ SqliteMetaImpl::DescribeCollectionIndex(const std::string& collection_id, Collec
         } else {
             return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
         }
+
+        //        auto field_groups =
+        //            ConnectorPtr->select(columns(&hybrid::FieldSchema::index_name_,
+        //            &hybrid::FieldSchema::index_param_),
+        //                                 where(c(&hybrid::FieldSchema::collection_id_) == collection_id and
+        //                                       c(&hybrid::FieldSchema::field_name_) == index.field_name_));
+        //
+        //        if (groups.size() == 1) {
+        //            index.index_name_ = std::get<0>(groups[0]);
+        //            index.extra_params_ = milvus::json::parse(std::get<1>(groups[1]));
+        //        }
     } catch (std::exception& e) {
         return HandleException("Encounter exception when describe index", e.what());
     }
@@ -2150,7 +2163,7 @@ SqliteMetaImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema
         // multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        if (collection_schema.collection_id_ == "") {
+        if (collection_schema.collection_id_.empty()) {
             NextCollectionId(collection_schema.collection_id_);
         } else {
             fiu_do_on("SqliteMetaImpl.CreateCollection.throw_exception", throw std::exception());
@@ -2236,7 +2249,8 @@ SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::CollectionSchema&
 
         auto field_groups =
             ConnectorPtr->select(columns(&hybrid::FieldSchema::collection_id_, &hybrid::FieldSchema::field_name_,
-                                         &hybrid::FieldSchema::field_type_, &hybrid::FieldSchema::field_params_),
+                                         &hybrid::FieldSchema::field_type_, &hybrid::FieldSchema::field_params_,
+                                         &hybrid::FieldSchema::index_name_, &hybrid::FieldSchema::index_param_),
                                  where(c(&hybrid::FieldSchema::collection_id_) == collection_schema.collection_id_));
 
         if (field_groups.size() >= 1) {
@@ -2246,6 +2260,8 @@ SqliteMetaImpl::DescribeHybridCollection(milvus::engine::meta::CollectionSchema&
                 fields_schema.fields_schema_[i].field_name_ = std::get<1>(field_groups[i]);
                 fields_schema.fields_schema_[i].field_type_ = std::get<2>(field_groups[i]);
                 fields_schema.fields_schema_[i].field_params_ = std::get<3>(field_groups[i]);
+                fields_schema.fields_schema_[i].index_name_ = std::get<4>(field_groups[i]);
+                fields_schema.fields_schema_[i].index_param_ = std::get<5>(field_groups[i]);
             }
         } else {
             return Status(DB_NOT_FOUND, "Collection " + collection_schema.collection_id_ + " fields not found");

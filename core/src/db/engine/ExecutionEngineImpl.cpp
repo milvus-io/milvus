@@ -804,101 +804,132 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
     free(res_dist);
 }
 
+template <typename T>
 Status
-ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::GeneralQueryPtr general_query,
-                                      std::unordered_map<std::string, meta::hybrid::DataType>& attr_type) {
-    auto field_name = general_query->leaf->term_query->field_name;
-    auto type = attr_type.at(field_name);
+ProcessIndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr& index_ptr,
+                        milvus::json& term_values_json) {
+    try {
+        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<T>>(index_ptr);
+        if (not T_index) {
+            return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
+        }
+        size_t term_size = term_values_json.size();
+        std::vector<T> term_value(term_size);
+        size_t offset = 0;
+        for (auto& data : term_values_json) {
+            term_value[offset] = data.get<T>();
+            ++offset;
+        }
 
-    switch (type) {
+        bitset = T_index->In(term_size, term_value.data());
+    } catch (std::exception& exception) {
+        return Status{SERVER_INVALID_DSL_PARAMETER, exception.what()};
+    }
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const std::string& field_name,
+                                      const meta::hybrid::DataType& data_type, milvus::json& term_values_json) {
+    switch (data_type) {
         case meta::hybrid::DataType::INT8: {
-            auto int8_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int8_t>>(
-                attr_index_->attr_index_data().at(field_name));
-            if (not int8_index) {
-                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
-            }
-
-            std::vector<int8_t> term_value;
-            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int8_t);
-            term_value.resize(term_size);
-            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(int8_t));
-
-            bitset = int8_index->In(term_size, term_value.data());
+            ProcessIndexedTermQuery<int8_t>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
             break;
         }
         case meta::hybrid::DataType::INT16: {
-            auto int16_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int16_t>>(
-                attr_index_->attr_index_data().at(field_name));
-            if (not int16_index) {
-                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
-            }
-
-            std::vector<int16_t> term_value;
-            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int16_t);
-            term_value.resize(term_size);
-            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(int16_t));
-
-            bitset = int16_index->In(term_size, term_value.data());
+            ProcessIndexedTermQuery<int16_t>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
             break;
         }
         case meta::hybrid::DataType::INT32: {
-            auto int32_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int32_t>>(
-                attr_index_->attr_index_data().at(field_name));
-            if (not int32_index) {
-                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
-            }
-
-            std::vector<int32_t> term_value;
-            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int32_t);
-            term_value.resize(term_size);
-            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(int32_t));
-
-            bitset = int32_index->In(term_size, term_value.data());
+            ProcessIndexedTermQuery<int32_t>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
             break;
         }
         case meta::hybrid::DataType::INT64: {
-            auto int64_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int64_t>>(
-                attr_index_->attr_index_data().at(field_name));
-            if (not int64_index) {
-                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
-            }
-
-            std::vector<int64_t> term_value;
-            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int64_t);
-            term_value.resize(term_size);
-            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(int64_t));
-
-            bitset = int64_index->In(term_size, term_value.data());
+            ProcessIndexedTermQuery<int64_t>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
             break;
         }
         case meta::hybrid::DataType::FLOAT: {
-            auto float_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<float>>(
-                attr_index_->attr_index_data().at(field_name));
-            if (not float_index) {
-                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
-            }
-
-            std::vector<float> term_value;
-            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(float);
-            term_value.resize(term_size);
-            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(int64_t));
-
-            bitset = float_index->In(term_size, term_value.data());
+            ProcessIndexedTermQuery<float>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
             break;
         }
         case meta::hybrid::DataType::DOUBLE: {
-            auto double_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<double>>(
-                attr_index_->attr_index_data().at(field_name));
-            if (not double_index) {
-                return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
+            ProcessIndexedTermQuery<double>(bitset, attr_index_->attr_index_data().at(field_name), term_values_json);
+            break;
+        }
+        default: { return Status{SERVER_INVALID_ARGUMENT, "Attribute:" + field_name + " type is wrong"}; }
+    }
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query::TermQueryPtr term_query,
+                                      std::unordered_map<std::string, meta::hybrid::DataType>& attr_type) {
+    auto status = Status::OK();
+    auto term_query_json = term_query->json_obj;
+    auto term_it = term_query_json.begin();
+    if (term_it != term_query_json.end()) {
+        std::string field_name = term_it.key();
+        if (term_it.value().is_object()) {
+            milvus::json term_values_json = term_it.value()["values"];
+            status = IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_values_json);
+        } else {
+            status = IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_it.value());
+        }
+    }
+    return status;
+}
+
+template <typename T>
+Status
+ProcessIndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr& index_ptr,
+                         milvus::json& range_values_json) {
+    try {
+        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<T>>(index_ptr);
+
+        bool flag = false;
+        for (auto& range_value_it : range_values_json.items()) {
+            std::string comp_op = range_value_it.key();
+            T value = range_value_it.value().get<T>();
+            if (not flag) {
+                bitset = (*bitset) | T_index->Range(value, knowhere::s_map_operator_type.at(comp_op));
+                flag = true;
+            } else {
+                bitset = (*bitset) & T_index->Range(value, knowhere::s_map_operator_type.at(comp_op));
             }
+        }
+    } catch (std::exception& exception) {
+        return Status{SERVER_INVALID_DSL_PARAMETER, exception.what()};
+    }
+    return Status::OK();
+}
 
-            std::vector<double> term_value;
-            auto term_size = general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(double);
-            term_value.resize(term_size);
-            memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(), term_size * sizeof(double));
-
-            bitset = double_index->In(term_size, term_value.data());
+Status
+ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const meta::hybrid::DataType& data_type,
+                                       knowhere::IndexPtr& index_ptr, milvus::json& range_values_json) {
+    auto status = Status::OK();
+    switch (data_type) {
+        case meta::hybrid::DataType::INT8: {
+            ProcessIndexedRangeQuery<int8_t>(bitset, index_ptr, range_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::INT16: {
+            ProcessIndexedRangeQuery<int16_t>(bitset, index_ptr, range_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::INT32: {
+            ProcessIndexedRangeQuery<int32_t>(bitset, index_ptr, range_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::INT64: {
+            ProcessIndexedRangeQuery<int64_t>(bitset, index_ptr, range_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::FLOAT: {
+            ProcessIndexedRangeQuery<float>(bitset, index_ptr, range_values_json);
+            break;
+        }
+        case meta::hybrid::DataType::DOUBLE: {
+            ProcessIndexedRangeQuery<double>(bitset, index_ptr, range_values_json);
             break;
         }
         default:
@@ -908,58 +939,15 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, query:
 }
 
 Status
-ExecutionEngineImpl::ProcessRangeQuery(const meta::hybrid::DataType data_type, const std::string& operand,
-                                       const query::CompareOperator& com_operator, knowhere::IndexPtr& index_ptr,
-                                       faiss::ConcurrentBitsetPtr& bitset) {
-    switch (data_type) {
-        case meta::hybrid::DataType::INT8: {
-            auto int8_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int8_t>>(index_ptr);
-
-            int8_t value = atoi(operand.c_str());
-            bitset = int8_index->Range(value, (knowhere::OperatorType)com_operator);
-            break;
-        }
-        case meta::hybrid::DataType::INT16: {
-            auto int16_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int16_t>>(index_ptr);
-
-            int16_t value = atoi(operand.c_str());
-            bitset = int16_index->Range(value, (knowhere::OperatorType)com_operator);
-            break;
-        }
-        case meta::hybrid::DataType::INT32: {
-            auto int32_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int32_t>>(index_ptr);
-
-            int32_t value = atoi(operand.c_str());
-            bitset = int32_index->Range(value, (knowhere::OperatorType)com_operator);
-            break;
-        }
-        case meta::hybrid::DataType::INT64: {
-            auto int64_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<int64_t>>(index_ptr);
-
-            int64_t value = atoi(operand.c_str());
-            bitset = int64_index->Range(value, (knowhere::OperatorType)com_operator);
-            break;
-        }
-        case meta::hybrid::DataType::FLOAT: {
-            auto float_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<float>>(index_ptr);
-
-            std::istringstream iss(operand);
-            float value;
-            iss >> value;
-            bitset = float_index->Range(value, (knowhere::OperatorType)com_operator);
-            break;
-        }
-        case meta::hybrid::DataType::DOUBLE: {
-            auto double_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<double>>(index_ptr);
-
-            std::istringstream iss(operand);
-            double value;
-            iss >> value;
-            bitset = double_index->Range(value, (knowhere::OperatorType)com_operator);
-            break;
-        }
-        default:
-            break;
+ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
+                                       faiss::ConcurrentBitsetPtr& bitset, query::RangeQueryPtr range_query) {
+    auto status = Status::OK();
+    auto range_query_json = range_query->json_obj;
+    auto range_it = range_query_json.begin();
+    if (range_it != range_query_json.end()) {
+        std::string field_name = range_it.key();
+        IndexedRangeQuery(bitset, attr_type.at(field_name), attr_index_->attr_index_data().at(field_name),
+                          range_it.value());
     }
     return Status::OK();
 }
@@ -968,44 +956,55 @@ Status
 ExecutionEngineImpl::HybridSearch(scheduler::SearchJobPtr search_job,
                                   std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
                                   std::vector<float>& distances, std::vector<int64_t>& search_ids, bool hybrid) {
-    faiss::ConcurrentBitsetPtr bitset;
-    std::string vector_placeholder;
-    auto status = ExecBinaryQuery(search_job->general_query(), bitset, attr_type, vector_placeholder);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // Do search
-    faiss::ConcurrentBitsetPtr list;
-    list = index_->GetBlacklist();
-    // Do AND
-    for (uint64_t i = 0; i < attr_index_->entity_count(); ++i) {
-        if (list->test(i) && !bitset->test(i)) {
-            list->clear(i);
+    try {
+        faiss::ConcurrentBitsetPtr bitset;
+        std::string vector_placeholder;
+        auto status = ExecBinaryQuery(search_job->general_query(), bitset, attr_type, vector_placeholder);
+        if (!status.ok()) {
+            return status;
         }
-    }
-    index_->SetBlacklist(list);
 
-    auto vector_query = search_job->query_ptr()->vectors.at(vector_placeholder);
-    int64_t topk = vector_query->topk;
-    int64_t nq = vector_query->query_vector.float_data.size() / dim_;
+        // Do search
+        faiss::ConcurrentBitsetPtr list;
+        list = index_->GetBlacklist();
+        // Do AND
+        for (uint64_t i = 0; i < attr_index_->entity_count(); ++i) {
+            if (list->test(i) && !bitset->test(i)) {
+                list->clear(i);
+            }
+        }
+        index_->SetBlacklist(list);
 
-    VectorsData vectors;
-    vectors.vector_count_ = nq;
-    vectors.float_data_ = vector_query->query_vector.float_data;
-    vectors.binary_data_ = vector_query->query_vector.binary_data;
+        auto vector_query = search_job->query_ptr()->vectors.at(vector_placeholder);
+        int64_t topk = vector_query->topk;
+        int64_t nq = 0;
+        if (!vector_query->query_vector.float_data.empty()) {
+            nq = vector_query->query_vector.float_data.size() / dim_;
+        } else if (!vector_query->query_vector.binary_data.empty()) {
+            nq = vector_query->query_vector.binary_data.size() * 8 / dim_;
+        }
 
-    search_job->SetVectors(vectors);
-    search_job->vector_count() = nq;
-    search_job->topk() = topk;
+        engine::VectorsData vectors;
+        vectors.vector_count_ = nq;
+        vectors.float_data_ = vector_query->query_vector.float_data;
+        vectors.binary_data_ = vector_query->query_vector.binary_data;
 
-    status = Search(search_ids, distances, search_job, hybrid);
-    if (!status.ok()) {
-        return status;
+        search_job->SetVectors(vectors);
+        search_job->vector_count() = nq;
+        search_job->topk() = topk;
+        search_job->vector_params() = vector_query->extra_params;
+
+        status = Search(search_ids, distances, search_job, hybrid);
+        if (!status.ok()) {
+            return status;
+        }
+    } catch (std::exception& exception) {
+        return Status{DB_ERROR, "Illegal search params"};
     }
 
     return Status::OK();
 }
+
 Status
 ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr& bitset,
                                      std::unordered_map<std::string, meta::hybrid::DataType>& attr_type,
@@ -1060,193 +1059,15 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
         bitset = std::make_shared<faiss::ConcurrentBitset>(attr_index_->entity_count());
         if (general_query->leaf->term_query != nullptr) {
             // process attrs_data
-            status = ProcessTermQuery(bitset, general_query, attr_type);
+            status = ProcessTermQuery(bitset, general_query->leaf->term_query, attr_type);
             if (!status.ok()) {
                 return status;
             }
-#if 0
-            auto field_name = general_query->leaf->term_query->field_name;
-            auto type = attr_type.at(field_name);
-            if (attr_->attr_size().find(field_name) == attr_->attr_size().end()) {
-                return Status{SERVER_INVALID_BINARY_QUERY, "Attribute's field_name is wrong"};
-            }
-            auto size = attr_->attr_size().at(field_name);
-
-            switch (type) {
-                case DataType::INT8: {
-                    std::vector<int8_t> data;
-                    data.resize(size / sizeof(int8_t));
-                    memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-
-                    std::vector<int8_t> term_value;
-                    auto term_size =
-                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int8_t);
-                    term_value.resize(term_size);
-                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
-                           term_size * sizeof(int8_t));
-
-                    for (uint64_t i = 0; i < data.size(); ++i) {
-                        bool value_in_term = false;
-                        for (auto query_value : term_value) {
-                            if (data[i] == query_value) {
-                                value_in_term = true;
-                                break;
-                            }
-                        }
-                        if (value_in_term) {
-                            bitset->set(i);
-                        }
-                    }
-                    break;
-                }
-                case DataType::INT16: {
-                    std::vector<int16_t> data;
-                    data.resize(size / sizeof(int16_t));
-                    memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-                    std::vector<int16_t> term_value;
-                    auto term_size =
-                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int16_t);
-                    term_value.resize(term_size);
-                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
-                           term_size * sizeof(int16_t));
-
-                    for (uint64_t i = 0; i < data.size(); ++i) {
-                        bool value_in_term = false;
-                        for (auto query_value : term_value) {
-                            if (data[i] == query_value) {
-                                value_in_term = true;
-                                break;
-                            }
-                        }
-                        if (value_in_term) {
-                            bitset->set(i);
-                        }
-                    }
-                    break;
-                }
-                case DataType::INT32: {
-                    std::vector<int32_t> data;
-                    data.resize(size / sizeof(int32_t));
-                    memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-
-                    std::vector<int32_t> term_value;
-                    auto term_size =
-                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int32_t);
-                    term_value.resize(term_size);
-                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
-                           term_size * sizeof(int32_t));
-
-                    for (uint64_t i = 0; i < data.size(); ++i) {
-                        bool value_in_term = false;
-                        for (auto query_value : term_value) {
-                            if (data[i] == query_value) {
-                                value_in_term = true;
-                                break;
-                            }
-                        }
-                        if (value_in_term) {
-                            bitset->set(i);
-                        }
-                    }
-                    break;
-                }
-                case DataType::INT64: {
-                    std::vector<int64_t> data;
-                    data.resize(size / sizeof(int64_t));
-                    memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-
-                    std::vector<int64_t> term_value;
-                    auto term_size =
-                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int64_t);
-                    term_value.resize(term_size);
-                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
-                           term_size * sizeof(int64_t));
-
-                    for (uint64_t i = 0; i < data.size(); ++i) {
-                        bool value_in_term = false;
-                        for (auto query_value : term_value) {
-                            if (data[i] == query_value) {
-                                value_in_term = true;
-                                break;
-                            }
-                        }
-                        if (value_in_term) {
-                            bitset->set(i);
-                        }
-                    }
-                    break;
-                }
-                case DataType::FLOAT: {
-                    std::vector<float> data;
-                    data.resize(size / sizeof(float));
-                    memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-
-                    std::vector<float> term_value;
-                    auto term_size =
-                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(float);
-                    term_value.resize(term_size);
-                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
-                           term_size * sizeof(int64_t));
-
-                    for (uint64_t i = 0; i < data.size(); ++i) {
-                        bool value_in_term = false;
-                        for (auto query_value : term_value) {
-                            if (data[i] == query_value) {
-                                value_in_term = true;
-                                break;
-                            }
-                        }
-                        if (value_in_term) {
-                            bitset->set(i);
-                        }
-                    }
-                    break;
-                }
-                case DataType::DOUBLE: {
-                    std::vector<double> data;
-                    data.resize(size / sizeof(double));
-                    memcpy(data.data(), attr_->attr_data().at(field_name).data(), size);
-
-                    std::vector<double> term_value;
-                    auto term_size =
-                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(double);
-                    term_value.resize(term_size);
-                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
-                           term_size * sizeof(double));
-
-                    for (uint64_t i = 0; i < data.size(); ++i) {
-                        bool value_in_term = false;
-                        for (auto query_value : term_value) {
-                            if (data[i] == query_value) {
-                                value_in_term = true;
-                                break;
-                            }
-                        }
-                        if (value_in_term) {
-                            bitset->set(i);
-                        }
-                    }
-                    break;
-                }
-                default:
-                    break;
-            }
-            return Status::OK();
-#endif
         }
         if (general_query->leaf->range_query != nullptr) {
-            auto field_name = general_query->leaf->range_query->field_name;
-            auto com_expr = general_query->leaf->range_query->compare_expr;
-            auto type = attr_type.at(field_name);
-            for (uint64_t j = 0; j < com_expr.size(); ++j) {
-                auto operand = com_expr[j].operand;
-                auto com_operator = com_expr[j].compare_operator;
-
-                status = ProcessRangeQuery(type, operand, com_operator, attr_index_->attr_index_data().at(field_name),
-                                           bitset);
-                if (!status.ok()) {
-                    return status;
-                }
+            status = ProcessRangeQuery(attr_type, bitset, general_query->leaf->range_query);
+            if (!status.ok()) {
+                return status;
             }
         }
         if (general_query->leaf->vector_placeholder.size() > 0) {
