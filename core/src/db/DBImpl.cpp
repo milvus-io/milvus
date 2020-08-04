@@ -526,6 +526,7 @@ DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_ar
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     std::string dir_root = options_.meta_.path_;
+    valid_row.resize(id_array.size(), false);
     auto handler =
         std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, dir_root, id_array, field_names, valid_row);
     handler->Iterate();
