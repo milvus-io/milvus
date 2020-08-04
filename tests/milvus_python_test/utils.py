@@ -677,7 +677,7 @@ def gen_simple_index():
         if all_index_types[i] in binary_support():
             continue
         dic = {"index_type": all_index_types[i], "metric_type": "L2"}
-        dic.update(default_index_params[i])
+        dic.update({"params": default_index_params[i]})
         index_params.append(dic)
     return index_params
 
@@ -687,7 +687,7 @@ def gen_binary_index():
     for i in range(len(all_index_types)):
         if all_index_types[i] in binary_support():
             dic = {"index_type": all_index_types[i]}
-            dic.update(default_index_params[i])
+            dic.update({"params": default_index_params[i]})
             index_params.append(dic)
     return index_params
 

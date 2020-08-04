@@ -26,7 +26,7 @@ entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 query, query_vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1)
-default_index = {"index_type": "IVF_FLAT", "nlist": 1024, "metric_type": "L2"}
+default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 1024}, "metric_type": "L2"}
 
 
 class TestIndexBase:
@@ -340,7 +340,7 @@ class TestIndexBase:
         expected: return code 0, and describe index result equals with the second index params
         '''
         ids = connect.insert(collection, entities)
-        indexs = [default_index, {"index_type": "FLAT", "nlist": 1024, "metric_type": "IP"}]
+        indexs = [default_index, {"index_type": "FLAT", "params": {"nlist": 1024}, "metric_type": "IP"}]
         for index in indexs:
             connect.create_index(collection, field_name, index)
             stats = connect.get_collection_stats(collection)
