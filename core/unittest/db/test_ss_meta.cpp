@@ -14,9 +14,9 @@
 #include "db/snapshot/ResourceContext.h"
 #include "db/utils.h"
 
-template <typename T>
+template<typename T>
 using ResourceContext = milvus::engine::snapshot::ResourceContext<T>;
-template <typename T>
+template<typename T>
 using ResourceContextBuilder = milvus::engine::snapshot::ResourceContextBuilder<T>;
 
 using FType = milvus::engine::DataType;
@@ -73,7 +73,7 @@ TEST_F(MetaTest, SessionTest) {
     field->SetID(result_id);
 
     auto field_element = std::make_shared<FieldElement>(collection->GetID(), field->GetID(),
-        "meta_test_f1_fe1", FEType::FET_RAW);
+                                                        "meta_test_f1_fe1", FEType::FET_RAW);
     auto fe_ctx = ResourceContextBuilder<FieldElement>().SetResource(field_element).CreatePtr();
     status = meta_->Apply<FieldElement>(fe_ctx, result_id);
     ASSERT_TRUE(status.ok()) << status.ToString();
@@ -144,7 +144,7 @@ TEST_F(MetaTest, SelectTest) {
 
     std::vector<Collection::Ptr> return_collections;
     status = meta_->SelectBy<Collection, ID_TYPE>(milvus::engine::meta::F_ID,
-        {collection2->GetID()}, return_collections);
+                                                  {collection2->GetID()}, return_collections);
     ASSERT_TRUE(status.ok()) << status.ToString();
     ASSERT_EQ(return_collections.size(), 1);
     ASSERT_EQ(return_collections.at(0)->GetID(), collection2->GetID());
@@ -186,4 +186,25 @@ TEST_F(MetaTest, TruncateTest) {
     status = meta_->Select<Collection>(collection->GetID(), return_collection);
     ASSERT_TRUE(status.ok()) << status.ToString();
     ASSERT_EQ(return_collection, nullptr);
+}
+
+TEST_F(MetaTest, MultiThreadRequestTest) {
+    unsigned int thread_hint = std::thread::hardware_concurrency();
+    auto request_worker = [&](size_t i) {
+        std::string collection_name_prefix = "meta_test_collection_" + std::to_string(i) + "_";
+        int64_t result_id;
+        for (size_t ii = 0; ii < 10; ii++) {
+            std::string collection_name = collection_name_prefix + std::to_string(ii);
+            auto collection = std::make_shared<Collection>(collection_name, collection_name);
+            auto c_ctx = ResourceContextBuilder<Collection>().SetResource(collection).CreatePtr();
+            auto status = meta_->Apply<Collection>(c_ctx, result_id);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+
+            collection->SetID(result_id);
+            auto c_ctx2 = ResourceContextBuilder<Collection>().SetResource(collection)
+                .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+            status = meta_->Apply<Collection>(c_ctx2, result_id);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+        }
+    };
 }
