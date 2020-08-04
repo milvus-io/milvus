@@ -129,7 +129,7 @@ def gen_inaccuracy(num):
     return num / 255.0
 
 
-def gen_vectors(num, dim, is_normal=False):
+def gen_vectors(num, dim, is_normal=True):
     vectors = [[random.random() for _ in range(dim)] for _ in range(num)]
     vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
     return vectors.tolist()
@@ -259,26 +259,18 @@ def assert_equal_entity(a, b):
     pass
 
 
-def gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10, "metric_type": "L2"}):
-    query_vectors = entities[-1]["values"][:nq]
+def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False, metric_type=None):
+    if rand_vector is True:
+        dimension = len(entities[-1]["values"][0])
+        query_vectors = gen_vectors(nq, dimension)
+    else:
+        query_vectors = entities[-1]["values"][:nq]
+    must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
+    if metric_type is not None:
+        must_param["vector"]["field_name"]["metric_type"] = metric_type
     query = {
         "bool": {
-            "must": [
-                {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
-            ]
-        }
-    }
-    return query, query_vectors
-
-
-def gen_query_vectors_rand_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10, "metric_type": "L2"}):
-    dimension = len(entities[-1]["values"][0])
-    query_vectors = gen_vectors(nq, dimension)
-    query = {
-        "bool": {
-            "must": [
-                {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
-            ]
+            "must": [must_param]
         }
     }
     return query, query_vectors
@@ -677,7 +669,7 @@ def gen_simple_index():
         if all_index_types[i] in binary_support():
             continue
         dic = {"index_type": all_index_types[i], "metric_type": "L2"}
-        dic.update(default_index_params[i])
+        dic.update({"params": default_index_params[i]})
         index_params.append(dic)
     return index_params
 
@@ -687,7 +679,7 @@ def gen_binary_index():
     for i in range(len(all_index_types)):
         if all_index_types[i] in binary_support():
             dic = {"index_type": all_index_types[i]}
-            dic.update(default_index_params[i])
+            dic.update({"params": default_index_params[i]})
             index_params.append(dic)
     return index_params
 
