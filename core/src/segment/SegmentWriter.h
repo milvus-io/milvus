@@ -96,7 +96,7 @@ class SegmentWriter {
     Initialize();
 
     Status
-    WriteField(const std::string& file_path, const engine::FIXED_FIELD_DATA& raw);
+    WriteField(const std::string& file_path, const engine::BinaryDataPtr& raw);
 
     Status
     WriteFields();

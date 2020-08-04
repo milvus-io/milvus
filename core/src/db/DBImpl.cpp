@@ -27,6 +27,7 @@
 #include "db/snapshot/Snapshots.h"
 #include "insert/MemManagerFactory.h"
 #include "knowhere/index/vector_index/helpers/BuilderSuspend.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "metrics/Metrics.h"
 #include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
@@ -103,6 +104,8 @@ DBImpl::Start() {
     snapshot::EventExecutor::Init(store);
     snapshot::EventExecutor::GetInstance().Start();
     snapshot::Snapshots::GetInstance().Init(store);
+
+    knowhere::enable_faiss_logging();
 
     // LOG_ENGINE_TRACE_ << "DB service start";
     initialized_.store(true, std::memory_order_release);
@@ -209,18 +212,25 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     CHECK_INITIALIZED;
 
     auto ctx = context;
-    // check uid existence/validation
+    // check uid params
     bool has_uid = false;
     for (auto& pair : ctx.fields_schema) {
-        if (pair.first->GetFtype() == DataType::UID) {
+        if (pair.first->GetName() == DEFAULT_UID_NAME) {
             has_uid = true;
+            json params = pair.first->GetParams();
+            if (params.find(PARAM_UID_AUTOGEN) == params.end()) {
+                params[PARAM_UID_AUTOGEN] = true;
+                pair.first->SetParams(params);
+            }
             break;
         }
     }
 
     // add uid field if not specified
     if (!has_uid) {
-        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, milvus::engine::DataType::UID);
+        json params;
+        params[PARAM_UID_AUTOGEN] = true;
+        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, DataType::INT64, params);
         auto bloom_filter_element = std::make_shared<snapshot::FieldElement>(
             0, 0, DEFAULT_BLOOM_FILTER_NAME, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
         auto delete_doc_element = std::make_shared<snapshot::FieldElement>(
@@ -477,14 +487,47 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         return Status(DB_NOT_FOUND, "Fail to get partition " + partition_name);
     }
 
-    // Generate id
-    if (data_chunk->fixed_fields_.find(engine::DEFAULT_UID_NAME) == data_chunk->fixed_fields_.end()) {
+    auto id_field = ss->GetField(DEFAULT_UID_NAME);
+    if (id_field == nullptr) {
+        return Status(DB_ERROR, "Field '_id' not found");
+    }
+
+    auto& params = id_field->GetParams();
+    bool auto_increment = true;
+    if (params.find(PARAM_UID_AUTOGEN) != params.end()) {
+        auto_increment = params[PARAM_UID_AUTOGEN];
+    }
+
+    // id is auto increment, but client provides id, return error
+    FIXEDX_FIELD_MAP& fields = data_chunk->fixed_fields_;
+    if (auto_increment) {
+        auto pair = fields.find(engine::DEFAULT_UID_NAME);
+        if (pair != fields.end() && pair->second != nullptr) {
+            return Status(DB_ERROR, "Field '_id' is auto increment, no need to provide id");
+        }
+    }
+
+    // id is not auto increment, but client doesn't provide id, return error
+    if (!auto_increment) {
+        auto pair = fields.find(engine::DEFAULT_UID_NAME);
+        if (pair == fields.end() || pair->second == nullptr) {
+            return Status(DB_ERROR, "Field '_id' is user defined");
+        }
+    }
+
+    // generate id
+    DataChunkPtr new_chunk = std::make_shared<DataChunk>();
+    new_chunk->fixed_fields_ = data_chunk->fixed_fields_;
+    new_chunk->variable_fields_ = data_chunk->variable_fields_;
+    new_chunk->count_ = data_chunk->count_;
+    if (auto_increment) {
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         IDNumbers ids;
         STATUS_CHECK(id_generator.GetNextIDNumbers(data_chunk->count_, ids));
-        FIXED_FIELD_DATA& id_data = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
-        id_data.resize(ids.size() * sizeof(int64_t));
-        memcpy(id_data.data(), ids.data(), ids.size() * sizeof(int64_t));
+        BinaryDataPtr id_data = std::make_shared<BinaryData>();
+        id_data->data_.resize(ids.size() * sizeof(int64_t));
+        memcpy(id_data->data_.data(), ids.data(), ids.size() * sizeof(int64_t));
+        new_chunk->fixed_fields_[engine::DEFAULT_UID_NAME] = id_data;
     }
 
     if (options_.wal_enable_) {
@@ -506,8 +549,8 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         record.lsn = 0;
         record.collection_id = collection_name;
         record.partition_tag = partition_name;
-        record.data_chunk = data_chunk;
-        record.length = data_chunk->count_;
+        record.data_chunk = new_chunk;
+        record.length = new_chunk->count_;
         record.type = wal::MXLogType::Entity;
 
         STATUS_CHECK(ExecWalRecord(record));
@@ -564,6 +607,10 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     CHECK_INITIALIZED;
 
     TimeRecorder rc("DBImpl::Query");
+
+    if (!query_ptr->root) {
+        return Status{DB_ERROR, "BinaryQuery is null"};
+    }
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, query_ptr->collection_id));

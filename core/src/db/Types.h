@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "cache/DataObj.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "utils/Json.h"
 
@@ -53,18 +54,39 @@ enum DataType {
 
     STRING = 20,
 
-    UID = 30,
-
     VECTOR_BINARY = 100,
     VECTOR_FLOAT = 101,
 };
 
+class BinaryData : public cache::DataObj {
+ public:
+    int64_t
+    Size() {
+        return data_.size();
+    }
+
+ public:
+    std::vector<uint8_t> data_;
+};
+using BinaryDataPtr = std::shared_ptr<BinaryData>;
+
+class VaribleData : public cache::DataObj {
+ public:
+    int64_t
+    Size() {
+        return data_.size();
+    }
+
+ public:
+    std::vector<uint8_t> data_;
+    std::vector<int64_t> offset_;
+};
+using VaribleDataPtr = std::shared_ptr<VaribleData>;
+
 using FIELD_TYPE_MAP = std::unordered_map<std::string, DataType>;
 using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;
-using FIXED_FIELD_DATA = std::vector<uint8_t>;
-using FIXEDX_FIELD_MAP = std::unordered_map<std::string, FIXED_FIELD_DATA>;
-using VARIABLE_FIELD_DATA = std::vector<std::string>;
-using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VARIABLE_FIELD_DATA>;
+using FIXEDX_FIELD_MAP = std::unordered_map<std::string, BinaryDataPtr>;
+using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VaribleDataPtr>;
 using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;
 using STRUCTURED_INDEX_MAP = std::unordered_map<std::string, knowhere::IndexPtr>;
 
@@ -78,6 +100,7 @@ using DataChunkPtr = std::shared_ptr<DataChunk>;
 
 struct CollectionIndex {
     std::string index_name_;
+    std::string index_type_;
     std::string metric_name_;
     milvus::json extra_params_ = {{"nlist", 2048}};
 };
@@ -115,6 +138,7 @@ using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;
 
 extern const char* DEFAULT_UID_NAME;
+extern const char* PARAM_UID_AUTOGEN;
 
 extern const char* DEFAULT_RAW_DATA_NAME;
 extern const char* DEFAULT_BLOOM_FILTER_NAME;
