@@ -119,9 +119,10 @@ BuildEntities(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& da
         vectors.id_array_.push_back(n * batch_index + i);
     }
 
-    milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_[VECTOR_FIELD_NAME];
-    raw.resize(vectors.float_data_.size() * sizeof(float));
-    memcpy(raw.data(), vectors.float_data_.data(), vectors.float_data_.size() * sizeof(float));
+    milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+    raw->data_.resize(vectors.float_data_.size() * sizeof(float));
+    memcpy(raw->data_.data(), vectors.float_data_.data(), vectors.float_data_.size() * sizeof(float));
+    data_chunk->fixed_fields_[VECTOR_FIELD_NAME] = raw;
 
     std::vector<int32_t> value_0;
     std::vector<int64_t> value_1;
@@ -139,21 +140,24 @@ BuildEntities(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& da
     }
 
     {
-        milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["field_0"];
-        raw.resize(value_0.size() * sizeof(int32_t));
-        memcpy(raw.data(), value_0.data(), value_0.size() * sizeof(int32_t));
+        milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+        raw->data_.resize(value_0.size() * sizeof(int32_t));
+        memcpy(raw->data_.data(), value_0.data(), value_0.size() * sizeof(int32_t));
+        data_chunk->fixed_fields_["field_0"] = raw;
     }
 
     {
-        milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["field_1"];
-        raw.resize(value_1.size() * sizeof(int64_t));
-        memcpy(raw.data(), value_1.data(), value_1.size() * sizeof(int64_t));
+        milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+        raw->data_.resize(value_1.size() * sizeof(int64_t));
+        memcpy(raw->data_.data(), value_1.data(), value_1.size() * sizeof(int64_t));
+        data_chunk->fixed_fields_["field_1"] = raw;
     }
 
     {
-        milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["field_2"];
-        raw.resize(value_2.size() * sizeof(double));
-        memcpy(raw.data(), value_2.data(), value_2.size() * sizeof(double));
+        milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+        raw->data_.resize(value_2.size() * sizeof(double));
+        memcpy(raw->data_.data(), value_2.data(), value_2.size() * sizeof(double));
+        data_chunk->fixed_fields_["field_2"] = raw;
     }
 }
 

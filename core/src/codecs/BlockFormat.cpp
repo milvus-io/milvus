@@ -20,9 +20,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <algorithm>
-#include <memory>
-
 #include <boost/filesystem.hpp>
+#include <memory>
 
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -32,7 +31,7 @@ namespace milvus {
 namespace codec {
 
 void
-BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, std::vector<uint8_t>& raw) {
+BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::BinaryDataPtr& raw) {
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
@@ -42,15 +41,16 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     size_t num_bytes;
     fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 
-    raw.resize(num_bytes);
-    fs_ptr->reader_ptr_->read(raw.data(), num_bytes);
+    raw = std::make_shared<engine::BinaryData>();
+    raw->data_.resize(num_bytes);
+    fs_ptr->reader_ptr_->read(raw->data_.data(), num_bytes);
 
     fs_ptr->reader_ptr_->close();
 }
 
 void
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset, int64_t num_bytes,
-                  std::vector<uint8_t>& raw) {
+                  engine::BinaryDataPtr& raw) {
     if (offset < 0 || num_bytes <= 0) {
         std::string err_msg = "Invalid input to read: " + file_path;
         LOG_ENGINE_ERROR_ << err_msg;
@@ -73,15 +73,16 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    raw.resize(num_bytes);
+    raw = std::make_shared<engine::BinaryData>();
+    raw->data_.resize(num_bytes);
     fs_ptr->reader_ptr_->seekg(offset);
-    fs_ptr->reader_ptr_->read(raw.data(), num_bytes);
+    fs_ptr->reader_ptr_->read(raw->data_.data(), num_bytes);
     fs_ptr->reader_ptr_->close();
 }
 
 void
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
-                  std::vector<uint8_t>& raw) {
+                  engine::BinaryDataPtr& raw) {
     if (read_ranges.empty()) {
         return;
     }
@@ -106,13 +107,13 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         total_bytes += range.num_bytes_;
     }
 
-    raw.clear();
-    raw.resize(total_bytes);
+    raw = std::make_shared<engine::BinaryData>();
+    raw->data_.resize(total_bytes);
     int64_t poz = 0;
     for (auto& range : read_ranges) {
         int64_t offset = range.offset_ + sizeof(size_t);
         fs_ptr->reader_ptr_->seekg(offset);
-        fs_ptr->reader_ptr_->read(raw.data() + poz, range.num_bytes_);
+        fs_ptr->reader_ptr_->read(raw->data_.data() + poz, range.num_bytes_);
         poz += range.num_bytes_;
     }
 
@@ -120,16 +121,21 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 }
 
 void
-BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const std::vector<uint8_t>& raw) {
+BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                   const engine::BinaryDataPtr& raw) {
+    if (raw == nullptr) {
+        return;
+    }
+
     if (!fs_ptr->writer_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
-    size_t num_bytes = raw.size();
+    size_t num_bytes = raw->data_.size();
     fs_ptr->writer_ptr_->write(&num_bytes, sizeof(size_t));
-    fs_ptr->writer_ptr_->write((void*)raw.data(), num_bytes);
+    fs_ptr->writer_ptr_->write((void*)(raw->data_.data()), num_bytes);
     fs_ptr->writer_ptr_->close();
 }
 
