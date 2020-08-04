@@ -277,7 +277,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
 
         auto single_size = data->data_.size() / id_size;
 
-        if (type == engine::DataType::UID) {
+        if (name == engine::DEFAULT_UID_NAME) {
             int64_t int64_value;
             auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
             for (int i = 0; i < id_size; i++) {

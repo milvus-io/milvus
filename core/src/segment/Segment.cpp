@@ -51,7 +51,6 @@ Segment::AddField(const std::string& field_name, DataType field_type, int64_t fi
         case DataType::INT32:
             real_field_width = sizeof(uint32_t);
             break;
-        case DataType::UID:
         case DataType::INT64:
             real_field_width = sizeof(uint64_t);
             break;

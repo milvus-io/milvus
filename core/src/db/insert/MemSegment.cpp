@@ -145,7 +145,6 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
             case DataType::INT32:
                 single_size += sizeof(uint32_t);
                 break;
-            case DataType::UID:
             case DataType::INT64:
                 single_size += sizeof(uint64_t);
                 break;

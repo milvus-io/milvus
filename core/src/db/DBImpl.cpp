@@ -484,15 +484,47 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         return Status(DB_NOT_FOUND, "Fail to get partition " + partition_name);
     }
 
-    // Generate id
-    if (data_chunk->fixed_fields_.find(engine::DEFAULT_UID_NAME) == data_chunk->fixed_fields_.end()) {
+    auto id_field = ss->GetField(DEFAULT_UID_NAME);
+    if (id_field == nullptr) {
+        return Status(DB_ERROR, "Field '_id' not found");
+    }
+
+    auto& params = id_field->GetParams();
+    bool auto_increment = true;
+    if (params.find(PARAM_UID_AUTOGEN) != params.end()) {
+        auto_increment = params[PARAM_UID_AUTOGEN];
+    }
+
+    // id is auto increment, but client provides id, return error
+    FIXEDX_FIELD_MAP& fields = data_chunk->fixed_fields_;
+    if (auto_increment) {
+        auto pair = fields.find(engine::DEFAULT_UID_NAME);
+        if (pair != fields.end() && pair->second != nullptr) {
+            return Status(DB_ERROR, "Field '_id' is auto increment, no need to provide id");
+        }
+    }
+
+    // id is not auto increment, but client doesn't provide id, return error
+    if (!auto_increment) {
+        auto pair = fields.find(engine::DEFAULT_UID_NAME);
+        if (pair == fields.end() || pair->second == nullptr) {
+            return Status(DB_ERROR, "Field '_id' is user defined");
+        }
+    }
+
+    // generate id
+    DataChunkPtr new_chunk = std::make_shared<DataChunk>();
+    new_chunk->fixed_fields_ = data_chunk->fixed_fields_;
+    new_chunk->variable_fields_ = data_chunk->variable_fields_;
+    new_chunk->count_ = data_chunk->count_;
+    if (auto_increment) {
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         IDNumbers ids;
         STATUS_CHECK(id_generator.GetNextIDNumbers(data_chunk->count_, ids));
         BinaryDataPtr id_data = std::make_shared<BinaryData>();
         id_data->data_.resize(ids.size() * sizeof(int64_t));
         memcpy(id_data->data_.data(), ids.data(), ids.size() * sizeof(int64_t));
-        data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME] = id_data;
+        new_chunk->fixed_fields_[engine::DEFAULT_UID_NAME] = id_data;
     }
 
     if (options_.wal_enable_) {
@@ -514,8 +546,8 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         record.lsn = 0;
         record.collection_id = collection_name;
         record.partition_tag = partition_name;
-        record.data_chunk = data_chunk;
-        record.length = data_chunk->count_;
+        record.data_chunk = new_chunk;
+        record.length = new_chunk->count_;
         record.type = wal::MXLogType::Entity;
 
         STATUS_CHECK(ExecWalRecord(record));
