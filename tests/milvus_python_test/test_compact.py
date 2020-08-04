@@ -29,6 +29,11 @@ default_single_query = {
     }
 }
 
+def ip_query():
+    query = copy.deepcopy(default_single_query)
+    query["bool"]["must"][0]["vector"][field_name].update({"metric_type": "IP"})
+    return query
+
 
 class TestCompactBase:
     """
@@ -697,7 +702,7 @@ class TestCompactJAC:
         assert len(ids) == nb
         connect.flush([collection])
         status = connect.compact(collection)
-        query = copy.deepcopy(default_single_query)
+        query = ip_query()
         query["bool"]["must"][0]["vector"][field_name]["query"] = [entity[-1]["values"][0], entities[-1]["values"][0],
                                                                    entities[-1]["values"][-1]]
         res = connect.search(collection, query)

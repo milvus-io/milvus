@@ -25,7 +25,7 @@ entity = gen_entities(1)
 entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)
 raw_vectors, binary_entities = gen_binary_entities(nb)
-query, query_vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1)
+query, query_vecs = gen_query_vectors(field_name, entities, top_k, 1)
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 1024}, "metric_type": "L2"}
 
 
@@ -124,7 +124,7 @@ class TestIndexBase:
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
+        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, search_params=search_param)
         res = connect.search(collection, query)
         assert len(res) == nq
 
@@ -257,14 +257,15 @@ class TestIndexBase:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
+        metric_type = "IP"
         ids = connect.insert(collection, entities)
-        get_simple_index["metric_type"] = "IP"
+        get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
         logging.getLogger().info(connect.get_collection_stats(collection))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
+        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, metric_type=metric_type, search_params=search_param)
         res = connect.search(collection, query)
         assert len(res) == nq
 
@@ -560,7 +561,7 @@ class TestIndexJAC:
         pdb.set_trace()
         ids = connect.insert(jac_collection, binary_entities)
         connect.create_index(jac_collection, binary_field_name, get_jaccard_index)
-        query, vecs = gen_query_vectors_inside_entities(binary_field_name, binary_entities, top_k, nq)
+        query, vecs = gen_query_vectors(binary_field_name, binary_entities, top_k, nq)
         search_param = get_search_param(get_jaccard_index["index_type"])
         res = connect.search(jac_collection, query, search_params=search_param)
         logging.getLogger().info(res)
