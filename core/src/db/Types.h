@@ -54,8 +54,6 @@ enum DataType {
 
     STRING = 20,
 
-    UID = 30,
-
     VECTOR_BINARY = 100,
     VECTOR_FLOAT = 101,
 };
@@ -139,6 +137,7 @@ using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;
 
 extern const char* DEFAULT_UID_NAME;
+extern const char* PARAM_UID_AUTOGEN;
 
 extern const char* DEFAULT_RAW_DATA_NAME;
 extern const char* DEFAULT_BLOOM_FILTER_NAME;

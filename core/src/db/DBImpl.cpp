@@ -209,18 +209,25 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     CHECK_INITIALIZED;
 
     auto ctx = context;
-    // check uid existence/validation
+    // check uid params
     bool has_uid = false;
     for (auto& pair : ctx.fields_schema) {
-        if (pair.first->GetFtype() == DataType::UID) {
+        if (pair.first->GetName() == DEFAULT_UID_NAME) {
             has_uid = true;
+            json params = pair.first->GetParams();
+            if (params.find(PARAM_UID_AUTOGEN) == params.end()) {
+                params[PARAM_UID_AUTOGEN] = true;
+                pair.first->SetParams(params);
+            }
             break;
         }
     }
 
     // add uid field if not specified
     if (!has_uid) {
-        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, milvus::engine::DataType::UID);
+        json params;
+        params[PARAM_UID_AUTOGEN] = true;
+        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, DataType::INT64, params);
         auto bloom_filter_element = std::make_shared<snapshot::FieldElement>(
             0, 0, DEFAULT_BLOOM_FILTER_NAME, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
         auto delete_doc_element = std::make_shared<snapshot::FieldElement>(

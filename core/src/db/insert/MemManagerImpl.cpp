@@ -109,7 +109,6 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
                     return Status(DB_ERROR, err_msg + name);
                 }
                 break;
-            case DataType::UID:
             case DataType::INT64:
                 if (data_size != chunk->count_ * sizeof(uint64_t)) {
                     return Status(DB_ERROR, err_msg + name);

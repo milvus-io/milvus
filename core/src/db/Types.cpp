@@ -16,6 +16,7 @@ namespace milvus {
 namespace engine {
 
 const char* DEFAULT_UID_NAME = "_uid";
+const char* PARAM_UID_AUTOGEN = "auto_increment";
 
 const char* DEFAULT_RAW_DATA_NAME = "_raw";
 const char* DEFAULT_BLOOM_FILTER_NAME = "_blf";

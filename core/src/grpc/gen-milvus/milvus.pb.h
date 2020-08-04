@@ -237,13 +237,12 @@ enum DataType : int {
   STRING = 20,
   VECTOR_BINARY = 100,
   VECTOR_FLOAT = 101,
-  VECTOR = 200,
   DataType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   DataType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool DataType_IsValid(int value);
 constexpr DataType DataType_MIN = NONE;
-constexpr DataType DataType_MAX = VECTOR;
+constexpr DataType DataType_MAX = VECTOR_FLOAT;
 constexpr int DataType_ARRAYSIZE = DataType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* DataType_descriptor();

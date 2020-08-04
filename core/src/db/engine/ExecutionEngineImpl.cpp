@@ -108,7 +108,6 @@ ExecutionEngineImpl::CreateStructuredIndex(const DataType field_type, engine::Bi
             index_ptr = CreateSortedIndex<int32_t>(raw_data);
             break;
         }
-        case engine::DataType::UID:
         case engine::DataType::INT64: {
             index_ptr = CreateSortedIndex<int64_t>(raw_data);
             break;
