@@ -14,8 +14,10 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
-#include "db/meta/MetaTypes.h"
+
+#include "db/Types.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshot.h"
 
@@ -37,11 +39,12 @@ struct SegmentFileContext {
     std::string field_element_name;
     ID_TYPE segment_id;
     ID_TYPE partition_id;
+    ID_TYPE collection_id;
 };
 
 struct LoadOperationContext {
     ID_TYPE id = 0;
-    State status = INVALID;
+    State state = INVALID;
     std::string name;
 };
 
@@ -53,17 +56,21 @@ struct OperationContext {
     ScopedSnapshotT prev_ss;
     SegmentPtr new_segment = nullptr;
     SegmentCommitPtr new_segment_commit = nullptr;
+    std::vector<SegmentCommitPtr> new_segment_commits;
     PartitionPtr new_partition = nullptr;
     PartitionCommitPtr new_partition_commit = nullptr;
+    std::vector<PartitionCommitPtr> new_partition_commits;
     SchemaCommitPtr new_schema_commit = nullptr;
     CollectionCommitPtr new_collection_commit = nullptr;
     CollectionPtr new_collection = nullptr;
 
-    SegmentFilePtr stale_segment_file = nullptr;
     std::vector<SegmentPtr> stale_segments;
 
-    FieldPtr prev_field = nullptr;
-    FieldElementPtr prev_field_element = nullptr;
+    std::vector<FieldElementPtr> new_field_elements;
+    std::vector<FieldElementPtr> stale_field_elements;
+
+    std::vector<FieldCommitPtr> new_field_commits;
+    std::vector<FieldCommitPtr> stale_field_commits;
 
     SegmentPtr prev_segment = nullptr;
     SegmentCommitPtr prev_segment_commit = nullptr;
@@ -73,6 +80,7 @@ struct OperationContext {
     PartitionCommitPtr stale_partition_commit = nullptr;
 
     SegmentFile::VecT new_segment_files;
+    SegmentFile::VecT stale_segment_files;
     CollectionPtr collection = nullptr;
     LSN_TYPE lsn = 0;
 
@@ -80,10 +88,12 @@ struct OperationContext {
     ToString() const;
 };
 
+using FieldElementMappings = std::unordered_map<FieldPtr, std::vector<FieldElementPtr>>;
+
 struct CreateCollectionContext {
     CollectionPtr collection = nullptr;
-    std::map<FieldPtr, std::vector<FieldElementPtr>> fields_schema;
     CollectionCommitPtr collection_commit = nullptr;
+    FieldElementMappings fields_schema;
     LSN_TYPE lsn = 0;
 
     std::string

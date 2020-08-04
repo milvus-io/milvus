@@ -28,8 +28,7 @@ class CollectionCommitOperation : public CommitOperation<CollectionCommit> {
         return prev_ss_->GetCollectionCommit();
     }
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 };
 
 class PartitionCommitOperation : public CommitOperation<PartitionCommit> {
@@ -40,8 +39,7 @@ class PartitionCommitOperation : public CommitOperation<PartitionCommit> {
     PartitionCommitPtr
     GetPrevResource() const override;
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -52,8 +50,7 @@ class PartitionOperation : public CommitOperation<Partition> {
     using BaseT = CommitOperation<Partition>;
     PartitionOperation(const PartitionContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(Store& store) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -70,8 +67,7 @@ class SegmentCommitOperation : public CommitOperation<SegmentCommit> {
     SegmentCommit::Ptr
     GetPrevResource() const override;
 
-    Status
-    DoExecute(Store&) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -82,8 +78,7 @@ class SegmentOperation : public CommitOperation<Segment> {
     using BaseT = CommitOperation<Segment>;
     SegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(Store& store) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     PreCheck() override;
@@ -94,11 +89,32 @@ class SegmentFileOperation : public CommitOperation<SegmentFile> {
     using BaseT = CommitOperation<SegmentFile>;
     SegmentFileOperation(const SegmentFileContext& sc, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(Store& store) override;
+    Status DoExecute(StorePtr) override;
 
  protected:
     SegmentFileContext context_;
+};
+
+class FieldCommitOperation : public CommitOperation<FieldCommit> {
+ public:
+    using BaseT = CommitOperation<FieldCommit>;
+    FieldCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    FieldCommit::Ptr
+    GetPrevResource() const override;
+
+    Status DoExecute(StorePtr) override;
+};
+
+class SchemaCommitOperation : public CommitOperation<SchemaCommit> {
+ public:
+    using BaseT = CommitOperation<SchemaCommit>;
+    SchemaCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    SchemaCommit::Ptr
+    GetPrevResource() const override;
+
+    Status DoExecute(StorePtr) override;
 };
 
 template <>
@@ -108,17 +124,17 @@ class LoadOperation<Collection> : public Operations {
         : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::O_Leaf), context_(context) {
     }
 
-    Status
-    ApplyToStore(Store& store) override {
+    const Status&
+    ApplyToStore(StorePtr store) override {
         if (done_) {
             Done(store);
             return status_;
         }
         Status status;
         if (context_.id == 0 && context_.name != "") {
-            status = store.GetCollection(context_.name, resource_);
+            status = store->GetCollection(context_.name, resource_);
         } else {
-            status = store.GetResource<Collection>(context_.id, resource_);
+            status = store->GetResource<Collection>(context_.id, resource_);
         }
         SetStatus(status);
         Done(store);
@@ -130,14 +146,12 @@ class LoadOperation<Collection> : public Operations {
         if (wait) {
             WaitToFinish();
         }
-        auto status = DoneRequired();
-        if (!status.ok())
-            return status;
+        STATUS_CHECK(CheckDone());
         if (!resource_) {
             return Status(SS_NOT_FOUND_ERROR, "No specified resource");
         }
         res = resource_;
-        return status;
+        return Status::OK();
     }
 
  protected:

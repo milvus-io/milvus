@@ -14,10 +14,10 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
+#include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
-#include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/impl/nsg/NSG.h"
 #include "knowhere/index/vector_index/impl/nsg/NSGIO.h"
@@ -47,7 +47,7 @@ NSG::Serialize(const Config& config) {
         std::shared_ptr<uint8_t[]> data(writer.data_);
 
         BinarySet res_set;
-        res_set.Append("NSG", data, writer.total);
+        res_set.Append("NSG", data, writer.rp);
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -78,7 +78,7 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
     try {
         auto elems = rows * config[meta::TOPK].get<int64_t>();
@@ -94,8 +94,8 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         s_params.k = config[meta::TOPK];
         {
             std::lock_guard<std::mutex> lk(mutex_);
-            index_->Search((float*)p_data, rows, dim, config[meta::TOPK].get<int64_t>(), p_dist, p_id, s_params,
-                           blacklist);
+            index_->Search((float*)p_data, nullptr, rows, dim, config[meta::TOPK].get<int64_t>(), p_dist, p_id,
+                           s_params, blacklist);
         }
 
         auto ret_ds = std::make_shared<Dataset>();
@@ -139,22 +139,45 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     b_params.out_degree = config[IndexParams::out_degree];
     b_params.search_length = config[IndexParams::search_length];
 
-    auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
+    GET_TENSOR(dataset_ptr)
 
-    GETTENSOR(dataset_ptr)
-    index_ = std::make_shared<impl::NsgIndex>(dim, rows, config[Metric::TYPE].get<std::string>());
+    impl::NsgIndex::Metric_Type metric;
+    auto metric_str = config[Metric::TYPE].get<std::string>();
+    if (metric_str == knowhere::Metric::IP) {
+        metric = impl::NsgIndex::Metric_Type::Metric_Type_IP;
+    } else if (metric_str == knowhere::Metric::L2) {
+        metric = impl::NsgIndex::Metric_Type::Metric_Type_L2;
+    } else {
+        KNOWHERE_THROW_MSG("Metric is not supported");
+    }
+
+    index_ = std::make_shared<impl::NsgIndex>(dim, rows, metric);
     index_->SetKnnGraph(knng);
     index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);
 }
 
 int64_t
 NSG::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
     return index_->ntotal;
 }
 
 int64_t
 NSG::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
     return index_->dimension;
+}
+
+void
+NSG::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = index_->GetSize();
 }
 
 }  // namespace knowhere

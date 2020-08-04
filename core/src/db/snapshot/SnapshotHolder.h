@@ -31,13 +31,12 @@ class SnapshotHolder {
     GetID() const {
         return collection_id_;
     }
-    Status
-    Add(ID_TYPE id);
+    Status Add(StorePtr, ID_TYPE);
 
     Status
-    Get(ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true);
+    Get(ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true) const;
     Status
-    Load(Store& store, ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true);
+    Load(StorePtr store, ScopedSnapshotT& ss, ID_TYPE id = 0, bool scoped = true);
 
     Status
     SetGCHandler(GCHandler gc_handler) {
@@ -54,7 +53,7 @@ class SnapshotHolder {
     /* Status */
     /* LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc); */
     Status
-    LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc, Store& store);
+    LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc, StorePtr store);
 
     void
     ReadyForRelease(Snapshot::Ptr ss) {
@@ -63,7 +62,7 @@ class SnapshotHolder {
         }
     }
 
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     ID_TYPE collection_id_;
     ID_TYPE min_id_ = std::numeric_limits<ID_TYPE>::max();
     ID_TYPE max_id_ = std::numeric_limits<ID_TYPE>::min();

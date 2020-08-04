@@ -237,7 +237,7 @@ DistanceL2::Compare(const float* a, const float* b, unsigned size) const {
 
 float
 DistanceIP::Compare(const float* a, const float* b, unsigned size) const {
-    return faiss::fvec_inner_product(a, b, (size_t)size);
+    return -(faiss::fvec_inner_product(a, b, (size_t)size));
 }
 
 #endif

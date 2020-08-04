@@ -30,7 +30,7 @@ namespace knowhere {
 
 void
 GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
     gpu_id_ = config[knowhere::meta::DEVICEID];
 
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
@@ -40,14 +40,11 @@ GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         idx_config.device = gpu_id_;
         int32_t nlist = config[IndexParams::nlist];
         faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-        faiss::gpu::GpuIndexIVFFlat device_index(gpu_res->faiss_res.get(), dim, nlist, metric_type, idx_config);
-        device_index.train(rows, (float*)p_data);
+        auto device_index =
+            new faiss::gpu::GpuIndexIVFFlat(gpu_res->faiss_res.get(), dim, nlist, metric_type, idx_config);
+        device_index->train(rows, (float*)p_data);
 
-        std::shared_ptr<faiss::Index> host_index = nullptr;
-        host_index.reset(faiss::gpu::index_gpu_to_cpu(&device_index));
-
-        auto device_index1 = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, host_index.get());
-        index_.reset(device_index1);
+        index_.reset(device_index);
         res_ = gpu_res;
     } else {
         KNOWHERE_THROW_MSG("Build IVF can't get gpu resource");

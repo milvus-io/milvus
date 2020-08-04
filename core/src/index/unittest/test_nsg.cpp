@@ -15,9 +15,8 @@
 #include <memory>
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/FaissBaseIndex.h"
-#include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/index/vector_offset_index/IndexNSG_NM.h"
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
@@ -45,7 +44,7 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
 #endif
         int nsg_dim = 256;
         Generate(nsg_dim, 20000, nq);
-        index_ = std::make_shared<milvus::knowhere::NSG>();
+        index_ = std::make_shared<milvus::knowhere::NSG_NM>();
 
         train_conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, 256},
                                               {milvus::knowhere::IndexParams::nlist, 163},
@@ -70,7 +69,7 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
     }
 
  protected:
-    std::shared_ptr<milvus::knowhere::NSG> index_;
+    std::shared_ptr<milvus::knowhere::NSG_NM> index_;
     milvus::knowhere::Config train_conf;
     milvus::knowhere::Config search_conf;
 };
@@ -88,34 +87,43 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     train_conf[milvus::knowhere::meta::DEVICEID] = -1;
     index_->BuildAll(base_dataset, train_conf);
+
+    // Serialize and Load before Query
+    milvus::knowhere::BinarySet bs = index_->Serialize();
+
+    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
+    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    bptr->size = dim * rows * sizeof(float);
+    bs.Append(RAW_DATA, bptr);
+
+    index_->Load(bs);
+
     auto result = index_->Query(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
-    auto binaryset = index_->Serialize();
-    {
-        fiu_enable("NSG.Serialize.throw_exception", 1, nullptr, 0);
-        ASSERT_ANY_THROW(index_->Serialize());
-        fiu_disable("NSG.Serialize.throw_exception");
-    }
-
     /* test NSG GPU train */
-    auto new_index_1 = std::make_shared<milvus::knowhere::NSG>(DEVICE_GPU0);
+    auto new_index_1 = std::make_shared<milvus::knowhere::NSG_NM>(DEVICE_GPU0);
     train_conf[milvus::knowhere::meta::DEVICEID] = DEVICE_GPU0;
     new_index_1->BuildAll(base_dataset, train_conf);
+
+    // Serialize and Load before Query
+    bs = new_index_1->Serialize();
+
+    dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+    raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    bptr = std::make_shared<milvus::knowhere::Binary>();
+    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    bptr->size = dim * rows * sizeof(float);
+    bs.Append(RAW_DATA, bptr);
+
+    new_index_1->Load(bs);
+
     auto new_result_1 = new_index_1->Query(query_dataset, search_conf);
     AssertAnns(new_result_1, nq, k);
-
-    /* test NSG index load */
-    auto new_index_2 = std::make_shared<milvus::knowhere::NSG>();
-    new_index_2->Load(binaryset);
-    {
-        fiu_enable("NSG.Load.throw_exception", 1, nullptr, 0);
-        ASSERT_ANY_THROW(new_index_2->Load(binaryset));
-        fiu_disable("NSG.Load.throw_exception");
-    }
-
-    auto new_result_2 = new_index_2->Query(query_dataset, search_conf);
-    AssertAnns(new_result_2, nq, k);
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
@@ -142,6 +150,19 @@ TEST_F(NSGInterfaceTest, delete_test) {
     train_conf[milvus::knowhere::meta::DEVICEID] = DEVICE_GPU0;
     index_->Train(base_dataset, train_conf);
 
+    // Serialize and Load before Query
+    milvus::knowhere::BinarySet bs = index_->Serialize();
+
+    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
+    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    bptr->size = dim * rows * sizeof(float);
+    bs.Append(RAW_DATA, bptr);
+
+    index_->Load(bs);
+
     auto result = index_->Query(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
@@ -157,6 +178,19 @@ TEST_F(NSGInterfaceTest, delete_test) {
 
     // search xq with delete
     index_->SetBlacklist(bitset);
+
+    // Serialize and Load before Query
+    bs = index_->Serialize();
+
+    dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+    raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    bptr = std::make_shared<milvus::knowhere::Binary>();
+    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    bptr->size = dim * rows * sizeof(float);
+    bs.Append(RAW_DATA, bptr);
+
+    index_->Load(bs);
     auto result_after = index_->Query(query_dataset, search_conf);
     AssertAnns(result_after, nq, k, CheckMode::CHECK_NOT_EQUAL);
     auto I_after = result_after->Get<int64_t*>(milvus::knowhere::meta::IDS);

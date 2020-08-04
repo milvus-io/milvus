@@ -22,10 +22,10 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
+#include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 #ifdef MILVUS_GPU_VERSION
@@ -81,12 +81,10 @@ INSTANTIATE_TEST_CASE_P(
     IVFParameters, IVFTest,
     Values(
 #ifdef MILVUS_GPU_VERSION
-        std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_GPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_GPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_GPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H, milvus::knowhere::IndexMode::MODE_GPU),
 #endif
-        std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, milvus::knowhere::IndexMode::MODE_CPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_CPU),
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::knowhere::IndexMode::MODE_CPU)));
 
@@ -245,26 +243,6 @@ TEST_P(IVFTest, clone_test) {
         }
     };
 
-    //    {
-    //        // clone in place
-    //        std::vector<std::string> support_idx_vec{"IVF", "GPUIVF", "IVFPQ", "IVFSQ", "GPUIVFSQ"};
-    //        auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
-    //        if (finder != support_idx_vec.cend()) {
-    //            EXPECT_NO_THROW({
-    //                                auto clone_index = index_->Clone();
-    //                                auto clone_result = clone_index->Search(query_dataset, conf);
-    //                                //AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
-    //                                AssertEqual(result, clone_result);
-    //                                std::cout << "inplace clone [" << index_type << "] success" << std::endl;
-    //                            });
-    //        } else {
-    //            EXPECT_THROW({
-    //                             std::cout << "inplace clone [" << index_type << "] failed" << std::endl;
-    //                             auto clone_index = index_->Clone();
-    //                         }, KnowhereException);
-    //        }
-    //    }
-
     {
         // copy from gpu to cpu
         if (index_mode_ == milvus::knowhere::IndexMode::MODE_GPU) {
@@ -352,11 +330,11 @@ TEST_P(IVFTest, invalid_gpu_source) {
     auto invalid_conf = ParamGenerator::GetInstance().Gen(index_type_);
     invalid_conf[milvus::knowhere::meta::DEVICEID] = -1;
 
-    if (index_type_ == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
-        // null faiss index
-        index_->SetIndexSize(0);
-        milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
-    }
+    // if (index_type_ == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+    //     null faiss index
+    //     index_->SetIndexSize(0);
+    //     milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
+    // }
 
     index_->Train(base_dataset, conf_);
 

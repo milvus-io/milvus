@@ -154,12 +154,9 @@ class TaskTableBaseTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
-        milvus::scheduler::SegmentSchemaPtr dummy = nullptr;
         invalid_task_ = nullptr;
-        task1_ = std::make_shared<milvus::scheduler::TestTask>(
-            std::make_shared<milvus::server::Context>("dummy_request_id"), dummy, nullptr);
-        task2_ = std::make_shared<milvus::scheduler::TestTask>(
-            std::make_shared<milvus::server::Context>("dummy_request_id"), dummy, nullptr);
+        task1_ = std::make_shared<milvus::scheduler::TestTask>();
+        task2_ = std::make_shared<milvus::scheduler::TestTask>();
     }
 
     milvus::scheduler::TaskPtr invalid_task_;
@@ -313,10 +310,8 @@ class TaskTableAdvanceTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
-        milvus::scheduler::SegmentSchemaPtr dummy = nullptr;
         for (uint64_t i = 0; i < 8; ++i) {
-            auto task = std::make_shared<milvus::scheduler::TestTask>(
-                std::make_shared<milvus::server::Context>("dummy_request_id"), dummy, nullptr);
+            auto task = std::make_shared<milvus::scheduler::TestTask>();
             table1_.Put(task);
         }
 

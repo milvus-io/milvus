@@ -42,9 +42,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ccache && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+# use login shell to activate environment un the RUN commands
+SHELL [ "/bin/bash", "-c", "-l" ]
 
-WORKDIR /root
-
-ENTRYPOINT [ "/app/docker-entrypoint.sh" ]
-CMD [ "start" ]
+# use login shell when running the container
+ENTRYPOINT [ "/bin/bash", "-c", "-l" ]

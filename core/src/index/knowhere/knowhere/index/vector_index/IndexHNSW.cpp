@@ -49,7 +49,7 @@ IndexHNSW::Serialize(const Config& config) {
         std::shared_ptr<uint8_t[]> data(writer.data_);
 
         BinarySet res_set;
-        res_set.Append("HNSW", data, writer.total);
+        res_set.Append("HNSW", data, writer.rp);
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -78,13 +78,14 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 void
 IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
-        GETTENSOR(dataset_ptr)
+        int64_t dim = dataset_ptr->Get<int64_t>(meta::DIM);
+        int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS);
 
         hnswlib::SpaceInterface<float>* space;
         if (config[Metric::TYPE] == Metric::L2) {
-            space = new hnswlib::L2Space(dim);
+            space = new hnswlib_nm::L2Space(dim);
         } else if (config[Metric::TYPE] == Metric::IP) {
-            space = new hnswlib::InnerProductSpace(dim);
+            space = new hnswlib_nm::InnerProductSpace(dim);
             normalize = true;
         }
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
@@ -102,7 +103,7 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 
     std::lock_guard<std::mutex> lk(mutex_);
 
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR_DATA_ID(dataset_ptr)
 
     //     if (normalize) {
     //         std::vector<float> ep_norm_vector(Dim());
@@ -135,7 +136,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
     size_t k = config[meta::TOPK].get<int64_t>();
     size_t id_size = sizeof(int64_t) * k;
@@ -203,6 +204,14 @@ IndexHNSW::Dim() {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     return (*(size_t*)index_->dist_func_param_);
+}
+
+void
+IndexHNSW::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = index_->cal_size();
 }
 
 }  // namespace knowhere

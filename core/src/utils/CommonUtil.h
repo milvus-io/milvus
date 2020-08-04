@@ -17,7 +17,6 @@
 #include <string>
 
 namespace milvus {
-namespace server {
 
 class CommonUtil {
  public:
@@ -52,5 +51,4 @@ class CommonUtil {
 #endif
 };
 
-}  // namespace server
 }  // namespace milvus

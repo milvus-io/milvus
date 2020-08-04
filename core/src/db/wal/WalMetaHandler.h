@@ -15,9 +15,8 @@
 #include <string>
 #include <unordered_map>
 
-#include "db/meta/Meta.h"
+#include "db/Types.h"
 #include "db/meta/MetaFactory.h"
-#include "db/meta/MetaTypes.h"
 #include "db/wal/WalDefinations.h"
 #include "db/wal/WalFileHandler.h"
 

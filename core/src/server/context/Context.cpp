@@ -14,7 +14,7 @@
 namespace milvus {
 namespace server {
 
-Context::Context(const std::string& request_id) : request_id_(request_id) {
+Context::Context(const std::string& req_id) : req_id_(req_id) {
 }
 
 const std::shared_ptr<tracing::TraceContext>&
@@ -28,14 +28,14 @@ Context::SetTraceContext(const std::shared_ptr<tracing::TraceContext>& trace_con
 }
 std::shared_ptr<Context>
 Context::Child(const std::string& operation_name) const {
-    auto new_context = std::make_shared<Context>(request_id_);
+    auto new_context = std::make_shared<Context>(req_id_);
     new_context->SetTraceContext(trace_context_->Child(operation_name));
     return new_context;
 }
 
 std::shared_ptr<Context>
 Context::Follower(const std::string& operation_name) const {
-    auto new_context = std::make_shared<Context>(request_id_);
+    auto new_context = std::make_shared<Context>(req_id_);
     new_context->SetTraceContext(trace_context_->Follower(operation_name));
     return new_context;
 }
@@ -54,14 +54,14 @@ Context::IsConnectionBroken() const {
     return context_->IsConnectionBroken();
 }
 
-BaseRequest::RequestType
-Context::GetRequestType() const {
-    return request_type_;
+ReqType
+Context::GetReqType() const {
+    return req_type_;
 }
 
 void
-Context::SetRequestType(BaseRequest::RequestType type) {
-    request_type_ = type;
+Context::SetReqType(ReqType type) {
+    req_type_ = type;
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////

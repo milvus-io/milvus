@@ -12,6 +12,8 @@
 #include <thrust/execution_policy.h>
 #include <thrust/transform.h>
 
+#ifdef FAISS_USE_FLOAT16
+
 namespace faiss { namespace gpu {
 
 bool getDeviceSupportsFloat16Math(int device) {
@@ -36,3 +38,5 @@ __half hostFloat2Half(float a) {
 }
 
 } } // namespace
+
+#endif // FAISS_USE_FLOAT16

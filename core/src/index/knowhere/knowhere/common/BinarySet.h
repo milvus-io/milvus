@@ -63,6 +63,17 @@ class BinarySet {
     //    binary_map_[name] = binary;
     //}
 
+    BinaryPtr
+    Erase(const std::string& name) {
+        BinaryPtr result = nullptr;
+        auto it = binary_map_.find(name);
+        if (it != binary_map_.end()) {
+            result = it->second;
+            binary_map_.erase(it);
+        }
+        return result;
+    }
+
     void
     clear() {
         binary_map_.clear();

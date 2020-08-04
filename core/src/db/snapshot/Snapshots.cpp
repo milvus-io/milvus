@@ -11,10 +11,16 @@
 
 #include "db/snapshot/Snapshots.h"
 #include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/EventExecutor.h"
+#include "db/snapshot/InActiveResourcesGCEvent.h"
 
 namespace milvus {
 namespace engine {
 namespace snapshot {
+
+/* Status */
+/* Snapshots::DropAll() { */
+/* } */
 
 Status
 Snapshots::DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn) {
@@ -76,7 +82,7 @@ Snapshots::DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_
 }
 
 Status
-Snapshots::LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) {
+Snapshots::LoadSnapshot(StorePtr store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) {
     SnapshotHolderPtr holder;
     auto status = LoadHolder(store, collection_id, holder);
     if (!status.ok())
@@ -86,7 +92,7 @@ Snapshots::LoadSnapshot(Store& store, ScopedSnapshotT& ss, ID_TYPE collection_id
 }
 
 Status
-Snapshots::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) {
+Snapshots::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) const {
     SnapshotHolderPtr holder;
     auto status = GetHolder(collection_id, holder);
     if (!status.ok())
@@ -96,7 +102,7 @@ Snapshots::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, b
 }
 
 Status
-Snapshots::GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id, bool scoped) {
+Snapshots::GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id, bool scoped) const {
     SnapshotHolderPtr holder;
     auto status = GetHolder(name, holder);
     if (!status.ok())
@@ -115,49 +121,65 @@ Snapshots::GetCollectionIds(IDS_TYPE& ids) const {
 }
 
 Status
-Snapshots::LoadNoLock(Store& store, ID_TYPE collection_id, SnapshotHolderPtr& holder) {
+Snapshots::GetCollectionNames(std::vector<std::string>& names) const {
+    std::shared_lock<std::shared_timed_mutex> lock(mutex_);
+    for (auto& kv : name_id_map_) {
+        names.push_back(kv.first);
+    }
+    return Status::OK();
+}
+
+Status
+Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& holder) {
     auto op = std::make_shared<GetSnapshotIDsOperation>(collection_id, false);
     /* op->Push(); */
     (*op)(store);
     auto& collection_commit_ids = op->GetIDs();
     if (collection_commit_ids.size() == 0) {
-        return Status(SS_NOT_FOUND_ERROR, "No collection commit found");
+        std::stringstream emsg;
+        emsg << "Snapshots::LoadNoLock: No collection commit is found for collection " << collection_id;
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
     holder = std::make_shared<SnapshotHolder>(collection_id,
                                               std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
     for (auto c_c_id : collection_commit_ids) {
-        holder->Add(c_c_id);
+        holder->Add(store, c_c_id);
     }
     return Status::OK();
 }
 
-void
-Snapshots::Init() {
+Status
+Snapshots::Init(StorePtr store) {
+    auto event = std::make_shared<InActiveResourcesGCEvent>();
+    EventExecutor::GetInstance().Submit(event);
+    STATUS_CHECK(event->WaitToFinish());
     auto op = std::make_shared<GetCollectionIDsOperation>();
-    op->Push();
+    STATUS_CHECK((*op)(store));
     auto& collection_ids = op->GetIDs();
     SnapshotHolderPtr holder;
-    // TODO
-    for (auto collection_id : collection_ids) {
-        /* GetHolder(collection_id, holder); */
-        auto& store = Store::GetInstance();
-        LoadHolder(store, collection_id, holder);
+    for (auto& collection_id : collection_ids) {
+        STATUS_CHECK(LoadHolder(store, collection_id, holder));
     }
+    return Status::OK();
 }
 
 Status
-Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) {
+Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) const {
     std::shared_lock<std::shared_timed_mutex> lock(mutex_);
     auto kv = name_id_map_.find(name);
     if (kv != name_id_map_.end()) {
         lock.unlock();
         return GetHolder(kv->second, holder);
     }
-    return Status(SS_NOT_FOUND_ERROR, "Specified snapshot holder not found");
+    std::stringstream emsg;
+    emsg << "Snapshots::GetHolderNoLock: Specified snapshot holder for collection ";
+    emsg << "\"" << name << "\""
+         << " not found";
+    return Status(SS_NOT_FOUND_ERROR, emsg.str());
 }
 
 Status
-Snapshots::GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder) {
+Snapshots::GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder) const {
     Status status;
     std::shared_lock<std::shared_timed_mutex> lock(mutex_);
     status = GetHolderNoLock(collection_id, holder);
@@ -166,7 +188,7 @@ Snapshots::GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder) {
 }
 
 Status
-Snapshots::LoadHolder(Store& store, const ID_TYPE& collection_id, SnapshotHolderPtr& holder) {
+Snapshots::LoadHolder(StorePtr store, const ID_TYPE& collection_id, SnapshotHolderPtr& holder) {
     Status status;
     {
         std::shared_lock<std::shared_timed_mutex> lock(mutex_);
@@ -189,10 +211,13 @@ Snapshots::LoadHolder(Store& store, const ID_TYPE& collection_id, SnapshotHolder
 }
 
 Status
-Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) {
+Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) const {
     auto it = holders_.find(collection_id);
     if (it == holders_.end()) {
-        return Status(SS_NOT_FOUND_ERROR, "Specified snapshot holder not found");
+        std::stringstream emsg;
+        emsg << "Snapshots::GetHolderNoLock: Specified snapshot holder for collection " << collection_id;
+        emsg << " not found";
+        return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
     holder = it->second;
     return Status::OK();
@@ -211,7 +236,8 @@ void
 Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
     /* to_release_.push_back(ss_ptr); */
     ss_ptr->UnRef();
-    std::cout << "Snapshot " << ss_ptr->GetID() << " RefCnt = " << ss_ptr->RefCnt() << " To be removed" << std::endl;
+    std::cout << "Snapshot " << ss_ptr->GetID() << " ref_count = " << ss_ptr->ref_count() << " To be removed"
+              << std::endl;
 }
 
 }  // namespace snapshot

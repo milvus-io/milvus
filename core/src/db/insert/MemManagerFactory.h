@@ -12,7 +12,7 @@
 #pragma once
 
 #include "MemManager.h"
-#include "db/meta/Meta.h"
+#include "db/Options.h"
 
 #include <memory>
 
@@ -22,7 +22,7 @@ namespace engine {
 class MemManagerFactory {
  public:
     static MemManagerPtr
-    Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options);
+    Build(const DBOptions& options);
 };
 
 }  // namespace engine

@@ -7,8 +7,8 @@ pull_request_rules:
         - "#changes-requested-reviews-by=0"
         - "status-success=DCO"
         - "status-success=continuous-integration/jenkins/pr-merge"
-        - "status-success=Core / AMD64 Ubuntu 18.04 (pull_request)"
-        - "status-success=Core / AMD64 CentOS 7 (pull_request)"
+        - "status-success=AMD64 Ubuntu 18.04"
+        - "status-success=AMD64 CentOS 7"
       actions:
         merge:
           method: squash

@@ -56,14 +56,10 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
 #endif
 
     int64_t
-    Count() override {
-        return index_->ntotal;
-    }
+    Count() override;
 
     int64_t
-    Dim() override {
-        return index_->d;
-    }
+    Dim() override;
 
     int64_t
     IndexSize() override {

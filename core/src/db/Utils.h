@@ -16,46 +16,31 @@
 
 #include "Options.h"
 #include "db/Types.h"
-#include "db/meta/MetaTypes.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
+namespace snapshot {
+class Segment;
+class Partition;
+class Collection;
+}  // namespace snapshot
 namespace utils {
 
 int64_t
 GetMicroSecTimeStamp();
 
-Status
-CreateCollectionPath(const DBMetaOptions& options, const std::string& collection_id);
-Status
-DeleteCollectionPath(const DBMetaOptions& options, const std::string& collection_id, bool force = true);
-
-Status
-CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
-Status
-GetCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
-Status
-DeleteCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file);
-Status
-DeleteSegment(const DBMetaOptions& options, meta::SegmentSchema& table_file);
-
-Status
-GetParentPath(const std::string& path, std::string& parent_path);
-
 bool
 IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2);
 
 bool
-IsRawIndexType(int32_t type);
+IsBinaryMetricType(const std::string& metric_type);
 
-bool
-IsBinaryMetricType(int32_t metric_type);
-
-meta::DateT
+engine::DateT
 GetDate(const std::time_t& t, int day_delta = 0);
-meta::DateT
+engine::DateT
 GetDate();
-meta::DateT
+engine::DateT
 GetDateWithDelta(int day_delta);
 
 struct MetaUriInfo {
@@ -70,17 +55,8 @@ struct MetaUriInfo {
 Status
 ParseMetaUri(const std::string& uri, MetaUriInfo& info);
 
-std::string
-GetIndexName(int32_t index_type);
-
 void
 SendExitSignal();
-
-void
-ExitOnWriteError(Status& status);
-
-void
-EraseFromCache(const std::string& item_key);
 
 }  // namespace utils
 }  // namespace engine

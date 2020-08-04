@@ -10,6 +10,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <faiss/IndexSQHybrid.h>
 #include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/index_factory.h>
@@ -30,7 +31,7 @@ namespace knowhere {
 
 void
 IVFSQHybrid::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
     gpu_id_ = config[knowhere::meta::DEVICEID];
 
     std::stringstream index_type;
@@ -45,19 +46,14 @@ IVFSQHybrid::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         auto device_index = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, build_index);
         device_index->train(rows, (float*)p_data);
 
-        std::shared_ptr<faiss::Index> host_index = nullptr;
-        host_index.reset(faiss::gpu::index_gpu_to_cpu(device_index));
-
-        delete device_index;
-        delete build_index;
-
-        device_index = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, host_index.get());
         index_.reset(device_index);
         res_ = gpu_res;
         gpu_mode_ = 2;
     } else {
         KNOWHERE_THROW_MSG("Build IVFSQHybrid can't get gpu resource");
     }
+
+    delete build_index;
 }
 
 VecIndexPtr
@@ -264,6 +260,20 @@ IVFSQHybrid::QueryImpl(int64_t n, const float* data, int64_t k, float* distances
     } else if (gpu_mode_ == 0) {
         IVF::QueryImpl(n, data, k, distances, labels, config);
     }
+}
+
+void
+IVFSQHybrid::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    auto ivfsqh_index = dynamic_cast<faiss::IndexIVFSQHybrid*>(index_.get());
+    auto nb = ivfsqh_index->invlists->compute_ntotal();
+    auto code_size = ivfsqh_index->code_size;
+    auto nlist = ivfsqh_index->nlist;
+    auto d = ivfsqh_index->d;
+    // ivf codes, ivf ids, sq trained vectors and quantizer
+    index_size_ = nb * code_size + nb * sizeof(int64_t) + 2 * d * sizeof(float) + nlist * d * sizeof(float);
 }
 
 FaissIVFQuantizer::~FaissIVFQuantizer() {

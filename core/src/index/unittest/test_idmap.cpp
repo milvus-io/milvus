@@ -17,8 +17,8 @@
 #include <thread>
 
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
-#include "knowhere/index/vector_index/IndexType.h"
 #ifdef MILVUS_GPU_VERSION
 #include <faiss/gpu/GpuCloner.h>
 #include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"

@@ -22,26 +22,6 @@ namespace milvus {
 namespace knowhere {
 
 template <typename T>
-struct IndexStructure {
-    IndexStructure() : a_(0), idx_(0) {
-    }
-    explicit IndexStructure(const T a) : a_(a), idx_(0) {
-    }
-    IndexStructure(const T a, const size_t idx) : a_(a), idx_(idx) {
-    }
-    bool
-    operator<(const IndexStructure& b) const {
-        return a_ < b.a_;
-    }
-    bool
-    operator==(const IndexStructure& b) const {
-        return a_ == b.a_;
-    }
-    T a_;
-    size_t idx_;
-};
-
-template <typename T>
 class StructuredIndexSort : public StructuredIndex<T> {
  public:
     StructuredIndexSort();

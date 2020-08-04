@@ -23,147 +23,67 @@
 #include <vector>
 
 #include "Job.h"
+#include "db/SnapshotVisitor.h"
 #include "db/Types.h"
-#include "db/meta/MetaTypes.h"
-
-#include "query/GeneralQuery.h"
 
 #include "server/context/Context.h"
 
 namespace milvus {
 namespace scheduler {
 
-using engine::meta::SegmentSchemaPtr;
-
-using Id2IndexMap = std::unordered_map<size_t, SegmentSchemaPtr>;
-
-using ResultIds = engine::ResultIds;
-using ResultDistances = engine::ResultDistances;
-
-struct SearchTimeStat {
-    double query_time = 0.0;
-    double map_uids_time = 0.0;
-    double reduce_time = 0.0;
-};
+// struct SearchTimeStat {
+//    double query_time = 0.0;
+//    double map_uids_time = 0.0;
+//    double reduce_time = 0.0;
+//};
 
 class SearchJob : public Job {
  public:
-    SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, const milvus::json& extra_params,
-              engine::VectorsData& vectors);
-
-    SearchJob(const std::shared_ptr<server::Context>& context, query::GeneralQueryPtr general_query,
-              query::QueryPtr query_ptr, std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type,
-              engine::VectorsData& vectorsData);
+    SearchJob(const server::ContextPtr& context, const engine::snapshot::ScopedSnapshotT& snapshot,
+              engine::DBOptions options, const query::QueryPtr& query_ptr,
+              const engine::snapshot::IDS_TYPE& segment_ids);
 
  public:
-    bool
-    AddIndexFile(const SegmentSchemaPtr& index_file);
-
-    void
-    WaitResult();
-
-    void
-    SearchDone(size_t index_id);
-
-    ResultIds&
-    GetResultIds();
-
-    ResultDistances&
-    GetResultDistances();
-
-    void
-    SetVectors(engine::VectorsData& vectors) {
-        vectors_ = vectors;
-    }
-
-    Status&
-    GetStatus();
-
     json
     Dump() const override;
 
- public:
-    const std::shared_ptr<server::Context>&
-    GetContext() const;
-
-    uint64_t&
-    topk() {
-        return topk_;
+    const server::ContextPtr&
+    GetContext() const {
+        return context_;
     }
 
-    uint64_t
-    nq() const {
-        return vectors_.vector_count_;
+    engine::DBOptions
+    options() const {
+        return options_;
     }
 
-    const milvus::json&
-    extra_params() const {
-        return extra_params_;
-    }
-
-    const engine::VectorsData&
-    vectors() const {
-        return vectors_;
-    }
-
-    Id2IndexMap&
-    index_files() {
-        return index_files_;
-    }
-
-    std::mutex&
-    mutex() {
-        return mutex_;
-    }
-
-    query::GeneralQueryPtr
-    general_query() {
-        return general_query_;
-    }
-
-    query::QueryPtr
-    query_ptr() {
+    const query::QueryPtr
+    query_ptr() const {
         return query_ptr_;
     }
 
-    std::unordered_map<std::string, engine::meta::hybrid::DataType>&
-    attr_type() {
-        return attr_type_;
+    engine::QueryResultPtr&
+    query_result() {
+        return query_result_;
     }
 
-    uint64_t&
-    vector_count() {
-        return vector_count_;
+    const engine::snapshot::IDS_TYPE&
+    segment_ids() {
+        return segment_ids_;
     }
 
-    SearchTimeStat&
-    time_stat() {
-        return time_stat_;
-    }
+ protected:
+    void
+    OnCreateTasks(JobTasks& tasks) override;
 
  private:
-    const std::shared_ptr<server::Context> context_;
+    const server::ContextPtr context_;
+    engine::snapshot::ScopedSnapshotT snapshot_;
+    engine::DBOptions options_;
 
-    uint64_t topk_ = 0;
-    milvus::json extra_params_;
-    // TODO: smart pointer
-    engine::VectorsData& vectors_;
-
-    Id2IndexMap index_files_;
-    // TODO: column-base better ?
-    ResultIds result_ids_;
-    ResultDistances result_distances_;
-    Status status_;
-
-    query::GeneralQueryPtr general_query_;
     query::QueryPtr query_ptr_;
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type_;
-    uint64_t vector_count_;
-
-    std::mutex mutex_;
-    std::condition_variable cv_;
-
-    SearchTimeStat time_stat_;
+    engine::QueryResultPtr query_result_;
+    engine::snapshot::IDS_TYPE segment_ids_;
 };
 
 using SearchJobPtr = std::shared_ptr<SearchJob>;

@@ -135,6 +135,49 @@ GpuIndexIVFScalarQuantizer::copyFrom(
 }
 
 void
+GpuIndexIVFScalarQuantizer::copyFromWithoutCodes(
+  const faiss::IndexIVFScalarQuantizer* index, const uint8_t* arranged_data) {
+  DeviceScope scope(device_);
+
+  // Clear out our old data
+  delete index_;
+  index_ = nullptr;
+
+  // Copy what we need from the CPU index
+  GpuIndexIVF::copyFrom(index);
+  sq = index->sq;
+  by_residual = index->by_residual;
+
+  // The other index might not be trained, in which case we don't need to copy
+  // over the lists
+  if (!index->is_trained) {
+    return;
+  }
+
+  // Otherwise, we can populate ourselves from the other index
+  this->is_trained = true;
+
+  // Copy our lists as well
+  index_ = new IVFFlat(resources_,
+                       quantizer->getGpuData(),
+                       index->metric_type,
+                       index->metric_arg,
+                       by_residual,
+                       &sq,
+                       ivfSQConfig_.indicesOptions,
+                       memorySpace_);
+
+  InvertedLists* ivf = index->invlists;
+
+  if(ReadOnlyArrayInvertedLists* rol = dynamic_cast<ReadOnlyArrayInvertedLists*>(ivf)) {
+      index_->copyCodeVectorsFromCpu((const float *)arranged_data,
+                                     (const long *)(rol->pin_readonly_ids->data), rol->readonly_length);
+  } else {
+      // should not happen
+  }
+}
+
+void
 GpuIndexIVFScalarQuantizer::copyTo(
   faiss::IndexIVFScalarQuantizer* index) const {
   DeviceScope scope(device_);
@@ -164,6 +207,38 @@ GpuIndexIVFScalarQuantizer::copyTo(
                        listIndices.size(),
                        listIndices.data(),
                        (const uint8_t*) listData.data());
+    }
+  }
+}
+
+void
+GpuIndexIVFScalarQuantizer::copyToWithoutCodes(
+  faiss::IndexIVFScalarQuantizer* index) const {
+  DeviceScope scope(device_);
+
+  // We must have the indices in order to copy to ourselves
+  FAISS_THROW_IF_NOT_MSG(
+    ivfSQConfig_.indicesOptions != INDICES_IVF,
+    "Cannot copy to CPU as GPU index doesn't retain "
+    "indices (INDICES_IVF)");
+
+  GpuIndexIVF::copyTo(index);
+  index->sq = sq;
+  index->code_size = sq.code_size;
+  index->by_residual = by_residual;
+  index->code_size = sq.code_size;
+
+  InvertedLists* ivf = new ArrayInvertedLists(nlist, index->code_size);
+  index->replace_invlists(ivf, true);
+
+  // Copy the inverted lists
+  if (index_) {
+    for (int i = 0; i < nlist; ++i) {
+      auto listIndices = index_->getListIndices(i);
+
+      ivf->add_entries_without_codes(i,
+                                     listIndices.size(),
+                                     listIndices.data());
     }
   }
 }

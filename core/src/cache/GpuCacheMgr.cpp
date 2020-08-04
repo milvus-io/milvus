@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "cache/GpuCacheMgr.h"
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "utils/Log.h"
 
 #include <fiu-local.h>
@@ -29,45 +29,15 @@ constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
 }
 
 GpuCacheMgr::GpuCacheMgr(int64_t gpu_id) : gpu_id_(gpu_id) {
-    // All config values have been checked in Config::ValidateConfig()
-    server::Config& config = server::Config::GetInstance();
-
-    int64_t gpu_cache_cap;
-    config.GetGpuResourceConfigCacheCapacity(gpu_cache_cap);
-    int64_t cap = gpu_cache_cap * G_BYTE;
     std::string header = "[CACHE GPU" + std::to_string(gpu_id) + "]";
-    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32, header);
+    cache_ = std::make_shared<Cache<DataObjPtr>>(config.gpu.cache_size(), 1UL << 32, header);
 
-    float gpu_mem_threshold;
-    config.GetGpuResourceConfigCacheThreshold(gpu_mem_threshold);
-    cache_->set_freemem_percent(gpu_mem_threshold);
-
-    SetIdentity("GpuCacheMgr");
-    AddGpuEnableListener();
-    AddGpuCacheCapacityListener();
+    cache_->set_freemem_percent(config.gpu.cache_threshold());
+    ConfigMgr::GetInstance().Attach("gpu.cache_threshold", this);
 }
 
 GpuCacheMgr::~GpuCacheMgr() {
-    server::Config& config = server::Config::GetInstance();
-    config.CancelCallBack(server::CONFIG_GPU_RESOURCE, server::CONFIG_GPU_RESOURCE_ENABLE, identity_);
-}
-
-DataObjPtr
-GpuCacheMgr::GetIndex(const std::string& key) {
-    DataObjPtr obj = GetItem(key);
-    return obj;
-}
-
-void
-GpuCacheMgr::InsertItem(const std::string& key, const milvus::cache::DataObjPtr& data) {
-    if (gpu_enable_) {
-        CacheMgr<DataObjPtr>::InsertItem(key, data);
-    }
-}
-
-bool
-GpuCacheMgr::Reserve(const int64_t size) {
-    return CacheMgr<DataObjPtr>::Reserve(size);
+    ConfigMgr::GetInstance().Detach("gpu.cache_threshold", this);
 }
 
 GpuCacheMgrPtr
@@ -81,10 +51,27 @@ GpuCacheMgr::GetInstance(int64_t gpu_id) {
     return instance_[gpu_id];
 }
 
+DataObjPtr
+GpuCacheMgr::GetDataObj(const std::string& key) {
+    DataObjPtr obj = GetItem(key);
+    return obj;
+}
+
 void
-GpuCacheMgr::OnGpuCacheCapacityChanged(int64_t capacity) {
-    for (auto& iter : instance_) {
-        iter.second->SetCapacity(capacity * G_BYTE);
+GpuCacheMgr::SetDataObj(const std::string& key, const milvus::cache::DataObjPtr& data) {
+    CacheMgr<DataObjPtr>::InsertItem(key, data);
+}
+
+bool
+GpuCacheMgr::Reserve(const int64_t size) {
+    return CacheMgr<DataObjPtr>::Reserve(size);
+}
+
+void
+GpuCacheMgr::ConfigUpdate(const std::string& name) {
+    std::lock_guard<std::mutex> lock(global_mutex_);
+    for (auto& it : instance_) {
+        it.second->SetCapacity(config.gpu.cache_size());
     }
 }
 

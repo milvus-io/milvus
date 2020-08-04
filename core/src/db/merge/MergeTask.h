@@ -11,8 +11,12 @@
 
 #pragma once
 
+#include <string>
+
+#include "db/Types.h"
 #include "db/merge/MergeManager.h"
-#include "db/meta/MetaTypes.h"
+#include "db/snapshot/ResourceTypes.h"
+#include "db/snapshot/Snapshot.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -20,17 +24,16 @@ namespace engine {
 
 class MergeTask {
  public:
-    MergeTask(const meta::MetaPtr& meta, const DBOptions& options, meta::SegmentsSchema& files);
+    MergeTask(const DBOptions& options, const snapshot::ScopedSnapshotT& ss, const snapshot::IDS_TYPE& segments);
 
     Status
     Execute();
 
  private:
-    meta::MetaPtr meta_ptr_;
     DBOptions options_;
-
-    meta::SegmentsSchema files_;
-};  // MergeTask
+    snapshot::ScopedSnapshotT snapshot_;
+    snapshot::IDS_TYPE segments_;
+};  // SSMergeTask
 
 }  // namespace engine
 }  // namespace milvus

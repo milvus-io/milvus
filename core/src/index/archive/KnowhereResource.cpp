@@ -14,7 +14,7 @@
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "faiss/FaissHook.h"
 #include "scheduler/Utils.h"
 #include "utils/Error.h"
@@ -34,18 +34,16 @@ constexpr int64_t M_BYTE = 1024 * 1024;
 
 Status
 KnowhereResource::Initialize() {
-    server::Config& config = server::Config::GetInstance();
-    std::string simd_type;
-    STATUS_CHECK(config.GetEngineConfigSimdType(simd_type));
-    if (simd_type == "avx512") {
+    auto simd_type = config.engine.simd_type();
+    if (simd_type == SimdType::AVX512) {
         faiss::faiss_use_avx512 = true;
         faiss::faiss_use_avx2 = false;
         faiss::faiss_use_sse = false;
-    } else if (simd_type == "avx2") {
+    } else if (simd_type == SimdType::AVX2) {
         faiss::faiss_use_avx512 = false;
         faiss::faiss_use_avx2 = true;
         faiss::faiss_use_sse = false;
-    } else if (simd_type == "sse") {
+    } else if (simd_type == SimdType::SSE) {
         faiss::faiss_use_avx512 = false;
         faiss::faiss_use_avx2 = false;
         faiss::faiss_use_sse = true;
@@ -63,8 +61,7 @@ KnowhereResource::Initialize() {
     }
 
 #ifdef MILVUS_GPU_VERSION
-    bool enable_gpu = false;
-    STATUS_CHECK(config.GetGpuResourceConfigEnable(enable_gpu));
+    bool enable_gpu = config.gpu.enable();
     fiu_do_on("KnowhereResource.Initialize.disable_gpu", enable_gpu = false);
     if (not enable_gpu)
         return Status::OK();
@@ -78,16 +75,14 @@ KnowhereResource::Initialize() {
     GpuResourcesArray gpu_resources;
 
     // get build index gpu resource
-    std::vector<int64_t> build_index_gpus;
-    STATUS_CHECK(config.GetGpuResourceConfigBuildIndexResources(build_index_gpus));
+    std::vector<int64_t> build_index_gpus = ParseGPUDevices(config.gpu.build_index_devices());
 
     for (auto gpu_id : build_index_gpus) {
         gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
     }
 
     // get search gpu resource
-    std::vector<int64_t> search_gpus;
-    STATUS_CHECK(config.GetGpuResourceConfigSearchResources(search_gpus));
+    std::vector<int64_t> search_gpus = ParseGPUDevices(config.gpu.search_devices());
 
     for (auto& gpu_id : search_gpus) {
         gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));

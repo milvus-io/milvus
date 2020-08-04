@@ -17,10 +17,14 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
-#include "Context.h"
+
+#include "db/snapshot/Context.h"
+#include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Snapshot.h"
 #include "db/snapshot/Store.h"
 #include "utils/Error.h"
@@ -30,15 +34,28 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-using StepsT = std::vector<std::any>;
 using CheckStaleFunc = std::function<Status(ScopedSnapshotT&)>;
+template <typename ResourceT>
+using StepsContextSet = std::set<typename ResourceContext<ResourceT>::Ptr>;
+using StepsHolderT =
+    std::tuple<StepsContextSet<CollectionCommit>, StepsContextSet<Collection>, StepsContextSet<SchemaCommit>,
+               StepsContextSet<FieldCommit>, StepsContextSet<Field>, StepsContextSet<FieldElement>,
+               StepsContextSet<PartitionCommit>, StepsContextSet<Partition>, StepsContextSet<SegmentCommit>,
+               StepsContextSet<Segment>, StepsContextSet<SegmentFile>>;
 
 enum OperationsType { Invalid, W_Leaf, O_Leaf, W_Compound, O_Compound };
 
 class Operations : public std::enable_shared_from_this<Operations> {
  public:
+    using TimeoutCBT = std::function<Status(const Status&)>;
+
     Operations(const OperationContext& context, ScopedSnapshotT prev_ss,
                const OperationsType& type = OperationsType::Invalid);
+
+    const OperationContext&
+    GetContext() const {
+        return context_;
+    }
 
     const ScopedSnapshotT&
     GetStartedSS() const {
@@ -55,6 +72,11 @@ class Operations : public std::enable_shared_from_this<Operations> {
         return context_.lsn;
     }
 
+    void
+    SetContextLsn(LSN_TYPE lsn) {
+        context_.lsn = lsn;
+    }
+
     virtual Status
     CheckStale(const CheckStaleFunc& checker = nullptr) const;
     virtual Status
@@ -62,18 +84,24 @@ class Operations : public std::enable_shared_from_this<Operations> {
 
     template <typename StepT>
     void
-    AddStep(const StepT& step, bool activate = true);
+    AddStep(const StepT& step, ResourceContextPtr<StepT> step_context = nullptr, bool activate = true);
     template <typename StepT>
     void
-    AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, bool activate = true);
+    AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, ResourceContextPtr<StepT> step_context = nullptr,
+                   bool activate = true);
     void
     SetStepResult(ID_TYPE id) {
         ids_.push_back(id);
     }
 
-    StepsT&
-    GetSteps() {
-        return steps_;
+    const size_t
+    GetPos() const {
+        return last_pos_;
+    }
+
+    StepsHolderT&
+    GetStepHolders() {
+        return holders_;
     }
 
     ID_TYPE
@@ -84,40 +112,36 @@ class Operations : public std::enable_shared_from_this<Operations> {
         return type_;
     }
 
-    virtual Status
-    OnExecute(Store&);
-    virtual Status
-    PreExecute(Store&);
-    virtual Status
-    DoExecute(Store&);
-    virtual Status
-    PostExecute(Store&);
+    virtual Status OnExecute(StorePtr);
+    virtual Status PreExecute(StorePtr);
+    virtual Status DoExecute(StorePtr);
+    virtual Status PostExecute(StorePtr);
 
     virtual Status
     GetSnapshot(ScopedSnapshotT& ss) const;
 
     virtual Status
-    operator()(Store& store);
+    operator()(StorePtr store);
     virtual Status
     Push(bool sync = true);
 
     virtual Status
     PreCheck();
 
-    virtual Status
-    ApplyToStore(Store& store);
+    virtual const Status& ApplyToStore(StorePtr);
 
-    Status
+    const Status&
     WaitToFinish();
 
     void
-    Done(Store& store);
+    Done(StorePtr store);
 
     void
     SetStatus(const Status& status);
 
-    Status
+    const Status&
     GetStatus() const {
+        std::unique_lock<std::mutex> lock(finish_mtx_);
         return status_;
     }
 
@@ -131,13 +155,19 @@ class Operations : public std::enable_shared_from_this<Operations> {
     virtual std::string
     ToString() const;
 
-    Status
-    RollBack();
-
     virtual Status
     OnSnapshotStale();
     virtual Status
     OnSnapshotDropped();
+
+    void
+    Abort() {
+        aborted_ = true;
+    }
+    bool
+    HasAborted() const {
+        return aborted_;
+    }
 
     virtual ~Operations();
 
@@ -145,24 +175,30 @@ class Operations : public std::enable_shared_from_this<Operations> {
     operator<<(std::ostream& out, const Operations& operation);
 
  protected:
+    virtual Status
+    OnApplySuccessCallback(ID_TYPE result_id);
+    virtual Status OnApplyErrorCallback(Status);
+    virtual Status OnApplyTimeoutCallback(StorePtr);
+
     virtual std::string
     SuccessString() const;
     virtual std::string
     FailureString() const;
 
     Status
-    DoneRequired() const;
+    CheckDone() const;
     Status
-    IDSNotEmptyRequried() const;
+    CheckIDSNotEmpty() const;
     Status
-    PrevSnapshotRequried() const;
+    CheckPrevSnapshot() const;
 
-    Status
-    ApplyRollBack(Store&);
+    void
+    RollBack();
 
     OperationContext context_;
     ScopedSnapshotT prev_ss_;
-    StepsT steps_;
+    StepsHolderT holders_;
+    size_t last_pos_;
     std::vector<ID_TYPE> ids_;
     bool done_ = false;
     Status status_;
@@ -170,25 +206,49 @@ class Operations : public std::enable_shared_from_this<Operations> {
     std::condition_variable finish_cond_;
     ID_TYPE uid_;
     OperationsType type_;
+    double execution_time_ = 0;
+    std::atomic_bool aborted_ = false;
 };
 
 template <typename StepT>
 void
-Operations::AddStep(const StepT& step, bool activate) {
+Operations::AddStep(const StepT& step, ResourceContextPtr<StepT> step_context, bool activate) {
+    if (step_context == nullptr) {
+        step_context = ResourceContextBuilder<StepT>().SetOp(meta::oAdd).CreatePtr();
+    }
+
     auto s = std::make_shared<StepT>(step);
-    if (activate)
+    step_context->AddResource(s);
+    if (activate) {
         s->Activate();
-    steps_.push_back(s);
+        step_context->AddAttr(StateField::Name);
+    }
+
+    last_pos_ = Index<StepsContextSet<StepT>, StepsHolderT>::value;
+    auto& holder = std::get<Index<StepsContextSet<StepT>, StepsHolderT>::value>(holders_);
+    holder.insert(step_context);
 }
 
 template <typename StepT>
 void
-Operations::AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, bool activate) {
+Operations::AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, ResourceContextPtr<StepT> step_context,
+                           bool activate) {
+    if (step_context == nullptr) {
+        step_context = ResourceContextBuilder<StepT>().SetOp(meta::oAdd).CreatePtr();
+    }
+
     auto s = std::make_shared<StepT>(step);
-    if (activate)
+    step_context->AddResource(s);
+    if (activate) {
         s->Activate();
+        step_context->AddAttr(StateField::Name);
+    }
     s->SetLsn(lsn);
-    steps_.push_back(s);
+    step_context->AddAttr(LsnField::Name);
+
+    last_pos_ = Index<StepsContextSet<StepT>, StepsHolderT>::value;
+    auto& holder = std::get<Index<StepsContextSet<StepT>, StepsHolderT>::value>(holders_);
+    holder.insert(step_context);
 }
 
 template <typename ResourceT>
@@ -211,20 +271,16 @@ class CommitOperation : public Operations {
         if (wait) {
             WaitToFinish();
         }
-        auto status = DoneRequired();
-        if (!status.ok())
-            return status;
-        status = IDSNotEmptyRequried();
-        if (!status.ok())
-            return status;
+        STATUS_CHECK(CheckDone());
+        STATUS_CHECK(CheckIDSNotEmpty());
         resource_->SetID(ids_[0]);
         res = resource_;
-        return status;
+        return Status::OK();
     }
 
  protected:
     Status
-    ResourceNotNullRequired() const {
+    CheckResource() const {
         Status status;
         if (!resource_)
             return Status(SS_CONSTRAINT_CHECK_ERROR, "No specified resource");
@@ -241,13 +297,13 @@ class LoadOperation : public Operations {
         : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::O_Leaf), context_(context) {
     }
 
-    Status
-    ApplyToStore(Store& store) override {
+    const Status&
+    ApplyToStore(StorePtr store) override {
         if (done_) {
             Done(store);
             return status_;
         }
-        auto status = store.GetResource<ResourceT>(context_.id, resource_);
+        auto status = store->GetResource<ResourceT>(context_.id, resource_);
         SetStatus(status);
         Done(store);
         return status_;
@@ -260,19 +316,15 @@ class LoadOperation : public Operations {
         if (wait) {
             WaitToFinish();
         }
-        auto status = DoneRequired();
-        if (!status.ok())
-            return status;
-        status = ResourceNotNullRequired();
-        if (!status.ok())
-            return status;
+        STATUS_CHECK(CheckDone());
+        STATUS_CHECK(CheckResource());
         res = resource_;
-        return status;
+        return Status::OK();
     }
 
  protected:
     Status
-    ResourceNotNullRequired() const {
+    CheckResource() const {
         Status status;
         if (!resource_)
             return Status(SS_CONSTRAINT_CHECK_ERROR, "No specified resource");
@@ -284,40 +336,60 @@ class LoadOperation : public Operations {
 };
 
 template <typename ResourceT>
+class SoftDeleteOperation : public Operations {
+ public:
+    using BaseT = Operations;
+    explicit SoftDeleteOperation(ID_TYPE id) : BaseT(OperationContext(), ScopedSnapshotT()), id_(id) {
+    }
+
+    Status
+    GetResource(typename ResourceT::Ptr& res, bool wait = false) {
+        if (!status_.ok())
+            return status_;
+        if (wait) {
+            WaitToFinish();
+        }
+        STATUS_CHECK(CheckDone());
+        STATUS_CHECK(CheckIDSNotEmpty());
+        res = resource_;
+        return Status::OK();
+    }
+
+    Status
+    DoExecute(StorePtr store) override {
+        auto status = store->GetResource<ResourceT>(id_, resource_);
+        if (!status.ok()) {
+            return status;
+        }
+        if (!resource_) {
+            std::stringstream emsg;
+            emsg << "Specified " << typeid(ResourceT).name() << " id=" << id_ << " not found";
+            return Status(SS_NOT_FOUND_ERROR, emsg.str());
+        }
+        resource_->Deactivate();
+        auto r_ctx_p = ResourceContextBuilder<ResourceT>().SetResource(resource_).SetOp(meta::oUpdate).CreatePtr();
+        r_ctx_p->AddAttr(StateField::Name);
+        AddStep(*resource_, r_ctx_p, false);
+        return status;
+    }
+
+ protected:
+    ID_TYPE id_;
+    typename ResourceT::Ptr resource_;
+};
+
+template <typename ResourceT>
 class HardDeleteOperation : public Operations {
  public:
     explicit HardDeleteOperation(ID_TYPE id)
         : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::W_Leaf), id_(id) {
     }
 
-    Status
-    ApplyToStore(Store& store) override {
+    const Status&
+    ApplyToStore(StorePtr store) override {
         if (done_)
             return status_;
-        auto status = store.RemoveResource<ResourceT>(id_);
-        SetStatus(status);
-        Done(store);
-        return status_;
-    }
-
- protected:
-    ID_TYPE id_;
-};
-
-template <>
-class HardDeleteOperation<Collection> : public Operations {
- public:
-    explicit HardDeleteOperation(ID_TYPE id)
-        : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::W_Leaf), id_(id) {
-    }
-
-    Status
-    ApplyToStore(Store& store) override {
-        if (done_) {
-            Done(store);
-            return status_;
-        }
-        auto status = store.RemoveCollection(id_);
+        auto status = store->RemoveResource<ResourceT>(id_);
         SetStatus(status);
         Done(store);
         return status_;

@@ -21,6 +21,7 @@
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <memory>
@@ -31,7 +32,7 @@
 #include <vector>
 
 #include "GrpcRequestHandler.h"
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/interceptor/SpanInterceptor.h"
@@ -49,7 +50,10 @@ class NoReusePortOption : public ::grpc::ServerBuilderOption {
     void
     UpdateArguments(::grpc::ChannelArguments* args) override {
         args->SetInt(GRPC_ARG_ALLOW_REUSEPORT, 0);
-        args->SetInt(GRPC_ARG_MAX_CONCURRENT_STREAMS, 20);
+        int grpc_concurrency = 4 * std::thread::hardware_concurrency();
+        grpc_concurrency = std::max(32, grpc_concurrency);
+        grpc_concurrency = std::min(256, grpc_concurrency);
+        args->SetInt(GRPC_ARG_MAX_CONCURRENT_STREAMS, grpc_concurrency);
     }
 
     void
@@ -74,13 +78,8 @@ GrpcServer::Stop() {
 Status
 GrpcServer::StartService() {
     SetThreadName("grpcserv_thread");
-    Config& config = Config::GetInstance();
-    std::string address, port;
 
-    STATUS_CHECK(config.GetNetworkConfigBindAddress(address));
-    STATUS_CHECK(config.GetNetworkConfigBindPort(port));
-
-    std::string server_address(address + ":" + port);
+    std::string server_address(config.network.bind.address() + ":" + std::to_string(config.network.bind.port()));
 
     ::grpc::ServerBuilder builder;
     builder.SetOption(std::unique_ptr<::grpc::ServerBuilderOption>(new NoReusePortOption));
@@ -92,7 +91,7 @@ GrpcServer::StartService() {
     builder.SetDefaultCompressionLevel(GRPC_COMPRESS_LEVEL_NONE);
 
     GrpcRequestHandler service(opentracing::Tracer::Global());
-    service.RegisterRequestHandler(RequestHandler());
+    service.RegisterRequestHandler(ReqHandler());
 
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);

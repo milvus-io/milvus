@@ -10,24 +10,25 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
+
+#include <memory>
+#include <sstream>
 #include <string>
+
 #include "ReferenceProxy.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
-class DBBaseResource : public ReferenceProxy {
+template <typename DerivedT>
+class BaseResource : public ReferenceProxy {
  public:
     virtual std::string
     ToString() const {
-        return "";
-    }
-
-    virtual ~DBBaseResource() {
+        std::stringstream ss;
+        const DerivedT& derived = static_cast<const DerivedT&>(*this);
+        ss << DerivedT::Name << ": id=" << derived.GetID() << " state=" << derived.GetState();
+        return ss.str();
     }
 };
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot

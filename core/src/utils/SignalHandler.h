@@ -14,7 +14,6 @@
 #include <cstdint>
 
 namespace milvus {
-namespace server {
 
 typedef void (*signal_func_ptr)(int32_t);
 
@@ -26,5 +25,4 @@ HandleSignal(int signum);
 extern void
 PrintStacktrace();
 
-}  // namespace server
 }  // namespace milvus

@@ -17,7 +17,8 @@
 #include <memory>
 #include <unordered_map>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
+#include "db/snapshot/Snapshots.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -39,7 +40,7 @@ WalManager::WalManager(const MXLogConfiguration& config) {
         mxlog_config_.mxlog_path += '/';
     }
     // check path exist
-    auto status = server::CommonUtil::CreateDirectory(mxlog_config_.mxlog_path);
+    auto status = CommonUtil::CreateDirectory(mxlog_config_.mxlog_path);
     if (!status.ok()) {
         std::string msg = "failed to create wal directory " + mxlog_config_.mxlog_path;
         LOG_ENGINE_ERROR_ << msg;
@@ -51,7 +52,7 @@ WalManager::~WalManager() {
 }
 
 ErrorCode
-WalManager::Init(const meta::MetaPtr& meta) {
+WalManager::Init() {
     uint64_t applied_lsn = 0;
     p_meta_handler_ = std::make_shared<MXLogMetaHandler>(mxlog_config_.mxlog_path);
     if (p_meta_handler_ != nullptr) {
@@ -59,58 +60,63 @@ WalManager::Init(const meta::MetaPtr& meta) {
     }
 
     uint64_t recovery_start = 0;
-    if (meta != nullptr) {
-        meta->GetGlobalLastLSN(recovery_start);
+    std::vector<std::string> collection_names;
+    auto status = snapshot::Snapshots::GetInstance().GetCollectionNames(collection_names);
+    if (!status.ok()) {
+        return WAL_META_ERROR;
+    }
 
-        std::vector<meta::CollectionSchema> collention_schema_array;
-        auto status = meta->AllCollections(collention_schema_array);
-        if (!status.ok()) {
-            return WAL_META_ERROR;
-        }
+    if (!collection_names.empty()) {
+        u_int64_t min_flushed_lsn = ~(u_int64_t)0;
+        u_int64_t max_flushed_lsn = 0;
+        auto update_limit_lsn = [&](u_int64_t lsn) {
+            if (min_flushed_lsn > lsn) {
+                min_flushed_lsn = lsn;
+            }
+            if (max_flushed_lsn < lsn) {
+                max_flushed_lsn = lsn;
+            }
+        };
 
-        if (!collention_schema_array.empty()) {
-            u_int64_t min_flushed_lsn = ~(u_int64_t)0;
-            u_int64_t max_flushed_lsn = 0;
-            auto update_limit_lsn = [&](u_int64_t lsn) {
-                if (min_flushed_lsn > lsn) {
-                    min_flushed_lsn = lsn;
-                }
-                if (max_flushed_lsn < lsn) {
-                    max_flushed_lsn = lsn;
-                }
-            };
+        for (auto& col_name : collection_names) {
+            auto& collection = collections_[col_name];
+            auto& default_part = collection[""];
 
-            for (auto& col_schema : collention_schema_array) {
-                auto& collection = collections_[col_schema.collection_id_];
-                auto& default_part = collection[""];
-                default_part.flush_lsn = col_schema.flush_lsn_;
-                update_limit_lsn(default_part.flush_lsn);
+            snapshot::ScopedSnapshotT ss;
+            status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, col_name);
+            if (!status.ok()) {
+                return WAL_META_ERROR;
+            }
 
-                std::vector<meta::CollectionSchema> partition_schema_array;
-                status = meta->ShowPartitions(col_schema.collection_id_, partition_schema_array);
-                if (!status.ok()) {
+            default_part.flush_lsn = ss->GetMaxLsn();
+            update_limit_lsn(default_part.flush_lsn);
+
+            std::vector<std::string> partition_names = ss->GetPartitionNames();
+            for (auto& part_name : partition_names) {
+                auto& partition = collection[part_name];
+
+                snapshot::PartitionPtr ss_part = ss->GetPartition(part_name);
+                if (ss_part == nullptr) {
                     return WAL_META_ERROR;
                 }
-                for (auto& par_schema : partition_schema_array) {
-                    auto& partition = collection[par_schema.partition_tag_];
-                    partition.flush_lsn = par_schema.flush_lsn_;
-                    update_limit_lsn(partition.flush_lsn);
-                }
-            }
 
-            if (applied_lsn < max_flushed_lsn) {
-                // a new WAL folder?
-                applied_lsn = max_flushed_lsn;
+                partition.flush_lsn = ss_part->GetLsn();
+                update_limit_lsn(partition.flush_lsn);
             }
-            if (recovery_start < min_flushed_lsn) {
-                // not flush all yet
-                recovery_start = min_flushed_lsn;
-            }
+        }
 
-            for (auto& col : collections_) {
-                for (auto& part : col.second) {
-                    part.second.wal_lsn = applied_lsn;
-                }
+        if (applied_lsn < max_flushed_lsn) {
+            // a new WAL folder?
+            applied_lsn = max_flushed_lsn;
+        }
+        if (recovery_start < min_flushed_lsn) {
+            // not flush all yet
+            recovery_start = min_flushed_lsn;
+        }
+
+        for (auto& col : collections_) {
+            for (auto& part : col.second) {
+                part.second.wal_lsn = applied_lsn;
             }
         }
     }
@@ -495,9 +501,9 @@ WalManager::InsertEntities(const std::string& collection_id, const std::string& 
                            const std::unordered_map<std::string, std::vector<uint8_t>>& attrs) {
     MXLogType log_type;
     if (std::is_same<T, float>::value) {
-        log_type = MXLogType::Entity;
-    } else {
-        return false;
+        log_type = MXLogType::InsertVector;
+    } else if (std::is_same<T, uint8_t>::value) {
+        log_type = MXLogType::InsertBinary;
     }
 
     size_t entity_num = entity_ids.size();
@@ -575,9 +581,9 @@ WalManager::InsertEntities(const std::string& collection_id, const std::string& 
 }
 
 bool
-WalManager::DeleteById(const std::string& collection_id, const IDNumbers& vector_ids) {
-    size_t vector_num = vector_ids.size();
-    if (vector_num == 0) {
+WalManager::DeleteById(const std::string& collection_id, const IDNumbers& entity_ids) {
+    size_t entity_num = entity_ids.size();
+    if (entity_num == 0) {
         LOG_WAL_ERROR_ << "The ids is empty.";
         return false;
     }
@@ -591,7 +597,7 @@ WalManager::DeleteById(const std::string& collection_id, const IDNumbers& vector
     record.partition_tag = "";
 
     uint64_t new_lsn = 0;
-    for (size_t i = 0; i < vector_num; i += record.length) {
+    for (size_t i = 0; i < entity_num; i += record.length) {
         size_t surplus_space = p_buffer_->SurplusSpace();
         size_t max_rcd_num = 0;
         if (surplus_space >= head_size + unit_size) {
@@ -600,12 +606,12 @@ WalManager::DeleteById(const std::string& collection_id, const IDNumbers& vector
             max_rcd_num = (mxlog_config_.buffer_size - head_size) / unit_size;
         }
 
-        record.length = std::min(vector_num - i, max_rcd_num);
-        record.ids = vector_ids.data() + i;
+        record.length = std::min(entity_num - i, max_rcd_num);
+        record.ids = entity_ids.data() + i;
         record.data_size = 0;
         record.data = nullptr;
 
-        auto error_code = p_buffer_->Append(record);
+        auto error_code = p_buffer_->AppendEntity(record);
         if (error_code != WAL_SUCCESS) {
             p_buffer_->ResetWriteLsn(last_applied_lsn_);
             return false;

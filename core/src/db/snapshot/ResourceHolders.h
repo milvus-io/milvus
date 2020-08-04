@@ -18,7 +18,7 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include "db/snapshot/BaseHolders.h"
+#include "db/snapshot/ResourceHolder.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/ScopedResource.h"

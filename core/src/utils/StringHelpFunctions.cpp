@@ -17,7 +17,6 @@
 #include <string>
 
 namespace milvus {
-namespace server {
 
 void
 StringHelpFunctions::TrimStringBlank(std::string& string) {
@@ -161,5 +160,4 @@ StringHelpFunctions::ConvertToBoolean(const std::string& str, bool& value) {
     return Status::OK();
 }
 
-}  // namespace server
 }  // namespace milvus

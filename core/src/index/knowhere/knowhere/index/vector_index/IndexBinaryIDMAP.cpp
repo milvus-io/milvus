@@ -44,7 +44,7 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
     int64_t k = config[meta::TOPK].get<int64_t>();
     auto elems = rows * k;
@@ -112,6 +112,22 @@ BinaryIDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 #endif
 
+int64_t
+BinaryIDMAP::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->ntotal;
+}
+
+int64_t
+BinaryIDMAP::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->d;
+}
+
 void
 BinaryIDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
@@ -119,7 +135,7 @@ BinaryIDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR_DATA_ID(dataset_ptr)
 
     index_->add_with_ids(rows, (uint8_t*)p_data, p_ids);
 }
@@ -161,7 +177,7 @@ BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) 
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
     std::vector<int64_t> new_ids(rows);
     for (int i = 0; i < rows; ++i) {

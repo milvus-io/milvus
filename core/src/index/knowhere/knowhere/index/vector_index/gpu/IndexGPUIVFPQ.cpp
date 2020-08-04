@@ -27,7 +27,7 @@ namespace knowhere {
 
 void
 GPUIVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
     gpu_id_ = config[knowhere::meta::DEVICEID];
 
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
@@ -38,11 +38,8 @@ GPUIVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
                                           config[IndexParams::m], config[IndexParams::nbits],
                                           GetMetricType(config[Metric::TYPE].get<std::string>()));  // IP not support
         device_index->train(rows, (float*)p_data);
-        std::shared_ptr<faiss::Index> host_index = nullptr;
-        host_index.reset(faiss::gpu::index_gpu_to_cpu(device_index));
 
-        auto device_index1 = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, host_index.get());
-        index_.reset(device_index1);
+        index_.reset(device_index);
         res_ = gpu_res;
     } else {
         KNOWHERE_THROW_MSG("Build IVFPQ can't get gpu resource");

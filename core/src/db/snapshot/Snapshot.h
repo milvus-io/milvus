@@ -20,12 +20,14 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <shared_mutex>
 #include <string>
 #include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
+
 #include "db/snapshot/Store.h"
 #include "db/snapshot/Utils.h"
 #include "db/snapshot/WrappedTypes.h"
@@ -43,33 +45,33 @@ using ScopedResourcesT =
 class Snapshot : public ReferenceProxy {
  public:
     using Ptr = std::shared_ptr<Snapshot>;
-    explicit Snapshot(ID_TYPE id);
+    Snapshot(StorePtr, ID_TYPE);
 
     ID_TYPE
-    GetID() {
+    GetID() const {
         return GetCollectionCommit()->GetID();
     }
 
     ID_TYPE
     GetCollectionId() const {
-        auto it = GetResources<Collection>().begin();
+        auto it = GetResources<Collection>().cbegin();
         return it->first;
     }
 
     CollectionPtr
-    GetCollection() {
-        return GetResources<Collection>().begin()->second.Get();
+    GetCollection() const {
+        return GetResources<Collection>().cbegin()->second.Get();
     }
 
     SchemaCommitPtr
-    GetSchemaCommit() {
+    GetSchemaCommit() const {
         auto id = GetLatestSchemaCommitId();
         return GetResource<SchemaCommit>(id);
     }
 
     const std::string&
     GetName() const {
-        return GetResources<Collection>().begin()->second->GetName();
+        return GetResources<Collection>().cbegin()->second->GetName();
     }
 
     size_t
@@ -83,7 +85,7 @@ class Snapshot : public ReferenceProxy {
     }
 
     PartitionPtr
-    GetPartition(const std::string& name) {
+    GetPartition(const std::string& name) const {
         ID_TYPE id;
         auto status = GetPartitionId(name, id);
         if (!status.ok()) {
@@ -94,7 +96,8 @@ class Snapshot : public ReferenceProxy {
 
     Status
     GetPartitionId(const std::string& name, ID_TYPE& id) const {
-        auto it = partition_names_map_.find(name);
+        std::string real_name = name.empty() ? DEFAULT_PARTITON_TAG : name;
+        auto it = partition_names_map_.find(real_name);
         if (it == partition_names_map_.end()) {
             return Status(SS_NOT_FOUND_ERROR, "Specified partition name not found");
         }
@@ -103,30 +106,82 @@ class Snapshot : public ReferenceProxy {
     }
 
     CollectionCommitPtr
-    GetCollectionCommit() {
-        return GetResources<CollectionCommit>().begin()->second.Get();
+    GetCollectionCommit() const {
+        return GetResources<CollectionCommit>().cbegin()->second.Get();
     }
+
+    const std::set<ID_TYPE>&
+    GetSegmentFileIds(ID_TYPE segment_id) const {
+        auto it = seg_segfiles_map_.find(segment_id);
+        if (it == seg_segfiles_map_.end()) {
+            return empty_set_;
+        }
+        return it->second;
+    }
+
+    SegmentFilePtr
+    GetSegmentFile(ID_TYPE segment_id, ID_TYPE field_element_id) const;
 
     ID_TYPE
     GetLatestSchemaCommitId() const {
         return latest_schema_commit_id_;
     }
 
-    // PXU TODO: add const. Need to change Scopedxxxx::Get
+    Status
+    GetFieldElement(const std::string& field_name, const std::string& field_element_name,
+                    FieldElementPtr& field_element) const;
+
     SegmentCommitPtr
-    GetSegmentCommitBySegmentId(ID_TYPE segment_id) {
+    GetSegmentCommitBySegmentId(ID_TYPE segment_id) const {
         auto it = seg_segc_map_.find(segment_id);
         if (it == seg_segc_map_.end())
             return nullptr;
         return GetResource<SegmentCommit>(it->second);
     }
 
+    Status
+    GetSegmentRowCount(ID_TYPE segment_id, SIZE_TYPE&) const;
+
+    std::vector<std::string>
+    GetPartitionNames() const {
+        std::vector<std::string> names;
+        for (auto& kv : partition_names_map_) {
+            names.emplace_back(kv.first);
+        }
+
+        return std::move(names);
+    }
+
     PartitionCommitPtr
-    GetPartitionCommitByPartitionId(ID_TYPE partition_id) {
+    GetPartitionCommitByPartitionId(ID_TYPE partition_id) const {
         auto it = p_pc_map_.find(partition_id);
         if (it == p_pc_map_.end())
             return nullptr;
         return GetResource<PartitionCommit>(it->second);
+    }
+
+    template <typename HandlerT>
+    void
+    IterateResources(const typename HandlerT::Ptr& handler) {
+        auto& resources = GetResources<typename HandlerT::ResourceT>();
+        auto status = handler->PreIterate();
+        if (!status.ok()) {
+            handler->SetStatus(status);
+            return;
+        }
+        for (auto& kv : resources) {
+            status = handler->Handle(kv.second.Get());
+            if (!status.ok()) {
+                break;
+            }
+        }
+        if (!status.ok()) {
+            handler->SetStatus(status);
+            return;
+        }
+
+        status = handler->PostIterate();
+        handler->SetStatus(status);
     }
 
     std::vector<std::string>
@@ -143,6 +198,9 @@ class Snapshot : public ReferenceProxy {
         auto it = field_names_map_.find(name);
         return it != field_names_map_.end();
     }
+
+    FieldPtr
+    GetField(const std::string& name) const;
 
     bool
     HasFieldElement(const std::string& field_name, const std::string& field_element_name) const {
@@ -174,7 +232,7 @@ class Snapshot : public ReferenceProxy {
     GetFieldElementId(const std::string& field_name, const std::string& field_element_name) const {
         auto itf = field_element_names_map_.find(field_name);
         if (itf == field_element_names_map_.end())
-            return false;
+            return 0;
         auto itfe = itf->second.find(field_element_name);
         if (itfe == itf->second.end()) {
             return 0;
@@ -183,8 +241,22 @@ class Snapshot : public ReferenceProxy {
         return itfe->second;
     }
 
+    std::vector<FieldElementPtr>
+    GetFieldElementsByField(const std::string& field_name) const {
+        auto it = field_element_names_map_.find(field_name);
+        if (it == field_element_names_map_.end()) {
+            return {};
+        }
+        std::vector<FieldElementPtr> elements;
+        for (auto& kv : it->second) {
+            elements.push_back(GetResource<FieldElement>(kv.second));
+        }
+
+        return std::move(elements);
+    }
+
     NUM_TYPE
-    GetMaxSegmentNumByPartition(ID_TYPE partition_id) {
+    GetMaxSegmentNumByPartition(ID_TYPE partition_id) const {
         auto it = p_max_seg_num_.find(partition_id);
         if (it == p_max_seg_num_.end())
             return 0;
@@ -198,7 +270,7 @@ class Snapshot : public ReferenceProxy {
 
     template <typename ResourceT>
     void
-    DumpResource(const std::string& tag = "") {
+    DumpResource(const std::string& tag = "") const {
         auto& resources = GetResources<ResourceT>();
         std::cout << typeid(*this).name() << " Dump " << GetID() << " " << ResourceT::Name << " Start [" << tag
                   << "]:" << resources.size() << std::endl;
@@ -239,13 +311,12 @@ class Snapshot : public ReferenceProxy {
 
     template <typename ResourceT>
     typename ResourceT::Ptr
-    GetResource(ID_TYPE id) {
+    GetResource(ID_TYPE id) const {
         auto& resources = GetResources<ResourceT>();
         auto it = resources.find(id);
         if (it == resources.end()) {
             return nullptr;
         }
-
         return it->second.Get();
     }
 
@@ -257,7 +328,7 @@ class Snapshot : public ReferenceProxy {
     }
 
     const std::string
-    ToString();
+    ToString() const;
 
  private:
     Snapshot(const Snapshot&) = delete;
@@ -271,15 +342,17 @@ class Snapshot : public ReferenceProxy {
     std::map<std::string, ID_TYPE> partition_names_map_;
     std::map<std::string, std::map<std::string, ID_TYPE>> field_element_names_map_;
     std::map<ID_TYPE, std::map<ID_TYPE, ID_TYPE>> element_segfiles_map_;
+    std::map<ID_TYPE, std::set<ID_TYPE>> seg_segfiles_map_;
     std::map<ID_TYPE, ID_TYPE> seg_segc_map_;
     std::map<ID_TYPE, ID_TYPE> p_pc_map_;
     ID_TYPE latest_schema_commit_id_ = 0;
     std::map<ID_TYPE, NUM_TYPE> p_max_seg_num_;
     LSN_TYPE max_lsn_;
+    std::set<ID_TYPE> empty_set_;
 };
 
-using ScopedSnapshotT = ScopedResource<Snapshot>;
 using GCHandler = std::function<void(Snapshot::Ptr)>;
+using ScopedSnapshotT = ScopedResource<Snapshot>;
 
 }  // namespace snapshot
 }  // namespace engine

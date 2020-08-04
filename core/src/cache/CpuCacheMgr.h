@@ -16,26 +16,30 @@
 
 #include "cache/CacheMgr.h"
 #include "cache/DataObj.h"
-#include "config/handler/CacheConfigHandler.h"
+#include "config/ConfigMgr.h"
 
 namespace milvus {
 namespace cache {
 
-class CpuCacheMgr : public CacheMgr<DataObjPtr>, public server::CacheConfigHandler {
+class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
  private:
     CpuCacheMgr();
 
+    ~CpuCacheMgr();
+
  public:
-    // TODO(myh): use smart pointer instead
-    static CpuCacheMgr*
+    static CpuCacheMgr&
     GetInstance();
 
     DataObjPtr
-    GetIndex(const std::string& key);
+    GetDataObj(const std::string& key);
 
- protected:
     void
-    OnCpuCacheCapacityChanged(int64_t value) override;
+    SetDataObj(const std::string& key, const DataObjPtr& data);
+
+ public:
+    void
+    ConfigUpdate(const std::string& name) override;
 };
 
 }  // namespace cache

@@ -202,3 +202,30 @@ function(ADD_THIRDPARTY_LIB LIB_NAME)
         message(FATAL_ERROR "No static or shared library provided for ${LIB_NAME}")
     endif()
 endfunction()
+
+MACRO (import_mysql_inc)
+    find_path (MYSQL_INCLUDE_DIR
+        NAMES "mysql.h"
+        PATH_SUFFIXES "mysql")
+
+    if (${MYSQL_INCLUDE_DIR} STREQUAL "MYSQL_INCLUDE_DIR-NOTFOUND")
+        message(FATAL_ERROR "Could not found MySQL include directory")
+    else ()
+        include_directories(${MYSQL_INCLUDE_DIR})
+    endif ()
+ENDMACRO (import_mysql_inc)
+
+MACRO(using_ccache_if_defined MILVUS_USE_CCACHE)
+    if (MILVUS_USE_CCACHE)
+        find_program(CCACHE_FOUND ccache)
+        if (CCACHE_FOUND)
+            message(STATUS "Using ccache: ${CCACHE_FOUND}")
+            set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_FOUND})
+            set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE_FOUND})
+            # let ccache preserve C++ comments, because some of them may be
+            # meaningful to the compiler
+            set(ENV{CCACHE_COMMENTS} "1")
+        endif (CCACHE_FOUND)
+    endif ()
+ENDMACRO(using_ccache_if_defined)
+

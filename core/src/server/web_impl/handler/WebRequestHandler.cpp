@@ -19,15 +19,17 @@
 
 #include <fiu-local.h>
 
-#include "config/Config.h"
-#include "config/Utils.h"
+#include "config/ServerConfig.h"
+#include "db/Utils.h"
 #include "metrics/SystemInfo.h"
-#include "server/delivery/request/BaseRequest.h"
+#include "query/BinaryQuery.h"
+#include "server/delivery/request/BaseReq.h"
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/Types.h"
 #include "server/web_impl/dto/PartitionDto.hpp"
 #include "server/web_impl/utils/Util.h"
 #include "thirdparty/nlohmann/json.hpp"
+#include "utils/ConfigUtils.h"
 #include "utils/StringHelpFunctions.h"
 
 namespace milvus {
@@ -59,7 +61,7 @@ WebErrorMap(ErrorCode code) {
         {SERVER_INVALID_NPROBE, StatusCode::ILLEGAL_ARGUMENT},
         {SERVER_INVALID_INDEX_NLIST, StatusCode::ILLEGAL_NLIST},
         {SERVER_INVALID_INDEX_METRIC_TYPE, StatusCode::ILLEGAL_METRIC_TYPE},
-        {SERVER_INVALID_INDEX_FILE_SIZE, StatusCode::ILLEGAL_ARGUMENT},
+        {SERVER_INVALID_SEGMENT_ROW_COUNT, StatusCode::ILLEGAL_ARGUMENT},
         {SERVER_ILLEGAL_VECTOR_ID, StatusCode::ILLEGAL_VECTOR_ID},
         {SERVER_ILLEGAL_SEARCH_RESULT, StatusCode::ILLEGAL_SEARCH_RESULT},
         {SERVER_CACHE_FULL, StatusCode::CACHE_FAILED},
@@ -78,6 +80,23 @@ WebErrorMap(ErrorCode code) {
     }
 }
 
+template <typename T>
+void
+CopyStructuredData(const nlohmann::json& json, std::vector<uint8_t>& raw) {
+    std::vector<T> values;
+    auto size = json.size();
+    values.resize(size);
+    raw.resize(size * sizeof(T));
+    size_t offset = 0;
+    for (auto data : json) {
+        values[offset] = data.get<T>();
+        ++offset;
+    }
+    memcpy(raw.data(), values.data(), size * sizeof(T));
+}
+
+using FloatJson = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t, float>;
+
 /////////////////////////////////// Private methods ///////////////////////////////////////
 void
 WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg) {
@@ -88,12 +107,10 @@ WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std
 Status
 WebRequestHandler::IsBinaryCollection(const std::string& collection_name, bool& bin) {
     CollectionSchema schema;
-    auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
+    auto status = req_handler_.GetCollectionInfo(context_ptr_, collection_name, schema);
     if (status.ok()) {
-        auto metric = engine::MetricType(schema.metric_type_);
-        bin = engine::MetricType::HAMMING == metric || engine::MetricType::JACCARD == metric ||
-              engine::MetricType::TANIMOTO == metric || engine::MetricType::SUPERSTRUCTURE == metric ||
-              engine::MetricType::SUBSTRUCTURE == metric;
+        std::string metric_type = schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE];
+        bin = engine::utils::IsBinaryMetricType(metric_type);
     }
 
     return status;
@@ -134,29 +151,16 @@ WebRequestHandler::CopyRecordsFromJson(const nlohmann::json& json, engine::Vecto
 Status
 WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlohmann::json& json_out) {
     CollectionSchema schema;
-    auto status = request_handler_.DescribeCollection(context_ptr_, collection_name, schema);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(req_handler_.GetCollectionInfo(context_ptr_, collection_name, schema));
 
     int64_t count;
-    status = request_handler_.CountCollection(context_ptr_, collection_name, count);
-    if (!status.ok()) {
-        return status;
-    }
-
-    IndexParam index_param;
-    status = request_handler_.DescribeIndex(context_ptr_, collection_name, index_param);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(req_handler_.CountEntities(context_ptr_, collection_name, count));
 
     json_out["collection_name"] = schema.collection_name_;
-    json_out["dimension"] = schema.dimension_;
-    json_out["index_file_size"] = schema.index_file_size_;
-    json_out["index"] = IndexMap.at(engine::EngineType(index_param.index_type_));
-    json_out["index_params"] = index_param.extra_params_;
-    json_out["metric_type"] = MetricMap.at(engine::MetricType(schema.metric_type_));
+    json_out["dimension"] = schema.extra_params_[engine::PARAM_DIMENSION].get<int64_t>();
+    json_out["segment_row_count"] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT].get<int64_t>();
+    json_out["metric_type"] = schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE].get<int64_t>();
+    json_out["index_params"] = schema.extra_params_[engine::PARAM_INDEX_EXTRA_PARAMS].get<std::string>();
     json_out["count"] = count;
 
     return Status::OK();
@@ -164,12 +168,12 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
 
 Status
 WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohmann::json& json_out) {
-    std::string collection_info;
-    auto status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name, collection_info);
+    std::string collection_stats;
+    auto status = req_handler_.GetCollectionStats(context_ptr_, collection_name, collection_stats);
 
     if (status.ok()) {
         try {
-            json_out = nlohmann::json::parse(collection_info);
+            json_out = nlohmann::json::parse(collection_stats);
         } catch (std::exception& e) {
             return Status(SERVER_UNEXPECTED_ERROR,
                           "Error occurred when parsing collection stat information: " + std::string(e.what()));
@@ -180,20 +184,17 @@ WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohman
 }
 
 Status
-WebRequestHandler::GetSegmentVectors(const std::string& collection_name, const std::string& segment_name,
-                                     int64_t page_size, int64_t offset, nlohmann::json& json_out) {
-    std::vector<int64_t> vector_ids;
-    auto status = request_handler_.GetVectorIDs(context_ptr_, collection_name, segment_name, vector_ids);
-    if (!status.ok()) {
-        return status;
-    }
+WebRequestHandler::GetSegmentVectors(const std::string& collection_name, int64_t segment_id, int64_t page_size,
+                                     int64_t offset, nlohmann::json& json_out) {
+    engine::IDNumbers vector_ids;
+    STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, 0, segment_id, vector_ids));
 
     auto ids_begin = std::min(vector_ids.size(), (size_t)offset);
     auto ids_end = std::min(vector_ids.size(), (size_t)(offset + page_size));
 
-    auto ids = std::vector<int64_t>(vector_ids.begin() + ids_begin, vector_ids.begin() + ids_end);
+    auto new_ids = std::vector<int64_t>(vector_ids.begin() + ids_begin, vector_ids.begin() + ids_end);
     nlohmann::json vectors_json;
-    status = GetVectorsByIDs(collection_name, ids, vectors_json);
+    auto status = GetVectorsByIDs(collection_name, new_ids, vectors_json);
 
     nlohmann::json result_json;
     if (vectors_json.empty()) {
@@ -209,22 +210,22 @@ WebRequestHandler::GetSegmentVectors(const std::string& collection_name, const s
 }
 
 Status
-WebRequestHandler::GetSegmentIds(const std::string& collection_name, const std::string& segment_name, int64_t page_size,
+WebRequestHandler::GetSegmentIds(const std::string& collection_name, int64_t segment_id, int64_t page_size,
                                  int64_t offset, nlohmann::json& json_out) {
-    std::vector<int64_t> vector_ids;
-    auto status = request_handler_.GetVectorIDs(context_ptr_, collection_name, segment_name, vector_ids);
+    std::vector<int64_t> ids;
+    auto status = req_handler_.ListIDInSegment(context_ptr_, collection_name, segment_id, ids);
     if (status.ok()) {
-        auto ids_begin = std::min(vector_ids.size(), (size_t)offset);
-        auto ids_end = std::min(vector_ids.size(), (size_t)(offset + page_size));
+        auto ids_begin = std::min(ids.size(), (size_t)offset);
+        auto ids_end = std::min(ids.size(), (size_t)(offset + page_size));
 
         if (ids_begin >= ids_end) {
             json_out["ids"] = std::vector<int64_t>();
         } else {
             for (size_t i = ids_begin; i < ids_end; i++) {
-                json_out["ids"].push_back(std::to_string(vector_ids.at(i)));
+                json_out["ids"].push_back(std::to_string(ids.at(i)));
             }
         }
-        json_out["count"] = vector_ids.size();
+        json_out["count"] = ids.size();
     }
 
     return status;
@@ -232,7 +233,7 @@ WebRequestHandler::GetSegmentIds(const std::string& collection_name, const std::
 
 Status
 WebRequestHandler::CommandLine(const std::string& cmd, std::string& reply) {
-    return request_handler_.Cmd(context_ptr_, cmd, reply);
+    return req_handler_.Cmd(context_ptr_, cmd, reply);
 }
 
 Status
@@ -257,7 +258,7 @@ WebRequestHandler::PreLoadCollection(const nlohmann::json& json, std::string& re
     }
 
     auto collection_name = json["collection_name"];
-    auto status = request_handler_.PreloadCollection(context_ptr_, collection_name.get<std::string>());
+    auto status = req_handler_.LoadCollection(context_ptr_, collection_name.get<std::string>());
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());
@@ -283,7 +284,7 @@ WebRequestHandler::Flush(const nlohmann::json& json, std::string& result_str) {
         names.emplace_back(name.get<std::string>());
     }
 
-    auto status = request_handler_.Flush(context_ptr_, names);
+    auto status = req_handler_.Flush(context_ptr_, names);
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());
@@ -307,7 +308,7 @@ WebRequestHandler::Compact(const nlohmann::json& json, std::string& result_str) 
     auto name = collection_name.get<std::string>();
 
     double compact_threshold = 0.1;  // compact trigger threshold: delete_counts/segment_counts
-    auto status = request_handler_.Compact(context_ptr_, name, compact_threshold);
+    auto status = req_handler_.Compact(context_ptr_, name, compact_threshold);
 
     if (status.ok()) {
         nlohmann::json result;
@@ -342,9 +343,9 @@ WebRequestHandler::GetConfig(std::string& result_str) {
         }
 #endif
         // check if server require start
-        Config& config = Config::GetInstance();
         bool required = false;
-        config.GetServerRestartRequired(required);
+        // TODO: Use new cofnig mgr
+        // Config::GetInstance().GetServerRestartRequired(required);
         j["restart_required"] = required;
         result_str = j.dump();
     }
@@ -396,110 +397,10 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
     AddStatusToJson(result, StatusCode::SUCCESS, msg);
 
     bool required = false;
-    Config& config = Config::GetInstance();
-    config.GetServerRestartRequired(required);
+    // Config::GetInstance().GetServerRestartRequired(required);
     result["restart_required"] = required;
 
     result_str = result.dump();
-
-    return Status::OK();
-}
-
-Status
-WebRequestHandler::Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str) {
-    if (!json.contains("topk")) {
-        return Status(BODY_FIELD_LOSS, "Field \'topk\' is required");
-    }
-    int64_t topk = json["topk"];
-
-    if (!json.contains("params")) {
-        return Status(BODY_FIELD_LOSS, "Field \'params\' is required");
-    }
-
-    std::vector<std::string> partition_tags;
-    if (json.contains("partition_tags")) {
-        auto tags = json["partition_tags"];
-        if (!tags.is_null() && !tags.is_array()) {
-            return Status(BODY_PARSE_FAIL, "Field \"partition_tags\" must be a array");
-        }
-
-        for (auto& tag : tags) {
-            partition_tags.emplace_back(tag.get<std::string>());
-        }
-    }
-
-    TopKQueryResult result;
-    Status status;
-    if (json.contains("ids")) {
-        auto vec_ids = json["ids"];
-        if (!vec_ids.is_array()) {
-            return Status(BODY_PARSE_FAIL, "Field \"ids\" must be ad array");
-        }
-
-        std::vector<int64_t> id_array;
-        for (auto& id_str : vec_ids) {
-            id_array.emplace_back(std::stol(id_str.get<std::string>()));
-        }
-        //        std::vector<int64_t> id_array(vec_ids.begin(), vec_ids.end());
-        status = request_handler_.SearchByID(context_ptr_, collection_name, id_array, topk, json["params"],
-                                             partition_tags, result);
-    } else {
-        std::vector<std::string> file_id_vec;
-        if (json.contains("file_ids")) {
-            auto ids = json["file_ids"];
-            if (!ids.is_null() && !ids.is_array()) {
-                return Status(BODY_PARSE_FAIL, "Field \"file_ids\" must be a array");
-            }
-            for (auto& id : ids) {
-                file_id_vec.emplace_back(id.get<std::string>());
-            }
-        }
-
-        bool bin_flag = false;
-        status = IsBinaryCollection(collection_name, bin_flag);
-        if (!status.ok()) {
-            return status;
-        }
-
-        if (!json.contains("vectors")) {
-            return Status(BODY_FIELD_LOSS, "Field \"vectors\" is required");
-        }
-
-        engine::VectorsData vectors_data;
-        status = CopyRecordsFromJson(json["vectors"], vectors_data, bin_flag);
-        if (!status.ok()) {
-            return status;
-        }
-
-        status = request_handler_.Search(context_ptr_, collection_name, vectors_data, topk, json["params"],
-                                         partition_tags, file_id_vec, result);
-    }
-    if (!status.ok()) {
-        return status;
-    }
-
-    nlohmann::json result_json;
-    result_json["num"] = result.row_num_;
-    if (result.row_num_ == 0) {
-        result_json["result"] = std::vector<int64_t>();
-        result_str = result_json.dump();
-        return Status::OK();
-    }
-
-    auto step = result.id_list_.size() / result.row_num_;
-    nlohmann::json search_result_json;
-    for (int64_t i = 0; i < result.row_num_; i++) {
-        nlohmann::json raw_result_json;
-        for (size_t j = 0; j < step; j++) {
-            nlohmann::json one_result_json;
-            one_result_json["id"] = std::to_string(result.id_list_.at(i * step + j));
-            one_result_json["distance"] = std::to_string(result.distance_list_.at(i * step + j));
-            raw_result_json.emplace_back(one_result_json);
-        }
-        search_result_json.emplace_back(raw_result_json);
-    }
-    result_json["result"] = search_result_json;
-    result_str = result_json.dump();
 
     return Status::OK();
 }
@@ -516,109 +417,109 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
             return Status{BODY_PARSE_FAIL, msg};
         }
 
-        auto term_size = term_value_json.size();
-        auto term_query = std::make_shared<query::TermQuery>();
-        term_query->field_name = field_name;
-        term_query->field_value.resize(term_size * sizeof(int64_t));
-
-        switch (field_type_.at(field_name)) {
-            case engine::meta::hybrid::DataType::INT8:
-            case engine::meta::hybrid::DataType::INT16:
-            case engine::meta::hybrid::DataType::INT32:
-            case engine::meta::hybrid::DataType::INT64: {
-                std::vector<int64_t> term_value(term_size, 0);
-                for (uint64_t i = 0; i < term_size; ++i) {
-                    term_value[i] = term_value_json[i].get<int64_t>();
-                }
-                memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(int64_t));
-                break;
-            }
-            case engine::meta::hybrid::DataType::FLOAT:
-            case engine::meta::hybrid::DataType::DOUBLE: {
-                std::vector<double> term_value(term_size, 0);
-                for (uint64_t i = 0; i < term_size; ++i) {
-                    term_value[i] = term_value_json[i].get<double>();
-                }
-                memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(double));
-                break;
-            }
-            default:
-                break;
-        }
-
-        leaf_query->term_query = term_query;
-        query->AddLeafQuery(leaf_query);
-    } else if (json.contains("range")) {
-        auto leaf_query = std::make_shared<query::LeafQuery>();
-        auto range_query = std::make_shared<query::RangeQuery>();
-
-        auto range_json = json["range"];
-        std::string field_name = range_json["field_name"];
-        range_query->field_name = field_name;
-
-        auto range_value_json = range_json["values"];
-        if (range_value_json.contains("lt")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::LT;
-            compare_expr.operand = range_value_json["lt"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-        if (range_value_json.contains("lte")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::LTE;
-            compare_expr.operand = range_value_json["lte"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-        if (range_value_json.contains("eq")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::EQ;
-            compare_expr.operand = range_value_json["eq"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-        if (range_value_json.contains("ne")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::NE;
-            compare_expr.operand = range_value_json["ne"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-        if (range_value_json.contains("gt")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::GT;
-            compare_expr.operand = range_value_json["gt"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-        if (range_value_json.contains("gte")) {
-            query::CompareExpr compare_expr;
-            compare_expr.compare_operator = query::CompareOperator::GTE;
-            compare_expr.operand = range_value_json["gte"].get<std::string>();
-            range_query->compare_expr.emplace_back(compare_expr);
-        }
-
-        leaf_query->range_query = range_query;
-        query->AddLeafQuery(leaf_query);
-    } else if (json.contains("vector")) {
-        auto leaf_query = std::make_shared<query::LeafQuery>();
-        auto vector_query = std::make_shared<query::VectorQuery>();
-
-        auto vector_json = json["vector"];
-        std::string field_name = vector_json["field_name"];
-        vector_query->field_name = field_name;
-
-        engine::VectorsData vectors;
-        // TODO(yukun): process binary vector
-        CopyRecordsFromJson(vector_json["values"], vectors, false);
-
-        vector_query->query_vector.float_data = vectors.float_data_;
-        vector_query->query_vector.binary_data = vectors.binary_data_;
-
-        vector_query->topk = vector_json["topk"].get<int64_t>();
-        vector_query->extra_params = vector_json["extra_params"];
-
-        // TODO(yukun): remove hardcode here
-        std::string vector_placeholder = "placeholder_1";
-        query_ptr_->vectors.insert(std::make_pair(vector_placeholder, vector_query));
-        leaf_query->vector_placeholder = vector_placeholder;
-        query->AddLeafQuery(leaf_query);
+        //        auto term_size = term_value_json.size();
+        //        auto term_query = std::make_shared<query::TermQuery>();
+        //        term_query->field_name = field_name;
+        //        term_query->field_value.resize(term_size * sizeof(int64_t));
+        //
+        //        switch (field_type_.at(field_name)) {
+        //            case engine::DataType::INT8:
+        //            case engine::DataType::INT16:
+        //            case engine::DataType::INT32:
+        //            case engine::DataType::INT64: {
+        //                std::vector<int64_t> term_value(term_size, 0);
+        //                for (uint64_t i = 0; i < term_size; ++i) {
+        //                    term_value[i] = term_value_json[i].get<int64_t>();
+        //                }
+        //                memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(int64_t));
+        //                break;
+        //            }
+        //            case engine::DataType::FLOAT:
+        //            case engine::DataType::DOUBLE: {
+        //                std::vector<double> term_value(term_size, 0);
+        //                for (uint64_t i = 0; i < term_size; ++i) {
+        //                    term_value[i] = term_value_json[i].get<double>();
+        //                }
+        //                memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(double));
+        //                break;
+        //            }
+        //            default:
+        //                break;
+        //        }
+        //
+        //        leaf_query->term_query = term_query;
+        //        query->AddLeafQuery(leaf_query);
+        //    } else if (json.contains("range")) {
+        //        auto leaf_query = std::make_shared<query::LeafQuery>();
+        //        auto range_query = std::make_shared<query::RangeQuery>();
+        //
+        //        auto range_json = json["range"];
+        //        std::string field_name = range_json["field_name"];
+        //        range_query->field_name = field_name;
+        //
+        //        auto range_value_json = range_json["values"];
+        //        if (range_value_json.contains("lt")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::LT;
+        //            compare_expr.operand = range_value_json["lt"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //        if (range_value_json.contains("lte")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::LTE;
+        //            compare_expr.operand = range_value_json["lte"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //        if (range_value_json.contains("eq")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::EQ;
+        //            compare_expr.operand = range_value_json["eq"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //        if (range_value_json.contains("ne")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::NE;
+        //            compare_expr.operand = range_value_json["ne"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //        if (range_value_json.contains("gt")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::GT;
+        //            compare_expr.operand = range_value_json["gt"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //        if (range_value_json.contains("gte")) {
+        //            query::CompareExpr compare_expr;
+        //            compare_expr.compare_operator = query::CompareOperator::GTE;
+        //            compare_expr.operand = range_value_json["gte"].get<std::string>();
+        //            range_query->compare_expr.emplace_back(compare_expr);
+        //        }
+        //
+        //        leaf_query->range_query = range_query;
+        //        query->AddLeafQuery(leaf_query);
+        //    } else if (json.contains("vector")) {
+        //        auto leaf_query = std::make_shared<query::LeafQuery>();
+        //        auto vector_query = std::make_shared<query::VectorQuery>();
+        //
+        //        auto vector_json = json["vector"];
+        //        std::string field_name = vector_json["field_name"];
+        //        vector_query->field_name = field_name;
+        //
+        //        engine::VectorsData vectors;
+        //        // TODO(yukun): process binary vector
+        //        CopyRecordsFromJson(vector_json["values"], vectors, false);
+        //
+        //        vector_query->query_vector.float_data = vectors.float_data_;
+        //        vector_query->query_vector.binary_data = vectors.binary_data_;
+        //
+        //        vector_query->topk = vector_json["topk"].get<int64_t>();
+        //        vector_query->extra_params = vector_json["extra_params"];
+        //
+        //        // TODO(yukun): remove hardcode here
+        //        std::string vector_placeholder = "placeholder_1";
+        //        query_ptr_->vectors.insert(std::make_pair(vector_placeholder, vector_query));
+        //        leaf_query->vector_placeholder = vector_placeholder;
+        //        query->AddLeafQuery(leaf_query);
     }
     return Status::OK();
 }
@@ -686,16 +587,16 @@ WebRequestHandler::ProcessBoolQueryJson(const nlohmann::json& query_json, query:
 }
 
 void
-ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, std::vector<std::string>& field_names,
+ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, const std::vector<std::string>& field_names,
                        const int64_t row_num, nlohmann::json& column_attrs_json) {
-    if (field_names.size() == 0) {
-        if (row_attrs.size() > 0) {
-            auto attr_it = row_attrs[0].attr_type_.begin();
-            for (; attr_it != row_attrs[0].attr_type_.end(); attr_it++) {
-                field_names.emplace_back(attr_it->first);
-            }
-        }
-    }
+    //    if (field_names.size() == 0) {
+    //        if (row_attrs.size() > 0) {
+    //            auto attr_it = row_attrs[0].attr_type_.begin();
+    //            for (; attr_it != row_attrs[0].attr_type_.end(); attr_it++) {
+    //                field_names.emplace_back(attr_it->first);
+    //            }
+    //        }
+    //    }
 
     for (uint64_t i = 0; i < field_names.size() - 1; i++) {
         std::vector<int64_t> int_data;
@@ -705,35 +606,35 @@ ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, std::vec
             double double_value;
             auto attr_data = attr.attr_data_.at(field_names[i]);
             switch (attr.attr_type_.at(field_names[i])) {
-                case engine::meta::hybrid::DataType::INT8: {
+                case engine::DataType::INT8: {
                     if (attr_data.size() == sizeof(int8_t)) {
                         int_value = attr_data[0];
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::hybrid::DataType::INT16: {
+                case engine::DataType::INT16: {
                     if (attr_data.size() == sizeof(int16_t)) {
                         memcpy(&int_value, attr_data.data(), sizeof(int16_t));
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::hybrid::DataType::INT32: {
+                case engine::DataType::INT32: {
                     if (attr_data.size() == sizeof(int32_t)) {
                         memcpy(&int_value, attr_data.data(), sizeof(int32_t));
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::hybrid::DataType::INT64: {
+                case engine::DataType::INT64: {
                     if (attr_data.size() == sizeof(int64_t)) {
                         memcpy(&int_value, attr_data.data(), sizeof(int64_t));
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::hybrid::DataType::FLOAT: {
+                case engine::DataType::FLOAT: {
                     if (attr_data.size() == sizeof(float)) {
                         float float_value;
                         memcpy(&float_value, attr_data.data(), sizeof(float));
@@ -742,7 +643,7 @@ ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, std::vec
                     }
                     break;
                 }
-                case engine::meta::hybrid::DataType::DOUBLE: {
+                case engine::DataType::DOUBLE: {
                     if (attr_data.size() == sizeof(double)) {
                         memcpy(&double_value, attr_data.data(), sizeof(double));
                         double_data.emplace_back(double_value);
@@ -789,11 +690,11 @@ ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, std::vec
 }
 
 Status
-WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohmann::json& json,
-                                std::string& result_str) {
+WebRequestHandler::Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str) {
     Status status;
 
-    status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name, field_type_);
+    milvus::server::CollectionSchema collection_schema;
+    status = req_handler_.GetCollectionInfo(context_ptr_, collection_name, collection_schema);
     if (!status.ok()) {
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }
@@ -830,39 +731,38 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
         auto general_query = std::make_shared<query::GeneralQuery>();
         query::GenBinaryQuery(boolean_query, general_query->bin);
 
-        query_ptr_->root = general_query->bin;
+        query_ptr_->root = general_query;
 
-        engine::QueryResult result;
-        std::vector<std::string> field_names;
-        status = request_handler_.HybridSearch(context_ptr_, collection_name, partition_tags, general_query, query_ptr_,
-                                               extra_params, field_names, result);
+        engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
+        engine::snapshot::FieldElementMappings field_mappings;
+        status = req_handler_.Search(context_ptr_, query_ptr_, extra_params, field_mappings, result);
 
         if (!status.ok()) {
             return status;
         }
 
         nlohmann::json result_json;
-        result_json["num"] = result.row_num_;
-        if (result.row_num_ == 0) {
+        result_json["num"] = result->row_num_;
+        if (result->row_num_ == 0) {
             result_json["result"] = std::vector<int64_t>();
             result_str = result_json.dump();
             return Status::OK();
         }
 
-        auto step = result.result_ids_.size() / result.row_num_;
+        auto step = result->result_ids_.size() / result->row_num_;
         nlohmann::json search_result_json;
-        for (int64_t i = 0; i < result.row_num_; i++) {
+        for (int64_t i = 0; i < result->row_num_; i++) {
             nlohmann::json raw_result_json;
             for (size_t j = 0; j < step; j++) {
                 nlohmann::json one_result_json;
-                one_result_json["id"] = std::to_string(result.result_ids_.at(i * step + j));
-                one_result_json["distance"] = std::to_string(result.result_distances_.at(i * step + j));
+                one_result_json["id"] = std::to_string(result->result_ids_.at(i * step + j));
+                one_result_json["distance"] = std::to_string(result->result_distances_.at(i * step + j));
                 raw_result_json.emplace_back(one_result_json);
             }
             search_result_json.emplace_back(raw_result_json);
         }
         nlohmann::json attr_json;
-        ConvertRowToColumnJson(result.attrs_, field_names, result.row_num_, attr_json);
+        //        ConvertRowToColumnJson(result->attrs_, query_ptr_->field_names, result->row_num_, attr_json);
         result_json["Entity"] = attr_json;
         result_json["result"] = search_result_json;
         result_str = result_json.dump();
@@ -891,7 +791,7 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
         vector_ids.emplace_back(std::stol(id_str));
     }
 
-    auto status = request_handler_.DeleteByID(context_ptr_, collection_name, vector_ids);
+    auto status = req_handler_.DeleteEntityByID(context_ptr_, collection_name, vector_ids);
 
     nlohmann::json result_json;
     AddStatusToJson(result_json, status.code(), status.message());
@@ -902,12 +802,41 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
 
 Status
 WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
-                                  nlohmann::json& json_out) {
-    std::vector<engine::VectorsData> vector_batch;
+                                  std::vector<std::string>& field_names, nlohmann::json& json_out) {
+    std::vector<bool> valid_row;
+    engine::DataChunkPtr data_chunk;
+    engine::snapshot::FieldElementMappings field_mappings;
+
     std::vector<engine::AttrsData> attr_batch;
-    auto status = request_handler_.GetEntityByID(context_ptr_, collection_name, ids, attr_batch, vector_batch);
+    std::vector<engine::VectorsData> vector_batch;
+    auto status = req_handler_.GetEntityByID(context_ptr_, collection_name, ids, field_names, valid_row, field_mappings,
+                                             data_chunk);
     if (!status.ok()) {
         return status;
+    }
+    std::vector<uint8_t> id_array = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME]->data_;
+
+    for (const auto& it : field_mappings) {
+        std::string name = it.first->GetName();
+        uint64_t type = it.first->GetFtype();
+        std::vector<uint8_t>& data = data_chunk->fixed_fields_[name]->data_;
+        if (type == engine::DataType::VECTOR_BINARY) {
+            engine::VectorsData vectors_data;
+            memcpy(vectors_data.binary_data_.data(), data.data(), data.size());
+            memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
+            vector_batch.emplace_back(vectors_data);
+        } else if (type == engine::DataType::VECTOR_FLOAT) {
+            engine::VectorsData vectors_data;
+            memcpy(vectors_data.float_data_.data(), data.data(), data.size());
+            memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
+            vector_batch.emplace_back(vectors_data);
+        } else {
+            engine::AttrsData attrs_data;
+            attrs_data.attr_type_[name] = static_cast<engine::DataType>(type);
+            attrs_data.attr_data_[name] = data;
+            memcpy(attrs_data.id_array_.data(), id_array.data(), id_array.size());
+            attr_batch.emplace_back(attrs_data);
+        }
     }
 
     bool bin;
@@ -927,17 +856,18 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
         vector_json["id"] = std::to_string(ids[i]);
         vectors_json.push_back(vector_json);
     }
-    std::vector<std::string> field_names;
     ConvertRowToColumnJson(attr_batch, field_names, -1, attrs_json);
     json_out["vectors"] = vectors_json;
     json_out["attributes"] = attrs_json;
+    return Status::OK();
 }
 
 Status
 WebRequestHandler::GetVectorsByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
                                    nlohmann::json& json_out) {
     std::vector<engine::VectorsData> vector_batch;
-    auto status = request_handler_.GetVectorsByID(context_ptr_, collection_name, ids, vector_batch);
+    auto status = Status::OK();
+    //    auto status = req_handler_.GetVectorsByID(context_ptr_, collection_name, ids, vector_batch);
     if (!status.ok()) {
         return status;
     }
@@ -993,239 +923,245 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
 
 StatusDto::ObjectWrapper
 WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_config) {
-    std::string reply;
-    std::string cache_cmd_prefix = "get_config " + std::string(CONFIG_CACHE) + ".";
-
-    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY);
-    auto status = CommandLine(cache_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-    advanced_config->cpu_cache_capacity = std::stol(reply);
-
-    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA);
-    CommandLine(cache_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-    advanced_config->cache_insert_data = ("1" == reply || "true" == reply);
-
-    auto engine_cmd_prefix = "get_config " + std::string(CONFIG_ENGINE) + ".";
-    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD);
-    CommandLine(engine_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-    advanced_config->use_blas_threshold = std::stol(reply);
-
-#ifdef MILVUS_GPU_VERSION
-    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD);
-    CommandLine(engine_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-    advanced_config->gpu_search_threshold = std::stol(reply);
-#endif
-
-    ASSIGN_RETURN_STATUS_DTO(status)
+    //    std::string reply;
+    //    std::string cache_cmd_prefix = "get_config " + std::string(CONFIG_CACHE) + ".";
+    //
+    //    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY);
+    //    auto status = CommandLine(cache_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //    advanced_config->cpu_cache_capacity = std::stol(reply);
+    //
+    //    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA);
+    //    CommandLine(cache_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //    advanced_config->cache_insert_data = ("1" == reply || "true" == reply);
+    //
+    //    auto engine_cmd_prefix = "get_config " + std::string(CONFIG_ENGINE) + ".";
+    //    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD);
+    //    CommandLine(engine_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //    advanced_config->use_blas_threshold = std::stol(reply);
+    //
+    //#ifdef MILVUS_GPU_VERSION
+    //    engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD);
+    //    CommandLine(engine_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //    advanced_config->gpu_search_threshold = std::stol(reply);
+    //#endif
+    //
+    //    ASSIGN_RETURN_STATUS_DTO(status)
+    ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& advanced_config) {
-    if (nullptr == advanced_config->cpu_cache_capacity.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cpu_cache_capacity\' miss.");
-    }
-
-    if (nullptr == advanced_config->cache_insert_data.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_insert_data\' miss.");
-    }
-
-    if (nullptr == advanced_config->use_blas_threshold.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'use_blas_threshold\' miss.");
-    }
-
-#ifdef MILVUS_GPU_VERSION
-    if (nullptr == advanced_config->gpu_search_threshold.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'gpu_search_threshold\' miss.");
-    }
-#endif
-
-    std::string reply;
-    std::string cache_cmd_prefix = "set_config " + std::string(CONFIG_CACHE) + ".";
-
-    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY) + " " +
-                                   std::to_string(advanced_config->cpu_cache_capacity->getValue());
-    auto status = CommandLine(cache_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA) + " " +
-                       std::to_string(advanced_config->cache_insert_data->getValue());
-    status = CommandLine(cache_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    auto engine_cmd_prefix = "set_config " + std::string(CONFIG_ENGINE) + ".";
-
-    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD) + " " +
-                             std::to_string(advanced_config->use_blas_threshold->getValue());
-    status = CommandLine(engine_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-#ifdef MILVUS_GPU_VERSION
-    auto gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
-    auto gpu_cmd_string = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD) + " " +
-                          std::to_string(advanced_config->gpu_search_threshold->getValue());
-    status = CommandLine(gpu_cmd_string, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-#endif
-
-    ASSIGN_RETURN_STATUS_DTO(status)
+    //    if (nullptr == advanced_config->cpu_cache_capacity.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cpu_cache_capacity\' miss.");
+    //    }
+    //
+    //    if (nullptr == advanced_config->cache_insert_data.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_insert_data\' miss.");
+    //    }
+    //
+    //    if (nullptr == advanced_config->use_blas_threshold.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'use_blas_threshold\' miss.");
+    //    }
+    //
+    //#ifdef MILVUS_GPU_VERSION
+    //    if (nullptr == advanced_config->gpu_search_threshold.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'gpu_search_threshold\' miss.");
+    //    }
+    //#endif
+    //
+    //    std::string reply;
+    //    std::string cache_cmd_prefix = "set_config " + std::string(CONFIG_CACHE) + ".";
+    //
+    //    std::string cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CPU_CACHE_CAPACITY) + " " +
+    //                                   std::to_string(advanced_config->cpu_cache_capacity->getValue());
+    //    auto status = CommandLine(cache_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //
+    //    cache_cmd_string = cache_cmd_prefix + std::string(CONFIG_CACHE_CACHE_INSERT_DATA) + " " +
+    //                       std::to_string(advanced_config->cache_insert_data->getValue());
+    //    status = CommandLine(cache_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //
+    //    auto engine_cmd_prefix = "set_config " + std::string(CONFIG_ENGINE) + ".";
+    //
+    //    auto engine_cmd_string = engine_cmd_prefix + std::string(CONFIG_ENGINE_USE_BLAS_THRESHOLD) + " " +
+    //                             std::to_string(advanced_config->use_blas_threshold->getValue());
+    //    status = CommandLine(engine_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //
+    //#ifdef MILVUS_GPU_VERSION
+    //    auto gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
+    //    auto gpu_cmd_string = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_GPU_SEARCH_THRESHOLD) + " " +
+    //                          std::to_string(advanced_config->gpu_search_threshold->getValue());
+    //    status = CommandLine(gpu_cmd_string, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status)
+    //    }
+    //#endif
+    //
+    //    ASSIGN_RETURN_STATUS_DTO(status)
+    ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 
 #ifdef MILVUS_GPU_VERSION
+
 StatusDto::ObjectWrapper
 WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-    std::string reply;
-    std::string gpu_cmd_prefix = "get_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
-
-    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE);
-    auto status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-    gpu_config_dto->enable = reply == "1" || reply == "true";
-
-    if (!gpu_config_dto->enable->getValue()) {
-        ASSIGN_RETURN_STATUS_DTO(Status::OK());
-    }
-
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY);
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-    gpu_config_dto->cache_capacity = std::stol(reply);
-
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES);
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    std::vector<std::string> gpu_entry;
-    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
-
-    gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
-    for (auto& device_id : gpu_entry) {
-        gpu_config_dto->search_resources->pushBack(OString(device_id.c_str())->toUpperCase());
-    }
-    gpu_entry.clear();
-
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES);
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
-    gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
-    for (auto& device_id : gpu_entry) {
-        gpu_config_dto->build_index_resources->pushBack(OString(device_id.c_str())->toUpperCase());
-    }
-
+    //    std::string reply;
+    //    std::string gpu_cmd_prefix = "get_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
+    //
+    //    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE);
+    //    auto status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //    gpu_config_dto->enable = reply == "1" || reply == "true";
+    //
+    //    if (!gpu_config_dto->enable->getValue()) {
+    //        ASSIGN_RETURN_STATUS_DTO(Status::OK());
+    //    }
+    //
+    //    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY);
+    //    status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //    gpu_config_dto->cache_capacity = std::stol(reply);
+    //
+    //    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES);
+    //    status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    std::vector<std::string> gpu_entry;
+    //    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
+    //
+    //    gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
+    //    for (auto& device_id : gpu_entry) {
+    //        gpu_config_dto->search_resources->pushBack(OString(device_id.c_str())->toUpperCase());
+    //    }
+    //    gpu_entry.clear();
+    //
+    //    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES);
+    //    status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    StringHelpFunctions::SplitStringByDelimeter(reply, ",", gpu_entry);
+    //    gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
+    //    for (auto& device_id : gpu_entry) {
+    //        gpu_config_dto->build_index_resources->pushBack(OString(device_id.c_str())->toUpperCase());
+    //    }
+    //
+    //    ASSIGN_RETURN_STATUS_DTO(Status::OK());
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 
 StatusDto::ObjectWrapper
 WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
-    // Step 1: Check config param
-    if (nullptr == gpu_config_dto->enable.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'enable\' miss")
-    }
-
-    if (nullptr == gpu_config_dto->cache_capacity.get()) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_capacity\' miss")
-    }
-
-    if (nullptr == gpu_config_dto->search_resources.get()) {
-        gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
-        gpu_config_dto->search_resources->pushBack("GPU0");
-    }
-
-    if (nullptr == gpu_config_dto->build_index_resources.get()) {
-        gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
-        gpu_config_dto->build_index_resources->pushBack("GPU0");
-    }
-
-    // Step 2: Set config
-    std::string reply;
-    std::string gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
-    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE) + " " +
-                                  std::to_string(gpu_config_dto->enable->getValue());
-    auto status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    if (!gpu_config_dto->enable->getValue()) {
-        RETURN_STATUS_DTO(SUCCESS, "Set Gpu resources to false");
-    }
-
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY) + " " +
-                      std::to_string(gpu_config_dto->cache_capacity->getValue());
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    std::vector<std::string> search_resources;
-    gpu_config_dto->search_resources->forEach(
-        [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str()); });
-
-    std::string search_resources_value;
-    for (auto& res : search_resources) {
-        search_resources_value += res + ",";
-    }
-    auto len = search_resources_value.size();
-    if (len > 0) {
-        search_resources_value.erase(len - 1);
-    }
-
-    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES) + " " + search_resources_value;
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
-    std::vector<std::string> build_resources;
-    gpu_config_dto->build_index_resources->forEach(
-        [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
-
-    std::string build_resources_value;
-    for (auto& res : build_resources) {
-        build_resources_value += res + ",";
-    }
-    len = build_resources_value.size();
-    if (len > 0) {
-        build_resources_value.erase(len - 1);
-    }
-
-    gpu_cmd_request =
-        gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) + " " + build_resources_value;
-    status = CommandLine(gpu_cmd_request, reply);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status);
-    }
-
+    //    // Step 1: Check config param
+    //    if (nullptr == gpu_config_dto->enable.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'enable\' miss")
+    //    }
+    //
+    //    if (nullptr == gpu_config_dto->cache_capacity.get()) {
+    //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cache_capacity\' miss")
+    //    }
+    //
+    //    if (nullptr == gpu_config_dto->search_resources.get()) {
+    //        gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
+    //        gpu_config_dto->search_resources->pushBack("GPU0");
+    //    }
+    //
+    //    if (nullptr == gpu_config_dto->build_index_resources.get()) {
+    //        gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
+    //        gpu_config_dto->build_index_resources->pushBack("GPU0");
+    //    }
+    //
+    //    // Step 2: Set config
+    //    std::string reply;
+    //    std::string gpu_cmd_prefix = "set_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
+    //    std::string gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_ENABLE) + " " +
+    //                                  std::to_string(gpu_config_dto->enable->getValue());
+    //    auto status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    if (!gpu_config_dto->enable->getValue()) {
+    //        RETURN_STATUS_DTO(SUCCESS, "Set Gpu resources to false");
+    //    }
+    //
+    //    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_CACHE_CAPACITY) + " " +
+    //                      std::to_string(gpu_config_dto->cache_capacity->getValue());
+    //    status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    std::vector<std::string> search_resources;
+    //    gpu_config_dto->search_resources->forEach(
+    //        [&search_resources](const OString& res) { search_resources.emplace_back(res->toLowerCase()->std_str());
+    //        });
+    //
+    //    std::string search_resources_value;
+    //    for (auto& res : search_resources) {
+    //        search_resources_value += res + ",";
+    //    }
+    //    auto len = search_resources_value.size();
+    //    if (len > 0) {
+    //        search_resources_value.erase(len - 1);
+    //    }
+    //
+    //    gpu_cmd_request = gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_SEARCH_RESOURCES) + " " +
+    //    search_resources_value; status = CommandLine(gpu_cmd_request, reply); if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    std::vector<std::string> build_resources;
+    //    gpu_config_dto->build_index_resources->forEach(
+    //        [&build_resources](const OString& res) { build_resources.emplace_back(res->toLowerCase()->std_str()); });
+    //
+    //    std::string build_resources_value;
+    //    for (auto& res : build_resources) {
+    //        build_resources_value += res + ",";
+    //    }
+    //    len = build_resources_value.size();
+    //    if (len > 0) {
+    //        build_resources_value.erase(len - 1);
+    //    }
+    //
+    //    gpu_cmd_request =
+    //        gpu_cmd_prefix + std::string(CONFIG_GPU_RESOURCE_BUILD_INDEX_RESOURCES) + " " + build_resources_value;
+    //    status = CommandLine(gpu_cmd_request, reply);
+    //    if (!status.ok()) {
+    //        ASSIGN_RETURN_STATUS_DTO(status);
+    //    }
+    //
+    //    ASSIGN_RETURN_STATUS_DTO(Status::OK());
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
+
 #endif
 
 /*************
@@ -1250,14 +1186,11 @@ WebRequestHandler::CreateCollection(const CollectionRequestDto::ObjectWrapper& c
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'metric_type\' is missing")
     }
 
-    if (MetricNameMap.find(collection_schema->metric_type->std_str()) == MetricNameMap.end()) {
-        RETURN_STATUS_DTO(ILLEGAL_METRIC_TYPE, "metric_type is illegal")
-    }
-
-    auto status = request_handler_.CreateCollection(
-        context_ptr_, collection_schema->collection_name->std_str(), collection_schema->dimension,
-        collection_schema->index_file_size,
-        static_cast<int64_t>(MetricNameMap.at(collection_schema->metric_type->std_str())));
+    auto status = Status::OK();
+    //    auto status = req_handler_.CreateCollection(
+    //        context_ptr_, collection_schema->collection_name->std_str(), collection_schema->dimension,
+    //        collection_schema->index_file_size,
+    //        static_cast<int64_t>(MetricNameMap.at(collection_schema->metric_type->std_str())));
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1268,40 +1201,38 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
     std::string collection_name = json_str["collection_name"];
 
     // TODO(yukun): do checking
-    std::vector<std::pair<std::string, engine::meta::hybrid::DataType>> field_types;
-    std::vector<std::pair<std::string, std::string>> field_extra_params;
-    std::vector<std::pair<std::string, uint64_t>> vector_dimensions;
+    std::unordered_map<std::string, FieldSchema> fields;
     for (auto& field : json_str["fields"]) {
+        FieldSchema field_schema;
         std::string field_name = field["field_name"];
-        std::string field_type = field["field_type"];
-        auto extra_params = field["extra_params"];
+
+        field_schema.field_params_ = field["extra_params"];
+
+        const std::string& field_type = field["field_type"];
         if (field_type == "int8") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::INT8));
+            field_schema.field_type_ = engine::DataType::INT8;
         } else if (field_type == "int16") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::INT16));
+            field_schema.field_type_ = engine::DataType::INT16;
         } else if (field_type == "int32") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::INT32));
+            field_schema.field_type_ = engine::DataType::INT32;
         } else if (field_type == "int64") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::INT64));
+            field_schema.field_type_ = engine::DataType::INT64;
         } else if (field_type == "float") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::FLOAT));
+            field_schema.field_type_ = engine::DataType::FLOAT;
         } else if (field_type == "double") {
-            field_types.emplace_back(std::make_pair(field_name, engine::meta::hybrid::DataType::DOUBLE));
+            field_schema.field_type_ = engine::DataType::DOUBLE;
         } else if (field_type == "vector") {
         } else {
             std::string msg = field_name + " has wrong field_type";
             RETURN_STATUS_DTO(BODY_PARSE_FAIL, msg.c_str());
         }
 
-        field_extra_params.emplace_back(std::make_pair(field_name, extra_params.dump()));
-
-        if (extra_params.contains("dimension")) {
-            vector_dimensions.emplace_back(std::make_pair(field_name, extra_params["dimension"].get<uint64_t>()));
-        }
+        fields[field_name] = field_schema;
     }
 
-    auto status = request_handler_.CreateHybridCollection(context_ptr_, collection_name, field_types, vector_dimensions,
-                                                          field_extra_params);
+    milvus::json json_params;
+
+    auto status = req_handler_.CreateCollection(context_ptr_, collection_name, fields, json_params);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1331,7 +1262,7 @@ WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& re
     }
 
     std::vector<std::string> collections;
-    status = request_handler_.ShowCollections(context_ptr_, collections);
+    status = req_handler_.ListCollections(context_ptr_, collections);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
@@ -1394,7 +1325,7 @@ WebRequestHandler::GetCollection(const OString& collection_name, const OQueryPar
 
 StatusDto::ObjectWrapper
 WebRequestHandler::DropCollection(const OString& collection_name) {
-    auto status = request_handler_.DropCollection(context_ptr_, collection_name->std_str());
+    auto status = req_handler_.DropCollection(context_ptr_, collection_name->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1408,20 +1339,15 @@ StatusDto::ObjectWrapper
 WebRequestHandler::CreateIndex(const OString& collection_name, const OString& body) {
     try {
         auto request_json = nlohmann::json::parse(body->std_str());
+        std::string field_name, index_name;
         if (!request_json.contains("index_type")) {
             RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'index_type\' is required");
         }
 
-        std::string index_type = request_json["index_type"];
-        if (IndexNameMap.find(index_type) == IndexNameMap.end()) {
-            RETURN_STATUS_DTO(ILLEGAL_INDEX_TYPE, "The index type is invalid.")
-        }
-        auto index = static_cast<int64_t>(IndexNameMap.at(index_type));
-        if (!request_json.contains("params")) {
-            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'params\' is required")
-        }
-        auto status =
-            request_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index, request_json["params"]);
+        auto status = Status::OK();
+        //        auto status =
+        //            req_handler_.CreateIndex(context_ptr_, collection_name->std_str(), index,
+        //            request_json["params"]);
         ASSIGN_RETURN_STATUS_DTO(status);
     } catch (nlohmann::detail::parse_error& e) {
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
@@ -1433,24 +1359,9 @@ WebRequestHandler::CreateIndex(const OString& collection_name, const OString& bo
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::GetIndex(const OString& collection_name, OString& result) {
-    IndexParam param;
-    auto status = request_handler_.DescribeIndex(context_ptr_, collection_name->std_str(), param);
-
-    if (status.ok()) {
-        nlohmann::json json_out;
-        auto index_type = IndexMap.at(engine::EngineType(param.index_type_));
-        json_out["index_type"] = index_type;
-        json_out["params"] = nlohmann::json::parse(param.extra_params_);
-        result = json_out.dump().c_str();
-    }
-
-    ASSIGN_RETURN_STATUS_DTO(status)
-}
-
-StatusDto::ObjectWrapper
 WebRequestHandler::DropIndex(const OString& collection_name) {
-    auto status = request_handler_.DropIndex(context_ptr_, collection_name->std_str());
+    auto status = Status::OK();
+    //    auto status = req_handler_.DropIndex(context_ptr_, collection_name->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1462,13 +1373,13 @@ WebRequestHandler::CreatePartition(const OString& collection_name, const Partiti
     }
 
     auto status =
-        request_handler_.CreatePartition(context_ptr_, collection_name->std_str(), param->partition_tag->std_str());
+        req_handler_.CreatePartition(context_ptr_, collection_name->std_str(), param->partition_tag->std_str());
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
 StatusDto::ObjectWrapper
-WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryParams& query_params, const OString& body,
+WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
                                   PartitionListDto::ObjectWrapper& partition_list_dto) {
     int64_t offset = 0;
     auto status = ParseQueryInteger(query_params, "offset", offset);
@@ -1487,35 +1398,6 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
             Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
     }
 
-    if (nullptr != body.get() && body->getSize() > 0) {
-        auto body_json = nlohmann::json::parse(body->c_str());
-        if (!body_json.contains("filter")) {
-            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'filter\' is required.")
-        }
-        auto filter_json = body_json["filter"];
-        if (filter_json.contains("partition_tag")) {
-            std::string tag = filter_json["partition_tag"];
-            bool exists = false;
-            status = request_handler_.HasPartition(context_ptr_, collection_name->std_str(), tag, exists);
-            if (!status.ok()) {
-                ASSIGN_RETURN_STATUS_DTO(status)
-            }
-            auto partition_dto = PartitionFieldsDto::createShared();
-            if (exists) {
-                partition_list_dto->count = 1;
-                partition_dto->partition_tag = tag.c_str();
-            } else {
-                partition_list_dto->count = 0;
-            }
-            partition_list_dto->partitions = partition_list_dto->partitions->createShared();
-            partition_list_dto->partitions->pushBack(partition_dto);
-
-            ASSIGN_RETURN_STATUS_DTO(status)
-        } else {
-            RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Unknown field.")
-        }
-    }
-
     bool all_required = false;
     auto required = query_params.get("all_required");
     if (nullptr != required.get()) {
@@ -1526,27 +1408,27 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
         all_required = required_str == "True" || required_str == "true";
     }
 
-    std::vector<PartitionParam> partitions;
-    status = request_handler_.ShowPartitions(context_ptr_, collection_name->std_str(), partitions);
+    std::vector<std::string> partition_names;
+    status = req_handler_.ListPartitions(context_ptr_, collection_name->std_str(), partition_names);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
     if (all_required) {
         offset = 0;
-        page_size = partitions.size();
+        page_size = partition_names.size();
     } else {
-        offset = std::min((size_t)offset, partitions.size());
-        page_size = std::min(partitions.size() - offset, (size_t)page_size);
+        offset = std::min((size_t)offset, partition_names.size());
+        page_size = std::min(partition_names.size() - offset, (size_t)page_size);
     }
 
-    partition_list_dto->count = partitions.size();
+    partition_list_dto->count = partition_names.size();
     partition_list_dto->partitions = partition_list_dto->partitions->createShared();
 
-    if (offset < (int64_t)(partitions.size())) {
+    if (offset < (int64_t)(partition_names.size())) {
         for (int64_t i = offset; i < page_size + offset; i++) {
             auto partition_dto = PartitionFieldsDto::createShared();
-            partition_dto->partition_tag = partitions.at(i).tag_.c_str();
+            partition_dto->partition_tag = partition_names.at(i).c_str();
             partition_list_dto->partitions->pushBack(partition_dto);
         }
     }
@@ -1565,7 +1447,7 @@ WebRequestHandler::DropPartition(const OString& collection_name, const OString& 
     } catch (nlohmann::detail::type_error& e) {
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
     }
-    auto status = request_handler_.DropPartition(context_ptr_, collection_name->std_str(), tag);
+    auto status = req_handler_.DropPartition(context_ptr_, collection_name->std_str(), tag);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1607,13 +1489,13 @@ WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryPara
         tag = query_params.get("partition_tag")->std_str();
     }
 
-    std::string info;
-    status = request_handler_.ShowCollectionInfo(context_ptr_, collection_name->std_str(), info);
+    std::string stats;
+    status = req_handler_.GetCollectionStats(context_ptr_, collection_name->std_str(), stats);
     if (!status.ok()) {
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    nlohmann::json info_json = nlohmann::json::parse(info);
+    nlohmann::json info_json = nlohmann::json::parse(stats);
     nlohmann::json segments_json = nlohmann::json::array();
     for (auto& par : info_json["partitions"]) {
         if (!(all_required || tag.empty() || tag == par["tag"])) {
@@ -1668,15 +1550,17 @@ WebRequestHandler::GetSegmentInfo(const OString& collection_name, const OString&
             Status(SERVER_UNEXPECTED_ERROR, "Query param 'offset' or 'page_size' should equal or bigger than 0"));
     }
 
+    std::string id_str = segment_name->std_str();
+    int64_t segment_id = atol(id_str.c_str());
     std::string re = info->std_str();
     status = Status::OK();
     nlohmann::json json;
     // Get vectors
     if (re == "vectors") {
-        status = GetSegmentVectors(collection_name->std_str(), segment_name->std_str(), page_size, offset, json);
+        status = GetSegmentVectors(collection_name->std_str(), segment_id, page_size, offset, json);
         // Get vector ids
     } else if (re == "ids") {
-        status = GetSegmentIds(collection_name->std_str(), segment_name->std_str(), page_size, offset, json);
+        status = GetSegmentIds(collection_name->std_str(), segment_id, page_size, offset, json);
     }
 
     result = status.ok() ? json.dump().c_str() : "NULL";
@@ -1684,70 +1568,10 @@ WebRequestHandler::GetSegmentInfo(const OString& collection_name, const OString&
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-/**********
+/**
  *
- * Vector {
+ * Vector
  */
-StatusDto::ObjectWrapper
-WebRequestHandler::Insert(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto) {
-    if (nullptr == body.get() || body->getSize() == 0) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Request payload is required.")
-    }
-
-    // step 1: copy vectors
-    bool bin_flag;
-    auto status = IsBinaryCollection(collection_name->std_str(), bin_flag);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    auto body_json = nlohmann::json::parse(body->std_str());
-    if (!body_json.contains("vectors")) {
-        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'vectors\' is required");
-    }
-    engine::VectorsData vectors;
-    CopyRecordsFromJson(body_json["vectors"], vectors, bin_flag);
-    if (!status.ok()) {
-        ASSIGN_RETURN_STATUS_DTO(status)
-    }
-
-    // step 2: copy id array
-    if (body_json.contains("ids")) {
-        auto& ids_json = body_json["ids"];
-        if (!ids_json.is_array()) {
-            RETURN_STATUS_DTO(ILLEGAL_BODY, "Field \"ids\" must be a array");
-        }
-        auto& id_array = vectors.id_array_;
-        id_array.clear();
-        try {
-            for (auto& id_str : ids_json) {
-                int64_t id = std::stol(id_str.get<std::string>());
-                id_array.emplace_back(id);
-            }
-        } catch (std::exception& e) {
-            std::string err_msg = std::string("Cannot convert vectors id. details: ") + e.what();
-            RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, err_msg.c_str());
-        }
-    }
-
-    // step 3: copy partition tag
-    std::string tag;
-    if (body_json.contains("partition_tag")) {
-        tag = body_json["partition_tag"];
-    }
-
-    // step 4: construct result
-    status = request_handler_.Insert(context_ptr_, collection_name->std_str(), vectors, tag);
-    if (status.ok()) {
-        ids_dto->ids = ids_dto->ids->createShared();
-        for (auto& id : vectors.id_array_) {
-            ids_dto->ids->pushBack(std::to_string(id).c_str());
-        }
-    }
-
-    ASSIGN_RETURN_STATUS_DTO(status)
-}
-
 StatusDto::ObjectWrapper
 WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::server::web::OString& body,
                                 VectorIdsDto::ObjectWrapper& ids_dto) {
@@ -1756,92 +1580,75 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     }
 
     auto body_json = nlohmann::json::parse(body->c_str());
-    std::string partition_tag = body_json["partition_tag"];
+    std::string partition_name = body_json["partition_tag"];
+    int32_t row_num = body_json["row_num"];
 
-    uint64_t row_num = body_json["row_num"];
-
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
-    auto status = request_handler_.DescribeHybridCollection(context_ptr_, collection_name->c_str(), field_types);
+    std::unordered_map<std::string, engine::DataType> field_types;
+    auto status = Status::OK();
+    // auto status = req_handler_.DescribeHybridCollection(context_ptr_, collection_name->c_str(), field_types);
 
     auto entities = body_json["entity"];
     if (!entities.is_array()) {
         RETURN_STATUS_DTO(ILLEGAL_BODY, "An entity must be an array");
     }
 
-    std::vector<std::string> field_names;
-    std::vector<std::vector<uint8_t>> attr_values;
-    size_t attr_size = 0;
-    std::unordered_map<std::string, engine::VectorsData> vector_datas;
+    std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
+
     for (auto& entity : entities) {
         std::string field_name = entity["field_name"];
-        field_names.emplace_back(field_name);
         auto field_value = entity["field_value"];
-        std::vector<uint8_t> attr_value;
-        switch (field_types.at(field_name)) {
-            case engine::meta::hybrid::DataType::INT8:
-            case engine::meta::hybrid::DataType::INT16:
-            case engine::meta::hybrid::DataType::INT32:
-            case engine::meta::hybrid::DataType::INT64: {
-                std::vector<int64_t> value;
-                auto size = field_value.size();
-                value.resize(size);
-                attr_value.resize(size * sizeof(int64_t));
-                size_t offset = 0;
-                for (auto data : field_value) {
-                    value[offset] = data.get<int64_t>();
-                    ++offset;
-                }
-                memcpy(attr_value.data(), value.data(), size * sizeof(int64_t));
-                attr_size += size * sizeof(int64_t);
-                attr_values.emplace_back(attr_value);
-                break;
-            }
-            case engine::meta::hybrid::DataType::FLOAT:
-            case engine::meta::hybrid::DataType::DOUBLE: {
-                std::vector<double> value;
-                auto size = field_value.size();
-                value.resize(size);
-                attr_value.resize(size * sizeof(double));
-                size_t offset = 0;
-                for (auto data : field_value) {
-                    value[offset] = data.get<double>();
-                    ++offset;
-                }
-                memcpy(attr_value.data(), value.data(), size * sizeof(double));
-                attr_size += size * sizeof(double);
+        auto size = field_value.size();
+        if (size != row_num) {
+            RETURN_STATUS_DTO(ILLEGAL_ROWRECORD, "Field row count inconsist");
+        }
 
-                attr_values.emplace_back(attr_value);
+        std::vector<uint8_t> temp_data;
+        switch (field_types.at(field_name)) {
+            case engine::DataType::INT32: {
+                CopyStructuredData<int32_t>(field_value, temp_data);
                 break;
             }
-            case engine::meta::hybrid::DataType::VECTOR: {
+            case engine::DataType::INT64: {
+                CopyStructuredData<int64_t>(field_value, temp_data);
+                break;
+            }
+            case engine::DataType::FLOAT: {
+                CopyStructuredData<float>(field_value, temp_data);
+                break;
+            }
+            case engine::DataType::DOUBLE: {
+                CopyStructuredData<double>(field_value, temp_data);
+                break;
+            }
+            case engine::DataType::VECTOR_FLOAT: {
                 bool bin_flag;
                 status = IsBinaryCollection(collection_name->c_str(), bin_flag);
                 if (!status.ok()) {
                     ASSIGN_RETURN_STATUS_DTO(status)
                 }
 
-                engine::VectorsData vectors;
-                CopyRecordsFromJson(field_value, vectors, bin_flag);
-                vector_datas.insert(std::make_pair(field_name, vectors));
+                // engine::VectorsData vectors;
+                // CopyRecordsFromJson(field_value, vectors, bin_flag);
+                // vector_datas.insert(std::make_pair(field_name, vectors));
             }
             default: {}
         }
+
+        chunk_data.insert(std::make_pair(field_name, temp_data));
     }
 
-    std::vector<uint8_t> attrs(attr_size, 0);
-    size_t attr_offset = 0;
-    for (auto& data : attr_values) {
-        memcpy(attrs.data() + attr_offset, data.data(), data.size());
-        attr_offset += data.size();
+    status = req_handler_.Insert(context_ptr_, collection_name->c_str(), partition_name, row_num, chunk_data);
+    if (!status.ok()) {
+        RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Failed to insert data");
     }
 
-    status = request_handler_.InsertEntity(context_ptr_, collection_name->c_str(), partition_tag, row_num, field_names,
-                                           attrs, vector_datas);
-
-    if (status.ok()) {
-        ids_dto->ids = ids_dto->ids->createShared();
-        for (auto& id : vector_datas.begin()->second.id_array_) {
-            ids_dto->ids->pushBack(std::to_string(id).c_str());
+    // return generated ids
+    auto pair = chunk_data.find(engine::DEFAULT_UID_NAME);
+    if (pair != chunk_data.end()) {
+        int64_t count = pair->second.size() / 8;
+        int64_t* pdata = reinterpret_cast<int64_t*>(pair->second.data());
+        for (int64_t i = 0; i < count; ++i) {
+            ids_dto->ids->pushBack(std::to_string(pdata[i]).c_str());
         }
     }
 
@@ -1865,8 +1672,16 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         for (auto& id : ids) {
             entity_ids.push_back(std::stol(id));
         }
+
+        std::vector<std::string> field_names;
+        auto query_fields = query_params.get("fields");
+        if (query_fields != nullptr && query_fields.get() != nullptr) {
+            StringHelpFunctions::SplitStringByDelimeter(query_fields->c_str(), ",", field_names);
+        }
+
+        std::vector<bool> valid_row;
         nlohmann::json entity_result_json;
-        status = GetEntityByIDs(collection_name->std_str(), entity_ids, entity_result_json);
+        status = GetEntityByIDs(collection_name->std_str(), entity_ids, field_names, entity_result_json);
         if (!status.ok()) {
             response = "NULL";
             ASSIGN_RETURN_STATUS_DTO(status)
@@ -1910,8 +1725,9 @@ WebRequestHandler::GetVector(const OString& collection_name, const OQueryParams&
             ASSIGN_RETURN_STATUS_DTO(status)
         }
 
-        nlohmann::json json;
-        AddStatusToJson(json, status.code(), status.message());
+        FloatJson json;
+        json["code"] = (int64_t)status.code();
+        json["message"] = status.message();
         if (vectors_json.empty()) {
             json["vectors"] = std::vector<int64_t>();
         } else {
@@ -1935,10 +1751,8 @@ WebRequestHandler::VectorsOp(const OString& collection_name, const OString& payl
 
         if (payload_json.contains("delete")) {
             status = DeleteByIDs(collection_name->std_str(), payload_json["delete"], result_str);
-        } else if (payload_json.contains("search")) {
-            status = Search(collection_name->std_str(), payload_json["search"], result_str);
         } else if (payload_json.contains("query")) {
-            status = HybridSearch(collection_name->c_str(), payload_json, result_str);
+            status = Search(collection_name->c_str(), payload_json, result_str);
         } else {
             status = Status(ILLEGAL_BODY, "Unknown body");
         }
@@ -2012,8 +1826,8 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
             if (j.contains("compact")) {
                 status = Compact(j["compact"], result_str);
             }
-        } else if (op->equals("config")) {
-            status = SetConfig(j, result_str);
+            //        } else if (op->equals("config")) {
+            //            status = SetConfig(j, result_str);
         } else {
             status = Status(UNKNOWN_PATH, "Unknown path: /system/" + op->std_str());
         }

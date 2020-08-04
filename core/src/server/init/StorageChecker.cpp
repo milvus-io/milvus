@@ -18,7 +18,7 @@
 
 #include <fiu-local.h>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 
@@ -27,13 +27,8 @@ namespace server {
 
 Status
 StorageChecker::CheckStoragePermission() {
-    auto& config = Config::GetInstance();
     /* Check log file write permission */
-    std::string logs_path;
-    auto status = config.GetLogsPath(logs_path);
-    if (!status.ok()) {
-        return status;
-    }
+    const std::string& logs_path = config.logs.path();
     int ret = access(logs_path.c_str(), F_OK | R_OK | W_OK);
     fiu_do_on("StorageChecker.CheckStoragePermission.logs_path_access_fail", ret = -1);
     if (0 != ret) {
@@ -44,21 +39,12 @@ StorageChecker::CheckStoragePermission() {
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 
-    bool cluster_enable = false;
-    std::string cluster_role;
-    STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
-    STATUS_CHECK(config.GetClusterConfigRole(cluster_role));
-
-    if (cluster_enable && cluster_role == "ro") {
+    if (config.cluster.enable() && config.cluster.role() == ClusterRole::RO) {
         return Status::OK();
     }
 
     /* Check db directory write permission */
-    std::string primary_path;
-    status = config.GetStorageConfigPath(primary_path);
-    if (!status.ok()) {
-        return status;
-    }
+    const std::string& primary_path = config.storage.path();
 
     ret = access(primary_path.c_str(), F_OK | R_OK | W_OK);
     fiu_do_on("StorageChecker.CheckStoragePermission.db_primary_path_access_fail", ret = -1);
@@ -71,18 +57,9 @@ StorageChecker::CheckStoragePermission() {
     }
 
     /* Check wal directory write permission */
-    bool wal_enable = false;
-    status = config.GetWalConfigEnable(wal_enable);
-    if (!status.ok()) {
-        return status;
-    }
+    if (config.wal.enable()) {
+        const std::string& wal_path = config.wal.path();
 
-    if (wal_enable) {
-        std::string wal_path;
-        status = config.GetWalConfigWalPath(wal_path);
-        if (!status.ok()) {
-            return status;
-        }
         ret = access(wal_path.c_str(), F_OK | R_OK | W_OK);
         fiu_do_on("StorageChecker.CheckStoragePermission.wal_path_access_fail", ret = -1);
         if (0 != ret) {

@@ -23,6 +23,8 @@ const char* NAME_ENGINE_TYPE_RNSG = "RNSG";
 const char* NAME_ENGINE_TYPE_IVFPQ = "IVFPQ";
 const char* NAME_ENGINE_TYPE_HNSW = "HNSW";
 const char* NAME_ENGINE_TYPE_ANNOY = "ANNOY";
+const char* NAME_ENGINE_TYPE_IVFSQ8NR = "IVFSQ8NR";
+const char* NAME_ENGINE_TYPE_HNSWSQ8NM = "HNSWSQ8NM";
 
 const char* NAME_METRIC_TYPE_L2 = "L2";
 const char* NAME_METRIC_TYPE_IP = "IP";
@@ -45,47 +47,7 @@ const int64_t VALUE_CONFIG_CPU_CACHE_CAPACITY_DEFAULT = 4;
 const bool VALUE_CONFIG_CACHE_INSERT_DATA_DEFAULT = false;
 
 /////////////////////////////////////////////////////
-const std::unordered_map<engine::EngineType, std::string> IndexMap = {
-    {engine::EngineType::FAISS_IDMAP, NAME_ENGINE_TYPE_FLAT},
-    {engine::EngineType::FAISS_IVFFLAT, NAME_ENGINE_TYPE_IVFFLAT},
-    {engine::EngineType::FAISS_IVFSQ8, NAME_ENGINE_TYPE_IVFSQ8},
-    {engine::EngineType::FAISS_IVFSQ8H, NAME_ENGINE_TYPE_IVFSQ8H},
-    {engine::EngineType::NSG_MIX, NAME_ENGINE_TYPE_RNSG},
-    {engine::EngineType::FAISS_PQ, NAME_ENGINE_TYPE_IVFPQ},
-    {engine::EngineType::HNSW, NAME_ENGINE_TYPE_HNSW},
-    {engine::EngineType::ANNOY, NAME_ENGINE_TYPE_ANNOY},
-};
 
-const std::unordered_map<std::string, engine::EngineType> IndexNameMap = {
-    {NAME_ENGINE_TYPE_FLAT, engine::EngineType::FAISS_IDMAP},
-    {NAME_ENGINE_TYPE_IVFFLAT, engine::EngineType::FAISS_IVFFLAT},
-    {NAME_ENGINE_TYPE_IVFSQ8, engine::EngineType::FAISS_IVFSQ8},
-    {NAME_ENGINE_TYPE_IVFSQ8H, engine::EngineType::FAISS_IVFSQ8H},
-    {NAME_ENGINE_TYPE_RNSG, engine::EngineType::NSG_MIX},
-    {NAME_ENGINE_TYPE_IVFPQ, engine::EngineType::FAISS_PQ},
-    {NAME_ENGINE_TYPE_HNSW, engine::EngineType::HNSW},
-    {NAME_ENGINE_TYPE_ANNOY, engine::EngineType::ANNOY},
-};
-
-const std::unordered_map<engine::MetricType, std::string> MetricMap = {
-    {engine::MetricType::L2, NAME_METRIC_TYPE_L2},
-    {engine::MetricType::IP, NAME_METRIC_TYPE_IP},
-    {engine::MetricType::HAMMING, NAME_METRIC_TYPE_HAMMING},
-    {engine::MetricType::JACCARD, NAME_METRIC_TYPE_JACCARD},
-    {engine::MetricType::TANIMOTO, NAME_METRIC_TYPE_TANIMOTO},
-    {engine::MetricType::SUBSTRUCTURE, NAME_METRIC_TYPE_SUBSTRUCTURE},
-    {engine::MetricType::SUPERSTRUCTURE, NAME_METRIC_TYPE_SUPERSTRUCTURE},
-};
-
-const std::unordered_map<std::string, engine::MetricType> MetricNameMap = {
-    {NAME_METRIC_TYPE_L2, engine::MetricType::L2},
-    {NAME_METRIC_TYPE_IP, engine::MetricType::IP},
-    {NAME_METRIC_TYPE_HAMMING, engine::MetricType::HAMMING},
-    {NAME_METRIC_TYPE_JACCARD, engine::MetricType::JACCARD},
-    {NAME_METRIC_TYPE_TANIMOTO, engine::MetricType::TANIMOTO},
-    {NAME_METRIC_TYPE_SUBSTRUCTURE, engine::MetricType::SUBSTRUCTURE},
-    {NAME_METRIC_TYPE_SUPERSTRUCTURE, engine::MetricType::SUPERSTRUCTURE},
-};
 }  // namespace web
 }  // namespace server
 }  // namespace milvus

@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "knowhere/common/Config.h"
-#include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 
 namespace milvus {
 namespace knowhere {
@@ -92,6 +92,21 @@ class ANNOYConfAdapter : public ConfAdapter {
 
     bool
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
+class HNSWSQ8NRConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
+class IVFSQ8NRConfAdapter : public IVFConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
 };
 
 }  // namespace knowhere

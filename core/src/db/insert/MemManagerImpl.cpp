@@ -16,166 +16,175 @@
 
 #include "VectorSource.h"
 #include "db/Constants.h"
+#include "db/snapshot/Snapshots.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
 
-MemTablePtr
-MemManagerImpl::GetMemByTable(const std::string& collection_id) {
-    auto memIt = mem_id_map_.find(collection_id);
-    if (memIt != mem_id_map_.end()) {
-        return memIt->second;
+MemCollectionPtr
+MemManagerImpl::GetMemByCollection(int64_t collection_id) {
+    auto mem_collection = mem_map_.find(collection_id);
+    if (mem_collection != mem_map_.end()) {
+        return mem_collection->second;
     }
 
-    mem_id_map_[collection_id] = std::make_shared<MemTable>(collection_id, meta_, options_);
-    return mem_id_map_[collection_id];
+    auto mem = std::make_shared<MemCollection>(collection_id, options_);
+    mem_map_[collection_id] = mem;
+    return mem;
 }
 
 Status
-MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                              const float* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
-    flushed_tables.clear();
-    if (GetCurrentMem() > options_.insert_buffer_size_) {
-        // TODO(zhiru): Don't apply delete here in order to avoid possible concurrency issues with Merge
-        auto status = Flush(flushed_tables, false);
-        fiu_do_on("MemManagerImpl::InsertVectors_flush_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-        if (!status.ok()) {
-            return status;
+MemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) {
+    auto status = ValidateChunk(collection_id, chunk);
+    if (!status.ok()) {
+        return status;
+    }
+
+    VectorSourcePtr source = std::make_shared<VectorSource>(chunk);
+    std::unique_lock<std::mutex> lock(mutex_);
+    return InsertEntitiesNoLock(collection_id, partition_id, source, lsn);
+}
+
+Status
+MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) {
+    if (chunk == nullptr) {
+        return Status(DB_ERROR, "Null chunk pointer");
+    }
+
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id);
+    if (!status.ok()) {
+        std::string err_msg = "Could not get snapshot: " + status.ToString();
+        LOG_ENGINE_ERROR_ << err_msg;
+        return status;
+    }
+
+    std::vector<std::string> field_names = ss->GetFieldNames();
+    for (auto& name : field_names) {
+        auto iter = chunk->fixed_fields_.find(name);
+        if (iter == chunk->fixed_fields_.end()) {
+            std::string err_msg = "Missed chunk field: " + name;
+            LOG_ENGINE_ERROR_ << err_msg;
+            return Status(DB_ERROR, err_msg);
+        }
+        if (iter->second == nullptr) {
+            continue;
+        }
+
+        size_t data_size = iter->second->data_.size();
+
+        snapshot::FieldPtr field = ss->GetField(name);
+        DataType ftype = static_cast<DataType>(field->GetFtype());
+        std::string err_msg = "Illegal data size for chunk field: ";
+        switch (ftype) {
+            case DataType::BOOL:
+                if (data_size != chunk->count_ * sizeof(bool)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case DataType::DOUBLE:
+                if (data_size != chunk->count_ * sizeof(double)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case DataType::FLOAT:
+                if (data_size != chunk->count_ * sizeof(float)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case DataType::INT8:
+                if (data_size != chunk->count_ * sizeof(uint8_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case DataType::INT16:
+                if (data_size != chunk->count_ * sizeof(uint16_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case DataType::INT32:
+                if (data_size != chunk->count_ * sizeof(uint32_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case DataType::INT64:
+                if (data_size != chunk->count_ * sizeof(uint64_t)) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+                break;
+            case DataType::VECTOR_FLOAT:
+            case DataType::VECTOR_BINARY: {
+                json params = field->GetParams();
+                if (params.find(knowhere::meta::DIM) == params.end()) {
+                    std::string msg = "Vector field params must contain: dimension";
+                    LOG_SERVER_ERROR_ << msg;
+                    return Status(DB_ERROR, msg);
+                }
+
+                int64_t dimension = params[knowhere::meta::DIM];
+                int64_t row_size = (ftype == DataType::VECTOR_BINARY) ? dimension / 8 : dimension * sizeof(float);
+                if (data_size != chunk->count_ * row_size) {
+                    return Status(DB_ERROR, err_msg + name);
+                }
+
+                break;
+            }
         }
     }
 
-    VectorsData vectors_data;
-    vectors_data.vector_count_ = length;
-    vectors_data.float_data_.resize(length * dim);
-    memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(float));
-    vectors_data.id_array_.resize(length);
-    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
-    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data);
-
-    std::unique_lock<std::mutex> lock(mutex_);
-
-    return InsertVectorsNoLock(collection_id, source, lsn);
+    return Status::OK();
 }
 
 Status
-MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                              const uint8_t* vectors, uint64_t lsn, std::set<std::string>& flushed_tables) {
-    flushed_tables.clear();
-    if (GetCurrentMem() > options_.insert_buffer_size_) {
-        LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0)
-                          << "Insert buffer size exceeds limit. Performing force flush";
-        // TODO(zhiru): Don't apply delete here in order to avoid possible concurrency issues with Merge
-        auto status = Flush(flushed_tables, false);
-        if (!status.ok()) {
-            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Flush fail: " << status.message();
-            return status;
-        }
-    }
-
-    VectorsData vectors_data;
-    vectors_data.vector_count_ = length;
-    vectors_data.binary_data_.resize(length * dim);
-    memcpy(vectors_data.binary_data_.data(), vectors, length * dim * sizeof(uint8_t));
-    vectors_data.id_array_.resize(length);
-    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
-    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data);
-
-    std::unique_lock<std::mutex> lock(mutex_);
-
-    return InsertVectorsNoLock(collection_id, source, lsn);
-}
-
-Status
-MemManagerImpl::InsertEntities(const std::string& table_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
-                               const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                               const std::unordered_map<std::string, uint64_t>& attr_size,
-                               const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn,
-                               std::set<std::string>& flushed_tables) {
-    flushed_tables.clear();
-    if (GetCurrentMem() > options_.insert_buffer_size_) {
-        LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0)
-                          << "Insert buffer size exceeds limit. Performing force flush";
-        auto status = Flush(flushed_tables, false);
-        if (!status.ok()) {
-            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Flush fail: " << status.message();
-            return status;
-        }
-    }
-
-    VectorsData vectors_data;
-    vectors_data.vector_count_ = length;
-    vectors_data.float_data_.resize(length * dim);
-    memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(float));
-    vectors_data.id_array_.resize(length);
-    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
-
-    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data, attr_nbytes, attr_size, attr_data);
-
-    std::unique_lock<std::mutex> lock(mutex_);
-
-    return InsertEntitiesNoLock(table_id, source, lsn);
-}
-
-Status
-MemManagerImpl::InsertVectorsNoLock(const std::string& collection_id, const VectorSourcePtr& source, uint64_t lsn) {
-    MemTablePtr mem = GetMemByTable(collection_id);
+MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id,
+                                     const milvus::engine::VectorSourcePtr& source, uint64_t lsn) {
+    MemCollectionPtr mem = GetMemByCollection(collection_id);
     mem->SetLSN(lsn);
 
-    auto status = mem->Add(source);
+    auto status = mem->Add(partition_id, source);
     return status;
 }
 
 Status
-MemManagerImpl::InsertEntitiesNoLock(const std::string& collection_id, const milvus::engine::VectorSourcePtr& source,
-                                     uint64_t lsn) {
-    MemTablePtr mem = GetMemByTable(collection_id);
-    mem->SetLSN(lsn);
+MemManagerImpl::DeleteEntity(int64_t collection_id, IDNumber engity_id, uint64_t lsn) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    MemCollectionPtr mem = GetMemByCollection(collection_id);
 
-    auto status = mem->AddEntities(source);
-    return status;
+    mem->SetLSN(lsn);
+    IDNumbers ids = {engity_id};
+    auto status = mem->Delete(ids);
+    if (status.ok()) {
+        return status;
+    }
+
+    return Status::OK();
 }
 
 Status
-MemManagerImpl::DeleteVector(const std::string& collection_id, IDNumber vector_id, uint64_t lsn) {
+MemManagerImpl::DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* engity_ids, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
-    MemTablePtr mem = GetMemByTable(collection_id);
-    mem->SetLSN(lsn);
-    auto status = mem->Delete(vector_id);
-    return status;
-}
+    MemCollectionPtr mem = GetMemByCollection(collection_id);
 
-Status
-MemManagerImpl::DeleteVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids,
-                              uint64_t lsn) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    MemTablePtr mem = GetMemByTable(collection_id);
     mem->SetLSN(lsn);
 
     IDNumbers ids;
     ids.resize(length);
-    memcpy(ids.data(), vector_ids, length * sizeof(IDNumber));
+    memcpy(ids.data(), engity_ids, length * sizeof(IDNumber));
 
     auto status = mem->Delete(ids);
     if (!status.ok()) {
         return status;
     }
 
-    //    // TODO(zhiru): loop for now
-    //    for (auto& id : ids) {
-    //        auto status = mem->Delete(id);
-    //        if (!status.ok()) {
-    //            return status;
-    //        }
-    //    }
-
     return Status::OK();
 }
 
 Status
-MemManagerImpl::Flush(const std::string& collection_id, bool apply_delete) {
+MemManagerImpl::Flush(int64_t collection_id) {
     ToImmutable(collection_id);
-    // TODO: There is actually only one memTable in the immutable list
+
     MemList temp_immutable_list;
     {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -185,20 +194,20 @@ MemManagerImpl::Flush(const std::string& collection_id, bool apply_delete) {
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetTableId();
-        auto status = mem->Serialize(max_lsn, apply_delete);
+        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetCollectionId();
+        auto status = mem->Serialize(max_lsn);
         if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetTableId() << " failed";
+            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetCollectionId() << " failed";
             return status;
         }
-        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetTableId();
+        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetCollectionId();
     }
 
     return Status::OK();
 }
 
 Status
-MemManagerImpl::Flush(std::set<std::string>& table_ids, bool apply_delete) {
+MemManagerImpl::Flush(std::set<int64_t>& collection_ids) {
     ToImmutable();
 
     MemList temp_immutable_list;
@@ -208,36 +217,33 @@ MemManagerImpl::Flush(std::set<std::string>& table_ids, bool apply_delete) {
     }
 
     std::unique_lock<std::mutex> lock(serialization_mtx_);
-    table_ids.clear();
+    collection_ids.clear();
     auto max_lsn = GetMaxLSN(temp_immutable_list);
     for (auto& mem : temp_immutable_list) {
-        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetTableId();
-        auto status = mem->Serialize(max_lsn, apply_delete);
+        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetCollectionId();
+        auto status = mem->Serialize(max_lsn);
         if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetTableId() << " failed";
+            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetCollectionId() << " failed";
             return status;
         }
-        table_ids.insert(mem->GetTableId());
-        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetTableId();
+        collection_ids.insert(mem->GetCollectionId());
+        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetCollectionId();
     }
 
-    meta_->SetGlobalLastLSN(max_lsn);
+    // TODO: global lsn?
+    //    meta_->SetGlobalLastLSN(max_lsn);
 
     return Status::OK();
 }
 
 Status
-MemManagerImpl::ToImmutable(const std::string& collection_id) {
+MemManagerImpl::ToImmutable(int64_t collection_id) {
     std::unique_lock<std::mutex> lock(mutex_);
-    auto memIt = mem_id_map_.find(collection_id);
-    if (memIt != mem_id_map_.end()) {
-        if (!memIt->second->Empty()) {
-            immu_mem_list_.push_back(memIt->second);
-            mem_id_map_.erase(memIt);
-        }
-        //        std::string err_msg = "Could not find collection = " + collection_id + " to flush";
-        //        LOG_ENGINE_ERROR_ << err_msg;
-        //        return Status(DB_NOT_FOUND, err_msg);
+
+    auto mem_collection = mem_map_.find(collection_id);
+    if (mem_collection != mem_map_.end()) {
+        immu_mem_list_.push_back(mem_collection->second);
+        mem_map_.erase(mem_collection);
     }
 
     return Status::OK();
@@ -246,32 +252,27 @@ MemManagerImpl::ToImmutable(const std::string& collection_id) {
 Status
 MemManagerImpl::ToImmutable() {
     std::unique_lock<std::mutex> lock(mutex_);
-    MemIdMap temp_map;
-    for (auto& kv : mem_id_map_) {
-        if (kv.second->Empty()) {
-            // empty collection without any deletes, no need to serialize
-            temp_map.insert(kv);
-        } else {
-            immu_mem_list_.push_back(kv.second);
-        }
-    }
 
-    mem_id_map_.swap(temp_map);
+    for (auto& mem_collection : mem_map_) {
+        immu_mem_list_.push_back(mem_collection.second);
+    }
+    mem_map_.clear();
+
     return Status::OK();
 }
 
 Status
-MemManagerImpl::EraseMemVector(const std::string& collection_id) {
+MemManagerImpl::EraseMem(int64_t collection_id) {
     {  // erase MemVector from rapid-insert cache
         std::unique_lock<std::mutex> lock(mutex_);
-        mem_id_map_.erase(collection_id);
+        mem_map_.erase(collection_id);
     }
 
     {  // erase MemVector from serialize cache
         std::unique_lock<std::mutex> lock(serialization_mtx_);
         MemList temp_list;
         for (auto& mem : immu_mem_list_) {
-            if (mem->GetTableId() != collection_id) {
+            if (mem->GetCollectionId() != collection_id) {
                 temp_list.push_back(mem);
             }
         }
@@ -281,13 +282,33 @@ MemManagerImpl::EraseMemVector(const std::string& collection_id) {
     return Status::OK();
 }
 
+Status
+MemManagerImpl::EraseMem(int64_t collection_id, int64_t partition_id) {
+    {  // erase MemVector from rapid-insert cache
+        std::unique_lock<std::mutex> lock(mutex_);
+        auto mem_collection = mem_map_.find(collection_id);
+        if (mem_collection != mem_map_.end()) {
+            mem_collection->second->EraseMem(partition_id);
+        }
+    }
+
+    {  // erase MemVector from serialize cache
+        std::unique_lock<std::mutex> lock(serialization_mtx_);
+        MemList temp_list;
+        for (auto& mem : immu_mem_list_) {
+            mem->EraseMem(partition_id);
+        }
+    }
+
+    return Status::OK();
+}
+
 size_t
 MemManagerImpl::GetCurrentMutableMem() {
     size_t total_mem = 0;
     std::unique_lock<std::mutex> lock(mutex_);
-    for (auto& kv : mem_id_map_) {
-        auto memTable = kv.second;
-        total_mem += memTable->GetCurrentMem();
+    for (auto& mem_collection : mem_map_) {
+        total_mem += mem_collection.second->GetCurrentMem();
     }
     return total_mem;
 }
@@ -296,8 +317,8 @@ size_t
 MemManagerImpl::GetCurrentImmutableMem() {
     size_t total_mem = 0;
     std::unique_lock<std::mutex> lock(serialization_mtx_);
-    for (auto& mem_table : immu_mem_list_) {
-        total_mem += mem_table->GetCurrentMem();
+    for (auto& mem_collection : immu_mem_list_) {
+        total_mem += mem_collection->GetCurrentMem();
     }
     return total_mem;
 }
@@ -308,20 +329,15 @@ MemManagerImpl::GetCurrentMem() {
 }
 
 uint64_t
-MemManagerImpl::GetMaxLSN(const MemList& tables) {
+MemManagerImpl::GetMaxLSN(const MemList& collections) {
     uint64_t max_lsn = 0;
-    for (auto& collection : tables) {
+    for (auto& collection : collections) {
         auto cur_lsn = collection->GetLSN();
         if (collection->GetLSN() > max_lsn) {
             max_lsn = cur_lsn;
         }
     }
     return max_lsn;
-}
-
-void
-MemManagerImpl::OnInsertBufferSizeChanged(int64_t value) {
-    options_.insert_buffer_size_ = value * GB;
 }
 
 }  // namespace engine

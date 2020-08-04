@@ -48,9 +48,13 @@ class GpuIndexIVFFlat : public GpuIndexIVF {
   /// all data in ourselves
   void copyFrom(const faiss::IndexIVFFlat* index);
 
+  void copyFromWithoutCodes(const faiss::IndexIVFFlat* index, const uint8_t* arranged_data);
+
   /// Copy ourselves to the given CPU index; will overwrite all data
   /// in the index instance
   void copyTo(faiss::IndexIVFFlat* index) const;
+
+  void copyToWithoutCodes(faiss::IndexIVFFlat* index) const;
 
   /// After adding vectors, one can call this to reclaim device memory
   /// to exactly the amount needed. Returns space reclaimed in bytes

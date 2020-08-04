@@ -35,6 +35,10 @@ class ScopedResource {
     Get() {
         return res_;
     }
+    const ResourcePtr&
+    Get() const {
+        return res_;
+    }
 
     ResourceT operator*() const {
         return *res_;
@@ -44,9 +48,7 @@ class ScopedResource {
     }
 
     operator bool() const {
-        if (res_)
-            return true;
-        return false;
+        return (res_ != nullptr);
     }
 
     ~ScopedResource();

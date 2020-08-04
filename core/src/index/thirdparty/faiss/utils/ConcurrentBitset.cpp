@@ -60,7 +60,7 @@ ConcurrentBitset::operator&=(ConcurrentBitset& bitset) {
 }
 
 std::shared_ptr<ConcurrentBitset>
-ConcurrentBitset::operator&(std::shared_ptr<ConcurrentBitset>& bitset) {
+ConcurrentBitset::operator&(const std::shared_ptr<ConcurrentBitset>& bitset) {
     auto result_bitset = std::make_shared<ConcurrentBitset>(bitset->capacity());
 
     auto result_8 = const_cast<uint8_t*>(result_bitset->data());
@@ -119,7 +119,7 @@ ConcurrentBitset::operator|=(ConcurrentBitset& bitset) {
 }
 
 std::shared_ptr<ConcurrentBitset>
-ConcurrentBitset::operator|(std::shared_ptr<ConcurrentBitset>& bitset) {
+ConcurrentBitset::operator|(const std::shared_ptr<ConcurrentBitset>& bitset) {
     auto result_bitset = std::make_shared<ConcurrentBitset>(bitset->capacity());
 
     auto result_8 = const_cast<uint8_t*>(result_bitset->data());

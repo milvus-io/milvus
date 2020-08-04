@@ -18,18 +18,13 @@
 
 #include <fiu-local.h>
 #include <limits>
+#include <set>
 #include <string>
 
 namespace milvus {
 namespace server {
 
 namespace {
-
-constexpr size_t COLLECTION_NAME_SIZE_LIMIT = 255;
-constexpr int64_t COLLECTION_DIMENSION_LIMIT = 32768;
-constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
-constexpr int64_t M_BYTE = 1024 * 1024;
-constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
 
 Status
 CheckParameterRange(const milvus::json& json_params, const std::string& param_name, int64_t min, int64_t max,
@@ -101,7 +96,7 @@ ValidateCollectionName(const std::string& collection_name) {
 
     std::string invalid_msg = "Invalid collection name: " + collection_name + ". ";
     // Collection name size shouldn't exceed 255.
-    if (collection_name.size() > COLLECTION_NAME_SIZE_LIMIT) {
+    if (collection_name.size() > engine::MAX_NAME_LENGTH) {
         std::string msg = invalid_msg + "The length of a collection name must be less than 255 characters.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
@@ -129,220 +124,174 @@ ValidateCollectionName(const std::string& collection_name) {
 }
 
 Status
-ValidateTableDimension(int64_t dimension, int64_t metric_type) {
-    if (dimension <= 0 || dimension > COLLECTION_DIMENSION_LIMIT) {
-        std::string msg = "Invalid collection dimension: " + std::to_string(dimension) + ". " +
-                          "The collection dimension must be within the range of 1 ~ " +
-                          std::to_string(COLLECTION_DIMENSION_LIMIT) + ".";
+ValidateFieldName(const std::string& field_name) {
+    // Field name shouldn't be empty.
+    if (field_name.empty()) {
+        std::string msg = "Field name should not be empty.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    std::string invalid_msg = "Invalid field name: " + field_name + ". ";
+    // Field name size shouldn't exceed 255.
+    if (field_name.size() > engine::MAX_NAME_LENGTH) {
+        std::string msg = invalid_msg + "The length of a field name must be less than 255 characters.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    // Field name first character should be underscore or character.
+    char first_char = field_name[0];
+    if (first_char != '_' && std::isalpha(first_char) == 0) {
+        std::string msg = invalid_msg + "The first character of a field name must be an underscore or letter.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    int64_t field_name_size = field_name.size();
+    for (int64_t i = 1; i < field_name_size; ++i) {
+        char name_char = field_name[i];
+        if (name_char != '_' && std::isalnum(name_char) == 0) {
+            std::string msg = invalid_msg + "Field name cannot only contain numbers, letters, and underscores.";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_FIELD_NAME, msg);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidateIndexType(const std::string& index_type) {
+    // Index name shouldn't be empty.
+    if (index_type.empty()) {
+        std::string msg = "Index type should not be empty.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    static std::set<std::string> s_valid_index_names = {
+        knowhere::IndexEnum::INVALID,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+        knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
+        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
+        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR,
+        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H,
+        knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+        knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+        knowhere::IndexEnum::INDEX_NSG,
+        knowhere::IndexEnum::INDEX_HNSW,
+        knowhere::IndexEnum::INDEX_ANNOY,
+        knowhere::IndexEnum::INDEX_HNSW_SQ8NM,
+    };
+
+    if (s_valid_index_names.find(index_type) == s_valid_index_names.end()) {
+        std::string msg = "Invalid index type: " + index_type;
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_INDEX_TYPE, msg);
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidateDimension(int64_t dim, bool is_binary) {
+    if (dim <= 0 || dim > engine::MAX_DIMENSION) {
+        std::string msg = "Invalid dimension: " + std::to_string(dim) + ". Should be in range 1 ~ " +
+                          std::to_string(engine::MAX_DIMENSION) + ".";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
     }
 
-    if (milvus::engine::utils::IsBinaryMetricType(metric_type)) {
-        if ((dimension % 8) != 0) {
-            std::string msg = "Invalid collection dimension: " + std::to_string(dimension) + ". " +
-                              "The collection dimension must be a multiple of 8";
+    if (is_binary && (dim % 8) != 0) {
+        std::string msg = "Invalid dimension: " + std::to_string(dim) + ". Should be multiple of 8.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type) {
+    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
+        index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+        return Status::OK();
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
+               index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
+               index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
+               index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H ||
+               index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+        if (!status.ok()) {
+            return status;
+        }
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+        if (!status.ok()) {
+            return status;
+        }
+
+        status = CheckParameterExistence(index_params, knowhere::IndexParams::m);
+        if (!status.ok()) {
+            return status;
+        }
+
+        // special check for 'm' parameter
+        std::vector<int64_t> resset;
+        milvus::knowhere::IVFPQConfAdapter::GetValidMList(dimension, resset);
+        int64_t m_value = index_params[knowhere::IndexParams::m];
+        if (resset.empty()) {
+            std::string msg = "Invalid collection dimension, unable to get reasonable values for 'm'";
             LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
+            return Status(SERVER_INVALID_COLLECTION_DIMENSION, msg);
         }
-    }
 
-    return Status::OK();
-}
-
-Status
-ValidateCollectionIndexType(int32_t index_type) {
-    int engine_type = static_cast<int>(engine::EngineType(index_type));
-    if (engine_type <= 0 || engine_type > static_cast<int>(engine::EngineType::MAX_VALUE)) {
-        std::string msg = "Invalid index type: " + std::to_string(index_type) + ". " +
-                          "Make sure the index type is in IndexType list.";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_INDEX_TYPE, msg);
-    }
-
-#ifndef MILVUS_GPU_VERSION
-    // special case, hybird index only available in customize faiss library
-    if (engine_type == static_cast<int>(engine::EngineType::FAISS_IVFSQ8H)) {
-        std::string msg = "Unsupported index type: " + std::to_string(index_type);
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_INDEX_TYPE, msg);
-    }
-#endif
-
-    return Status::OK();
-}
-
-Status
-ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& collection_schema,
-                    int32_t index_type) {
-    switch (index_type) {
-        case (int32_t)engine::EngineType::FAISS_IDMAP:
-        case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
-            break;
-        }
-        case (int32_t)engine::EngineType::FAISS_IVFFLAT:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
-        case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
-            if (!status.ok()) {
-                return status;
-            }
-            break;
-        }
-        case (int32_t)engine::EngineType::FAISS_PQ: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
-            if (!status.ok()) {
-                return status;
-            }
-
-            status = CheckParameterExistence(index_params, knowhere::IndexParams::m);
-            if (!status.ok()) {
-                return status;
-            }
-
-            // special check for 'm' parameter
-            std::vector<int64_t> resset;
-            milvus::knowhere::IVFPQConfAdapter::GetValidMList(collection_schema.dimension_, resset);
-            int64_t m_value = index_params[knowhere::IndexParams::m];
-            if (resset.empty()) {
-                std::string msg = "Invalid collection dimension, unable to get reasonable values for 'm'";
-                LOG_SERVER_ERROR_ << msg;
-                return Status(SERVER_INVALID_COLLECTION_DIMENSION, msg);
-            }
-
-            auto iter = std::find(std::begin(resset), std::end(resset), m_value);
-            if (iter == std::end(resset)) {
-                std::string msg =
-                    "Invalid " + std::string(knowhere::IndexParams::m) + ", must be one of the following values: ";
-                for (size_t i = 0; i < resset.size(); i++) {
-                    if (i != 0) {
-                        msg += ",";
-                    }
-                    msg += std::to_string(resset[i]);
+        auto iter = std::find(std::begin(resset), std::end(resset), m_value);
+        if (iter == std::end(resset)) {
+            std::string msg =
+                "Invalid " + std::string(knowhere::IndexParams::m) + ", must be one of the following values: ";
+            for (size_t i = 0; i < resset.size(); i++) {
+                if (i != 0) {
+                    msg += ",";
                 }
-
-                LOG_SERVER_ERROR_ << msg;
-                return Status(SERVER_INVALID_ARGUMENT, msg);
+                msg += std::to_string(resset[i]);
             }
 
-            break;
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
         }
-        case (int32_t)engine::EngineType::NSG_MIX: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::search_length, 10, 300);
-            if (!status.ok()) {
-                return status;
-            }
-            status = CheckParameterRange(index_params, knowhere::IndexParams::out_degree, 5, 300);
-            if (!status.ok()) {
-                return status;
-            }
-            status = CheckParameterRange(index_params, knowhere::IndexParams::candidate, 50, 1000);
-            if (!status.ok()) {
-                return status;
-            }
-            status = CheckParameterRange(index_params, knowhere::IndexParams::knng, 5, 300);
-            if (!status.ok()) {
-                return status;
-            }
-            break;
+    } else if (index_type == knowhere::IndexEnum::INDEX_NSG) {
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::search_length, 10, 300);
+        if (!status.ok()) {
+            return status;
         }
-        case (int32_t)engine::EngineType::HNSW: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 5, 48);
-            if (!status.ok()) {
-                return status;
-            }
-            status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 100, 500);
-            if (!status.ok()) {
-                return status;
-            }
-            break;
+        status = CheckParameterRange(index_params, knowhere::IndexParams::out_degree, 5, 300);
+        if (!status.ok()) {
+            return status;
         }
-        case (int32_t)engine::EngineType::ANNOY: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
-            if (!status.ok()) {
-                return status;
-            }
-            break;
+        status = CheckParameterRange(index_params, knowhere::IndexParams::candidate, 50, 1000);
+        if (!status.ok()) {
+            return status;
         }
-    }
-    return Status::OK();
-}
-
-Status
-ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& collection_schema,
-                     int64_t topk) {
-    switch (collection_schema.engine_type_) {
-        case (int32_t)engine::EngineType::FAISS_IDMAP:
-        case (int32_t)engine::EngineType::FAISS_BIN_IDMAP: {
-            break;
+        status = CheckParameterRange(index_params, knowhere::IndexParams::knng, 5, 300);
+        if (!status.ok()) {
+            return status;
         }
-        case (int32_t)engine::EngineType::FAISS_IVFFLAT:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8:
-        case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
-        case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT:
-        case (int32_t)engine::EngineType::FAISS_PQ: {
-            auto status = CheckParameterRange(search_params, knowhere::IndexParams::nprobe, 1, 999999);
-            if (!status.ok()) {
-                return status;
-            }
-            break;
+    } else if (index_type == knowhere::IndexEnum::INDEX_HNSW || index_type == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
+        if (!status.ok()) {
+            return status;
         }
-        case (int32_t)engine::EngineType::NSG_MIX: {
-            auto status = CheckParameterRange(search_params, knowhere::IndexParams::search_length, 10, 300);
-            if (!status.ok()) {
-                return status;
-            }
-            break;
+        status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 8, 512);
+        if (!status.ok()) {
+            return status;
         }
-        case (int32_t)engine::EngineType::HNSW: {
-            auto status = CheckParameterRange(search_params, knowhere::IndexParams::ef, topk, 4096);
-            if (!status.ok()) {
-                return status;
-            }
-            break;
-        }
-        case (int32_t)engine::EngineType::ANNOY: {
-            auto status = CheckParameterRange(search_params, knowhere::IndexParams::search_k, topk,
-                                              std::numeric_limits<int64_t>::max());
-            if (!status.ok()) {
-                return status;
-            }
-            break;
-        }
-    }
-    return Status::OK();
-}
-
-Status
-ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema) {
-    uint64_t vector_count = vectors.vector_count_;
-    if ((vectors.float_data_.empty() && vectors.binary_data_.empty()) || vector_count == 0) {
-        return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                      "The vector array is empty. Make sure you have entered vector records.");
-    }
-
-    if (engine::utils::IsBinaryMetricType(collection_schema.metric_type_)) {
-        // check prepared binary data
-        if (vectors.binary_data_.size() % vector_count != 0) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                          "The vector dimension must be equal to the collection dimension.");
-        }
-
-        if (vectors.binary_data_.size() * 8 / vector_count != collection_schema.dimension_) {
-            return Status(SERVER_INVALID_VECTOR_DIMENSION,
-                          "The vector dimension must be equal to the collection dimension.");
-        }
-    } else {
-        // check prepared float data
-        fiu_do_on("SearchRequest.OnExecute.invalod_rowrecord_array", vector_count = vectors.float_data_.size() + 1);
-        if (vectors.float_data_.size() % vector_count != 0) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
-                          "The vector dimension must be equal to the collection dimension.");
-        }
-        if (vectors.float_data_.size() / vector_count != collection_schema.dimension_) {
-            return Status(SERVER_INVALID_VECTOR_DIMENSION,
-                          "The vector dimension must be equal to the collection dimension.");
+    } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
+        if (!status.ok()) {
+            return status;
         }
     }
 
@@ -350,41 +299,30 @@ ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::Colle
 }
 
 Status
-ValidateVectorDataSize(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema) {
-    std::string msg =
-        "The amount of data inserted each time cannot exceed " + std::to_string(MAX_INSERT_DATA_SIZE / M_BYTE) + " MB";
-    if (engine::utils::IsBinaryMetricType(collection_schema.metric_type_)) {
-        if (vectors.binary_data_.size() > MAX_INSERT_DATA_SIZE) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
-        }
-
-    } else {
-        if (vectors.float_data_.size() * sizeof(float) > MAX_INSERT_DATA_SIZE) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
-        }
-    }
-
-    return Status::OK();
-}
-
-Status
-ValidateCollectionIndexFileSize(int64_t index_file_size) {
-    if (index_file_size <= 0 || index_file_size > INDEX_FILE_SIZE_LIMIT) {
-        std::string msg = "Invalid index file size: " + std::to_string(index_file_size) + ". " +
-                          "The index file size must be within the range of 1 ~ " +
-                          std::to_string(INDEX_FILE_SIZE_LIMIT) + ".";
+ValidateSegmentRowCount(int64_t segment_row_count) {
+    if (segment_row_count <= 0 || segment_row_count > engine::MAX_SEGMENT_ROW_COUNT) {
+        std::string msg = "Invalid segment row count: " + std::to_string(segment_row_count) + ". " +
+                          "Should be in range 1 ~ " + std::to_string(engine::MAX_SEGMENT_ROW_COUNT) + ".";
         LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_INDEX_FILE_SIZE, msg);
+        return Status(SERVER_INVALID_SEGMENT_ROW_COUNT, msg);
     }
-
     return Status::OK();
 }
 
 Status
-ValidateCollectionIndexMetricType(int32_t metric_type) {
-    if (metric_type <= 0 || metric_type > static_cast<int32_t>(engine::MetricType::MAX_VALUE)) {
-        std::string msg = "Invalid index metric type: " + std::to_string(metric_type) + ". " +
-                          "Make sure the metric type is in MetricType list.";
+ValidateIndexMetricType(const std::string& metric_type) {
+    static std::set<std::string> s_valid_metric = {
+        milvus::knowhere::Metric::L2,
+        milvus::knowhere::Metric::IP,
+        milvus::knowhere::Metric::HAMMING,
+        milvus::knowhere::Metric::JACCARD,
+        milvus::knowhere::Metric::TANIMOTO,
+        milvus::knowhere::Metric::SUBSTRUCTURE,
+        milvus::knowhere::Metric::SUPERSTRUCTURE,
+    };
+    if (s_valid_metric.find(metric_type) == s_valid_metric.end()) {
+        std::string msg =
+            "Invalid index metric type: " + metric_type + ". " + "Make sure the metric type is in MetricType list.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
     }
@@ -413,7 +351,7 @@ ValidatePartitionName(const std::string& partition_name) {
 
     std::string invalid_msg = "Invalid partition name: " + partition_name + ". ";
     // Collection name size shouldn't exceed 255.
-    if (partition_name.size() > COLLECTION_NAME_SIZE_LIMIT) {
+    if (partition_name.size() > engine::MAX_NAME_LENGTH) {
         std::string msg = invalid_msg + "The length of a partition name must be less than 255 characters.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);

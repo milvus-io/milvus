@@ -64,15 +64,13 @@ IVF::Load(const BinarySet& binary_set) {
 
 void
 IVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
-    faiss::Index* coarse_quantizer = new faiss::IndexFlatL2(dim);
-    int64_t nlist = config[IndexParams::nlist].get<int64_t>();
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, nlist, metric_type);
-    index->train(rows, (float*)p_data);
-
-    index_.reset(faiss::clone_index(index.get()));
+    faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
+    int64_t nlist = config[IndexParams::nlist].get<int64_t>();
+    index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFFlat(coarse_quantizer, dim, nlist, metric_type));
+    index_->train(rows, (float*)p_data);
 }
 
 void
@@ -82,7 +80,7 @@ IVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR_DATA_ID(dataset_ptr)
     index_->add_with_ids(rows, (float*)p_data, p_ids);
 }
 
@@ -93,7 +91,7 @@ IVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
     index_->add(rows, (float*)p_data);
 }
 
@@ -103,7 +101,7 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA(dataset_ptr)
 
     try {
         fiu_do_on("IVF.Search.throw_std_exception", throw std::exception());
@@ -217,12 +215,41 @@ IVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 #endif
 
+int64_t
+IVF::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->ntotal;
+}
+
+int64_t
+IVF::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->d;
+}
+
 void
 IVF::Seal() {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
     SealImpl();
+}
+
+void
+IVF::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    auto ivf_index = dynamic_cast<faiss::IndexIVFFlat*>(index_.get());
+    auto nb = ivf_index->invlists->compute_ntotal();
+    auto nlist = ivf_index->nlist;
+    auto code_size = ivf_index->code_size;
+    // ivf codes, ivf ids and quantizer
+    index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
 }
 
 VecIndexPtr

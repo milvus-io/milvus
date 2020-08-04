@@ -22,13 +22,13 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/handler/GpuResourceConfigHandler.h"
+#include "config/ConfigMgr.h"
 #include "scheduler/selector/Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class BuildIndexPass : public Pass, public server::GpuResourceConfigHandler {
+class BuildIndexPass : public Pass, public ConfigObserver {
  public:
     BuildIndexPass() = default;
 
@@ -39,8 +39,14 @@ class BuildIndexPass : public Pass, public server::GpuResourceConfigHandler {
     bool
     Run(const TaskPtr& task) override;
 
+ public:
+    void
+    ConfigUpdate(const std::string& name) override;
+
  private:
     uint64_t idx_ = 0;
+    bool gpu_enable_ = false;
+    std::vector<int64_t> build_gpus_;
 };
 
 using BuildIndexPassPtr = std::shared_ptr<BuildIndexPass>;

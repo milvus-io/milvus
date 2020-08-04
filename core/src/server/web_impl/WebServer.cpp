@@ -12,7 +12,7 @@
 #include <chrono>
 #include <oatpp/network/server/Server.hpp>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/controller/WebController.hpp"
 
@@ -22,10 +22,7 @@ namespace web {
 
 void
 WebServer::Start() {
-    auto& config = Config::GetInstance();
-    bool enable = true;
-    config.GetNetworkConfigHTTPEnable(enable);
-    if (enable && nullptr == thread_ptr_) {
+    if (config.network.http.enable() && nullptr == thread_ptr_) {
         thread_ptr_ = std::make_shared<std::thread>(&WebServer::StartService, this);
     }
 }
@@ -45,12 +42,8 @@ WebServer::StartService() {
     SetThreadName("webserv_thread");
     oatpp::base::Environment::init();
 
-    Config& config = Config::GetInstance();
-    std::string port;
-    STATUS_CHECK(config.GetNetworkConfigHTTPPort(port));
-
     {
-        AppComponent components = AppComponent(std::stoi(port));
+        AppComponent components = AppComponent(config.network.http.port());
 
         /* create ApiControllers and add endpoints to router */
         auto user_controller = WebController::createShared();

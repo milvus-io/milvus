@@ -12,7 +12,6 @@
 #pragma once
 
 #include "db/Types.h"
-#include "db/meta/MetaTypes.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
 
@@ -28,30 +27,28 @@ extern Status
 ValidateCollectionName(const std::string& collection_name);
 
 extern Status
-ValidateTableDimension(int64_t dimension, int64_t metric_type);
+ValidateFieldName(const std::string& field_name);
 
 extern Status
-ValidateCollectionIndexType(int32_t index_type);
+ValidateIndexName(const std::string& index_name);
 
 extern Status
-ValidateIndexParams(const milvus::json& index_params, const engine::meta::CollectionSchema& collection_schema,
-                    int32_t index_type);
+ValidateDimension(int64_t dimension, bool is_binary);
 
 extern Status
-ValidateSearchParams(const milvus::json& search_params, const engine::meta::CollectionSchema& collection_schema,
-                     int64_t topk);
+ValidateIndexType(const std::string& index_type);
 
 extern Status
-ValidateVectorData(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema);
+ValidateVectorDimension(int64_t dimension, const std::string& metric_type);
 
 extern Status
-ValidateVectorDataSize(const engine::VectorsData& vectors, const engine::meta::CollectionSchema& collection_schema);
+ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type);
 
 extern Status
-ValidateCollectionIndexFileSize(int64_t index_file_size);
+ValidateSegmentRowCount(int64_t segment_row_count);
 
 extern Status
-ValidateCollectionIndexMetricType(int32_t metric_type);
+ValidateIndexMetricType(const std::string& metric_type);
 
 extern Status
 ValidateSearchTopk(int64_t top_k);

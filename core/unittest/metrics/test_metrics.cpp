@@ -18,7 +18,7 @@
 #include <fiu-local.h>
 #include <fiu-control.h>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "metrics/utils.h"
 #include "metrics/Metrics.h"
 
@@ -42,77 +42,6 @@ TEST_F(MetricTest, METRIC_TEST) {
 
     std::string system_info;
     milvus::server::SystemInfo::GetInstance().GetSysInfoJsonStr(system_info);
-
-//    static const char* group_name = "test_group";
-//    static const int group_dim = 256;
-//
-//    milvus::engine::meta::CollectionSchema group_info;
-//    group_info.dimension_ = group_dim;
-//    group_info.collection_id_ = group_name;
-//    auto stat = db_->CreateCollection(group_info);
-//
-//    milvus::engine::meta::CollectionSchema group_info_get;
-//    group_info_get.collection_id_ = group_name;
-//    stat = db_->DescribeCollection(group_info_get);
-//
-//    int nb = 50;
-//    milvus::engine::VectorsData xb;
-//    BuildVectors(nb, xb);
-//
-//    int qb = 5;
-//    milvus::engine::VectorsData xq;
-//    BuildVectors(qb, xq);
-//
-//    std::thread search([&]() {
-////        std::vector<std::string> tags;
-////        milvus::engine::ResultIds result_ids;
-////        milvus::engine::ResultDistances result_distances;
-//        std::this_thread::sleep_for(std::chrono::seconds(1));
-//
-//        INIT_TIMER;
-//        std::stringstream ss;
-//        uint64_t count = 0;
-//        uint64_t prev_count = 0;
-//
-//        for (auto j = 0; j < 10; ++j) {
-//            ss.str("");
-//            db_->Size(count);
-//            prev_count = count;
-//
-//            START_TIMER;
-////            stat = db_->Query(group_name, tags, k, qb, qxb, result_ids, result_distances);
-//            ss << "Search " << j << " With Size " << (float)(count * group_dim * sizeof(float)) / (1024 * 1024)
-//               << " M";
-//
-//            for (auto k = 0; k < qb; ++k) {
-////                ASSERT_EQ(results[k][0].first, target_ids[k]);
-//                ss.str("");
-//                ss << "Result [" << k << "]:";
-////                for (auto result : results[k]) {
-////                    ss << result.first << " ";
-////                }
-//            }
-//            ASSERT_TRUE(count >= prev_count);
-//            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-//        }
-//    });
-//
-//    int loop = 100;
-//
-//    for (auto i = 0; i < loop; ++i) {
-//        if (i == 40) {
-//            xq.id_array_.clear();
-//            db_->InsertVectors(group_name, "", xq);
-//            ASSERT_EQ(xq.id_array_.size(), qb);
-//        } else {
-//            xb.id_array_.clear();
-//            db_->InsertVectors(group_name, "", xb);
-//            ASSERT_EQ(xb.id_array_.size(), nb);
-//        }
-//        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-//    }
-//
-//    search.join();
 }
 
 TEST_F(MetricTest, COLLECTOR_METRICS_TEST) {
@@ -132,14 +61,6 @@ TEST_F(MetricTest, COLLECTOR_METRICS_TEST) {
     milvus::server::CollectSerializeMetrics serialize_metrics(10);
 
     milvus::server::CollectAddMetrics add_metrics(10, 128);
-
-    milvus::server::CollectDurationMetrics duration_metrics_raw(milvus::engine::meta::SegmentSchema::RAW);
-    milvus::server::CollectDurationMetrics duration_metrics_index(milvus::engine::meta::SegmentSchema::TO_INDEX);
-    milvus::server::CollectDurationMetrics duration_metrics_delete(milvus::engine::meta::SegmentSchema::TO_DELETE);
-
-    milvus::server::CollectSearchTaskMetrics search_metrics_raw(milvus::engine::meta::SegmentSchema::RAW);
-    milvus::server::CollectSearchTaskMetrics search_metrics_index(milvus::engine::meta::SegmentSchema::TO_INDEX);
-    milvus::server::CollectSearchTaskMetrics search_metrics_delete(milvus::engine::meta::SegmentSchema::TO_DELETE);
 
     milvus::server::MetricCollector metric_collector();
 }

@@ -5,6 +5,26 @@ import "status.proto";
 package milvus.grpc;
 
 /**
+ * @brief field data type
+ */
+enum DataType {
+    NONE = 0;
+    BOOL = 1;
+    INT8 = 2;
+    INT16 = 3;
+    INT32 = 4;
+    INT64 = 5;
+
+    FLOAT = 10;
+    DOUBLE = 11;
+
+    STRING = 20;
+
+    VECTOR_BINARY = 100;
+    VECTOR_FLOAT = 101;
+}
+
+/**
  * @brief general usage
  */
 message KeyValuePair {
@@ -28,16 +48,29 @@ message CollectionNameList {
 }
 
 /**
- * @brief Collection schema
- * metric_type: 1-L2, 2-IP
+ * @brief Field name
  */
-message CollectionSchema {
+message FieldName {
+    string collection_name = 1;
+    string field_name = 2;
+}
+
+/**
+ * @brief Collection mapping
+ */
+message Mapping {
     Status status = 1;
     string collection_name = 2;
-    int64 dimension = 3;
-    int64 index_file_size = 4;
-    int32 metric_type = 5;
-    repeated KeyValuePair extra_params = 6;
+    repeated FieldParam fields = 3;
+    repeated KeyValuePair extra_params = 4;
+}
+
+/**
+ * @brief Collection mapping list
+ */
+message MappingList {
+    Status status = 1;
+    repeated Mapping mapping_list = 2;
 }
 
 /**
@@ -57,11 +90,38 @@ message PartitionList {
 }
 
 /**
- * @brief Record inserted
+ * @brief Vector row record inserted
  */
-message RowRecord {
+message VectorRowRecord {
     repeated float float_data = 1;             //float vector data
     bytes binary_data = 2;                      //binary vector data
+}
+
+/**
+ * @brief Attribute record inserted
+ */
+message AttrRecord {
+    repeated int32 int32_value = 1;
+    repeated int64 int64_value = 2;
+    repeated float float_value = 3;
+    repeated double double_value = 4;
+}
+
+/**
+ * @brief Vector records
+ */
+message VectorRecord {
+    repeated VectorRowRecord records = 1;
+}
+
+/**
+ * @brief Field values
+ */
+message FieldValue {
+    string field_name = 1;
+    DataType type = 2;
+    AttrRecord attr_record = 3;
+    VectorRecord vector_record = 4;
 }
 
 /**
@@ -69,66 +129,67 @@ message RowRecord {
  */
 message InsertParam {
     string collection_name = 1;
-    repeated RowRecord row_record_array = 2;
-    repeated int64 row_id_array = 3;            //optional
+    repeated FieldValue fields = 2;
+    repeated int64 entity_id_array = 3;            //optional
     string partition_tag = 4;
     repeated KeyValuePair extra_params = 5;
 }
 
 /**
- * @brief Vector ids
+ * @brief Entity ids
  */
-message VectorIds {
+message EntityIds {
     Status status = 1;
-    repeated int64 vector_id_array = 2;
+    repeated int64 entity_id_array = 2;
 }
 
 /**
- * @brief Params for searching vector
+ * @brief Search vector params
+ */
+message VectorParam {
+    string json = 1;
+    VectorRecord row_record = 2;
+}
+
+/**
+ * @brief Params for searching
  */
 message SearchParam {
     string collection_name = 1;
     repeated string partition_tag_array = 2;
-    repeated RowRecord query_record_array = 3;
-    int64 topk = 4;
+    repeated VectorParam vector_param = 3;
+    string dsl = 4;
     repeated KeyValuePair extra_params = 5;
 }
 
 /**
  * @brief Params for searching vector in files
  */
-message SearchInFilesParam {
+message SearchInSegmentParam {
     repeated string file_id_array = 1;
     SearchParam search_param = 2;
 }
 
 /**
- * @brief Params for searching vector by ID
+ * @brief Entities
  */
-message SearchByIDParam {
-    string collection_name = 1;
-    repeated string partition_tag_array = 2;
-    repeated int64 id_array = 3;
-    int64 topk = 4;
-    repeated KeyValuePair extra_params = 5;
-}
-
-/**
- * @brief Params for reloading segments
- */
-message ReLoadSegmentsParam {
-    string collection_name = 1;
-    repeated string segment_id_array = 2;
+message Entities {
+    Status status = 1;
+    repeated int64 ids = 2;
+    repeated bool valid_row = 3;
+    repeated FieldValue fields = 4;
 }
 
 /**
  * @brief Query result params
  */
-message TopKQueryResult {
+message QueryResult {
     Status status = 1;
-    int64 row_num = 2;
-    repeated int64 ids = 3;
-    repeated float distances = 4;
+    Entities entities = 2;
+    int64 row_num = 3;
+    repeated float scores = 4;
+    repeated float distances = 5;
+    repeated KeyValuePair extra_params = 6;
 }
 
 /**
@@ -164,13 +225,25 @@ message Command {
 
 /**
  * @brief Index params
- * @index_type: 0-invalid, 1-idmap, 2-ivflat, 3-ivfsq8, 4-nsgmix
+ * @collection_name: target collection
+ * @field_name: target field
+ * @index_name: a name for index provided by user, unique within this field
+ * @extra_params: index parameters in json format
+ *    for vector field:
+ *        extra_params["index_type"] = one of the values: IDMAP, IVFLAT, IVFSQ8, NSGMIX, IVFSQ8H,
+ *                                                        PQ, HNSW, HNSW_SQ8NM, ANNOY
+ *        extra_params["metric_type"] = one of the values: L2, IP, HAMMING, JACCARD, TANIMOTO
+ *                                                         SUBSTRUCTURE, SUPERSTRUCTURE
+ *        extra_params["params"] = extra parameters for index, for example ivflat: {nlist: 2048}
+ *    for structured field:
+ *        extra_params["index_type"] = one of the values: SORTED
  */
 message IndexParam {
     Status status = 1;
     string collection_name = 2;
-    int32 index_type = 3;
-    repeated KeyValuePair extra_params = 4;
+    string field_name = 3;
+    string index_name = 4;
+    repeated KeyValuePair extra_params = 5;
 }
 
 /**
@@ -197,51 +270,23 @@ message CollectionInfo {
 }
 
 /**
- * @brief vectors identity
+ * @brief get entity ids from a segment parameters
  */
-message VectorsIdentity {
+message GetEntityIDsParam {
+    string collection_name = 1;
+    int64 segment_id = 2;
+}
+
+/**
+ * @brief Entities identity
+ */
+message EntityIdentity {
     string collection_name = 1;
     repeated int64 id_array = 2;
+    repeated string field_names = 3;
 }
 
-/**
- * @brief vector data
- */
-message VectorsData {
-    Status status = 1;
-    repeated RowRecord vectors_data = 2;
-}
-
-/**
- * @brief get vector ids from a segment parameters
- */
-message GetVectorIDsParam {
-    string collection_name = 1;
-    string segment_name = 2;
-}
-
-
-/********************************************************************************************************************/
-
-enum DataType {
-    NULL = 0;
-    INT8 = 1;
-    INT16 = 2;
-    INT32 = 3;
-    INT64 = 4;
-
-    STRING = 20;
-
-    BOOL = 30;
-
-    FLOAT = 40;
-    DOUBLE = 41;
-
-    VECTOR = 100;
-    UNKNOWN = 9999;
-}
-
-///////////////////////////////////////////////////////////////////
+/********************************************SearchPB interface***************************************************/
 
 message VectorFieldParam {
     int64 dimension = 1;
@@ -257,36 +302,13 @@ message FieldType {
 message FieldParam {
     uint64 id = 1;
     string name = 2;
-    FieldType type = 3;
-    repeated KeyValuePair extra_params = 4;
+    DataType type = 3;
+    repeated KeyValuePair index_params = 4;
+    repeated KeyValuePair extra_params = 5;
 }
 
 message VectorFieldRecord {
-    repeated RowRecord value = 1;
-}
-
-message FieldValue {
-    oneof value {
-        int64 int64_value = 1;
-        double double_value = 2;
-        string string_value = 3;
-        bool  bool_value = 4;
-        VectorFieldRecord vector_value = 5;
-    }
-}
-
-///////////////////////////////////////////////////////////////////
-
-message Mapping {
-    Status status = 1;
-    uint64 collection_id = 2;
-    string collection_name = 3;
-    repeated FieldParam fields = 4;
-}
-
-message MappingList {
-    Status status = 1;
-    repeated Mapping mapping_list = 2;
+    repeated VectorRowRecord value = 1;
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -324,7 +346,7 @@ message RangeQuery {
 message VectorQuery {
     string field_name = 1;
     float query_boost = 2;
-    repeated RowRecord records = 3;
+    repeated VectorRowRecord records = 3;
     int64 topk = 4;
     repeated KeyValuePair extra_params = 5;
 }
@@ -350,94 +372,12 @@ message GeneralQuery {
     }
 }
 
-message VectorParam {
-    string json = 1;
-    repeated RowRecord row_record = 2;
-}
-
-message HSearchParam {
-    string collection_name = 1;
-    repeated string partition_tag_array = 2;
-    repeated VectorParam vector_param = 3;
-    string dsl = 4;
-    repeated KeyValuePair extra_params = 5;
-}
-
-message HSearchParamPB {
+message SearchParamPB {
     string collection_name = 1;
     repeated string partition_tag_array = 2;
     GeneralQuery general_query = 3;
     repeated KeyValuePair extra_params = 4;
 }
-
-message HSearchInSegmentsParam {
-    repeated string segment_id_array = 1;
-    HSearchParamPB search_param = 2;
-}
-
-///////////////////////////////////////////////////////////////////
-
-message AttrRecord {
-    repeated int64 int_value = 1;
-    repeated double double_value = 2;
-}
-
-message HEntity {
-    Status status = 1;
-    repeated int64 entity_id = 2;
-    repeated string field_names = 3;
-    repeated DataType data_types = 4;
-    int64 row_num = 5;
-    repeated AttrRecord attr_data = 6;
-    repeated VectorFieldRecord vector_data = 7;
-}
-
-message HQueryResult {
-    Status status = 1;
-    HEntity entity = 2;
-    int64 row_num = 3;
-    repeated float score = 4;
-    repeated float distance = 5;
-    repeated KeyValuePair extra_params = 6;
-}
-
-message HInsertParam {
-    string collection_name = 1;
-    string partition_tag = 2;
-    HEntity entity = 3;
-    repeated int64 entity_id_array = 4;
-    repeated KeyValuePair extra_params = 5;
-}
-
-message HEntityIdentity {
-    string collection_name = 1;
-    repeated int64 id = 2;
-}
-
-message HEntityIDs {
-    Status status = 1;
-    repeated int64 entity_id_array = 2;
-}
-
-message HGetEntityIDsParam {
-    string collection_name = 1;
-    string segment_name = 2;
-}
-
-message HDeleteByIDParam {
-    string collection_name = 1;
-    repeated int64 id_array = 2;
-}
-
-///////////////////////////////////////////////////////////////////
-
-message HIndexParam {
-    Status status = 1;
-    string collection_name = 2;
-    repeated string field_names = 3;
-    repeated KeyValuePair extra_params = 4;
-}
-
 
 service MilvusService {
     /**
@@ -447,7 +387,7 @@ service MilvusService {
      *
      * @return Status
      */
-    rpc CreateCollection(CollectionSchema) returns (Status){}
+    rpc CreateCollection(Mapping) returns (Status){}
 
     /**
      * @brief This method is used to test collection existence.
@@ -465,7 +405,7 @@ service MilvusService {
      *
      * @return CollectionSchema
      */
-    rpc DescribeCollection(CollectionName) returns (CollectionSchema) {}
+    rpc DescribeCollection(CollectionName) returns (Mapping) {}
 
     /**
      * @brief This method is used to get collection schema.
@@ -499,7 +439,7 @@ service MilvusService {
      *
      * @param CollectionName, collection name is going to be deleted.
      *
-     * @return CollectionNameList
+     * @return Status
      */
     rpc DropCollection(CollectionName) returns (Status) {}
 
@@ -515,20 +455,20 @@ service MilvusService {
     /**
      * @brief This method is used to describe index
      *
-     * @param CollectionName, target collection name.
+     * @param IndexParam, target index.
      *
      * @return IndexParam
      */
-    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
+    rpc DescribeIndex(IndexParam) returns (IndexParam) {}
 
     /**
      * @brief This method is used to drop index
      *
-     * @param CollectionName, target collection name.
+     * @param IndexParam, target field. if the IndexParam.field_name is empty, will drop all index of the collection
      *
      * @return Status
      */
-    rpc DropIndex(CollectionName) returns (Status) {}
+    rpc DropIndex(IndexParam) returns (Status) {}
 
     /**
      * @brief This method is used to create partition
@@ -573,16 +513,16 @@ service MilvusService {
      *
      * @return VectorIds
      */
-    rpc Insert(InsertParam) returns (VectorIds) {}
+    rpc Insert(InsertParam) returns (EntityIds) {}
 
     /**
-     * @brief This method is used to get vectors data by id array.
+     * @brief This method is used to get entities data by id array.
      *
-     * @param VectorsIdentity, target vector id array.
+     * @param EntitiesIdentity, target entity id array.
      *
-     * @return VectorsData
+     * @return EntitiesData
      */
-    rpc GetVectorsByID(VectorsIdentity) returns (VectorsData) {}
+    rpc GetEntityByID(EntityIdentity) returns (Entities) {}
 
     /**
      * @brief This method is used to get vector ids from a segment
@@ -591,34 +531,25 @@ service MilvusService {
      *
      * @return VectorIds
      */
-    rpc GetVectorIDs(GetVectorIDsParam) returns (VectorIds) {}
+    rpc GetEntityIDs(GetEntityIDsParam) returns (EntityIds) {}
 
     /**
      * @brief This method is used to query vector in collection.
      *
      * @param SearchParam, search parameters.
      *
-     * @return TopKQueryResult
+     * @return KQueryResult
      */
-    rpc Search(SearchParam) returns (TopKQueryResult) {}
-
-    /**
-     * @brief This method is used to query vector by id.
-     *
-     * @param SearchByIDParam, search parameters.
-     *
-     * @return TopKQueryResult
-     */
-    rpc SearchByID(SearchByIDParam) returns (TopKQueryResult) {}
+    rpc Search(SearchParam) returns (QueryResult) {}
 
     /**
      * @brief This method is used to query vector in specified files.
      *
-     * @param SearchInFilesParam, search in files paremeters.
+     * @param SearchInSegmentParam, target segments to search.
      *
      * @return TopKQueryResult
      */
-    rpc SearchInFiles(SearchInFilesParam) returns (TopKQueryResult) {}
+    rpc SearchInSegment(SearchInSegmentParam) returns (QueryResult) {}
 
     /**
      * @brief This method is used to give the server status.
@@ -648,15 +579,6 @@ service MilvusService {
     rpc PreloadCollection(CollectionName) returns (Status) {}
 
     /**
-     * @brief This method is used to reload collection segments
-     *
-     * @param ReLoadSegmentsParam, target segments information.
-     *
-     * @return Status
-     */
-    rpc ReloadSegments(ReLoadSegmentsParam) returns (Status) {}
-
-    /**
      * @brief This method is used to flush buffer into storage.
      *
      * @param FlushParam, flush parameters
@@ -676,45 +598,5 @@ service MilvusService {
 
     /********************************New Interface********************************************/
 
-    rpc CreateHybridCollection(Mapping) returns (Status) {}
-
-    rpc HasHybridCollection(CollectionName) returns (BoolReply) {}
-
-    rpc DropHybridCollection(CollectionName) returns (Status) {}
-
-    rpc DescribeHybridCollection(CollectionName) returns (Mapping) {}
-
-    rpc CountHybridCollection(CollectionName) returns (CollectionRowCount) {}
-
-    rpc ShowHybridCollections(Command) returns (MappingList) {}
-
-    rpc ShowHybridCollectionInfo (CollectionName) returns (CollectionInfo) {}
-
-    rpc PreloadHybridCollection(CollectionName) returns (Status) {}
-
-    ///////////////////////////////////////////////////////////////////
-
-    rpc CreateHybridIndex(HIndexParam) returns (Status) {}
-    //
-    //    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
-    //
-    //    rpc DropIndex(CollectionName) returns (Status) {}
-
-    ///////////////////////////////////////////////////////////////////
-
-    rpc InsertEntity(HInsertParam) returns (HEntityIDs) {}
-
-    rpc HybridSearchPB(HSearchParamPB) returns (HQueryResult) {}
-
-    rpc HybridSearch(HSearchParam) returns (HQueryResult) {}
-
-    rpc HybridSearchInSegments(HSearchInSegmentsParam) returns (TopKQueryResult) {}
-
-    rpc GetEntityByID(VectorsIdentity) returns (HEntity) {}
-
-    rpc GetEntityIDs(HGetEntityIDsParam) returns (HEntityIDs) {}
-
-    rpc DeleteEntitiesByID(HDeleteByIDParam) returns (Status) {}
-
-    ///////////////////////////////////////////////////////////////////
+    rpc SearchPB(SearchParamPB) returns (QueryResult) {}
 }

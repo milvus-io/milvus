@@ -18,8 +18,9 @@
 #include <cstring>
 #include <unordered_map>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "index/archive/KnowhereResource.h"
+#include "log/LogMgr.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
@@ -30,13 +31,11 @@
 #include "server/web_impl/WebServer.h"
 #include "src/version.h"
 //#include "storage/s3/S3ClientWrapper.h"
+#include <yaml-cpp/yaml.h>
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
-#include "utils/LogUtil.h"
 #include "utils/SignalHandler.h"
 #include "utils/TimeRecorder.h"
-
-#include "search/TaskInst.h"
 
 namespace milvus {
 namespace server {
@@ -152,10 +151,7 @@ Server::Start() {
             return s;
         }
 
-        Config& config = Config::GetInstance();
-
-        std::string meta_uri;
-        STATUS_CHECK(config.GetGeneralConfigMetaURI(meta_uri));
+        auto meta_uri = config.general.meta_uri();
         if (meta_uri.length() > 6 && strcasecmp("sqlite", meta_uri.substr(0, 6).c_str()) == 0) {
             std::cout << "WARNNING: You are using SQLite as the meta data management, "
                          "which can't be used in production. Please change it to MySQL!"
@@ -163,18 +159,12 @@ Server::Start() {
         }
 
         /* Init opentracing tracer from config */
-        std::string tracing_config_path;
-        s = config.GetTracingConfigJsonConfigPath(tracing_config_path);
+        std::string tracing_config_path = config.tracing.json_config_path();
         tracing_config_path.empty() ? tracing::TracerUtil::InitGlobal()
                                     : tracing::TracerUtil::InitGlobal(tracing_config_path);
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
-        std::string time_zone;
-        s = config.GetGeneralConfigTimezone(time_zone);
-        if (!s.ok()) {
-            std::cerr << "Fail to get server config timezone" << std::endl;
-            return s;
-        }
+        auto time_zone = config.general.timezone();
 
         if (time_zone.length() == 3) {
             time_zone = "CUT";
@@ -199,19 +189,17 @@ Server::Start() {
                 {"debug", 5}, {"info", 4}, {"warning", 3}, {"error", 2}, {"fatal", 1},
             };
 
-            std::string level;
-            bool trace_enable = false;
+            bool trace_enable = config.logs.trace.enable();
             bool debug_enable = false;
             bool info_enable = false;
             bool warning_enable = false;
             bool error_enable = false;
             bool fatal_enable = false;
-            std::string logs_path;
-            int64_t max_log_file_size = 0;
-            int64_t delete_exceeds = 0;
+            std::string logs_path = config.logs.path();
+            int64_t max_log_file_size = config.logs.max_log_file_size();
+            int64_t delete_exceeds = config.logs.log_rotate_num();
 
-            STATUS_CHECK(config.GetLogsLevel(level));
-            switch (level_to_int[level]) {
+            switch (level_to_int[config.logs.level()]) {
                 case 5:
                     debug_enable = true;
                 case 4:
@@ -227,31 +215,24 @@ Server::Start() {
                     return Status(SERVER_UNEXPECTED_ERROR, "invalid log level");
             }
 
-            STATUS_CHECK(config.GetLogsTraceEnable(trace_enable));
-            STATUS_CHECK(config.GetLogsPath(logs_path));
-            STATUS_CHECK(config.GetLogsMaxLogFileSize(max_log_file_size));
-            STATUS_CHECK(config.GetLogsLogRotateNum(delete_exceeds));
-            InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable, logs_path,
-                    max_log_file_size, delete_exceeds);
+            LogMgr::InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable,
+                            logs_path, max_log_file_size, delete_exceeds);
         }
 
-        bool cluster_enable = false;
-        std::string cluster_role;
-        STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
-        STATUS_CHECK(config.GetClusterConfigRole(cluster_role));
+        bool cluster_enable = config.cluster.enable();
+        auto cluster_role = config.cluster.role();
 
-        if ((not cluster_enable) || cluster_role == "rw") {
-            std::string db_path;
-            STATUS_CHECK(config.GetStorageConfigPath(db_path));
-
+        if ((not cluster_enable) || cluster_role == ClusterRole::RW) {
             try {
                 // True if a new directory was created, otherwise false.
-                boost::filesystem::create_directories(db_path);
+                boost::filesystem::create_directories(config.storage.path());
+            } catch (std::exception& ex) {
+                return Status(SERVER_UNEXPECTED_ERROR, "Cannot create db directory, " + std::string(ex.what()));
             } catch (...) {
                 return Status(SERVER_UNEXPECTED_ERROR, "Cannot create db directory");
             }
 
-            s = InstanceLockCheck::Check(db_path);
+            s = InstanceLockCheck::Check(config.storage.path());
             if (!s.ok()) {
                 if (not cluster_enable) {
                     std::cerr << "single instance lock db path failed." << s.message() << std::endl;
@@ -261,12 +242,8 @@ Server::Start() {
                 return s;
             }
 
-            bool wal_enable = false;
-            STATUS_CHECK(config.GetWalConfigEnable(wal_enable));
-
-            if (wal_enable) {
-                std::string wal_path;
-                STATUS_CHECK(config.GetWalConfigWalPath(wal_path));
+            if (config.wal.enable()) {
+                std::string wal_path = config.wal.path();
 
                 try {
                     // True if a new directory was created, otherwise false.
@@ -301,7 +278,9 @@ Server::Start() {
         /* record config and hardware information into log */
         LogConfigInFile(config_filename_);
         LogCpuInfo();
-        LogConfigInMem();
+        LOG_SERVER_INFO_ << "\n\n"
+                         << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
+                         << ConfigMgr::GetInstance().Dump();
 
         server::Metrics::GetInstance().Init();
         server::SystemInfo::GetInstance().Init();
@@ -347,18 +326,27 @@ Server::Stop() {
 
 Status
 Server::LoadConfig() {
-    Config& config = Config::GetInstance();
-    Status s = config.LoadConfigFile(config_filename_);
-    if (!s.ok()) {
-        std::cerr << s.message() << std::endl;
-        return s;
-    }
+    // Config& config = Config::GetInstance();
+    // Status s = config.LoadConfigFile(config_filename_);
+    // if (!s.ok()) {
+    //     std::cerr << s.message() << std::endl;
+    //     return s;
+    // }
 
-    s = config.ValidateConfig();
-    if (!s.ok()) {
-        std::cerr << "Config check fail: " << s.message() << std::endl;
-        return s;
-    }
+    // config_mgr_ = std::make_shared<ConfigMgr>(config_filename_);
+    // try {
+    //     config_mgr_->Init();
+    //     config_mgr_->Load();
+    // } catch (std::exception &ex) {
+    //     std::cerr << "Load config file failed: " << ex.what() << std::endl;
+    //     return Status(SERVER_UNEXPECTED_ERROR, "LoadConfig failed.");
+    // }
+
+    // s = config.ValidateConfig();
+    // if (!s.ok()) {
+    //     std::cerr << "Config check fail: " << s.message() << std::endl;
+    //     return s;
+    // }
     return milvus::Status::OK();
 }
 
@@ -388,8 +376,6 @@ Server::StartService() {
     //     goto FAIL;
     // }
 
-    //    search::TaskInst::GetInstance().Start();
-
     return Status::OK();
 FAIL:
     std::cerr << "Milvus initializes fail: " << stat.message() << std::endl;
@@ -398,13 +384,47 @@ FAIL:
 
 void
 Server::StopService() {
-    //    search::TaskInst::GetInstance().Stop();
     // storage::S3ClientWrapper::GetInstance().StopService();
     web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
     scheduler::StopSchedulerService();
     engine::KnowhereResource::Finalize();
+}
+
+void
+Server::LogConfigInFile(const std::string& path) {
+    // TODO(yhz): Check if file exists
+    auto node = YAML::LoadFile(path);
+    YAML::Emitter out;
+    out << node;
+    LOG_SERVER_INFO_ << "\n\n"
+                     << std::string(15, '*') << "Config in file" << std::string(15, '*') << "\n\n"
+                     << out.c_str();
+}
+
+void
+Server::LogCpuInfo() {
+    /*CPU information*/
+    std::fstream fcpu("/proc/cpuinfo", std::ios::in);
+    if (!fcpu.is_open()) {
+        LOG_SERVER_WARNING_ << "Cannot obtain CPU information. Open file /proc/cpuinfo fail: " << strerror(errno)
+                            << "(errno: " << errno << ")";
+        return;
+    }
+    std::stringstream cpu_info_ss;
+    cpu_info_ss << fcpu.rdbuf();
+    fcpu.close();
+    std::string cpu_info = cpu_info_ss.str();
+
+    auto processor_pos = cpu_info.rfind("processor");
+    if (std::string::npos == processor_pos) {
+        LOG_SERVER_WARNING_ << "Cannot obtain CPU information. No sub string \'processor\'";
+        return;
+    }
+
+    auto sub_str = cpu_info.substr(processor_pos);
+    LOG_SERVER_INFO_ << "\n\n" << std::string(15, '*') << "CPU" << std::string(15, '*') << "\n\n" << sub_str;
 }
 
 }  // namespace server

@@ -15,7 +15,7 @@
 #include <thread>
 
 #include "knowhere/common/Timer.h"
-#include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 #include "unittest/Helper.h"
 #include "unittest/utils.h"
 

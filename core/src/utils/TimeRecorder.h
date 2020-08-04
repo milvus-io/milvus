@@ -16,6 +16,7 @@
 #include "utils/Log.h"
 
 namespace milvus {
+
 inline void
 print_timestamp(const std::string& message) {
     std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();

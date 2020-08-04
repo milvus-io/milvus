@@ -1,23 +1,32 @@
 import time
 import random
 import pdb
+import copy
 import threading
 import logging
 from multiprocessing import Pool, Process
 import pytest
-from milvus import IndexType, MetricType
 from utils import *
 
 
 dim = 128
-index_file_size = 10
+segment_row_count = 5000
 collection_id = "test_delete"
 DELETE_TIMEOUT = 60
-nprobe = 1
-epsilon = 0.001
 tag = "1970-01-01"
-top_k = 1
 nb = 6000
+field_name = default_float_vec_field_name
+entity = gen_entities(1)
+raw_vector, binary_entity = gen_binary_entities(1)
+entities = gen_entities(nb)
+raw_vectors, binary_entities = gen_binary_entities(nb)
+default_single_query = {
+    "bool": {
+        "must": [
+            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim), "params": {"nprobe": 10}}}}
+        ]
+    }
+}
 
 class TestDeleteBase:
     """
@@ -25,535 +34,450 @@ class TestDeleteBase:
       The following cases are used to test `delete_entity_by_id` function
     ******************************************************************
     """
-
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
+        if str(connect._cmd("mode")) == "GPU":
+            if not request.param["index_type"] not in ivf():
                 pytest.skip("Only support index_type: idmap/ivf")
-        elif str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] in [IndexType.IVF_SQ8H]:
+        if str(connect._cmd("mode")) == "CPU":
+            if request.param["index_type"] in index_cpu_not_support():
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
-    def test_delete_vector_search(self, connect, collection, get_simple_index):
-        '''
-        target: test delete vector
-        method: add vector and delete
-        expected: status ok, vector deleted
-        '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        vector = gen_single_vector(dim)
-        status, ids = connect.insert(collection, vector)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status = connect.delete_entity_by_id(collection, ids)
-        assert status.OK()
-        status = connect.flush([collection])
-        search_param = get_search_param(index_type)
-        status = connect.flush([collection])
-        search_param = get_search_param(index_type)
-        status, res = connect.search(collection, top_k, vector, params=search_param)
-        logging.getLogger().info(res)
-        assert status.OK()
-        assert len(res[0]) == 0
+    @pytest.fixture(
+        scope="function",
+        params=[
+            1,
+            6000
+        ],
+    )
+    def insert_count(self, request):
+        yield request.param
 
-    def test_delete_vector_multi_same_ids(self, connect, collection, get_simple_index):
+    def test_delete_entity_id_not_exised(self, connect, collection):
         '''
-        target: test delete vector, with some same ids
-        method: add vector and delete
-        expected: status ok, vector deleted
+        target: test delete entity, params entity_id not existed
+        method: add entity and delete
+        expected: status DELETED
         '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        vectors = gen_vectors(nb, dim)
-        connect.insert(collection, vectors, ids=[1 for i in range(nb)])
-        status = connect.flush([collection])
-        # Bloom filter error
-        assert status.OK()
-        status = connect.delete_entity_by_id(collection, [1])
-        assert status.OK()
-        status = connect.flush([collection])
-        search_param = get_search_param(index_type)
-        status, res = connect.search(collection, top_k, [vectors[0]], params=search_param)
-        logging.getLogger().info(res)
-        assert status.OK()
-        assert len(res[0]) == 0
-
-    def test_delete_vector_collection_count(self, connect, collection):
-        '''
-        target: test delete vector
-        method: add vector and delete
-        expected: status ok, vector deleted
-        '''
-        vector = gen_single_vector(dim)
-        status, ids = connect.insert(collection, vector)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status = connect.delete_entity_by_id(collection, ids)
-        assert status.OK()
-        status = connect.flush([collection])
-        status, res = connect.count_entities(collection)
-        assert status.OK()
-        assert res == 0
-
-    def test_delete_vector_collection_count_no_flush(self, connect, collection):
-        '''
-        target: test delete vector
-        method: add vector and delete, no flush(using auto flush)
-        expected: status ok, vector deleted
-        '''
-        vector = gen_single_vector(dim)
-        status, ids = connect.insert(collection, vector)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status = connect.delete_entity_by_id(collection, ids)
-        assert status.OK()
-        time.sleep(2)
-        status, res = connect.count_entities(collection)
-        assert status.OK()
-        assert res == 0
-
-    def test_delete_vector_id_not_exised(self, connect, collection, get_simple_index):
-        '''
-        target: test delete vector, params vector_id not existed
-        method: add vector and delete
-        expected: status ok, search with vector have result
-        '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        vector = gen_single_vector(dim)
-        status, ids = connect.insert(collection, vector)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
+        ids = connect.insert(collection, entity)
+        connect.flush([collection])
         status = connect.delete_entity_by_id(collection, [0])
-        assert status.OK()
-        status = connect.flush([collection])
-        search_param = get_search_param(index_type)
-        status, res = connect.search(collection, top_k, vector, params=search_param)
-        assert status.OK()
-        assert res[0][0].id == ids[0]
+        assert status
 
-    def test_delete_vector_collection_not_existed(self, connect, collection):
+    # TODO
+    def test_delete_empty_collection(self, connect, collection):
         '''
-        target: test delete vector, params collection_name not existed
-        method: add vector and delete
-        expected: status not ok
+        target: test delete entity, params collection_name not existed
+        method: add entity and delete
+        expected: status DELETED
         '''
-        vector = gen_single_vector(dim)
-        status, ids = connect.insert(collection, vector)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
+        status = connect.delete_entity_by_id(collection, [0])
+        assert status
+
+    def test_delete_entity_collection_not_existed(self, connect, collection):
+        '''
+        target: test delete entity, params collection_name not existed
+        method: add entity and delete
+        expected: error raised
+        '''
         collection_new = gen_unique_str()
-        status = connect.delete_entity_by_id(collection_new, [0])
-        assert not status.OK()
+        with pytest.raises(Exception) as e:
+            status = connect.delete_entity_by_id(collection_new, [0])
 
-    def test_insert_delete_vector(self, connect, collection, get_simple_index):
+    def test_delete_entity_collection_not_existed(self, connect, collection):
         '''
-        method: add vectors and delete
-        expected: status ok, vectors deleted
+        target: test delete entity, params collection_name not existed
+        method: add entity and delete
+        expected: error raised
         '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        delete_ids = [ids[0], ids[-1]]
-        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        ids = connect.insert(collection, entity)
+        connect.flush([collection])
+        collection_new = gen_unique_str()
+        with pytest.raises(Exception) as e:
+            status = connect.delete_entity_by_id(collection_new, [0])
+
+    # TODO:
+    def test_insert_delete(self, connect, collection, insert_count):
+        '''
+        target: test delete entity
+        method: add entities and delete
+        expected: no error raised
+        '''
+        entities = gen_entities(insert_count)
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
+        delete_ids = [ids[0]]
         status = connect.delete_entity_by_id(collection, delete_ids)
-        assert status.OK()
-        status = connect.flush([collection])
-        search_param = get_search_param(index_type)
-        status, res = connect.search(collection, top_k, query_vecs, params=search_param)
-        assert status.OK()
-        logging.getLogger().info(res)
-        assert res[0][0].distance > epsilon
-        assert res[1][0].distance < epsilon
-        assert res[1][0].id == ids[1]
-        assert res[2][0].distance > epsilon
+        assert status
 
+    @pytest.mark.level(2)
+    def test_insert_delete_A(self, connect, collection):
+        '''
+        target: test delete entity
+        method: add entities and delete one in collection, and one not in collection
+        expected: no error raised
+        '''
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
+        delete_ids = [ids[0], 1]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        assert status
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == nb - 1
+
+    @pytest.mark.level(2)
+    def test_insert_delete_B(self, connect, collection):
+        '''
+        target: test delete entity
+        method: add entities with the same ids, and delete the id in collection
+        expected: no error raised, all entities deleted
+        '''
+        ids = [1 for i in range(nb)]
+        res_ids = connect.insert(collection, entities, ids)
+        connect.flush([collection])
+        delete_ids = [1]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        assert status
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == 0
+
+    @pytest.mark.level(2)
+    def test_delete_exceed_limit(self, connect, collection):
+        '''
+        target: test delete entity
+        method: add one entity and delete two ids
+        expected: error raised
+        '''        
+        ids = connect.insert(collection, entity)
+        connect.flush([collection])
+        delete_ids = [ids[0], 1]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == 0
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_flush_after_delete(self, connect, collection):
+        '''
+        target: test delete entity
+        method: add entities and delete, then flush
+        expected: entity deleted and no error raised
+        '''
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
+        delete_ids = [ids[0], ids[-1]]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        assert status
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == nb - len(delete_ids)
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_flush_after_delete_ip(self, connect, ip_collection):
+        '''
+        target: test delete entity
+        method: add entities and delete, then flush
+        expected: entity deleted and no error raised
+        '''
+        ids = connect.insert(ip_collection, entities)
+        connect.flush([ip_collection])
+        delete_ids = [ids[0], ids[-1]]
+        status = connect.delete_entity_by_id(ip_collection, delete_ids)
+        assert status
+        connect.flush([ip_collection])
+        res_count = connect.count_entities(ip_collection)
+        assert res_count == nb - len(delete_ids)
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_flush_after_delete_jac(self, connect, jac_collection):
+        '''
+        target: test delete entity
+        method: add entities and delete, then flush
+        expected: entity deleted and no error raised
+        '''
+        ids = connect.insert(jac_collection, binary_entities)
+        connect.flush([jac_collection])
+        delete_ids = [ids[0], ids[-1]]
+        status = connect.delete_entity_by_id(jac_collection, delete_ids)
+        assert status
+        connect.flush([jac_collection])
+        res_count = connect.count_entities(jac_collection)
+        assert res_count == nb - len(delete_ids)
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_insert_same_ids_after_delete(self, connect, collection):
+        '''
+        method: add entities and delete
+        expected: status DELETED
+        '''
+        insert_ids = [i for i in range(nb)]
+        ids = connect.insert(collection, entities, insert_ids)
+        connect.flush([collection])
+        delete_ids = [ids[0], ids[-1]]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        assert status
+        new_ids = connect.insert(collection, entity, [ids[0]])
+        assert new_ids == [ids[0]]
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == nb - 1
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_insert_same_ids_after_delete_ip(self, connect, ip_collection):
+        '''
+        method: add entities and delete
+        expected: status DELETED
+        '''
+        insert_ids = [i for i in range(nb)]
+        ids = connect.insert(ip_collection, entities, insert_ids)
+        connect.flush([ip_collection])
+        delete_ids = [ids[0], ids[-1]]
+        status = connect.delete_entity_by_id(ip_collection, delete_ids)
+        assert status
+        new_ids = connect.insert(ip_collection, entity, [ids[0]])
+        assert new_ids == [ids[0]]
+        connect.flush([ip_collection])
+        res_count = connect.count_entities(ip_collection)
+        assert res_count == nb - 1
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_insert_same_ids_after_delete_jac(self, connect, jac_collection):
+        '''
+        method: add entities, with the same id and delete the ids
+        expected: status DELETED, all id deleted
+        '''
+        insert_ids = [i for i in range(nb)]
+        ids = connect.insert(jac_collection, binary_entities, insert_ids)
+        connect.flush([jac_collection])
+        delete_ids = [ids[0], ids[-1]]
+        status = connect.delete_entity_by_id(jac_collection, delete_ids)
+        assert status
+        new_ids = connect.insert(jac_collection, binary_entity, [ids[0]])
+        assert new_ids == [ids[0]]
+        connect.flush([jac_collection])
+        res_count = connect.count_entities(jac_collection)
+        assert res_count == nb - 1
+
+    # TODO:
+    @pytest.mark.level(2)
+    def test_search_after_delete(self, connect, collection):
+        '''
+        target: test delete entity
+        method: add entities and delete, then search
+        expected: entity deleted and no error raised
+        '''
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
+        delete_ids = [ids[0], ids[-1]]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        assert status
+        query = copy.deepcopy(default_single_query)
+        query["bool"]["must"][0]["vector"][field_name]["query"] = [entity[-1]["values"][0], entities[-1]["values"][0], entities[-1]["values"][-1]]
+        res = connect.search(collection, query)
+        logging.getLogger().debug(res)
+        assert len(res) == len(query["bool"]["must"][0]["vector"][field_name]["query"])
+        assert res[0]._distances[0] > epsilon
+        assert res[1]._distances[0] < epsilon
+        assert res[2]._distances[0] < epsilon
+
+    # TODO
+    @pytest.mark.level(2)
     def test_create_index_after_delete(self, connect, collection, get_simple_index):
         '''
-        method: add vectors and delete, then create index
-        expected: status ok, vectors deleted, index created
+        method: add entitys and delete, then create index
+        expected: vectors deleted, index created
         '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
-        query_vecs = [vectors[0], vectors[1], vectors[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
-        assert status.OK()
-        status = connect.flush([collection])
-        status = connect.create_index(collection, index_type, index_param)
-        assert status.OK()
-        search_param = get_search_param(index_type)
-        status, res = connect.search(collection, top_k, query_vecs, params=search_param)
-        assert status.OK()
-        logging.getLogger().info(res)
-        logging.getLogger().info(ids[0])
-        logging.getLogger().info(ids[1])
-        logging.getLogger().info(ids[-1])
-        assert res[0][0].id != ids[0]
-        assert res[1][0].id == ids[1]
-        assert res[2][0].id != ids[-1]
+        connect.create_index(collection, field_name, get_simple_index)
+        # assert index info
 
-    def test_add_vector_after_delete(self, connect, collection, get_simple_index):
-        '''
-        method: add vectors and delete, then add vector
-        expected: status ok, vectors deleted, vector added
-        '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        delete_ids = [ids[0], ids[-1]]
-        query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status = connect.delete_entity_by_id(collection, delete_ids)
-        assert status.OK()
-        status = connect.flush([collection])
-        status, tmp_ids = connect.insert(collection, [vectors[0], vectors[-1]])
-        assert status.OK()
-        status = connect.flush([collection])
-        search_param = get_search_param(index_type)
-        status, res = connect.search(collection, top_k, query_vecs, params=search_param)
-        assert status.OK()
-        logging.getLogger().info(res)
-        assert res[0][0].id == tmp_ids[0]
-        assert res[0][0].distance < epsilon
-        assert res[1][0].distance < epsilon
-        assert res[2][0].id == tmp_ids[-1]
-        assert res[2][0].distance < epsilon
-
+    # TODO
     def test_delete_multiable_times(self, connect, collection):
         '''
-        method: add vectors and delete id serveral times
-        expected: status ok, vectors deleted, and status ok for next delete operation
+        method: add entities and delete id serveral times
+        expected: entities deleted
         '''
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
-        query_vecs = [vectors[0], vectors[1], vectors[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
-        assert status.OK()
-        status = connect.flush([collection])
+        assert status
+        connect.flush([collection])
         for i in range(10):
             status = connect.delete_entity_by_id(collection, delete_ids)
-            assert status.OK()
+            assert status
 
-    def test_delete_no_flush_multiable_times(self, connect, collection):
+    # TODO
+    @pytest.mark.level(2)
+    def test_index_insert_batch_delete_get(self, connect, collection, get_simple_index):
         '''
-        method: add vectors and delete id serveral times
-        expected: status ok, vectors deleted, and status ok for next delete operation
+        method: create index, insert entities, and delete
+        expected: entities deleted
         '''
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
+        connect.create_index(collection, field_name, get_simple_index)
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
-        query_vecs = [vectors[0], vectors[1], vectors[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
-        assert status.OK()
-        for i in range(10):
-            status = connect.delete_entity_by_id(collection, delete_ids)
-            assert status.OK()
-            assert status.OK()
+        assert status
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == nb - len(delete_ids)
+        res_get = connect.get_entity_by_id(collection, delete_ids)
+        assert res_get[0] is None
 
-
-class TestDeleteIndexedVectors:
-    """
-    ******************************************************************
-      The following cases are used to test `delete_entity_by_id` function
-    ******************************************************************
-    """
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
-                pytest.skip("Only support index_type: idmap/ivf")
-        elif str(connect._cmd("mode")[1]) == "CPU":
-            if request.param["index_type"] in [IndexType.IVF_SQ8H]:
-                pytest.skip("CPU not support index_type: ivf_sq8h")
-        return request.param
-
-    def test_delete_vectors_after_index_created_search(self, connect, collection, get_simple_index):
+    # TODO
+    @pytest.mark.level(2)
+    def test_index_insert_single_delete_get(self, connect, collection, get_simple_index):
         '''
-        target: test delete vector after index created
-        method: add vector, create index and delete vector
-        expected: status ok, vector deleted
+        method: create index, insert entities, and delete
+        expected: entities deleted
         '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        vector = gen_single_vector(dim)
-        status, ids = connect.insert(collection, vector)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status = connect.create_index(collection, index_type, index_param)
-        assert status.OK()
-        status = connect.delete_entity_by_id(collection, ids)
-        assert status.OK()
-        status = connect.flush([collection])
-        search_param = get_search_param(index_type)
-        status, res = connect.search(collection, top_k, vector, params=search_param)
-        logging.getLogger().info(res)
-        assert status.OK()
-        assert len(res[0]) == 0
-
-    def test_insert_delete_vector(self, connect, collection, get_simple_index):
-        '''
-        method: add vectors and delete
-        expected: status ok, vectors deleted
-        '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        vectors = gen_vector(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        status = connect.create_index(collection, index_type, index_param)
-        assert status.OK()
+        ids = [i for i in range(nb)]
+        connect.create_index(collection, field_name, get_simple_index)
+        for i in range(nb):
+            connect.insert(collection, entity, [ids[i]])
+        connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
-        query_vecs = [vectors[0], vectors[1], vectors[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
-        assert status.OK()
-        status = connect.flush([collection])
-        search_param = get_search_param(index_type)
-        status, res = connect.search(collection, top_k, query_vecs, params=search_param)
-        assert status.OK()
-        logging.getLogger().info(ids[0])
-        logging.getLogger().info(ids[1])
-        logging.getLogger().info(ids[-1])
-        logging.getLogger().info(res)
-        assert res[0][0].id != ids[0]
-        assert res[1][0].id == ids[1]
-        assert res[2][0].id != ids[-1]
+        assert status
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == nb - len(delete_ids)
 
-
-class TestDeleteBinary:
     """
     ******************************************************************
-      The following cases are used to test `delete_entity_by_id` function
+      The following cases are used to test `delete_entity_by_id` function, with tags
     ******************************************************************
     """
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        logging.getLogger().info(request.param)
-        if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
-            return request.param
-        else:
-            pytest.skip("Skip index Temporary")
-
-    def test_delete_vector_search(self, connect, jac_collection, get_simple_index):
+    # TODO:
+    def test_insert_tag_delete(self, connect, collection):
         '''
-        target: test delete vector
-        method: add vector and delete
-        expected: status ok, vector deleted
+        method: add entitys with given tag, delete entities with the return ids
+        expected: entities deleted
         '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.insert(jac_collection, vector)
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        assert status.OK()
-        status = connect.delete_entity_by_id(jac_collection, ids)
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        search_param = get_search_param(index_type)
-        status, res = connect.search(jac_collection, top_k, vector, params=search_param)
-        logging.getLogger().info(res)
-        assert status.OK()
-        assert len(res[0]) == 0
-
-    # TODO: soft delete
-    def test_delete_vector_collection_count(self, connect, jac_collection):
-        '''
-        target: test delete vector
-        method: add vector and delete
-        expected: status ok, vector deleted
-        '''
-        tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.insert(jac_collection, vector)
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        assert status.OK()
-        status = connect.delete_entity_by_id(jac_collection, ids)
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        status, res = connect.count_entities(jac_collection)
-        assert status.OK()
-        assert res == 0
-
-    def test_delete_vector_id_not_exised(self, connect, jac_collection, get_simple_index):
-        '''
-        target: test delete vector, params vector_id not existed
-        method: add vector and delete
-        expected: status ok, search with vector have result
-        '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.insert(jac_collection, vector)
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        assert status.OK()
-        status = connect.delete_entity_by_id(jac_collection, [0])
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        status = connect.flush([jac_collection])
-        search_param = get_search_param(index_type)
-        status, res = connect.search(jac_collection, top_k, vector, params=search_param)
-        assert status.OK()
-        assert res[0][0].id == ids[0]
-
-    def test_delete_vector_collection_not_existed(self, connect, jac_collection):
-        '''
-        target: test delete vector, params collection_name not existed
-        method: add vector and delete
-        expected: status not ok
-        '''
-        tmp, vector = gen_binary_vectors(1, dim)
-        status, ids = connect.insert(jac_collection, vector)
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        assert status.OK()
-        collection_new = gen_unique_str()
-        status = connect.delete_entity_by_id(collection_new, [0])
-        collection_new = gen_unique_str()
-        status = connect.delete_entity_by_id(collection_new, [0])
-        assert not status.OK()
-
-    def test_insert_delete_vector(self, connect, jac_collection, get_simple_index):
-        '''
-        method: add vectors and delete
-        expected: status ok, vectors deleted
-        '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        tmp, vectors = gen_binary_vectors(nb, dim)
-        status, ids = connect.insert(jac_collection, vectors)
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        assert status.OK()
+        connect.create_partition(collection, tag)
+        ids = connect.insert(collection, entities, partition_tag=tag)
+        connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
-        query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status = connect.delete_entity_by_id(jac_collection, delete_ids)
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        search_param = get_search_param(index_type)
-        status, res = connect.search(jac_collection, top_k, query_vecs, params=search_param)
-        assert status.OK()
-        logging.getLogger().info(res)
-        assert res[0][0].id != ids[0]
-        assert res[1][0].id == ids[1]
-        assert res[2][0].id != ids[-1]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        assert status
 
-    def test_add_after_delete_vector(self, connect, jac_collection, get_simple_index):
+    # TODO:
+    def test_insert_default_tag_delete(self, connect, collection):
         '''
-        method: add vectors and delete, add
-        expected: status ok, vectors added
+        method: add entitys, delete entities with the return ids
+        expected: entities deleted
         '''
-        index_param = get_simple_index["index_param"]
-        index_type = get_simple_index["index_type"]
-        tmp, vectors = gen_binary_vectors(nb, dim)
-        status, ids = connect.insert(jac_collection, vectors)
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        assert status.OK()
+        connect.create_partition(collection, tag)
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
-        query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status = connect.delete_entity_by_id(jac_collection, delete_ids)
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        status, tmp_ids = connect.insert(jac_collection, [vectors[0], vectors[-1]])
-        assert status.OK()
-        status = connect.flush([jac_collection])
-        search_param = get_search_param(index_type)
-        status, res = connect.search(jac_collection, top_k, query_vecs, params=search_param)
-        assert status.OK()
-        logging.getLogger().info(res)
-        assert res[0][0].id == tmp_ids[0]
-        assert res[1][0].id == ids[1]
-        assert res[2][0].id == tmp_ids[-1]
-        assert res[2][0].id == tmp_ids[-1]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        assert status
+
+    # TODO:
+    @pytest.mark.level(2)
+    def test_insert_tags_delete(self, connect, collection):
+        '''
+        method: add entitys with given two tags, delete entities with the return ids
+        expected: entities deleted
+        '''
+        tag_new = "tag_new"
+        connect.create_partition(collection, tag)
+        connect.create_partition(collection, tag_new)
+        ids = connect.insert(collection, entities, partition_tag=tag)
+        ids_new = connect.insert(collection, entities, partition_tag=tag_new)
+        connect.flush([collection])
+        delete_ids = [ids[0], ids_new[0]]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        assert status
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == 2 * (nb - 1)
+
+    # TODO:
+    @pytest.mark.level(2)
+    def test_insert_tags_index_delete(self, connect, collection, get_simple_index):
+        '''
+        method: add entitys with given tag, create index, delete entities with the return ids
+        expected: entities deleted
+        '''
+        tag_new = "tag_new"
+        connect.create_partition(collection, tag)
+        connect.create_partition(collection, tag_new)
+        ids = connect.insert(collection, entities, partition_tag=tag)
+        ids_new = connect.insert(collection, entities, partition_tag=tag_new)
+        connect.flush([collection])
+        connect.create_index(collection, field_name, get_simple_index)
+        delete_ids = [ids[0], ids_new[0]]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        assert status
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == 2 * (nb - 1)
 
 
-class TestDeleteIdsIngalid(object):
-    single_vector = gen_single_vector(dim)
+class TestDeleteInvalid(object):
 
     """
     Test adding vectors with invalid vectors
     """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_vector_ids()
+        params=gen_invalid_ints()
     )
-    def gen_invalid_id(self, request):
+    def gen_entity_id(self, request):
         yield request.param
 
-    @pytest.mark.level(1)
-    def test_delete_vector_id_invalid(self, connect, collection, gen_invalid_id):
-        invalid_id = gen_invalid_id
-        with pytest.raises(Exception) as e:
-            status = connect.delete_entity_by_id(collection, [invalid_id])
-
-    @pytest.mark.level(2)
-    def test_delete_vector_ids_invalid(self, connect, collection, gen_invalid_id):
-        invalid_id = gen_invalid_id
-        with pytest.raises(Exception) as e:
-            status = connect.delete_entity_by_id(collection, [1, invalid_id])
-
-
-class TestCollectionNameInvalid(object):
-    """
-    Test adding vectors with invalid collection names
-    """
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_collection_names()
+        params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
-    def test_delete_vectors_with_invalid_collection_name(self, connect, get_collection_name):
-        collection_name = get_collection_name
-        status = connect.delete_entity_by_id(collection_name, [1])
-        assert not status.OK()
+    @pytest.mark.level(1)
+    def test_delete_entity_id_invalid(self, connect, collection, gen_entity_id):
+        invalid_id = gen_entity_id
+        with pytest.raises(Exception) as e:
+            status = connect.delete_entity_by_id(collection, [invalid_id])
 
+    @pytest.mark.level(2)
+    def test_delete_entity_ids_invalid(self, connect, collection, gen_entity_id):
+        invalid_id = gen_entity_id
+        with pytest.raises(Exception) as e:
+            status = connect.delete_entity_by_id(collection, [1, invalid_id])
+
+    @pytest.mark.level(2)
+    def test_delete_entity_with_invalid_collection_name(self, connect, get_collection_name):
+        collection_name = get_collection_name
+        with pytest.raises(Exception) as e:
+            status = connect.delete_entity_by_id(collection_name, [1])
+
+    # def test_insert_same_ids_after_delete_jac(self, connect, jac_collection):
+    #     '''
+    #     method: add entities and delete
+    #     expected: status DELETED
+    #     '''
+    #     insert_ids = [i for i in range(nb)]
+    #     ids = connect.insert(jac_collection, binary_entities, insert_ids)
+    #     connect.flush([jac_collection])
+    #     delete_ids = [ids[0], ids[-1]]
+    #     with pytest.raises(Exception) as e:
+    #         status = connect.delete_entity_by_id(jac_collection, delete_ids)

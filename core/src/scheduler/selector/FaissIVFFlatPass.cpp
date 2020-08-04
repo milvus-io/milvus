@@ -11,7 +11,7 @@
 #ifdef MILVUS_GPU_VERSION
 #include "scheduler/selector/FaissIVFFlatPass.h"
 #include "cache/GpuCacheMgr.h"
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
@@ -21,23 +21,20 @@
 namespace milvus {
 namespace scheduler {
 
+FaissIVFFlatPass::FaissIVFFlatPass() {
+    ConfigMgr::GetInstance().Attach("gpu.gpu_search_threshold", this);
+}
+
+FaissIVFFlatPass::~FaissIVFFlatPass() {
+    ConfigMgr::GetInstance().Detach("gpu.gpu_search_threshold", this);
+}
+
 void
 FaissIVFFlatPass::Init() {
 #ifdef MILVUS_GPU_VERSION
-    server::Config& config = server::Config::GetInstance();
-    Status s = config.GetGpuResourceConfigGpuSearchThreshold(threshold_);
-    if (!s.ok()) {
-        threshold_ = std::numeric_limits<int32_t>::max();
-    }
-    s = config.GetGpuResourceConfigSearchResources(search_gpus_);
-    if (!s.ok()) {
-        throw std::exception();
-    }
-
-    SetIdentity("FaissIVFFlatPass");
-    AddGpuEnableListener();
-    AddGpuSearchThresholdListener();
-    AddGpuSearchResourcesListener();
+    gpu_enable_ = config.gpu.enable();
+    threshold_ = config.gpu.gpu_search_threshold();
+    search_gpus_ = ParseGPUDevices(config.gpu.search_devices());
 #endif
 }
 
@@ -47,17 +44,13 @@ FaissIVFFlatPass::Run(const TaskPtr& task) {
         return false;
     }
 
-    auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFFLAT) {
-        return false;
-    }
+    auto search_task = std::static_pointer_cast<SearchTask>(task);
 
-    auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFFlatPass: gpu disable, specify cpu to search!", "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_job->nq() < (uint64_t)threshold_) {
+    } else if (search_task->nq() < (uint64_t)threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFFlatPass: nq < gpu_search_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
@@ -70,6 +63,11 @@ FaissIVFFlatPass::Run(const TaskPtr& task) {
     auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;
     return true;
+}
+
+void
+FaissIVFFlatPass::ConfigUpdate(const std::string& name) {
+    threshold_ = config.gpu.gpu_search_threshold();
 }
 
 }  // namespace scheduler

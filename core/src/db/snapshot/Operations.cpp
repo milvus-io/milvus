@@ -10,9 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Operations.h"
+
 #include <chrono>
 #include <sstream>
+
+#include "config/ServerConfig.h"
+#include "db/Utils.h"
+#include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/ResourceGCEvent.h"
 #include "db/snapshot/Snapshots.h"
 
 namespace milvus {
@@ -64,6 +70,7 @@ Operations::ToString() const {
             ss << " | " << FailureString();
         }
     }
+    ss << " | " << execution_time_ / 1000 << " ms";
     return ss.str();
 }
 
@@ -73,19 +80,18 @@ Operations::GetID() const {
 }
 
 Status
-Operations::operator()(Store& store) {
-    auto status = PreCheck();
-    if (!status.ok())
-        return status;
+Operations::operator()(StorePtr store) {
+    STATUS_CHECK(PreCheck());
     return ApplyToStore(store);
 }
 
 void
 Operations::SetStatus(const Status& status) {
+    std::unique_lock<std::mutex> lock(finish_mtx_);
     status_ = status;
 }
 
-Status
+const Status&
 Operations::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     finish_cond_.wait(lock, [this] { return done_; });
@@ -93,7 +99,7 @@ Operations::WaitToFinish() {
 }
 
 void
-Operations::Done(Store& store) {
+Operations::Done(StorePtr store) {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     done_ = true;
     if (GetType() == OperationsType::W_Compound) {
@@ -101,6 +107,13 @@ Operations::Done(Store& store) {
             Snapshots::GetInstance().LoadSnapshot(store, context_.latest_ss,
                                                   context_.new_collection_commit->GetCollectionId(), ids_.back());
         }
+        /* if (!context_.latest_ss && context_.new_collection_commit) { */
+        /*     auto& holder = std::get<ConstPos(last_pos_)>(holders_); */
+        /*     if (holder.size() > 0) */
+        /*         Snapshots::GetInstance().LoadSnapshot(store, context_.latest_ss, */
+        /*                 context_.new_collection_commit->GetCollectionId(), holder.rbegin()->GetID()); */
+        /*     } */
+        /* } */
         std::cout << ToString() << std::endl;
     }
     finish_cond_.notify_all();
@@ -113,9 +126,7 @@ Operations::PreCheck() {
 
 Status
 Operations::Push(bool sync) {
-    auto status = PreCheck();
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(PreCheck());
     return OperationExecutor::GetInstance().Submit(shared_from_this(), sync);
 }
 
@@ -127,63 +138,58 @@ Operations::DoCheckStale(ScopedSnapshotT& latest_snapshot) const {
 Status
 Operations::CheckStale(const CheckStaleFunc& checker) const {
     decltype(prev_ss_) latest_ss;
-    auto status = Snapshots::GetInstance().GetSnapshot(latest_ss, prev_ss_->GetCollection()->GetID());
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(Snapshots::GetInstance().GetSnapshot(latest_ss, prev_ss_->GetCollection()->GetID()));
     if (prev_ss_->GetID() != latest_ss->GetID()) {
         if (checker) {
-            status = checker(latest_ss);
+            STATUS_CHECK(checker(latest_ss));
         } else {
-            status = DoCheckStale(latest_ss);
+            STATUS_CHECK(DoCheckStale(latest_ss));
         }
     }
-    return status;
+    return Status::OK();
 }
 
 Status
-Operations::DoneRequired() const {
-    Status status;
+Operations::CheckDone() const {
     if (!done_) {
-        status = Status(SS_CONSTRAINT_CHECK_ERROR, "Operation is expected to be done");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Should be done";
+        return Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
     }
-    return status;
+    return Status::OK();
 }
 
 Status
-Operations::IDSNotEmptyRequried() const {
-    Status status;
-    if (ids_.size() == 0)
-        status = Status(SS_CONSTRAINT_CHECK_ERROR, "No Snapshot is available");
-    return status;
+Operations::CheckIDSNotEmpty() const {
+    if (ids_.size() == 0) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". No resource available";
+        return Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
+    }
+    return Status::OK();
 }
 
 Status
-Operations::PrevSnapshotRequried() const {
-    Status status;
+Operations::CheckPrevSnapshot() const {
     if (!prev_ss_) {
-        status = Status(SS_CONSTRAINT_CHECK_ERROR, "Prev snapshot is requried");
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Previous snapshot required";
+        return Status(SS_CONSTRAINT_CHECK_ERROR, emsg.str());
     }
-    return status;
+    return Status::OK();
 }
 
 Status
 Operations::GetSnapshot(ScopedSnapshotT& ss) const {
-    auto status = PrevSnapshotRequried();
-    if (!status.ok())
-        return status;
-    status = DoneRequired();
-    if (!status.ok())
-        return status;
-    status = IDSNotEmptyRequried();
-    if (!status.ok())
-        return status;
-    /* status = Snapshots::GetInstance().GetSnapshot(ss, prev_ss_->GetCollectionId(), ids_.back()); */
+    STATUS_CHECK(CheckPrevSnapshot());
+    STATUS_CHECK(CheckDone());
+    STATUS_CHECK(CheckIDSNotEmpty());
     ss = context_.latest_ss;
-    return status;
+    return Status::OK();
 }
 
-Status
-Operations::ApplyToStore(Store& store) {
+const Status&
+Operations::ApplyToStore(StorePtr store) {
     if (GetType() == OperationsType::W_Compound) {
         /* std::cout << ToString() << std::endl; */
     }
@@ -191,7 +197,11 @@ Operations::ApplyToStore(Store& store) {
         Done(store);
         return status_;
     }
+    auto start_time = std::chrono::high_resolution_clock::now();
     auto status = OnExecute(store);
+    execution_time_ =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start_time)
+            .count();
     SetStatus(status);
     Done(store);
     return status_;
@@ -204,63 +214,95 @@ Operations::OnSnapshotDropped() {
 
 Status
 Operations::OnSnapshotStale() {
-    /* std::cout << GetRepr() << " Stale SS " << prev_ss_->GetID() << " RefCnt=" << prev_ss_->RefCnt() \ */
-    /*     << " Curr SS " << context_.prev_ss->GetID() << " RefCnt=" << context_.prev_ss->RefCnt() << std::endl; */
+    /* std::cout << GetRepr() << " Stale SS " << prev_ss_->GetID() << " RefCnt=" << prev_ss_->ref_count() \ */
+    /*     << " Curr SS " << context_.prev_ss->GetID() << " RefCnt=" << context_.prev_ss->ref_count() << std::endl; */
     return Status::OK();
 }
 
 Status
-Operations::OnExecute(Store& store) {
-    auto status = PreExecute(store);
-    if (!status.ok()) {
-        return status;
-    }
-    status = DoExecute(store);
-    if (!status.ok()) {
-        return status;
-    }
-    return PostExecute(store);
+Operations::OnExecute(StorePtr store) {
+    STATUS_CHECK(PreExecute(store));
+    STATUS_CHECK(DoExecute(store));
+    STATUS_CHECK(PostExecute(store));
+    return Status::OK();
 }
 
 Status
-Operations::PreExecute(Store& store) {
-    Status status;
+Operations::PreExecute(StorePtr store) {
     if (GetStartedSS() && type_ == OperationsType::W_Compound) {
-        Snapshots::GetInstance().GetSnapshot(context_.prev_ss, GetStartedSS()->GetCollectionId());
+        STATUS_CHECK(Snapshots::GetInstance().GetSnapshot(context_.prev_ss, GetStartedSS()->GetCollectionId()));
         if (!context_.prev_ss) {
-            status = OnSnapshotDropped();
+            STATUS_CHECK(OnSnapshotDropped());
         } else if (prev_ss_->GetID() != context_.prev_ss->GetID()) {
-            status = OnSnapshotStale();
+            STATUS_CHECK(OnSnapshotStale());
         }
+    }
+    return Status::OK();
+}
+
+Status
+Operations::DoExecute(StorePtr store) {
+    return Status::OK();
+}
+
+Status
+Operations::OnApplyTimeoutCallback(StorePtr store) {
+    ApplyContext context;
+    context.on_succes_cb = std::bind(&Operations::OnApplySuccessCallback, this, std::placeholders::_1);
+    context.on_error_cb = std::bind(&Operations::OnApplyErrorCallback, this, std::placeholders::_1);
+
+    auto try_times = 0;
+
+    auto status = store->ApplyOperation(*this, context);
+    while (status.code() == SS_TIMEOUT && !HasAborted()) {
+        std::cout << GetName() << " Timeout! Try " << ++try_times << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        status = store->ApplyOperation(*this, context);
     }
     return status;
 }
 
 Status
-Operations::DoExecute(Store& store) {
+Operations::OnApplySuccessCallback(ID_TYPE result_id) {
+    SetStepResult(result_id);
     return Status::OK();
 }
 
 Status
-Operations::PostExecute(Store& store) {
-    return store.DoCommitOperation(*this);
+Operations::OnApplyErrorCallback(Status status) {
+    return status;
 }
 
 Status
+Operations::PostExecute(StorePtr store) {
+    ApplyContext context;
+    context.on_succes_cb = std::bind(&Operations::OnApplySuccessCallback, this, std::placeholders::_1);
+    context.on_error_cb = std::bind(&Operations::OnApplyErrorCallback, this, std::placeholders::_1);
+    context.on_timeout_cb = std::bind(&Operations::OnApplyTimeoutCallback, this, std::placeholders::_1);
+
+    return store->ApplyOperation(*this, context);
+}
+
+template <typename ResourceT>
+void
+ApplyRollBack(std::set<std::shared_ptr<ResourceContext<ResourceT>>>& step_context_set) {
+    for (auto& step_context : step_context_set) {
+        auto res = step_context->Resource();
+        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(res);
+        EventExecutor::GetInstance().Submit(evt_ptr);
+        std::cout << "Rollback " << typeid(ResourceT).name() << ": " << res->GetID() << std::endl;
+    }
+}
+
+void
 Operations::RollBack() {
-    // TODO: Implement here
-    // Spwarn a rollback operation or re-use this operation
-    return Status::OK();
-}
-
-Status
-Operations::ApplyRollBack(Store& store) {
-    // TODO: Implement rollback to remove all resources in steps_
-    return Status::OK();
+    std::apply([&](auto&... step_context_set) { ((ApplyRollBack(step_context_set)), ...); }, GetStepHolders());
 }
 
 Operations::~Operations() {
-    // TODO: Prefer to submit a rollback operation if status is not ok
+    if ((!status_.ok() || !done_) && status_.code() != SS_TIMEOUT) {
+        RollBack();
+    }
 }
 
 }  // namespace snapshot

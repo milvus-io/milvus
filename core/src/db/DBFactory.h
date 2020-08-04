@@ -26,7 +26,7 @@ class DBFactory {
     BuildOption();
 
     static DBPtr
-    Build(const DBOptions& options);
+    BuildDB(const DBOptions& options);
 };
 
 }  // namespace engine

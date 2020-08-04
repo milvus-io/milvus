@@ -216,50 +216,73 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(CreateCollection)
 
     ENDPOINT("POST", "/collections", CreateCollection, BODY_DTO(CollectionRequestDto::ObjectWrapper, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections\'");
-        tr.RecordSection("Received request.");
+        //        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections\'");
+        //        tr.RecordSection("Received request.");
+        //
+        //        WebRequestHandler handler = WebRequestHandler();
+        //
+        //        std::shared_ptr<OutgoingResponse> response;
+        //        auto status_dto = handler.CreateCollection(body);
+        //        switch (status_dto->code->getValue()) {
+        //            case StatusCode::SUCCESS:
+        //                response = createDtoResponse(Status::CODE_201, status_dto);
+        //                break;
+        //            default:
+        //                response = createDtoResponse(Status::CODE_400, status_dto);
+        //        }
+        //
+        //        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+        //                          ", reason = " + status_dto->message->std_str() + ". Total cost";
+        //        tr.ElapseFromBegin(ttr);
 
-        WebRequestHandler handler = WebRequestHandler();
-
-        std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.CreateCollection(body);
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_201, status_dto);
-                break;
-            default:
-                response = createDtoResponse(Status::CODE_400, status_dto);
-        }
-
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
-                          ", reason = " + status_dto->message->std_str() + ". Total cost";
-        tr.ElapseFromBegin(ttr);
+        StatusDto::ObjectWrapper status;
+        auto response = createDtoResponse(Status::CODE_200, status);
         return response;
     }
 
     ADD_CORS(ShowCollections)
 
     ENDPOINT("GET", "/collections", ShowCollections, QUERIES(const QueryParams&, query_params)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections\'");
-        tr.RecordSection("Received request.");
+        //        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections\'");
+        //        tr.RecordSection("Received request.");
+        //
+        //        WebRequestHandler handler = WebRequestHandler();
+        //
+        //        String result;
+        //        auto status_dto = handler.ShowCollections(query_params, result);
+        //        std::shared_ptr<OutgoingResponse> response;
+        //        switch (status_dto->code->getValue()) {
+        //            case StatusCode::SUCCESS:
+        //                response = createResponse(Status::CODE_200, result);
+        //                break;
+        //            default:
+        //                response = createDtoResponse(Status::CODE_400, status_dto);
+        //        }
+        //
+        //        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+        //                          ", reason = " + status_dto->message->std_str() + ". Total cost";
+        //        tr.ElapseFromBegin(ttr);
 
-        WebRequestHandler handler = WebRequestHandler();
+        json result_json = R"({
+            "collections": [
+                {
+                    "collection_name": "test_collection",
+                    "fields": [
+                        {
+                        "field_name": "field_vec",
+                        "field_type": "VECTOR_FLOAT",
+                        "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
+                        "extra_params": {"dimension": 128, "metric_type":  "L2"}
+                        }
+                    ],
+                    "segment_size": 1024
+                }
+            ],
+            "count": 58
+        })";
 
-        String result;
-        auto status_dto = handler.ShowCollections(query_params, result);
-        std::shared_ptr<OutgoingResponse> response;
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                response = createResponse(Status::CODE_200, result);
-                break;
-            default:
-                response = createDtoResponse(Status::CODE_400, status_dto);
-        }
-
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
-                          ", reason = " + status_dto->message->std_str() + ". Total cost";
-        tr.ElapseFromBegin(ttr);
-
+        String result = result_json.dump().c_str();
+        auto response = createResponse(Status::CODE_200, result);
         return response;
     }
 
@@ -273,58 +296,74 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ENDPOINT("GET", "/collections/{collection_name}", GetCollection, PATH(String, collection_name),
              QUERIES(const QueryParams&, query_params)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() + "\'");
-        tr.RecordSection("Received request.");
+        //        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() +
+        //        "\'"); tr.RecordSection("Received request.");
+        //
+        //        WebRequestHandler handler = WebRequestHandler();
+        //
+        //        String response_str;
+        //        auto status_dto = handler.GetCollection(collection_name, query_params, response_str);
+        //
+        //        std::shared_ptr<OutgoingResponse> response;
+        //        switch (status_dto->code->getValue()) {
+        //            case StatusCode::SUCCESS:
+        //                response = createResponse(Status::CODE_200, response_str);
+        //                break;
+        //            case StatusCode::COLLECTION_NOT_EXISTS:
+        //                response = createDtoResponse(Status::CODE_404, status_dto);
+        //                break;
+        //            default:
+        //                response = createDtoResponse(Status::CODE_400, status_dto);
+        //        }
+        //
+        //        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+        //                          ", reason = " + status_dto->message->std_str() + ". Total cost";
+        //        tr.ElapseFromBegin(ttr);
 
-        WebRequestHandler handler = WebRequestHandler();
+        json result_json = R"({
+            "collection_name": "test_collection",
+            "fields": [
+                {
+                    "field_name": "field_vec",
+                    "field_type": "VECTOR_FLOAT",
+                    "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
+                    "extra_params": {"dimension": 128, "metric_type":  "L2"}
+                }
+            ],
+            "row_count": 10000
+        })";
 
-        String response_str;
-        auto status_dto = handler.GetCollection(collection_name, query_params, response_str);
-
-        std::shared_ptr<OutgoingResponse> response;
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                response = createResponse(Status::CODE_200, response_str);
-                break;
-            case StatusCode::COLLECTION_NOT_EXISTS:
-                response = createDtoResponse(Status::CODE_404, status_dto);
-                break;
-            default:
-                response = createDtoResponse(Status::CODE_400, status_dto);
-        }
-
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
-                          ", reason = " + status_dto->message->std_str() + ". Total cost";
-        tr.ElapseFromBegin(ttr);
-
+        auto response = createResponse(Status::CODE_200, result_json.dump().c_str());
         return response;
     }
 
     ADD_CORS(DropCollection)
 
     ENDPOINT("DELETE", "/collections/{collection_name}", DropCollection, PATH(String, collection_name)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "DELETE \'/collections/" + collection_name->std_str() + "\'");
-        tr.RecordSection("Received request.");
+        //        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "DELETE \'/collections/" + collection_name->std_str() +
+        //        "\'"); tr.RecordSection("Received request.");
+        //
+        //        WebRequestHandler handler = WebRequestHandler();
+        //
+        //        std::shared_ptr<OutgoingResponse> response;
+        //        auto status_dto = handler.DropCollection(collection_name);
+        //        switch (status_dto->code->getValue()) {
+        //            case StatusCode::SUCCESS:
+        //                response = createDtoResponse(Status::CODE_204, status_dto);
+        //                break;
+        //            case StatusCode::COLLECTION_NOT_EXISTS:
+        //                response = createDtoResponse(Status::CODE_404, status_dto);
+        //                break;
+        //            default:
+        //                response = createDtoResponse(Status::CODE_400, status_dto);
+        //        }
+        //
+        //        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+        //                          ", reason = " + status_dto->message->std_str() + ". Total cost";
+        //        tr.ElapseFromBegin(ttr);
 
-        WebRequestHandler handler = WebRequestHandler();
-
-        std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.DropCollection(collection_name);
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_204, status_dto);
-                break;
-            case StatusCode::COLLECTION_NOT_EXISTS:
-                response = createDtoResponse(Status::CODE_404, status_dto);
-                break;
-            default:
-                response = createDtoResponse(Status::CODE_400, status_dto);
-        }
-
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
-                          ", reason = " + status_dto->message->std_str() + ". Total cost";
-        tr.ElapseFromBegin(ttr);
-
+        StatusDto::ObjectWrapper status;
+        auto response = createDtoResponse(Status::CODE_201, status);
         return response;
     }
 
@@ -336,90 +375,100 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(CreateIndex)
 
-    ENDPOINT("POST", "/collections/{collection_name}/indexes", CreateIndex, PATH(String, collection_name),
+    ENDPOINT("POST", "/collections/{collection_name}/fields/{field_name}/indexes/{index_name}", CreateIndex,
+             PATH(String, collection_name), PATH(String, field_name), PATH(String, index_name),
              BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/tables/" + collection_name->std_str() + "/indexes\'");
-        tr.RecordSection("Received request.");
+        //        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/tables/" + collection_name->std_str() +
+        //        "/indexes\'"); tr.RecordSection("Received request.");
+        //
+        //        auto handler = WebRequestHandler();
+        //
+        //        std::shared_ptr<OutgoingResponse> response;
+        //        auto status_dto = handler.CreateIndex(collection_name, body);
+        //        switch (status_dto->code->getValue()) {
+        //            case StatusCode::SUCCESS:
+        //                response = createDtoResponse(Status::CODE_201, status_dto);
+        //                break;
+        //            case StatusCode::COLLECTION_NOT_EXISTS:
+        //                response = createDtoResponse(Status::CODE_404, status_dto);
+        //                break;
+        //            default:
+        //                response = createDtoResponse(Status::CODE_400, status_dto);
+        //        }
+        //
+        //        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+        //                          ", reason = " + status_dto->message->std_str() + ". Total cost";
+        //        tr.ElapseFromBegin(ttr);
 
-        auto handler = WebRequestHandler();
-
-        std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.CreateIndex(collection_name, body);
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_201, status_dto);
-                break;
-            case StatusCode::COLLECTION_NOT_EXISTS:
-                response = createDtoResponse(Status::CODE_404, status_dto);
-                break;
-            default:
-                response = createDtoResponse(Status::CODE_400, status_dto);
-        }
-
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
-                          ", reason = " + status_dto->message->std_str() + ". Total cost";
-        tr.ElapseFromBegin(ttr);
-
+        StatusDto::ObjectWrapper status;
+        auto response = createDtoResponse(Status::CODE_201, status);
         return response;
     }
 
     ADD_CORS(GetIndex)
 
-    ENDPOINT("GET", "/collections/{collection_name}/indexes", GetIndex, PATH(String, collection_name)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() +
-                        "/indexes\'");
-        tr.RecordSection("Received request.");
+    ENDPOINT("GET", "/collections/{collection_name}/fields/{field_name}/indexes", GetIndex,
+             PATH(String, collection_name), PATH(String, field_name)) {
+        //        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() +
+        //                        "/indexes\'");
+        //        tr.RecordSection("Received request.");
+        //
+        //        auto handler = WebRequestHandler();
+        //
+        //        OString result;
+        //        auto status_dto = handler.GetIndex(collection_name, result);
+        //
+        //        std::shared_ptr<OutgoingResponse> response;
+        //        switch (status_dto->code->getValue()) {
+        //            case StatusCode::SUCCESS:
+        //                response = createResponse(Status::CODE_200, result);
+        //                break;
+        //            case StatusCode::COLLECTION_NOT_EXISTS:
+        //                response = createDtoResponse(Status::CODE_404, status_dto);
+        //                break;
+        //            default:
+        //                response = createDtoResponse(Status::CODE_400, status_dto);
+        //        }
+        //
+        //        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+        //                          ", reason = " + status_dto->message->std_str() + ". Total cost";
+        //        tr.ElapseFromBegin(ttr);
 
-        auto handler = WebRequestHandler();
+        json result = R"({ "index_name": "FLAT", "params": {"index_type": "IVF_FLAT", "nlist": 4096 } })";
 
-        OString result;
-        auto status_dto = handler.GetIndex(collection_name, result);
-
-        std::shared_ptr<OutgoingResponse> response;
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                response = createResponse(Status::CODE_200, result);
-                break;
-            case StatusCode::COLLECTION_NOT_EXISTS:
-                response = createDtoResponse(Status::CODE_404, status_dto);
-                break;
-            default:
-                response = createDtoResponse(Status::CODE_400, status_dto);
-        }
-
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
-                          ", reason = " + status_dto->message->std_str() + ". Total cost";
-        tr.ElapseFromBegin(ttr);
-
+        auto response = createResponse(Status::CODE_200, result.dump().c_str());
         return response;
     }
 
     ADD_CORS(DropIndex)
 
-    ENDPOINT("DELETE", "/collections/{collection_name}/indexes", DropIndex, PATH(String, collection_name)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "DELETE \'/collections/" + collection_name->std_str() +
-                        "/indexes\'");
-        tr.RecordSection("Received request.");
+    ENDPOINT("DELETE", "/collections/{collection_name}/fields/{field_name}/indexes/{index_name}", DropIndex,
+             PATH(String, collection_name), PATH(String, field_name), PATH(String, index_name)) {
+        //        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "DELETE \'/collections/" + collection_name->std_str() +
+        //                        "/indexes\'");
+        //        tr.RecordSection("Received request.");
+        //
+        //        auto handler = WebRequestHandler();
+        //
+        //        std::shared_ptr<OutgoingResponse> response;
+        //        auto status_dto = handler.DropIndex(collection_name);
+        //        switch (status_dto->code->getValue()) {
+        //            case StatusCode::SUCCESS:
+        //                response = createDtoResponse(Status::CODE_204, status_dto);
+        //                break;
+        //            case StatusCode::COLLECTION_NOT_EXISTS:
+        //                response = createDtoResponse(Status::CODE_404, status_dto);
+        //                break;
+        //            default:
+        //                response = createDtoResponse(Status::CODE_400, status_dto);
+        //        }
+        //
+        //        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+        //                          ", reason = " + status_dto->message->std_str() + ". Total cost";
+        //        tr.ElapseFromBegin(ttr);
 
-        auto handler = WebRequestHandler();
-
-        std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.DropIndex(collection_name);
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_204, status_dto);
-                break;
-            case StatusCode::COLLECTION_NOT_EXISTS:
-                response = createDtoResponse(Status::CODE_404, status_dto);
-                break;
-            default:
-                response = createDtoResponse(Status::CODE_400, status_dto);
-        }
-
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
-                          ", reason = " + status_dto->message->std_str() + ". Total cost";
-        tr.ElapseFromBegin(ttr);
-
+        StatusDto::ObjectWrapper status;
+        auto response = createDtoResponse(Status::CODE_204, status);
         return response;
     }
 
@@ -461,7 +510,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_CORS(ShowPartitions)
 
     ENDPOINT("GET", "/collections/{collection_name}/partitions", ShowPartitions, PATH(String, collection_name),
-             QUERIES(const QueryParams&, query_params), BODY_STRING(String, body)) {
+             QUERIES(const QueryParams&, query_params)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() +
                         "/partitions\'");
         tr.RecordSection("Received request.");
@@ -473,7 +522,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto handler = WebRequestHandler();
 
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.ShowPartitions(collection_name, query_params, body, partition_list_dto);
+        auto status_dto = handler.ShowPartitions(collection_name, query_params, partition_list_dto);
         switch (status_dto->code->getValue()) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_200, partition_list_dto);
@@ -517,6 +566,30 @@ class WebController : public oatpp::web::server::api::ApiController {
         tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
                            ", reason = " + status_dto->message->std_str() + ". Total cost");
 
+        return response;
+    }
+
+    ADD_CORS(GetEntities)
+
+    ENDPOINT("GET", "/collections/{collection_name}/partitions/{partition_tag}/entities", GetEntities,
+             PATH(String, collection_name), PATH(String, partition_tag), QUERIES(const QueryParams&, query_params),
+             BODY_STRING(String, body)) {
+        json result = R"({
+            "entities": [
+                {
+                    "__id": "1578989029645098000",
+                    "field_1": 1,
+                    "field_vec": []
+                },
+                {
+                    "__id": "1578989029645098001",
+                    "field_1": 2,
+                    "field_vec": []
+                }
+            ]
+        })";
+
+        auto response = createResponse(Status::CODE_200, result.dump().c_str());
         return response;
     }
 
@@ -568,7 +641,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(VectorsOptions)
 
-    ENDPOINT("OPTIONS", "/collections/{collection_name}/vectors", VectorsOptions) {
+    ENDPOINT("OPTIONS", "/collections/{collection_name}/entities", VectorsOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
@@ -577,49 +650,67 @@ class WebController : public oatpp::web::server::api::ApiController {
      *
      * GetVectorByID ?id=
      */
-    ENDPOINT("GET", "/collections/{collection_name}/vectors", GetVectors, PATH(String, collection_name),
+    ENDPOINT("GET", "/collections/{collection_name}/Entities", GetVectors, PATH(String, collection_name),
              QUERIES(const QueryParams&, query_params)) {
-        auto handler = WebRequestHandler();
-        String response;
-        auto status_dto = handler.GetVector(collection_name, query_params, response);
-
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                return createResponse(Status::CODE_200, response);
-            case StatusCode::COLLECTION_NOT_EXISTS:
-                return createDtoResponse(Status::CODE_404, status_dto);
-            default:
-                return createDtoResponse(Status::CODE_400, status_dto);
-        }
+        //        auto handler = WebRequestHandler();
+        //        String response;
+        //        auto status_dto = handler.GetVector(collection_name, query_params, response);
+        //
+        //        switch (status_dto->code->getValue()) {
+        //            case StatusCode::SUCCESS:
+        //                return createResponse(Status::CODE_200, response);
+        //            case StatusCode::COLLECTION_NOT_EXISTS:
+        //                return createDtoResponse(Status::CODE_404, status_dto);
+        //            default:
+        //                return createDtoResponse(Status::CODE_400, status_dto);
+        //        }
+        json result = R"({
+            "entities": [
+                {
+                    "__id": "1578989029645098000",
+                    "field_1": 1,
+                    "field_vec": []
+                },
+                {
+                    "__id": "1578989029645098001",
+                    "field_1": 2,
+                    "field_vec": []
+                }
+            ]
+        })";
+        auto response = createResponse(Status::CODE_200, result.dump().c_str());
+        return response;
     }
 
     ADD_CORS(Insert)
 
-    ENDPOINT("POST", "/collections/{collection_name}/vectors", Insert, PATH(String, collection_name),
+    ENDPOINT("POST", "/collections/{collection_name}/entities", Insert, PATH(String, collection_name),
              BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections/" + collection_name->std_str() +
-                        "/vectors\'");
-        tr.RecordSection("Received request.");
+        //        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections/" + collection_name->std_str() +
+        //                        "/vectors\'");
+        //        tr.RecordSection("Received request.");
+        //
+        //        auto ids_dto = VectorIdsDto::createShared();
+        //        WebRequestHandler handler = WebRequestHandler();
+        //
+        //        std::shared_ptr<OutgoingResponse> response;
+        //        auto status_dto = handler.Insert(collection_name, body, ids_dto);
+        //        switch (status_dto->code->getValue()) {
+        //            case StatusCode::SUCCESS:
+        //                response = createDtoResponse(Status::CODE_201, ids_dto);
+        //                break;
+        //            case StatusCode::COLLECTION_NOT_EXISTS:
+        //                response = createDtoResponse(Status::CODE_404, status_dto);
+        //                break;
+        //            default:
+        //                response = createDtoResponse(Status::CODE_400, status_dto);
+        //        }
+        //
+        //        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+        //                           ", reason = " + status_dto->message->std_str() + ". Total cost");
 
-        auto ids_dto = VectorIdsDto::createShared();
-        WebRequestHandler handler = WebRequestHandler();
-
-        std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.Insert(collection_name, body, ids_dto);
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_201, ids_dto);
-                break;
-            case StatusCode::COLLECTION_NOT_EXISTS:
-                response = createDtoResponse(Status::CODE_404, status_dto);
-                break;
-            default:
-                response = createDtoResponse(Status::CODE_400, status_dto);
-        }
-
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
-                           ", reason = " + status_dto->message->std_str() + ". Total cost");
-
+        StatusDto::ObjectWrapper status;
+        auto response = createDtoResponse(Status::CODE_201, status);
         return response;
     }
 
@@ -685,31 +776,56 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(VectorsOp)
 
-    ENDPOINT("PUT", "/collections/{collection_name}/vectors", VectorsOp, PATH(String, collection_name),
+    ENDPOINT("PUT", "/collections/{collection_name}/entities", VectorsOp, PATH(String, collection_name),
              BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/collections/" + collection_name->std_str() +
-                        "/vectors\'");
-        tr.RecordSection("Received request.");
-
-        WebRequestHandler handler = WebRequestHandler();
-
-        OString result;
-        std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.VectorsOp(collection_name, body, result);
-        switch (status_dto->code->getValue()) {
-            case StatusCode::SUCCESS:
-                response = createResponse(Status::CODE_200, result);
-                break;
-            case StatusCode::COLLECTION_NOT_EXISTS:
-                response = createDtoResponse(Status::CODE_404, status_dto);
-                break;
-            default:
-                response = createDtoResponse(Status::CODE_400, status_dto);
-        }
-
-        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
-                           ", reason = " + status_dto->message->std_str() + ". Total cost");
-
+        //        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/collections/" + collection_name->std_str() +
+        //                        "/vectors\'");
+        //        tr.RecordSection("Received request.");
+        //
+        //        WebRequestHandler handler = WebRequestHandler();
+        //
+        //        OString result;
+        //        std::shared_ptr<OutgoingResponse> response;
+        //        auto status_dto = handler.VectorsOp(collection_name, body, result);
+        //        switch (status_dto->code->getValue()) {
+        //            case StatusCode::SUCCESS:
+        //                response = createResponse(Status::CODE_200, result);
+        //                break;
+        //            case StatusCode::COLLECTION_NOT_EXISTS:
+        //                response = createDtoResponse(Status::CODE_404, status_dto);
+        //                break;
+        //            default:
+        //                response = createDtoResponse(Status::CODE_400, status_dto);
+        //        }
+        //
+        //        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+        //                           ", reason = " + status_dto->message->std_str() + ". Total cost");
+        json result = R"({
+            "num": 2,
+            "results": [
+                [
+                    {
+                        "id": "1578989029645098000",
+                        "distance": "0.000000",
+                        "entity": {
+                            "field_1": 1,
+                            "field_2": 2,
+                            "field_vec": []
+                        }
+                    },
+                    {
+                        "id": "1578989029645098001",
+                        "distance": "0.010000",
+                        "entity": {
+                            "field_1": 10,
+                            "field_2": 20,
+                            "field_vec": []
+                        }
+                    }
+                ]
+            ]
+        })";
+        auto response = createResponse(Status::CODE_200, result.dump().c_str());
         return response;
     }
 
@@ -750,7 +866,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         tr.RecordSection("Received request.");
 
         WebRequestHandler handler = WebRequestHandler();
-        handler.RegisterRequestHandler(::milvus::server::RequestHandler());
+        handler.RegisterRequestHandler(::milvus::server::ReqHandler());
 
         String response_str;
         auto status_dto = handler.SystemOp(op, body_str, response_str);

@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
+
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -17,50 +18,96 @@
 #include "Store.h"
 #include "utils/BlockingQueue.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 using ThreadPtr = std::shared_ptr<std::thread>;
-using OperationQueue = server::BlockingQueue<OperationsPtr>;
-using OperationQueuePtr = std::shared_ptr<OperationQueue>;
+using OperationQueue = BlockingQueue<OperationsPtr>;
 
 class OperationExecutor {
  public:
-    using Ptr = std::shared_ptr<OperationExecutor>;
+    ~OperationExecutor() {
+        Stop();
+    }
 
+    static void
+    Init(StorePtr store) {
+        auto& instance = GetInstanceImpl();
+        if (instance.initialized_) {
+            return;
+        }
+        instance.store_ = store;
+        instance.initialized_ = true;
+    }
+
+    static OperationExecutor&
+    GetInstance() {
+        auto& instance = GetInstanceImpl();
+        if (!instance.initialized_) {
+            throw std::runtime_error("OperationExecutor should be init");
+        }
+        return instance;
+    }
+
+    Status
+    Submit(const OperationsPtr& operation, bool sync = true) {
+        if (!operation) {
+            return Status(SS_INVALID_ARGUMENT_ERROR, "Invalid Operation");
+        }
+        Enqueue(operation);
+        if (sync) {
+            return operation->WaitToFinish();
+        }
+        return Status::OK();
+    }
+
+    void
+    Start() {
+        if (thread_ptr_ == nullptr) {
+            thread_ptr_ = std::make_shared<std::thread>(&OperationExecutor::ThreadMain, this);
+        }
+    }
+
+    void
+    Stop() {
+        if (thread_ptr_ != nullptr) {
+            Enqueue(nullptr);
+            thread_ptr_->join();
+            thread_ptr_ = nullptr;
+            std::cout << "OperationExecutor Stopped" << std::endl;
+        }
+    }
+
+ private:
+    OperationExecutor() = default;
     OperationExecutor(const OperationExecutor&) = delete;
 
     static OperationExecutor&
-    GetInstance();
-
-    Status
-    Submit(OperationsPtr operation, bool sync = true);
-
-    void
-    Start();
+    GetInstanceImpl() {
+        static OperationExecutor executor;
+        return executor;
+    }
 
     void
-    Stop();
-
-    ~OperationExecutor();
-
- protected:
-    OperationExecutor();
+    ThreadMain() {
+        while (true) {
+            OperationsPtr operation = queue_.Take();
+            if (!operation) {
+                break;
+            }
+            store_->Apply(*operation);
+        }
+    }
 
     void
-    ThreadMain();
+    Enqueue(const OperationsPtr& operation) {
+        queue_.Put(operation);
+    }
 
-    void
-    Enqueue(OperationsPtr operation);
-
- protected:
-    mutable std::mutex mtx_;
-    bool running_ = false;
-    std::thread thread_;
+ private:
+    ThreadPtr thread_ptr_ = nullptr;
     OperationQueue queue_;
+    std::atomic_bool initialized_ = false;
+    StorePtr store_;
 };
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot

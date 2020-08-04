@@ -51,34 +51,14 @@ ConnectionImpl::Disconnect() {
     return client_proxy_->Disconnect();
 }
 
-std::string
-ConnectionImpl::ClientVersion() const {
-    return client_proxy_->ClientVersion();
-}
-
-std::string
-ConnectionImpl::ServerVersion() const {
-    return client_proxy_->ServerVersion();
-}
-
-std::string
-ConnectionImpl::ServerStatus() const {
-    return client_proxy_->ServerStatus();
+Status
+ConnectionImpl::CreateCollection(const Mapping& mapping, const std::string& extra_params) {
+    return client_proxy_->CreateCollection(mapping, extra_params);
 }
 
 Status
-ConnectionImpl::GetConfig(const std::string& node_name, std::string& value) const {
-    return client_proxy_->GetConfig(node_name, value);
-}
-
-Status
-ConnectionImpl::SetConfig(const std::string& node_name, const std::string& value) const {
-    return client_proxy_->SetConfig(node_name, value);
-}
-
-Status
-ConnectionImpl::CreateCollection(const CollectionParam& param) {
-    return client_proxy_->CreateCollection(param);
+ConnectionImpl::DropCollection(const std::string& collection_name) {
+    return client_proxy_->DropCollection(collection_name);
 }
 
 bool
@@ -87,84 +67,32 @@ ConnectionImpl::HasCollection(const std::string& collection_name) {
 }
 
 Status
-ConnectionImpl::DropCollection(const std::string& collection_name) {
-    return client_proxy_->DropCollection(collection_name);
-}
-
-Status
-ConnectionImpl::CreateIndex(const IndexParam& index_param) {
-    return client_proxy_->CreateIndex(index_param);
-}
-
-Status
-ConnectionImpl::Insert(const std::string& collection_name, const std::string& partition_tag,
-                       const std::vector<Entity>& entity_array, std::vector<int64_t>& id_array) {
-    return client_proxy_->Insert(collection_name, partition_tag, entity_array, id_array);
-}
-
-Status
-ConnectionImpl::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                              std::vector<Entity>& entities_data) {
-    return client_proxy_->GetEntityByID(collection_name, id_array, entities_data);
-}
-
-Status
-ConnectionImpl::ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
-                                std::vector<int64_t>& id_array) {
-    return client_proxy_->ListIDInSegment(collection_name, segment_name, id_array);
-}
-
-Status
-ConnectionImpl::Search(const std::string& collection_name, const PartitionTagList& partition_tag_array,
-                       const std::vector<Entity>& entity_array, int64_t topk, const std::string& extra_params,
-                       TopKQueryResult& topk_query_result) {
-    return client_proxy_->Search(collection_name, partition_tag_array, entity_array, topk, extra_params,
-                                 topk_query_result);
-}
-
-Status
-ConnectionImpl::GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_schema) {
-    return client_proxy_->GetCollectionInfo(collection_name, collection_schema);
-}
-
-Status
-ConnectionImpl::CountEntities(const std::string& collection_name, int64_t& row_count) {
-    return client_proxy_->CountEntities(collection_name, row_count);
-}
-
-Status
 ConnectionImpl::ListCollections(std::vector<std::string>& collection_array) {
     return client_proxy_->ListCollections(collection_array);
+}
+
+Status
+ConnectionImpl::GetCollectionInfo(const std::string& collection_name, Mapping& mapping) {
+    return client_proxy_->GetCollectionInfo(collection_name, mapping);
 }
 
 Status
 ConnectionImpl::GetCollectionStats(const std::string& collection_name, std::string& collection_stats) {
     return client_proxy_->GetCollectionStats(collection_name, collection_stats);
 }
-
 Status
-ConnectionImpl::DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
-    return client_proxy_->DeleteEntityByID(collection_name, id_array);
-}
-
-Status
-ConnectionImpl::LoadCollection(const std::string& collection_name) const {
-    return client_proxy_->LoadCollection(collection_name);
-}
-
-Status
-ConnectionImpl::GetIndexInfo(const std::string& collection_name, IndexParam& index_param) const {
-    return client_proxy_->GetIndexInfo(collection_name, index_param);
-}
-
-Status
-ConnectionImpl::DropIndex(const std::string& collection_name) const {
-    return client_proxy_->DropIndex(collection_name);
+ConnectionImpl::CountEntities(const std::string& collection_name, int64_t& row_count) {
+    return client_proxy_->CountEntities(collection_name, row_count);
 }
 
 Status
 ConnectionImpl::CreatePartition(const PartitionParam& partition_param) {
     return client_proxy_->CreatePartition(partition_param);
+}
+
+Status
+ConnectionImpl::DropPartition(const PartitionParam& partition_param) {
+    return client_proxy_->DropPartition(partition_param);
 }
 
 bool
@@ -178,8 +106,54 @@ ConnectionImpl::ListPartitions(const std::string& collection_name, PartitionTagL
 }
 
 Status
-ConnectionImpl::DropPartition(const PartitionParam& partition_param) {
-    return client_proxy_->DropPartition(partition_param);
+ConnectionImpl::CreateIndex(const IndexParam& index_param) {
+    return client_proxy_->CreateIndex(index_param);
+}
+
+Status
+ConnectionImpl::DropIndex(const std::string& collection_name, const std::string& field_name,
+                          const std::string& index_name) const {
+    return client_proxy_->DropIndex(collection_name, field_name, index_name);
+}
+
+Status
+ConnectionImpl::Insert(const std::string& collection_name, const std::string& partition_tag,
+                       const FieldValue& entity_array, std::vector<int64_t>& id_array) {
+    return client_proxy_->Insert(collection_name, partition_tag, entity_array, id_array);
+}
+
+Status
+ConnectionImpl::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
+                              std::string& entities) {
+    return client_proxy_->GetEntityByID(collection_name, id_array, entities);
+}
+
+Status
+ConnectionImpl::DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
+    return client_proxy_->DeleteEntityByID(collection_name, id_array);
+}
+
+Status
+ConnectionImpl::Search(const std::string& collection_name, const std::vector<std::string>& partition_list,
+                       const std::string& dsl, const VectorParam& vector_param, TopKQueryResult& query_result) {
+    return client_proxy_->Search(collection_name, partition_list, dsl, vector_param, query_result);
+}
+
+Status
+ConnectionImpl::SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
+                         milvus::BooleanQueryPtr& boolean_query, const std::string& extra_params,
+                         milvus::TopKQueryResult& query_result) {
+}
+
+Status
+ConnectionImpl::ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
+                                std::vector<int64_t>& id_array) {
+    return client_proxy_->ListIDInSegment(collection_name, segment_name, id_array);
+}
+
+Status
+ConnectionImpl::LoadCollection(const std::string& collection_name) const {
+    return client_proxy_->LoadCollection(collection_name);
 }
 
 Status
@@ -190,45 +164,6 @@ ConnectionImpl::Flush(const std::vector<std::string>& collection_name_array) {
 Status
 ConnectionImpl::Compact(const std::string& collection_name) {
     return client_proxy_->Compact(collection_name);
-}
-
-/*******************************New Interface**********************************/
-
-Status
-ConnectionImpl::CreateHybridCollection(const HMapping& mapping) {
-    return client_proxy_->CreateHybridCollection(mapping);
-}
-
-Status
-ConnectionImpl::InsertEntity(const std::string& collection_name, const std::string& partition_tag, HEntity& entities,
-                             std::vector<uint64_t>& id_array) {
-    return client_proxy_->InsertEntity(collection_name, partition_tag, entities, id_array);
-}
-
-Status
-ConnectionImpl::HybridSearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                               BooleanQueryPtr& boolean_query, const std::string& extra_params,
-                               TopKHybridQueryResult& topk_query_result) {
-    return client_proxy_->HybridSearchPB(collection_name, partition_list, boolean_query, extra_params,
-                                         topk_query_result);
-}
-
-Status
-ConnectionImpl::HybridSearch(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                             const std::string& dsl, const std::string& vector_param,
-                             const std::vector<Entity>& entity_array, milvus::TopKHybridQueryResult& query_result) {
-    return client_proxy_->HybridSearch(collection_name, partition_list, dsl, vector_param, entity_array, query_result);
-}
-
-Status
-ConnectionImpl::GetHEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                               milvus::HybridQueryResult& result) {
-    return client_proxy_->GetHEntityByID(collection_name, id_array, result);
-}
-
-Status
-ConnectionImpl::CreateHybridIndex(const milvus::HIndexParam& index_param) {
-    return client_proxy_->CreateHybridIndex(index_param);
 }
 
 }  // namespace milvus

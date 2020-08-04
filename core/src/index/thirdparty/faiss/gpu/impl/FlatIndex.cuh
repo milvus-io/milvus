@@ -47,7 +47,9 @@ class FlatIndex {
   Tensor<float, 2, true>& getVectorsFloat32Ref();
 
   /// Returns a reference to our vectors currently in use (useFloat16 mode)
+#ifdef FAISS_USE_FLOAT16
   Tensor<half, 2, true>& getVectorsFloat16Ref();
+#endif
 
   /// Performs a copy of the vectors on the given device, converting
   /// as needed from float16
@@ -67,6 +69,7 @@ class FlatIndex {
              Tensor<int, 2, true>& outIndices,
              bool exactDistance);
 
+#ifdef FAISS_USE_FLOAT16
   void query(Tensor<half, 2, true>& vecs,
              Tensor<uint8_t, 1, true>& bitset,
              int k,
@@ -75,6 +78,7 @@ class FlatIndex {
              Tensor<float, 2, true>& outDistances,
              Tensor<int, 2, true>& outIndices,
              bool exactDistance);
+#endif
 
   /// Compute residual for set of vectors
   void computeResidual(Tensor<float, 2, true>& vecs,
@@ -123,8 +127,10 @@ class FlatIndex {
   DeviceTensor<float, 2, true> vectorsTransposed_;
 
   /// Vectors currently in rawData_, float16 form
+#ifdef FAISS_USE_FLOAT16
   DeviceTensor<half, 2, true> vectorsHalf_;
   DeviceTensor<half, 2, true> vectorsHalfTransposed_;
+#endif
 
   /// Precomputed L2 norms
   DeviceTensor<float, 1, true> norms_;

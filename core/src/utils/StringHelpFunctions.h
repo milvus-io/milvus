@@ -17,7 +17,6 @@
 #include <vector>
 
 namespace milvus {
-namespace server {
 
 class StringHelpFunctions {
  private:
@@ -72,5 +71,4 @@ class StringHelpFunctions {
     ConvertToBoolean(const std::string& str, bool& value);
 };
 
-}  // namespace server
 }  // namespace milvus

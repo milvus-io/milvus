@@ -11,6 +11,9 @@
 
 #include "db/merge/MergeTask.h"
 #include "db/Utils.h"
+#include "db/snapshot/CompoundOperations.h"
+#include "db/snapshot/Operations.h"
+#include "db/snapshot/Snapshots.h"
 #include "metrics/Metrics.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
@@ -22,104 +25,110 @@
 namespace milvus {
 namespace engine {
 
-MergeTask::MergeTask(const meta::MetaPtr& meta_ptr, const DBOptions& options, meta::SegmentsSchema& files)
-    : meta_ptr_(meta_ptr), options_(options), files_(files) {
+MergeTask::MergeTask(const DBOptions& options, const snapshot::ScopedSnapshotT& ss, const snapshot::IDS_TYPE& segments)
+    : options_(options), snapshot_(ss), segments_(segments) {
 }
 
 Status
 MergeTask::Execute() {
-    if (files_.empty()) {
+    if (segments_.size() <= 1) {
         return Status::OK();
     }
 
-    // check input
-    std::string collection_id = files_.front().collection_id_;
-    for (auto& file : files_) {
-        if (file.collection_id_ != collection_id) {
-            return Status(DB_ERROR, "Cannot merge files across collections");
+    snapshot::OperationContext context;
+    for (auto& id : segments_) {
+        auto seg = snapshot_->GetResource<snapshot::Segment>(id);
+        if (!seg) {
+            return Status(DB_ERROR, "Snapshot segment is null");
+        }
+
+        context.stale_segments.push_back(seg);
+        if (!context.prev_partition) {
+            snapshot::PartitionPtr partition = snapshot_->GetResource<snapshot::Partition>(seg->GetPartitionId());
+            context.prev_partition = partition;
         }
     }
 
-    // step 1: create collection file
-    meta::SegmentSchema collection_file;
-    collection_file.collection_id_ = collection_id;
-    collection_file.file_type_ = meta::SegmentSchema::NEW_MERGE;
-    Status status = meta_ptr_->CreateCollectionFile(collection_file);
+    auto op = std::make_shared<snapshot::MergeOperation>(context, snapshot_);
+    snapshot::SegmentPtr new_seg;
+    auto status = op->CommitNewSegment(new_seg);
     if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to create collection: " << status.ToString();
         return status;
     }
 
-    // step 2: merge files
-    meta::SegmentsSchema updated;
+    // create segment raw files (placeholder)
+    auto names = snapshot_->GetFieldNames();
+    for (auto& name : names) {
+        snapshot::SegmentFileContext sf_context;
+        sf_context.collection_id = new_seg->GetCollectionId();
+        sf_context.partition_id = new_seg->GetPartitionId();
+        sf_context.segment_id = new_seg->GetID();
+        sf_context.field_name = name;
+        sf_context.field_element_name = engine::DEFAULT_RAW_DATA_NAME;
 
-    std::string new_segment_dir;
-    utils::GetParentPath(collection_file.location_, new_segment_dir);
-    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
-
-    // attention: here is a copy, not reference, since files_holder.UnmarkFile will change the array internal
-    std::string info = "Merge task files size info:";
-    for (auto& file : files_) {
-        info += std::to_string(file.file_size_);
-        info += ", ";
-
-        server::CollectMergeFilesMetrics metrics;
-        std::string segment_dir_to_merge;
-        utils::GetParentPath(file.location_, segment_dir_to_merge);
-        segment_writer_ptr->Merge(segment_dir_to_merge, collection_file.file_id_);
-
-        auto file_schema = file;
-        file_schema.file_type_ = meta::SegmentSchema::TO_DELETE;
-        updated.push_back(file_schema);
-        int64_t size = segment_writer_ptr->Size();
-        if (size >= file_schema.index_file_size_) {
-            break;
+        snapshot::SegmentFilePtr seg_file;
+        status = op->CommitNewSegmentFile(sf_context, seg_file);
+        if (!status.ok()) {
+            std::string err_msg = "MergeTask create segment failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
         }
     }
-    LOG_ENGINE_DEBUG_ << info;
 
-    // step 3: serialize to disk
-    try {
-        status = segment_writer_ptr->Serialize();
-    } catch (std::exception& ex) {
-        std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
-        LOG_ENGINE_ERROR_ << msg;
-        status = Status(DB_ERROR, msg);
+    // create deleted_doc and bloom_filter files (placeholder)
+    {
+        snapshot::SegmentFileContext sf_context;
+        sf_context.collection_id = new_seg->GetCollectionId();
+        sf_context.partition_id = new_seg->GetPartitionId();
+        sf_context.segment_id = new_seg->GetID();
+        sf_context.field_name = engine::DEFAULT_UID_NAME;
+        sf_context.field_element_name = engine::DEFAULT_DELETED_DOCS_NAME;
+
+        snapshot::SegmentFilePtr delete_doc_file, bloom_filter_file;
+        status = op->CommitNewSegmentFile(sf_context, delete_doc_file);
+        if (!status.ok()) {
+            std::string err_msg = "MergeTask create bloom filter segment file failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
+
+        sf_context.field_element_name = engine::DEFAULT_BLOOM_FILTER_NAME;
+        status = op->CommitNewSegmentFile(sf_context, bloom_filter_file);
+        if (!status.ok()) {
+            std::string err_msg = "MergeTask create deleted-doc segment file failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
     }
 
+    auto ctx = op->GetContext();
+    auto visitor = SegmentVisitor::Build(snapshot_, ctx.new_segment, ctx.new_segment_files);
+
+    // create segment writer
+    segment::SegmentWriterPtr segment_writer = std::make_shared<segment::SegmentWriter>(options_.meta_.path_, visitor);
+
+    // merge
+    for (auto& id : segments_) {
+        auto seg = snapshot_->GetResource<snapshot::Segment>(id);
+
+        auto read_visitor = SegmentVisitor::Build(snapshot_, id);
+        segment::SegmentReaderPtr segment_reader =
+            std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
+        status = segment_writer->Merge(segment_reader);
+        if (!status.ok()) {
+            std::string err_msg = "MergeTask merge failed: " + status.ToString();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return status;
+        }
+    }
+
+    status = segment_writer->Serialize();
     if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to persist merged segment: " << new_segment_dir << ". Error: " << status.message();
-
-        // if failed to serialize merge file to disk
-        // typical error: out of disk space, out of memory or permission denied
-        collection_file.file_type_ = meta::SegmentSchema::TO_DELETE;
-        status = meta_ptr_->UpdateCollectionFile(collection_file);
-        LOG_ENGINE_DEBUG_ << "Failed to update file to index, mark file: " << collection_file.file_id_
-                          << " to to_delete";
-
+        LOG_ENGINE_ERROR_ << "Failed to serialize segment: " << new_seg->GetID();
         return status;
     }
 
-    // step 4: update collection files state
-    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
-    // else set file type to RAW, no need to build index
-    if (!utils::IsRawIndexType(collection_file.engine_type_)) {
-        collection_file.file_type_ = (segment_writer_ptr->Size() >= (size_t)(collection_file.index_file_size_))
-                                         ? meta::SegmentSchema::TO_INDEX
-                                         : meta::SegmentSchema::RAW;
-    } else {
-        collection_file.file_type_ = meta::SegmentSchema::RAW;
-    }
-    collection_file.file_size_ = segment_writer_ptr->Size();
-    collection_file.row_count_ = segment_writer_ptr->VectorCount();
-    updated.push_back(collection_file);
-    status = meta_ptr_->UpdateCollectionFiles(updated);
-    LOG_ENGINE_DEBUG_ << "New merged segment " << collection_file.segment_id_ << " of size "
-                      << segment_writer_ptr->Size() << " bytes";
-
-    if (options_.insert_cache_immediately_) {
-        segment_writer_ptr->Cache();
-    }
+    status = op->Push();
 
     return status;
 }

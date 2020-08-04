@@ -11,23 +11,34 @@
 
 #pragma once
 
-#include "server/delivery/strategy/RequestStrategy.h"
+#include "config/ConfigMgr.h"
+#include "server/delivery/strategy/ReqStrategy.h"
 #include "utils/Status.h"
 
 #include <memory>
 #include <queue>
+#include <string>
 
 namespace milvus {
 namespace server {
 
-class SearchReqStrategy : public RequestStrategy {
+class SearchReqStrategy : public ReqStrategy, public ConfigObserver {
  public:
     SearchReqStrategy();
 
+    ~SearchReqStrategy();
+
     Status
-    ReScheduleQueue(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) override;
+    ReScheduleQueue(const BaseReqPtr& request, std::queue<BaseReqPtr>& queue) override;
+
+ public:
+    void
+    ConfigUpdate(const std::string& name);
+
+ private:
+    int64_t search_combine_nq_ = 0;
 };
 
-using RequestStrategyPtr = std::shared_ptr<RequestStrategy>;
+using ReqStrategyPtr = std::shared_ptr<ReqStrategy>;
 }  // namespace server
 }  // namespace milvus

@@ -10,22 +10,17 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/meta/MetaFactory.h"
-#include "MySQLMetaImpl.h"
-#include "SqliteMetaImpl.h"
+
 #include "db/Utils.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
 #include <cstdlib>
 #include <memory>
 #include <sstream>
 #include <string>
 
-namespace milvus {
-namespace engine {
+namespace milvus::engine {
 
 DBMetaOptions
 MetaFactory::BuildOption(const std::string& path) {
@@ -43,8 +38,8 @@ MetaFactory::BuildOption(const std::string& path) {
     return meta;
 }
 
-meta::MetaPtr
-MetaFactory::Build(const DBMetaOptions& meta_options, const int& mode) {
+meta::MetaAdapterPtr
+MetaFactory::Build(const DBMetaOptions& meta_options) {
     std::string uri = meta_options.backend_uri_;
 
     utils::MetaUriInfo uri_info;
@@ -57,15 +52,22 @@ MetaFactory::Build(const DBMetaOptions& meta_options, const int& mode) {
 
     if (strcasecmp(uri_info.dialect_.c_str(), "mysql") == 0) {
         LOG_ENGINE_INFO_ << "Using MySQL";
-        return std::make_shared<meta::MySQLMetaImpl>(meta_options, mode);
+        /* options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
+        auto engine = std::make_shared<meta::MySqlEngine>(meta_options);
+        return std::make_shared<meta::MetaAdapter>(engine);
+    } else if (strcasecmp(uri_info.dialect_.c_str(), "mock") == 0) {
+        LOG_ENGINE_INFO_ << "Using Mock. Should only be used in test environment";
+        auto engine = std::make_shared<meta::MockEngine>();
+        return std::make_shared<meta::MetaAdapter>(engine);
     } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
-        LOG_ENGINE_INFO_ << "Using SQLite";
-        return std::make_shared<meta::SqliteMetaImpl>(meta_options);
+        LOG_ENGINE_INFO_ << "Using Sqlite";
+        /* options.backend_uri_ = "mock://:@:/"; */
+        auto engine = std::make_shared<meta::SqliteEngine>(meta_options);
+        return std::make_shared<meta::MetaAdapter>(engine);
     } else {
         LOG_ENGINE_ERROR_ << "Invalid dialect in URI: dialect = " << uri_info.dialect_;
-        throw InvalidArgumentException("URI dialect is not mysql / sqlite");
+        throw InvalidArgumentException("URI dialect is not mysql / sqlite / mock");
     }
 }
 
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine

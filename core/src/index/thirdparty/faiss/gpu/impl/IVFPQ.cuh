@@ -153,7 +153,9 @@ class IVFPQ : public IVFBase {
   DeviceTensor<float, 3, true> precomputedCode_;
 
   /// Precomputed term 2 in half form
+#ifdef FAISS_USE_FLOAT16
   DeviceTensor<half, 3, true> precomputedCodeHalf_;
+#endif
 };
 
 } } // namespace

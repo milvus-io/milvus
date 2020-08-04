@@ -4,11 +4,10 @@ import threading
 import logging
 from multiprocessing import Pool, Process
 import pytest
-from milvus import IndexType, MetricType
 from utils import *
 
-
 dim = 128
+segment_row_count = 5000
 index_file_size = 10
 collection_id = "test_flush"
 DELETE_TIMEOUT = 60
@@ -17,6 +16,20 @@ tag = "1970-01-01"
 top_k = 1
 nb = 6000
 tag = "partition_tag"
+field_name = "float_vector"
+entity = gen_entities(1)
+entities = gen_entities(nb)
+raw_vector, binary_entity = gen_binary_entities(1)
+raw_vectors, binary_entities = gen_binary_entities(nb)
+default_fields = gen_default_fields()
+default_single_query = {
+    "bool": {
+        "must": [
+            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),
+                                     "params": {"nprobe": 10}}}}
+        ]
+    }
+}
 
 
 class TestFlushBase:
@@ -32,129 +45,167 @@ class TestFlushBase:
     )
     def get_simple_index(self, request, connect):
         if str(connect._cmd("mode")[1]) == "GPU":
-            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT, IndexType.IVF_PQ, IndexType.IVF_SQ8H]:
+            if request.param["index_type"] not in ivf():
                 pytest.skip("Only support index_type: idmap/flat")
         return request.param
 
+    @pytest.fixture(
+        scope="function",
+        params=gen_single_filter_fields()
+    )
+    def get_filter_field(self, request):
+        yield request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_single_vector_fields()
+    )
+    def get_vector_field(self, request):
+        yield request.param
+
     def test_flush_collection_not_existed(self, connect, collection):
         '''
-        target: test delete vector, params collection_name not existed
-        method: add vector and delete
-        expected: status not ok
+        target: test flush, params collection_name not existed
+        method: flush, with collection not existed
+        expected: error raised
         '''
-        collection_new = gen_unique_str()
-        status = connect.flush([collection_new])
-        assert not status.OK()
+        collection_new = gen_unique_str("test_flush_1")
+        with pytest.raises(Exception) as e:
+            connect.flush([collection_new])
 
     def test_flush_empty_collection(self, connect, collection):
         '''
         method: flush collection with no vectors
-        expected: status ok
+        expected: no error raised
         '''
-        status = connect.flush([collection])
+        ids = connect.insert(collection, entities)
+        assert len(ids) == nb
+        status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
+        res = connect.count_entities(collection)
+        assert 0 == res
+        # with pytest.raises(Exception) as e:
+        #     connect.flush([collection])
 
     def test_add_partition_flush(self, connect, collection):
         '''
-        method: add vectors into partition in collection, flush serveral times
-        expected: status ok
+        method: add entities into partition in collection, flush serveral times
+        expected: the length of ids and the collection row count
         '''
-        vectors = gen_vector(nb, dim)
-        status = connect.create_partition(collection, tag)
-        vectors = gen_vectors(nb, dim)
+        # vector = gen_vector(nb, dim)
+        connect.create_partition(collection, tag)
+        # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        status, ids = connect.insert(collection, vectors, ids)
-        status = connect.flush([collection])
-        result, res = connect.count_entities(collection)
-        assert res == nb
-        status, ids = connect.insert(collection, vectors, ids, partition_tag=tag)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        result, res = connect.count_entities(collection)
-        assert res == 2 * nb
+        ids = connect.insert(collection, entities, ids)
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == nb
+        ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        assert len(ids) == nb
+        connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == nb * 2
 
     def test_add_partitions_flush(self, connect, collection):
         '''
-        method: add vectors into partitions in collection, flush one
-        expected: status ok
+        method: add entities into partitions in collection, flush one
+        expected: the length of ids and the collection row count
         '''
-        vectors = gen_vectors(nb, dim)
+        # vectors = gen_vectors(nb, dim)
         tag_new = gen_unique_str()
-        status = connect.create_partition(collection, tag)
-        status = connect.create_partition(collection, tag_new)
+        connect.create_partition(collection, tag)
+        connect.create_partition(collection, tag_new)
         ids = [i for i in range(nb)]
-        status, ids = connect.insert(collection, vectors, ids, partition_tag=tag)
-        status = connect.flush([collection])
-        assert status.OK()
-        status, ids = connect.insert(collection, vectors, ids, partition_tag=tag_new)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        result, res = connect.count_entities(collection)
+        ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        connect.flush([collection])
+        ids = connect.insert(collection, entities, ids, partition_tag=tag_new)
+        connect.flush([collection])
+        res = connect.count_entities(collection)
         assert res == 2 * nb
 
     def test_add_collections_flush(self, connect, collection):
         '''
-        method: add vectors into collections, flush one
-        expected: status ok
+        method: add entities into collections, flush one
+        expected: the length of ids and the collection row count
         '''
-        vectors = gen_vectors(nb, dim)
         collection_new = gen_unique_str()
-        param = {'collection_name': collection_new,
-            'dimension': dim,
-            'index_file_size': index_file_size,
-            'metric_type': MetricType.L2}
-        status = connect.create_collection(param)
-        status = connect.create_partition(collection, tag)
-        status = connect.create_partition(collection_new, tag)
-        vectors = gen_vectors(nb, dim)
+        connect.create_collection(collection_new, default_fields)
+        connect.create_partition(collection, tag)
+        connect.create_partition(collection_new, tag)
+        # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        status, ids = connect.insert(collection, vectors, ids, partition_tag=tag)
-        status, ids = connect.insert(collection_new, vectors, ids, partition_tag=tag)
-        assert status.OK()
-        status = connect.flush([collection])
-        status = connect.flush([collection_new])
-        assert status.OK()
-        result, res = connect.count_entities(collection)
+        ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        ids = connect.insert(collection_new, entities, ids, partition_tag=tag)
+        connect.flush([collection])
+        connect.flush([collection_new])
+        res = connect.count_entities(collection)
         assert res == nb
-        result, res = connect.count_entities(collection_new)
+        res = connect.count_entities(collection_new)
         assert res == nb
-       
+
+    def test_add_collections_fields_flush(self, connect, collection, get_filter_field, get_vector_field):
+        '''
+        method: create collection with different fields, and add entities into collections, flush one
+        expected: the length of ids and the collection row count
+        '''
+        nb_new = 5
+        filter_field = get_filter_field
+        vector_field = get_vector_field
+        collection_new = gen_unique_str("test_flush")
+        fields = {
+            "fields": [filter_field, vector_field],
+            "segment_row_count": segment_row_count
+        }
+        connect.create_collection(collection_new, fields)
+        connect.create_partition(collection, tag)
+        connect.create_partition(collection_new, tag)
+        # vectors = gen_vectors(nb, dim)
+        entities_new = gen_entities_by_fields(fields["fields"], nb_new, dim)
+        ids = [i for i in range(nb)]
+        ids_new = [i for i in range(nb_new)]
+        ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        ids = connect.insert(collection_new, entities_new, ids_new, partition_tag=tag)
+        connect.flush([collection])
+        connect.flush([collection_new])
+        res = connect.count_entities(collection)
+        assert res == nb
+        res = connect.count_entities(collection_new)
+        assert res == nb_new
+
+    @pytest.mark.skip(reason="search not support yet")
     def test_add_flush_multiable_times(self, connect, collection):
         '''
-        method: add vectors, flush serveral times
-        expected: status ok
+        method: add entities, flush serveral times
+        expected: no error raised
         '''
-        vectors = gen_vectors(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
+        # vectors = gen_vectors(nb, dim)
+        ids = connect.insert(collection, entities)
         for i in range(10):
-            status = connect.flush([collection])
-            assert status.OK()
-        query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status, res = connect.search(collection, top_k, query_records=query_vecs)
-        assert status.OK()
+            connect.flush([collection])
+        res = connect.count_entities(collection)
+        assert res == len(ids)
+        # query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        res = connect.search(collection, default_single_query)
+        logging.getLogger().debug(res)
+        assert res
 
     # TODO: stable case
     def test_add_flush_auto(self, connect, collection):
         '''
-        method: add vectors
-        expected: status ok
+        method: add entities
+        expected: no error raised
         '''
-        vectors = gen_vectors(nb, dim)
+        # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        status, ids = connect.insert(collection, vectors, ids)
-        assert status.OK()
+        ids = connect.insert(collection, entities, ids)
         timeout = 10
         start_time = time.time()
-        while (time.time()-start_time < timeout):
+        while (time.time() - start_time < timeout):
             time.sleep(1)
-            status, res = connect.count_entities(collection)
+            res = connect.count_entities(collection)
             if res == nb:
-                assert status.OK()
                 break
-        if time.time()-start_time > timeout:
+        if time.time() - start_time > timeout:
             assert False
 
     @pytest.fixture(
@@ -169,37 +220,35 @@ class TestFlushBase:
 
     def test_add_flush_same_ids(self, connect, collection, same_ids):
         '''
-        method: add vectors, with same ids, count(same ids) < 15, > 15
-        expected: status ok
+        method: add entities, with same ids, count(same ids) < 15, > 15
+        expected: the length of ids and the collection row count
         '''
-        vectors = gen_vectors(nb, dim)
+        # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
         for i, item in enumerate(ids):
             if item <= same_ids:
                 ids[i] = 0
-        status, ids = connect.insert(collection, vectors, ids)
-        status = connect.flush([collection])
-        assert status.OK()
-        status, res = connect.count_entities(collection)
-        assert status.OK()
-        assert res == nb 
+        ids = connect.insert(collection, entities, ids)
+        connect.flush([collection])
+        res = connect.count_entities(collection)
+        assert res == nb
 
+    @pytest.mark.skip(reason="search not support yet")
     def test_delete_flush_multiable_times(self, connect, collection):
         '''
-        method: delete vectors, flush serveral times
-        expected: status ok
+        method: delete entities, flush serveral times
+        expected: no error raised
         '''
-        vectors = gen_vectors(nb, dim)
-        status, ids = connect.insert(collection, vectors)
-        assert status.OK()
+        # vectors = gen_vectors(nb, dim)
+        ids = connect.insert(collection, entities)
         status = connect.delete_entity_by_id(collection, [ids[-1]])
         assert status.OK()
         for i in range(10):
-            status = connect.flush([collection])
-            assert status.OK()
-        query_vecs = [vectors[0], vectors[1], vectors[-1]]
-        status, res = connect.search(collection, top_k, query_records=query_vecs)
-        assert status.OK()
+            connect.flush([collection])
+        # query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        res = connect.search(collection, default_single_query)
+        logging.getLogger().debug(res)
+        assert res
 
     # TODO: CI fail, LOCAL pass
     def _test_collection_count_during_flush(self, connect, args):
@@ -207,28 +256,30 @@ class TestFlushBase:
         method: flush collection at background, call `count_entities`
         expected: status ok
         '''
-        collection = gen_unique_str() 
-        param = {'collection_name': collection,
-                 'dimension': dim,
-                 'index_file_size': index_file_size,
-                 'metric_type': MetricType.L2}
+        collection = gen_unique_str("test_flush")
+        # param = {'collection_name': collection,
+        #          'dimension': dim,
+        #          'index_file_size': index_file_size,
+        #          'metric_type': MetricType.L2}
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-        milvus.create_collection(param)
-        vectors = gen_vector(nb, dim)
-        status, ids = milvus.insert(collection, vectors, ids=[i for i in range(nb)])
+        milvus.create_collection(collection, default_fields)
+        # vectors = gen_vector(nb, dim)
+        ids = milvus.insert(collection, entities, ids=[i for i in range(nb)])
+
         def flush(collection_name):
             milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             status = milvus.delete_entity_by_id(collection_name, [i for i in range(nb)])
-            assert status.OK()
-            status = milvus.flush([collection_name])
-            assert status.OK()
-        p = Process(target=flush, args=(collection, ))
+            with pytest.raises(Exception) as e:
+                milvus.flush([collection_name])
+
+
+        p = Process(target=flush, args=(collection,))
         p.start()
-        status, res = milvus.count_entities(collection)
-        assert status.OK()
+        res = milvus.count_entities(collection)
+        assert res == nb
         p.join()
-        status, res = milvus.count_entities(collection)
-        assert status.OK()
+        res = milvus.count_entities(collection)
+        assert res == nb
         logging.getLogger().info(res)
         assert res == 0
 
@@ -244,9 +295,9 @@ class TestFlushAsync:
       The following cases are used to test `flush` function
     ******************************************************************
     """
-    def check_status(self, status, result):
+
+    def check_status(self):
         logging.getLogger().info("In callback check status")
-        assert status.OK()
 
     def test_flush_empty_collection(self, connect, collection):
         '''
@@ -255,40 +306,42 @@ class TestFlushAsync:
         '''
         future = connect.flush([collection], _async=True)
         status = future.result()
-        assert status.OK()
 
-    def test_flush_async(self, connect, collection):
-        vectors = gen_vectors(nb, dim)
-        status, ids = connect.insert(collection, vectors)
+    def test_flush_async_long(self, connect, collection):
+        # vectors = gen_vectors(nb, dim)
+        ids = connect.insert(collection, entities)
         future = connect.flush([collection], _async=True)
         status = future.result()
-        assert status.OK()
 
-    def test_flush_async(self, connect, collection):
+    # TODO:
+    def _test_flush_async(self, connect, collection):
         nb = 100000
         vectors = gen_vectors(nb, dim)
-        connect.insert(collection, vectors)
+        connect.insert(collection, entities)
         logging.getLogger().info("before")
         future = connect.flush([collection], _async=True, _callback=self.check_status)
         logging.getLogger().info("after")
         future.done()
         status = future.result()
-        assert status.OK()
 
 
 class TestCollectionNameInvalid(object):
     """
     Test adding vectors with invalid collection names
     """
+
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_collection_names()
+        # params=gen_invalid_collection_names()
+        params=gen_invalid_strs()
     )
-    def get_collection_name(self, request):
+    def get_invalid_collection_name(self, request):
         yield request.param
 
     @pytest.mark.level(2)
-    def test_flush_with_invalid_collection_name(self, connect, get_collection_name):
-        collection_name = get_collection_name
+    def test_flush_with_invalid_collection_name(self, connect, get_invalid_collection_name):
+        collection_name = get_invalid_collection_name
+        if collection_name is None or not collection_name:
+            pytest.skip("while collection_name is None, then flush all collections")
         with pytest.raises(Exception) as e:
-            status, result = connect.flush(collection_name)
+            connect.flush(collection_name)

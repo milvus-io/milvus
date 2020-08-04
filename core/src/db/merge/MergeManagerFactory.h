@@ -22,7 +22,7 @@ namespace engine {
 class MergeManagerFactory {
  public:
     static MergeManagerPtr
-    Build(const meta::MetaPtr& meta_ptr, const DBOptions& options);
+    SSBuild(const DBOptions& options);
 };
 
 }  // namespace engine
