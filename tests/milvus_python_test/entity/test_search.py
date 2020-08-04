@@ -838,7 +838,7 @@ class TestSearchDSL(object):
         expected: error raised
         '''
         # entities, ids = init_data(connect, collection)
-        query = update_query_expr(default_query, keep_old=False):
+        query = update_query_expr(default_query, keep_old=False)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
@@ -852,7 +852,7 @@ class TestSearchDSL(object):
         expr = {
             "must": [gen_default_term_expr]
         }
-        query = update_query_expr(default_query, keep_old=False, expr=expr):
+        query = update_query_expr(default_query, keep_old=False, expr=expr)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
@@ -865,7 +865,7 @@ class TestSearchDSL(object):
         expr = {
             "must1": [gen_default_term_expr]
         }
-        query = update_query_expr(default_query, keep_old=False, expr=expr):
+        query = update_query_expr(default_query, keep_old=False, expr=expr)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
@@ -902,7 +902,7 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = gen_default_term_expr(values=[100000])
-        query = update_query_expr(default_query, expr=expr):
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
@@ -912,8 +912,8 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = gen_default_term_expr(values=1)
-        query = update_query_expr(default_query, expr=expr):
+        expr = gen_default_term_expr(values=[1])
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
@@ -924,7 +924,7 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = gen_default_term_expr(values=[i for i in range(100000, 100010)])
-        query = update_query_expr(default_query, expr=expr):
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
@@ -935,7 +935,7 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = gen_default_term_expr()
-        query = update_query_expr(default_query, expr=expr):
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
@@ -946,7 +946,7 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = gen_default_term_expr(values=[i for i in range(nb/2, nb+nb/2)])
-        query = update_query_expr(default_query, expr=expr):
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
@@ -957,9 +957,77 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = gen_default_term_expr(values=[1 for i in range(1, nb)])
-        query = update_query_expr(default_query, expr=expr):
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
+
+
+class TestSearchDSLBools(object):
+
+    """
+    ******************************************************************
+    #  The following cases are used to build invalid query expr
+    ******************************************************************
+    """
+    def test_query_no_bool(self, connect, collection):
+        '''
+        method: build query without bool expr
+        expected: error raised
+        '''
+        expr = {"bool1": {}}
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    def test_query_should_only_term(self, connect, collection):
+        '''
+        method: build query without must, with should.term instead
+        expected: error raised
+        '''
+        expr = {"should": gen_default_term_expr}
+        query = update_query_expr(default_query, keep_old=False, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    def test_query_should_only_vector(self, connect, collection):
+        '''
+        method: build query without must, with should.vector instead
+        expected: error raised
+        '''
+        expr = {"should": default_query["bool"]["must"]}
+        query = update_query_expr(default_query, keep_old=False, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    def test_query_must_not_only_term(self, connect, collection):
+        '''
+        method: build query without must, with must_not.term instead
+        expected: error raised
+        '''
+        expr = {"must_not": gen_default_term_expr}
+        query = update_query_expr(default_query, keep_old=False, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    def test_query_must_not_vector(self, connect, collection):
+        '''
+        method: build query without must, with must_not.vector instead
+        expected: error raised
+        '''
+        expr = {"must_not": default_query["bool"]["must"]}
+        query = update_query_expr(default_query, keep_old=False, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    def test_query_must_should(self, connect, collection):
+        '''
+        method: build query must, and with should.term
+        expected: error raised
+        '''
+        expr = {"should": gen_default_term_expr}
+        query = update_query_expr(default_query, keep_old=True, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
 
 """
 ******************************************************************

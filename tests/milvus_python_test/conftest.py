@@ -114,109 +114,12 @@ def collection(request, connect):
 
 
 @pytest.fixture(scope="function")
-def ip_collection(request, connect):
+def binary_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     fields = gen_default_fields()
-    fields["fields"][-1]["params"]["metric_type"] = "IP"
-    try:
-        connect.create_collection(collection_name, fields)
-    except Exception as e:
-        logging.getLogger().info(str(e))
-        pytest.exit(str(e))
-    def teardown():
-        collection_names = connect.list_collections()
-        for collection_name in collection_names:
-            connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown)
-    assert connect.has_collection(collection_name)
-    return collection_name
-
-
-@pytest.fixture(scope="function")
-def jac_collection(request, connect):
-    ori_collection_name = getattr(request.module, "collection_id", "test")
-    collection_name = gen_unique_str(ori_collection_name)
-    fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dim": dimension, "metric_type": "JACCARD"}}
+    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dim": dimension}}
     logging.getLogger().info(fields)
-    try:
-        connect.create_collection(collection_name, fields)
-    except Exception as e:
-        pytest.exit(str(e))
-    def teardown():
-        collection_names = connect.list_collections()
-        for collection_name in collection_names:
-            connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown)
-    assert connect.has_collection(collection_name)
-    return collection_name
-
-
-@pytest.fixture(scope="function")
-def ham_collection(request, connect):
-    ori_collection_name = getattr(request.module, "collection_id", "test")
-    collection_name = gen_unique_str(ori_collection_name)
-    fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dim": dimension, "metric_type": "HAMMING"}}
-    try:
-        connect.create_collection(collection_name, fields)
-    except Exception as e:
-        pytest.exit(str(e))
-    def teardown():
-        collection_names = connect.list_collections()
-        for collection_name in collection_names:
-            connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown)
-    assert connect.has_collection(collection_name)
-    return collection_name
-
-
-@pytest.fixture(scope="function")
-def tanimoto_collection(request, connect):
-    ori_collection_name = getattr(request.module, "collection_id", "test")
-    collection_name = gen_unique_str(ori_collection_name)
-    fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dim": dimension, "metric_type": "TANIMOTO"}}
-    try:
-        connect.create_collection(collection_name, fields)
-    except Exception as e:
-        pytest.exit(str(e))
-    def teardown():
-        collection_names = connect.list_collections()
-        for collection_name in collection_names:
-            connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown)
-    assert connect.has_collection(collection_name)
-    return collection_name
-
-
-@pytest.fixture(scope="function")
-def substructure_collection(request, connect):
-    ori_collection_name = getattr(request.module, "collection_id", "test")
-    collection_name = gen_unique_str(ori_collection_name)
-    fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dim": dimension, "metric_type": "SUBSTRUCTURE"}}
-    try:
-        connect.create_collection(collection_name, fields)
-    except Exception as e:
-        pytest.exit(str(e))
-    def teardown():
-        collection_names = connect.list_collections()
-        for collection_name in collection_names:
-            connect.drop_collection(collection_name, timeout=delete_timeout)
-    request.addfinalizer(teardown)
-    assert connect.has_collection(collection_name)
-    return collection_name
-
-
-@pytest.fixture(scope="function")
-def superstructure_collection(request, connect):
-    dim = getattr(request.module, "dim", "128")
-    ori_collection_name = getattr(request.module, "collection_id", "test")
-    collection_name = gen_unique_str(ori_collection_name)
-    fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dim": dimension, "metric_type": MetricType.SUPERSTRUCTURE}}
     try:
         connect.create_collection(collection_name, fields)
     except Exception as e:

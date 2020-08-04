@@ -161,30 +161,16 @@ class TestGetBase:
     ******************************************************************
     """
 
-    def test_get_entity_parts_ids_ip(self, connect, ip_collection):
-        '''
-        target: test.get_entity_by_id, some ids in ip_collection, some ids not
-        method: add entity, and get
-        expected: entity returned equals insert
-        '''
-        ids = connect.insert(ip_collection, entities)
-        connect.flush([ip_collection])
-        get_ids = [ids[0], 1, ids[-1]]
-        res = connect.get_entity_by_id(ip_collection, get_ids)
-        assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
-        assert_equal_vector(res[-1].get(default_float_vec_field_name), entities[-1]["values"][-1])
-        assert res[1] is None
-
-    def test_get_entity_parts_ids_jac(self, connect, jac_collection):
+    def test_get_entity_parts_ids_binary(self, connect, binary_collection):
         '''
         target: test.get_entity_by_id, some ids in jac_collection, some ids not
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(jac_collection, binary_entities)
-        connect.flush([jac_collection])
+        ids = connect.insert(binary_collection, binary_entities)
+        connect.flush([binary_collection])
         get_ids = [ids[0], 1, ids[-1]]
-        res = connect.get_entity_by_id(jac_collection, get_ids)
+        res = connect.get_entity_by_id(binary_collection, get_ids)
         assert_equal_vector(res[0].get("binary_vector"), binary_entities[-1]["values"][0])
         assert_equal_vector(res[-1].get("binary_vector"), binary_entities[-1]["values"][-1])
         assert res[1] is None
