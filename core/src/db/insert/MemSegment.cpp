@@ -145,7 +145,6 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
             case DataType::INT32:
                 single_size += sizeof(uint32_t);
                 break;
-            case DataType::UID:
             case DataType::INT64:
                 single_size += sizeof(uint64_t);
                 break;
@@ -202,13 +201,13 @@ MemSegment::Delete(segment::doc_id_t doc_id) {
     segment_writer_ptr_->GetSegment(segment_ptr);
 
     // Check wither the doc_id is present, if yes, delete it's corresponding buffer
-    engine::FIXED_FIELD_DATA raw_data;
+    engine::BinaryDataPtr raw_data;
     auto status = segment_ptr->GetFixedFieldData(engine::DEFAULT_UID_NAME, raw_data);
     if (!status.ok()) {
         return Status::OK();
     }
 
-    int64_t* uids = reinterpret_cast<int64_t*>(raw_data.data());
+    int64_t* uids = reinterpret_cast<int64_t*>(raw_data->data_.data());
     int64_t row_count = segment_ptr->GetRowCount();
     for (int64_t i = 0; i < row_count; i++) {
         if (doc_id == uids[i]) {
@@ -231,13 +230,13 @@ MemSegment::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
 
     std::sort(temp.begin(), temp.end());
 
-    engine::FIXED_FIELD_DATA raw_data;
+    engine::BinaryDataPtr raw_data;
     auto status = segment_ptr->GetFixedFieldData(engine::DEFAULT_UID_NAME, raw_data);
     if (!status.ok()) {
         return Status::OK();
     }
 
-    int64_t* uids = reinterpret_cast<int64_t*>(raw_data.data());
+    int64_t* uids = reinterpret_cast<int64_t*>(raw_data->data_.data());
     int64_t row_count = segment_ptr->GetRowCount();
     size_t deleted = 0;
     for (int64_t i = 0; i < row_count; ++i) {

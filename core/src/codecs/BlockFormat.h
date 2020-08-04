@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "db/Types.h"
 #include "knowhere/common/BinarySet.h"
 #include "storage/FSHandler.h"
 
@@ -41,18 +42,18 @@ class BlockFormat {
     BlockFormat() = default;
 
     void
-    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, std::vector<uint8_t>& raw);
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::BinaryDataPtr& raw);
 
     void
     Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset, int64_t num_bytes,
-         std::vector<uint8_t>& raw);
+         engine::BinaryDataPtr& raw);
 
     void
     Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
-         std::vector<uint8_t>& raw);
+         engine::BinaryDataPtr& raw);
 
     void
-    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const std::vector<uint8_t>& raw);
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const engine::BinaryDataPtr& raw);
 
     // No copy and move
     BlockFormat(const BlockFormat&) = delete;

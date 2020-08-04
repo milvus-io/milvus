@@ -128,10 +128,15 @@ VectorIndexFormat::ReadCompress(const storage::FSHandlerPtr& fs_ptr, const std::
 }
 
 void
-VectorIndexFormat::ConvertRaw(const std::vector<uint8_t>& raw, knowhere::BinaryPtr& data) {
+VectorIndexFormat::ConvertRaw(const engine::BinaryDataPtr& raw, knowhere::BinaryPtr& data) {
     data = std::make_shared<knowhere::Binary>();
-    data->size = raw.size();
-    data->data = std::shared_ptr<uint8_t[]>(new uint8_t[data->size]);
+    if (raw == nullptr) {
+        return;
+    }
+
+    data->size = raw->Size();
+    data->data = std::shared_ptr<uint8_t[]>(new uint8_t[data->size], std::default_delete<uint8_t[]>());
+    memcpy(data->data.get(), raw->data_.data(), data->size);
 }
 
 void
