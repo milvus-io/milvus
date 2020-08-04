@@ -289,7 +289,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             auto type = field->GetFtype();
             if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
                 field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
-                segment_ptr->GetVectorIndex(field->GetName(), vec_index);
+                STATUS_CHECK(segment_ptr->GetVectorIndex(field->GetName(), vec_index));
             } else {
                 attr_type.insert(std::make_pair(field->GetName(), (engine::DataType)type));
             }

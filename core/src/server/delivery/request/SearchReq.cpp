@@ -52,6 +52,9 @@ SearchReq::OnExecute() {
         std::string hdr = "SearchReq(table=" + query_ptr_->collection_id;
         TimeRecorder rc(hdr);
 
+        STATUS_CHECK(ValidateCollectionName(query_ptr_->collection_id));
+        STATUS_CHECK(ValidatePartitionTags(query_ptr_->partitions));
+
         // step 2: check table existence
         // only process root table, ignore partition table
         engine::snapshot::CollectionPtr collection;
