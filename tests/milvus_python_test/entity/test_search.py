@@ -17,6 +17,7 @@ collection_id = "search"
 tag = "1970-01-01"
 insert_interval_time = 1.5
 nb = 6000
+nq = 1
 top_k = 10
 nprobe = 1
 epsilon = 0.001
@@ -27,7 +28,7 @@ entity = gen_entities(1, is_normal=True)
 raw_vector, binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(nb)
-default_query, default_query_vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1)
+default_query, default_query_vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq)
 
 def init_data(connect, collection, nb=6000, partition_tags=None):
     '''
@@ -1008,6 +1009,45 @@ class TestSearchDSL(object):
         logging.getLogger().info(query)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
+
+    # TODO
+    def test_query_term_null(self, connect, collection):
+        '''
+        method: build query with wrong format term
+        expected: error raised
+        '''
+        expr = {"term": {}}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    def test_query_term_field_term(self, connect, collection):
+        '''
+        method: build query with wrong format term
+        expected: error raised
+        '''
+        vectors = gen_vectors(nb, dim, is_normal=True)
+        term_fields = {
+            "fields": [
+                {"field": "term", "type": DataType.INT64},
+                {"field": "float_vector", "type": DataType.FLOAT_VECTOR, "params": {"dim": dim}}
+            ],
+            "segment_row_count": segment_row_count
+        }
+        collection_term = gen_unique_str("term")
+        connect.create_collection(collection_term, term_fields)
+        term_entities = [
+            {"field": "term", "type": DataType.INT64, "values": [i for i in range(nb)]},
+            {"field": "float_vector", "type": DataType.FLOAT_VECTOR, "values": vectors}
+        ]
+        ids = connect.insert(collection_term, term_entities)
+        expr = {"term": {"term": {"values": [i for i in range(nb//2)]}}}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == top_k
 
 
 """
