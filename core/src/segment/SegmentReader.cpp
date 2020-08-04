@@ -308,17 +308,17 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, index_visitor->GetFile());
         ss_codec.GetVectorIndexFormat()->ReadIndex(fs_ptr_, file_path, index_data);
 
-        auto index_name = index_visitor->GetElement()->GetName();
+        auto index_type = index_visitor->GetElement()->GetTypeName();
 
         // for some kinds index(IVF), read raw file
-        if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_name == knowhere::IndexEnum::INDEX_NSG ||
-            index_name == knowhere::IndexEnum::INDEX_HNSW) {
+        if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_type == knowhere::IndexEnum::INDEX_NSG ||
+            index_type == knowhere::IndexEnum::INDEX_HNSW) {
             read_raw();
         }
 
         // for some kinds index(SQ8), read compress file
-        if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
-            index_name == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+        if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
+            index_type == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
             if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8)) {
                 file_path =
                     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
@@ -326,7 +326,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             }
         }
 
-        ss_codec.GetVectorIndexFormat()->ConstructIndex(index_name, index_data, raw_data, compress_data, index_ptr);
+        ss_codec.GetVectorIndexFormat()->ConstructIndex(index_type, index_data, raw_data, compress_data, index_ptr);
 
         index_ptr->SetUids(uids);
         index_ptr->SetBlacklist(concurrent_bitset_ptr);
