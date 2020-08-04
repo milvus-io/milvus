@@ -329,9 +329,9 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         ss_codec.GetVectorIndexFormat()->ReadIndex(fs_ptr_, index_file_path, index_data);
 
         // for some kinds index(IVF), read raw file
-        auto index_name = index_visitor->GetElement()->GetTypeName();
-        if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_name == knowhere::IndexEnum::INDEX_NSG ||
-            index_name == knowhere::IndexEnum::INDEX_HNSW) {
+        auto index_type = index_visitor->GetElement()->GetTypeName();
+        if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_type == knowhere::IndexEnum::INDEX_NSG ||
+            index_type == knowhere::IndexEnum::INDEX_HNSW) {
             engine::BinaryDataPtr fixed_data;
             auto status = segment_ptr_->GetFixedFieldData(field_name, fixed_data);
             if (status.ok()) {
