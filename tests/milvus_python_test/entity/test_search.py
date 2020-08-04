@@ -21,13 +21,14 @@ top_k = 10
 nprobe = 1
 epsilon = 0.001
 field_name = default_float_vec_field_name
-default_fields = gen_default_fields() 
+default_fields = gen_default_fields()
 search_param = {"nprobe": 1}
 entity = gen_entities(1, is_normal=True)
 raw_vector, binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 default_query, default_query_vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1)
+
 
 def init_data(connect, collection, nb=6000, partition_tags=None):
     '''
@@ -36,7 +37,7 @@ def init_data(connect, collection, nb=6000, partition_tags=None):
     global entities
     if nb == 6000:
         insert_entities = entities
-    else:  
+    else:
         insert_entities = gen_entities(nb, is_normal=True)
     if partition_tags is None:
         ids = connect.insert(collection, insert_entities)
@@ -44,6 +45,7 @@ def init_data(connect, collection, nb=6000, partition_tags=None):
         ids = connect.insert(collection, insert_entities, partition_tag=partition_tags)
     connect.flush([collection])
     return insert_entities, ids
+
 
 def init_binary_data(connect, collection, nb=6000, insert=True, partition_tags=None):
     '''
@@ -55,7 +57,7 @@ def init_binary_data(connect, collection, nb=6000, insert=True, partition_tags=N
     if nb == 6000:
         insert_entities = binary_entities
         insert_raw_vectors = raw_vectors
-    else:  
+    else:
         insert_raw_vectors, insert_entities = gen_binary_entities(nb)
     if insert is True:
         if partition_tags is None:
@@ -67,11 +69,10 @@ def init_binary_data(connect, collection, nb=6000, insert=True, partition_tags=N
 
 
 class TestSearchBase:
-
-
     """
     generate valid create_index params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_index()
@@ -128,6 +129,7 @@ class TestSearchBase:
     """
     generate top-k params
     """
+
     @pytest.fixture(
         scope="function",
         params=[1, 10, 2049]
@@ -499,10 +501,11 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         '''
         nq = 2
-        search_param = {"nprobe" : 1}
+        search_param = {"nprobe": 1}
         entities, ids = init_data(connect, collection, nb=nq)
         query, vecs = gen_query_vectors_rand_entities(field_name, entities, top_k, nq, search_params=search_param)
-        inside_query, inside_vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
+        inside_query, inside_vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq,
+                                                                      search_params=search_param)
         distance_0 = l2(vecs[0], inside_vecs[0])
         distance_1 = l2(vecs[0], inside_vecs[1])
         res = connect.search(collection, query)
@@ -537,10 +540,11 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         '''
         nq = 2
-        search_param = {"nprobe" : 1}
+        search_param = {"nprobe": 1}
         entities, ids = init_data(connect, ip_collection, nb=nq)
         query, vecs = gen_query_vectors_rand_entities(field_name, entities, top_k, nq, search_params=search_param)
-        inside_query, inside_vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params=search_param)
+        inside_query, inside_vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, nq,
+                                                                      search_params=search_param)
         distance_0 = ip(vecs[0], inside_vecs[0])
         distance_1 = ip(vecs[0], inside_vecs[1])
         res = connect.search(ip_collection, query)
@@ -618,7 +622,8 @@ class TestSearchBase:
         connect.create_index(substructure_collection, binary_field_name, index_param)
         logging.getLogger().info(connect.get_collection_info(substructure_collection))
         logging.getLogger().info(connect.get_index_info(substructure_collection))
-        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, substructure_collection, nb=1, insert=False)
+        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, substructure_collection, nb=1,
+                                                                       insert=False)
         distance_0 = substructure(query_int_vectors[0], int_vectors[0])
         distance_1 = substructure(query_int_vectors[0], int_vectors[1])
         search_param = get_search_param(index_type)
@@ -649,7 +654,7 @@ class TestSearchBase:
         search_param = get_search_param(index_type)
         status, result = connect.search(substructure_collection, top_k, query_vecs, params=search_param)
         logging.getLogger().info(status)
-        logging.getLogger().info(result) 
+        logging.getLogger().info(result)
         assert len(result[0]) == 1
         assert len(result[1]) == 1
         assert result[0][0].distance <= epsilon
@@ -674,7 +679,8 @@ class TestSearchBase:
         connect.create_index(superstructure_collection, binary_field_name, index_param)
         logging.getLogger().info(connect.get_collection_info(superstructure_collection))
         logging.getLogger().info(connect.get_index_info(superstructure_collection))
-        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, superstructure_collection, nb=1, insert=False)
+        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, superstructure_collection, nb=1,
+                                                                       insert=False)
         distance_0 = superstructure(query_int_vectors[0], int_vectors[0])
         distance_1 = superstructure(query_int_vectors[0], int_vectors[1])
         search_param = get_search_param(index_type)
@@ -756,14 +762,16 @@ class TestSearchBase:
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
         milvus.create_collection(collection, default_fields)
         entities, ids = init_data(milvus, collection)
+
         def search(milvus):
             res = connect.search(collection, default_query)
             assert len(res) == 1
             assert res[0]._entities[0].id in ids
             assert res[0]._distances[0] < epsilon
+
         for i in range(threads_num):
             milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-            t = threading.Thread(target=search, args=(milvus, ))
+            t = threading.Thread(target=search, args=(milvus,))
             threads.append(t)
             t.start()
             time.sleep(0.2)
@@ -787,13 +795,15 @@ class TestSearchBase:
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
         milvus.create_collection(collection, default_fields)
         entities, ids = init_data(milvus, collection)
+
         def search(milvus):
             res = connect.search(collection, default_query)
             assert len(res) == 1
             assert res[0]._entities[0].id in ids
             assert res[0]._distances[0] < epsilon
+
         for i in range(threads_num):
-            t = threading.Thread(target=search, args=(milvus, ))
+            t = threading.Thread(target=search, args=(milvus,))
             threads.append(t)
             t.start()
             time.sleep(0.2)
@@ -810,7 +820,7 @@ class TestSearchBase:
         top_k = 10
         nq = 20
         for i in range(num):
-            collection = gen_unique_str(collection_id+str(i))
+            collection = gen_unique_str(collection_id + str(i))
             connect.create_collection(collection, default_fields)
             entities, ids = init_data(connect, collection)
             assert len(ids) == nb
@@ -824,7 +834,6 @@ class TestSearchBase:
 
 
 class TestSearchDSL(object):
-
     """
     ******************************************************************
     #  The following cases are used to build invalid query expr
@@ -901,42 +910,12 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    def test_query_with_wrong_format_term(self, connect, collection):
-        '''
-        method: build query with wrong term expr
-        expected: error raised
-        '''
-        # term_expr = gen_default_term_expr
-        # term_expr["term"] = 1
-        expr = {
-            "must": [{"term": 1}]
-        }
-        query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
-        with pytest.raises(Exception) as e:
-            res = connect.search(collection, query)
-
-    #TODO
-    def test_query_with_term_key_error(self,connect,collection):
-        '''
-        method: build query with wrong term key
-        expected: error raised
-        '''
-        term = {"terrm": {"int64": {"values": [1,2,5]}}}
-        expr = gen_default_term_expr(nb, term)
-        expr = {
-            "must": [{"termm": {}}]
-        }
-        query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
-        with pytest.raises(Exception) as e:
-            res = connect.search(collection, query)
-
     """
     ******************************************************************
     #  The following cases are used to build valid query expr
     ******************************************************************
     """
+
     def test_query_term_value_not_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with no term can be filtered
@@ -944,7 +923,7 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = gen_default_term_expr(values=[100000])
-        query = update_query_expr(default_query, expr=expr):
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
@@ -955,7 +934,7 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = gen_default_term_expr(values=1)
-        query = update_query_expr(default_query, expr=expr):
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
@@ -966,7 +945,7 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = gen_default_term_expr(values=[i for i in range(100000, 100010)])
-        query = update_query_expr(default_query, expr=expr):
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
@@ -977,7 +956,7 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = gen_default_term_expr()
-        query = update_query_expr(default_query, expr=expr):
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
@@ -987,8 +966,8 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = gen_default_term_expr(values=[i for i in range(nb/2, nb+nb/2)])
-        query = update_query_expr(default_query, expr=expr):
+        expr = gen_default_term_expr(values=[i for i in range(nb // 2, nb + nb // 2)])
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
@@ -999,21 +978,58 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = gen_default_term_expr(values=[1 for i in range(1, nb)])
-        query = update_query_expr(default_query, expr=expr):
+        query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
-    def test_query_with_term_empty_value(self,connect,collection):
+    # TODO
+    def test_query_term_value_empty(self, connect, collection):
         '''
         method: build query with term value empty
+        expected: return null
+        '''
+        expr = gen_default_term_expr(values=[])
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        res = connect.search(collection, query)
+        logging.getLogger().info(res)
+        assert len(res) == 1
+        assert len(res[0]) == 0
+
+    def test_query_term_key_error(self, connect, collection):
+        '''
+        method: build query with term key error
         expected: error raised
         '''
-        term = {"term": {"int64": {"values": []}}}
-        expr = gen_default_term_expr(nb, term)
-        logging.getLogger().info(expr)
+        expr = {"terrm": {"int64": {"values": [i for i in range(nb//2)]}}}
         query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
+
+    def test_query_term_wrong_format(self, connect, collection):
+        '''
+        method: build query with wrong format term
+        expected: error raised
+        '''
+        expr = {"term": 1}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    def test_query_term_wrong_format_null(self, connect, collection):
+        '''
+        method: build query with wrong format term
+        expected: error raised
+        '''
+        expr = {"term": {}}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+
 """
 ******************************************************************
 #  The following cases are used to test `search` function 
@@ -1130,7 +1146,8 @@ class TestSearchInvalid(object):
         connect.create_index(collection, field_name, get_simple_index)
         if search_params["index_type"] != index_type:
             pytest.skip("Skip case")
-        query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1, search_params=search_params["search_params"])
+        query, vecs = gen_query_vectors_inside_entities(field_name, entities, top_k, 1,
+                                                        search_params=search_params["search_params"])
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
