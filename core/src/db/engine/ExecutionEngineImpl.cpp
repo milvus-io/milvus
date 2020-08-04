@@ -51,10 +51,14 @@ namespace engine {
 namespace {
 template <typename T>
 knowhere::IndexPtr
-CreateSortedIndex(std::vector<uint8_t>& raw_data) {
-    auto count = raw_data.size() / sizeof(T);
+CreateSortedIndex(engine::BinaryDataPtr& raw_data) {
+    if (raw_data == nullptr) {
+        return nullptr;
+    }
+
+    auto count = raw_data->data_.size() / sizeof(T);
     auto index_ptr =
-        std::make_shared<knowhere::StructuredIndexSort<T>>(count, reinterpret_cast<const T*>(raw_data.data()));
+        std::make_shared<knowhere::StructuredIndexSort<T>>(count, reinterpret_cast<const T*>(raw_data->data_.data()));
     return std::static_pointer_cast<knowhere::Index>(index_ptr);
 }
 }  // namespace
@@ -97,14 +101,13 @@ ExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
 }
 
 Status
-ExecutionEngineImpl::CreateStructuredIndex(const DataType field_type, std::vector<uint8_t>& raw_data,
+ExecutionEngineImpl::CreateStructuredIndex(const DataType field_type, engine::BinaryDataPtr& raw_data,
                                            knowhere::IndexPtr& index_ptr) {
     switch (field_type) {
         case engine::DataType::INT32: {
             index_ptr = CreateSortedIndex<int32_t>(raw_data);
             break;
         }
-        case engine::DataType::UID:
         case engine::DataType::INT64: {
             index_ptr = CreateSortedIndex<int64_t>(raw_data);
             break;
@@ -145,7 +148,7 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
             if (!index_exist) {
                 // for structured field, create a simple sorted index for it
                 // we also can do this in BuildIndex step, but for now we do this in Load step
-                std::vector<uint8_t> raw_data;
+                BinaryDataPtr raw_data;
                 segment_reader_->LoadField(name, raw_data);
                 STATUS_CHECK(CreateStructuredIndex(field_type, raw_data, index_ptr));
                 segment_ptr->SetStructuredIndex(name, index_ptr);
@@ -155,7 +158,7 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
 
         // index not yet build, load raw data
         if (!index_exist) {
-            std::vector<uint8_t> raw;
+            BinaryDataPtr raw;
             segment_reader_->LoadField(name, raw);
         }
 
@@ -287,8 +290,6 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
                 field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
                 segment_ptr->GetVectorIndex(field->GetName(), vec_index);
-            } else if (type == (int)engine::DataType::UID) {
-                continue;
             } else {
                 attr_type.insert(std::make_pair(field->GetName(), (engine::DataType)type));
             }
@@ -647,6 +648,7 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
 
     auto& index_element = element_visitor->GetElement();
     index_info.index_name_ = index_element->GetName();
+    index_info.index_type_ = index_element->GetTypeName();
     auto params = index_element->GetParams();
     if (params.find(engine::PARAM_INDEX_METRIC_TYPE) != params.end()) {
         index_info.metric_name_ = params[engine::PARAM_INDEX_METRIC_TYPE];
@@ -728,7 +730,7 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
 
     // build index by knowhere
-    new_index = CreateVecIndex(index_info.index_name_);
+    new_index = CreateVecIndex(index_info.index_type_);
     if (!new_index) {
         throw Exception(DB_ERROR, "Unsupported index type");
     }

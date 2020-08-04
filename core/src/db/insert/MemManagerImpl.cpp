@@ -69,8 +69,11 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
             LOG_ENGINE_ERROR_ << err_msg;
             return Status(DB_ERROR, err_msg);
         }
+        if (iter->second == nullptr) {
+            continue;
+        }
 
-        size_t data_size = iter->second.size();
+        size_t data_size = iter->second->data_.size();
 
         snapshot::FieldPtr field = ss->GetField(name);
         DataType ftype = static_cast<DataType>(field->GetFtype());
@@ -106,7 +109,6 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
                     return Status(DB_ERROR, err_msg + name);
                 }
                 break;
-            case DataType::UID:
             case DataType::INT64:
                 if (data_size != chunk->count_ * sizeof(uint64_t)) {
                     return Status(DB_ERROR, err_msg + name);

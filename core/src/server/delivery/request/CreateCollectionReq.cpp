@@ -77,6 +77,14 @@ CreateCollectionReq::OnExecute() {
                 index_name = index_params["name"];
             }
 
+            // validate id field
+            if (field_name == engine::DEFAULT_UID_NAME) {
+                if (field_type != engine::DataType::INT64) {
+                    return Status(DB_ERROR, "Field '_id' data type must be int64");
+                }
+            }
+
+            // validate vector field dimension
             if (field_type == engine::DataType::VECTOR_FLOAT || field_type == engine::DataType::VECTOR_BINARY) {
                 if (!field_params.contains(engine::PARAM_DIMENSION)) {
                     return Status(SERVER_INVALID_VECTOR_DIMENSION, "Dimension not defined in field_params");
