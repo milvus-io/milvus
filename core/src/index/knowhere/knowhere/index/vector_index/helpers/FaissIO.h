@@ -12,6 +12,7 @@
 #pragma once
 
 #include <faiss/impl/io.h>
+#include <faiss/utils/utils.h>
 
 namespace milvus {
 namespace knowhere {
@@ -45,6 +46,9 @@ struct MemoryIOReader : public faiss::IOReader {
         return operator()((void*)ptr, size, nitems);
     }
 };
+
+void
+enable_faiss_logging();
 
 }  // namespace knowhere
 }  // namespace milvus
