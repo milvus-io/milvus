@@ -737,12 +737,12 @@ TEST_F(DBTest, StatsTest) {
 
 TEST_F(DBTest, DeleteEntitiesTest) {
     std::string collection_name = "test_collection_delete_";
-    CreateCollection(db_, collection_name, 0);
+    CreateCollection2(db_, collection_name, 0);
 
     auto insert_entities = [&](const std::string collection, const std::string partition,
-                               uint64_t count, milvus::engine::IDNumbers& ids) -> Status {
+                               uint64_t count, uint64_t batch_index, milvus::engine::IDNumbers& ids) -> Status {
         milvus::engine::DataChunkPtr data_chunk;
-        BuildEntities(count, 0, data_chunk);
+        BuildEntities(count, batch_index, data_chunk);
         STATUS_CHECK(db_->Insert(collection_name, partition, data_chunk));
         STATUS_CHECK(db_->Flush(collection_name));
         auto iter = data_chunk->fixed_fields_.find(milvus::engine::DEFAULT_UID_NAME);
@@ -757,7 +757,7 @@ TEST_F(DBTest, DeleteEntitiesTest) {
     };
 
     milvus::engine::IDNumbers entity_ids;
-    auto status = insert_entities(collection_name, "", 10000, entity_ids);
+    auto status = insert_entities(collection_name, "", 10000, 0, entity_ids);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     milvus::engine::IDNumbers delete_ids = {entity_ids[0]};
@@ -779,11 +779,11 @@ TEST_F(DBTest, DeleteEntitiesTest) {
         ASSERT_TRUE(status.ok()) << status.ToString();
 
         milvus::engine::IDNumbers partition0_ids;
-        status = insert_entities(collection_name, partition0, 10000, partition0_ids);
+        status = insert_entities(collection_name, partition0, 10000, 2 * i + 1, partition0_ids);
         ASSERT_TRUE(status.ok()) << status.ToString();
 
         milvus::engine::IDNumbers partition1_ids;
-        status = insert_entities(collection_name, partition1, 10000, partition1_ids);
+        status = insert_entities(collection_name, partition1, 10000, 2 * i + 1, partition1_ids);
         ASSERT_TRUE(status.ok()) << status.ToString();
 
         milvus::engine::IDNumbers partition_delete_ids = {partition0_ids[0], partition1_ids[0]};
@@ -799,7 +799,7 @@ TEST_F(DBTest, DeleteEntitiesTest) {
 
     std::vector<bool> valid_row;
     milvus::engine::DataChunkPtr entity_data_chunk;
-    for (auto & id: whole_delete_ids) {
+    for (auto& id: whole_delete_ids) {
         status = db_->GetEntityByID(collection_name, {id}, {}, valid_row, entity_data_chunk);
         ASSERT_TRUE(status.ok()) << status.ToString();
         ASSERT_EQ(entity_data_chunk->count_, 0);
