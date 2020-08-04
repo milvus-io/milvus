@@ -11,10 +11,16 @@
 
 #include "db/insert/MemCollection.h"
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <ctime>
 #include <memory>
 #include <string>
+
+#include <fiu-local.h>
 
 #include "config/ServerConfig.h"
 #include "db/Utils.h"
@@ -102,9 +108,16 @@ MemCollection::Serialize(uint64_t wal_lsn) {
     TimeRecorder recorder("MemCollection::Serialize collection " + collection_id_);
 
     if (!doc_ids_to_delete_.empty()) {
-        auto status = ApplyDeletes();
-        if (!status.ok()) {
-            return Status(DB_ERROR, status.message());
+        while (true) {
+            auto status = ApplyDeletes();
+            if (status.ok()) {
+                break;
+            } else if (status.code() == SS_STALE_ERROR) {
+                LOG_ENGINE_WARNING_ << "ApplyDeletes is stale, try again";
+                continue;
+            } else {
+                return status;
+            }
         }
     }
 
@@ -272,6 +285,10 @@ MemCollection::ApplyDeletes() {
     segment_iterator->Iterate();
     STATUS_CHECK(segment_iterator->GetStatus());
 
+    fiu_do_on("MemCollection.ApplyDeletes.RandomSleep", {
+        std::srand(std::time(nullptr));
+        sleep(std::rand() % 10);
+    });
     return segments_op->Push();
 }
 

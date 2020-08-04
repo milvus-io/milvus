@@ -31,7 +31,7 @@ namespace {
 const char* VECTOR_FIELD_NAME = "vector";
 
 milvus::Status
-CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
+CreateCollection(const std::shared_ptr<DBImpl>& db, const std::string& collection_name, const LSN_TYPE& lsn) {
     CreateCollectionContext context;
     context.lsn = lsn;
     auto collection_schema = std::make_shared<Collection>(collection_name);
@@ -733,4 +733,75 @@ TEST_F(DBTest, StatsTest) {
 
     std::string ss = json_stats.dump();
     std::cout << ss << std::endl;
+}
+
+TEST_F(DBTest, DeleteEntitiesTest) {
+    std::string collection_name = "test_collection_delete_";
+    CreateCollection(db_, collection_name, 0);
+
+    auto insert_entities = [&](const std::string collection, const std::string partition,
+                               uint64_t count, milvus::engine::IDNumbers& ids) -> Status {
+        milvus::engine::DataChunkPtr data_chunk;
+        BuildEntities(count, 0, data_chunk);
+        STATUS_CHECK(db_->Insert(collection_name, partition, data_chunk));
+        STATUS_CHECK(db_->Flush(collection_name));
+        auto iter = data_chunk->fixed_fields_.find(milvus::engine::DEFAULT_UID_NAME);
+        if (iter == data_chunk->fixed_fields_.end()) {
+            return Status(1, "Cannot find uid field");
+        }
+        auto& ids_buffer = iter->second;
+        ids.resize(data_chunk->count_);
+        memcpy(ids.data(), ids_buffer->data_.data(), ids_buffer->Size());
+
+        return Status::OK();
+    };
+
+    milvus::engine::IDNumbers entity_ids;
+    auto status = insert_entities(collection_name, "", 10000, entity_ids);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    milvus::engine::IDNumbers delete_ids = {entity_ids[0]};
+
+    status = db_->DeleteEntityByID(collection_name, delete_ids);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    milvus::engine::IDNumbers whole_delete_ids;
+    fiu_init(0);
+    fiu_enable("MemCollection.ApplyDeletes.RandomSleep", 1, nullptr, 0);
+    for (size_t i = 0; i < 5; i++) {
+        std::string partition0 = collection_name + "p_" + std::to_string(i) + "_0";
+        std::string partition1 = collection_name + "p_" + std::to_string(i) + "_1";
+
+        status = db_->CreatePartition(collection_name, partition0);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+
+        status = db_->CreatePartition(collection_name, partition1);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+
+        milvus::engine::IDNumbers partition0_ids;
+        status = insert_entities(collection_name, partition0, 10000, partition0_ids);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+
+        milvus::engine::IDNumbers partition1_ids;
+        status = insert_entities(collection_name, partition1, 10000, partition1_ids);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+
+        milvus::engine::IDNumbers partition_delete_ids = {partition0_ids[0], partition1_ids[0]};
+        whole_delete_ids.insert(whole_delete_ids.begin(), partition_delete_ids.begin(), partition_delete_ids.end());
+        db_->DeleteEntityByID(collection_name, partition_delete_ids);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+
+        status = db_->DropPartition(collection_name, partition1);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+    }
+    sleep(10);
+    fiu_disable("MemCollection.ApplyDeletes.RandomSleep");
+
+    std::vector<bool> valid_row;
+    milvus::engine::DataChunkPtr entity_data_chunk;
+    for (auto & id: whole_delete_ids) {
+        status = db_->GetEntityByID(collection_name, {id}, {}, valid_row, entity_data_chunk);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_EQ(entity_data_chunk->count_, 0);
+    }
 }
