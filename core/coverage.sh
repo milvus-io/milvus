@@ -128,5 +128,6 @@ if [ $? -ne 0 ]; then
     echo "generate ${FILE_INFO_OUTPUT_NEW} failed"
     exit -2
 fi
+
 # gen html report
 ${LCOV_GEN_CMD} "${FILE_INFO_OUTPUT_NEW}" --output-directory ${DIR_LCOV_OUTPUT}/
