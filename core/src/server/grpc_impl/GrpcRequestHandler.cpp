@@ -271,18 +271,18 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
         std::string name = it.first->GetName();
 
         // judge whether data exists
-        std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
-        if (data.empty())
+        engine::BinaryDataPtr data = data_chunk->fixed_fields_[name];
+        if (data == nullptr || data->data_.empty())
             continue;
 
-        auto single_size = data.size() / id_size;
+        auto single_size = data->data_.size() / id_size;
 
-        if (type == engine::DataType::UID) {
+        if (name == engine::DEFAULT_UID_NAME) {
             int64_t int64_value;
             auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
             for (int i = 0; i < id_size; i++) {
                 auto offset = i * single_size;
-                memcpy(&int64_value, data.data() + offset, single_size);
+                memcpy(&int64_value, data->data_.data() + offset, single_size);
                 response->add_ids(int64_value);
             }
             continue;
@@ -302,7 +302,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
             for (int i = 0; i < id_size; i++) {
                 auto vector_row_record = vector_record->add_records();
                 auto offset = i * single_size;
-                memcpy(binary_vector.data(), data.data() + offset, single_size);
+                memcpy(binary_vector.data(), data->data_.data() + offset, single_size);
                 vector_row_record->mutable_binary_data()->resize(binary_vector.size());
                 memcpy(vector_row_record->mutable_binary_data()->data(), binary_vector.data(), binary_vector.size());
             }
@@ -315,7 +315,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
             for (int i = 0; i < id_size; i++) {
                 auto vector_row_record = vector_record->add_records();
                 auto offset = i * single_size;
-                memcpy(float_vector.data(), data.data() + offset, single_size);
+                memcpy(float_vector.data(), data->data_.data() + offset, single_size);
                 vector_row_record->mutable_float_data()->Resize(vector_size, 0.0);
                 memcpy(vector_row_record->mutable_float_data()->mutable_data(), float_vector.data(),
                        float_vector.size() * sizeof(float));
@@ -329,7 +329,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
                 auto int32_size = single_size * sizeof(int8_t) / sizeof(int32_t);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
-                    memcpy(&int32_value, data.data() + offset, single_size);
+                    memcpy(&int32_value, data->data_.data() + offset, single_size);
                     attr_record->add_int32_value(int32_value);
                 }
             } else if (type == engine::DataType::INT64) {
@@ -338,7 +338,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
                 auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
-                    memcpy(&int64_value, data.data() + offset, single_size);
+                    memcpy(&int64_value, data->data_.data() + offset, single_size);
                     attr_record->add_int64_value(int64_value);
                 }
             } else if (type == engine::DataType::DOUBLE) {
@@ -347,7 +347,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
                 auto int32_size = single_size * sizeof(int8_t) / sizeof(double);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
-                    memcpy(&double_value, data.data() + offset, single_size);
+                    memcpy(&double_value, data->data_.data() + offset, single_size);
                     attr_record->add_double_value(double_value);
                 }
             } else if (type == engine::DataType::FLOAT) {
@@ -356,7 +356,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
                 auto float_size = single_size * sizeof(int8_t) / sizeof(float);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
-                    memcpy(&float_value, data.data() + offset, single_size);
+                    memcpy(&float_value, data->data_.data() + offset, single_size);
                     attr_record->add_float_value(float_value);
                 }
             }

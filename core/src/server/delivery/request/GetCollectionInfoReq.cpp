@@ -51,9 +51,6 @@ GetCollectionInfoReq::OnExecute() {
         collection_schema_.extra_params_ = collection->GetParams();
         for (auto& field_kv : field_mappings) {
             auto field = field_kv.first;
-            if (field->GetFtype() == (engine::snapshot::FTYPE_TYPE)engine::DataType::UID) {
-                continue;
-            }
 
             milvus::json field_index_param;
             auto field_elements = field_kv.second;
