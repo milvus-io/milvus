@@ -119,9 +119,10 @@ BuildEntities(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& da
         vectors.id_array_.push_back(n * batch_index + i);
     }
 
-    milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_[VECTOR_FIELD_NAME];
-    raw.resize(vectors.float_data_.size() * sizeof(float));
-    memcpy(raw.data(), vectors.float_data_.data(), vectors.float_data_.size() * sizeof(float));
+    milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+    raw->data_.resize(vectors.float_data_.size() * sizeof(float));
+    memcpy(raw->data_.data(), vectors.float_data_.data(), vectors.float_data_.size() * sizeof(float));
+    data_chunk->fixed_fields_[VECTOR_FIELD_NAME] = raw;
 
     std::vector<int32_t> value_0;
     std::vector<int64_t> value_1;
@@ -139,21 +140,103 @@ BuildEntities(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& da
     }
 
     {
-        milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["field_0"];
-        raw.resize(value_0.size() * sizeof(int32_t));
-        memcpy(raw.data(), value_0.data(), value_0.size() * sizeof(int32_t));
+        milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+        raw->data_.resize(value_0.size() * sizeof(int32_t));
+        memcpy(raw->data_.data(), value_0.data(), value_0.size() * sizeof(int32_t));
+        data_chunk->fixed_fields_["field_0"] = raw;
     }
 
     {
-        milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["field_1"];
+        milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+        raw->data_.resize(value_1.size() * sizeof(int64_t));
+        memcpy(raw->data_.data(), value_1.data(), value_1.size() * sizeof(int64_t));
+        data_chunk->fixed_fields_["field_1"] = raw;
+    }
+
+    {
+        milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+        raw->data_.resize(value_2.size() * sizeof(double));
+        memcpy(raw->data_.data(), value_2.data(), value_2.size() * sizeof(double));
+        data_chunk->fixed_fields_["field_2"] = raw;
+    }
+}
+
+void
+BuildQueryPtr(const std::string& collection_name, int64_t n, int64_t topk, std::vector<std::string>& field_names,
+              std::vector<std::string>& partitions, milvus::query::QueryPtr& query_ptr) {
+    auto general_query = std::make_shared<milvus::query::GeneralQuery>();
+    query_ptr->collection_id = collection_name;
+    query_ptr->field_names = field_names;
+    query_ptr->partitions = partitions;
+    std::set<std::string> index_fields = {"int64", "float_vector"};
+    query_ptr->index_fields = index_fields;
+
+    auto left_query = std::make_shared<milvus::query::GeneralQuery>();
+    auto term_query = std::make_shared<milvus::query::TermQuery>();
+    std::vector<int32_t> term_value(n, 0);
+    for (uint64_t i = 0; i < n; i++) {
+        term_value[i] = i;
+    }
+    term_query->json_obj = {{"int64", {{"values", term_value}}}};
+    std::cout << term_query->json_obj.dump() << std::endl;
+    left_query->leaf = std::make_shared<milvus::query::LeafQuery>();
+    left_query->leaf->term_query = term_query;
+    general_query->bin->left_query = left_query;
+
+    auto right_query = std::make_shared<milvus::query::GeneralQuery>();
+    right_query->leaf = std::make_shared<milvus::query::LeafQuery>();
+    std::string placeholder = "placeholder_1";
+    right_query->leaf->vector_placeholder = placeholder;
+    general_query->bin->right_query = right_query;
+
+    auto vector_query = std::make_shared<milvus::query::VectorQuery>();
+    vector_query->field_name = "float_vector";
+    vector_query->topk = topk;
+    milvus::query::VectorRecord vector_record;
+    vector_record.float_data.resize(n * COLLECTION_DIM);
+    for (uint64_t i = 0; i < n; i++) {
+        for (int64_t j = 0; j < COLLECTION_DIM; j++) vector_record.float_data[COLLECTION_DIM * i + j] = drand48();
+        vector_record.float_data[COLLECTION_DIM * i] += i / 2000.;
+    }
+    vector_query->query_vector = vector_record;
+    vector_query->extra_params = {{"metric_type", "L2"}, {"nprobe", 1024}};
+
+    query_ptr->root = general_query;
+    query_ptr->vectors.insert(std::make_pair(placeholder, vector_query));
+}
+
+void
+BuildEntities2(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& data_chunk) {
+    data_chunk = std::make_shared<milvus::engine::DataChunk>();
+    data_chunk->count_ = n;
+
+    milvus::engine::VectorsData vectors;
+    vectors.vector_count_ = n;
+    vectors.float_data_.clear();
+    vectors.float_data_.resize(n * COLLECTION_DIM);
+    float* data = vectors.float_data_.data();
+    for (uint64_t i = 0; i < n; i++) {
+        for (int64_t j = 0; j < COLLECTION_DIM; j++) data[COLLECTION_DIM * i + j] = drand48();
+        data[COLLECTION_DIM * i] += i / 2000.;
+
+        vectors.id_array_.push_back(n * batch_index + i);
+    }
+
+    milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["float_vector"];
+    raw.resize(vectors.float_data_.size() * sizeof(float));
+    memcpy(raw.data(), vectors.float_data_.data(), vectors.float_data_.size() * sizeof(float));
+
+    std::vector<int64_t> value_1;
+    value_1.resize(n);
+
+    for (uint64_t i = 0; i < n; ++i) {
+        value_1[i] = i;
+    }
+
+    {
+        milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["int64"];
         raw.resize(value_1.size() * sizeof(int64_t));
         memcpy(raw.data(), value_1.data(), value_1.size() * sizeof(int64_t));
-    }
-
-    {
-        milvus::engine::FIXED_FIELD_DATA& raw = data_chunk->fixed_fields_["field_2"];
-        raw.resize(value_2.size() * sizeof(double));
-        memcpy(raw.data(), value_2.data(), value_2.size() * sizeof(double));
     }
 }
 

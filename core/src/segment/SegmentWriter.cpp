@@ -112,7 +112,7 @@ SegmentWriter::Serialize() {
 }
 
 Status
-SegmentWriter::WriteField(const std::string& file_path, const engine::FIXED_FIELD_DATA& raw) {
+SegmentWriter::WriteField(const std::string& file_path, const engine::BinaryDataPtr& raw) {
     try {
         auto& ss_codec = codec::Codec::instance();
         ss_codec.GetBlockFormat()->Write(fs_ptr_, file_path, raw);
@@ -134,7 +134,7 @@ SegmentWriter::WriteFields() {
     for (auto& iter : field_visitors_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
-        engine::FIXED_FIELD_DATA raw_data;
+        engine::BinaryDataPtr raw_data;
         segment_ptr_->GetFixedFieldData(name, raw_data);
 
         auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
@@ -161,7 +161,7 @@ SegmentWriter::WriteBloomFilter() {
     try {
         TimeRecorder recorder("SegmentWriter::WriteBloomFilter");
 
-        engine::FIXED_FIELD_DATA uid_data;
+        engine::BinaryDataPtr uid_data;
         auto status = segment_ptr_->GetFixedFieldData(engine::DEFAULT_UID_NAME, uid_data);
         if (!status.ok()) {
             return status;
@@ -179,7 +179,7 @@ SegmentWriter::WriteBloomFilter() {
             segment::IdBloomFilterPtr bloom_filter_ptr;
             ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
 
-            int64_t* uids = (int64_t*)(uid_data.data());
+            int64_t* uids = (int64_t*)(uid_data->data_.data());
             int64_t row_count = segment_ptr_->GetRowCount();
             for (int64_t i = 0; i < row_count; i++) {
                 bloom_filter_ptr->Add(uids[i]);
@@ -332,13 +332,13 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     for (auto& iter : field_visitors_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
-        engine::FIXED_FIELD_DATA raw_data;
+        engine::BinaryDataPtr raw_data;
         segment_reader->LoadField(name, raw_data);
         chunk->fixed_fields_[name] = raw_data;
     }
 
     auto& uid_data = chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
-    chunk->count_ = uid_data.size() / sizeof(int64_t);
+    chunk->count_ = uid_data->data_.size() / sizeof(int64_t);
     status = AddChunk(chunk);
     if (!status.ok()) {
         return status;
