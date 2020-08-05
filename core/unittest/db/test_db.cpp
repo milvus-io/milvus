@@ -485,6 +485,9 @@ TEST_F(DBTest, InsertTest) {
         auto field = std::make_shared<Field>(field_name, 0, milvus::engine::DataType::INT32);
         context.fields_schema[field] = {};
 
+        field = std::make_shared<Field>(milvus::engine::DEFAULT_UID_NAME, 0, milvus::engine::DataType::INT64);
+        context.fields_schema[field] = {};
+
         auto status = db_->CreateCollection(context);
 
         milvus::engine::DataChunkPtr data_chunk = std::make_shared<milvus::engine::DataChunk>();
