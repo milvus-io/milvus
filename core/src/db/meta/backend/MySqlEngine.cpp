@@ -220,7 +220,7 @@ MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
             return status;
         }
 
-        std::lock_guard<std::mutex> lock(meta_mutex_);
+        // std::lock_guard<std::mutex> lock(meta_mutex_);
 
         mysqlpp::Query query = connectionPtr->query(sql);
         auto res = query.store();
@@ -270,7 +270,7 @@ MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_context
 
         mysqlpp::Transaction trans(*connectionPtr, mysqlpp::Transaction::serializable, mysqlpp::Transaction::session);
 
-        std::lock_guard<std::mutex> lock(meta_mutex_);
+        // std::lock_guard<std::mutex> lock(meta_mutex_);
         for (auto& context : sql_contexts) {
             std::string sql;
             auto status = MetaHelper::MetaApplyContextToSql(context, sql);

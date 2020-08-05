@@ -22,6 +22,7 @@ using ResourceContextBuilder = milvus::engine::snapshot::ResourceContextBuilder<
 using FType = milvus::engine::DataType;
 using FEType = milvus::engine::FieldElementType;
 using Op = milvus::engine::meta::MetaContextOp;
+using State = milvus::engine::snapshot::State;
 
 TEST_F(MetaTest, ApplyTest) {
     ID_TYPE result_id;
@@ -193,18 +194,43 @@ TEST_F(MetaTest, MultiThreadRequestTest) {
     auto request_worker = [&](size_t i) {
         std::string collection_name_prefix = "meta_test_collection_" + std::to_string(i) + "_";
         int64_t result_id;
-        for (size_t ii = 0; ii < 10; ii++) {
+        for (size_t ii = 0; ii < 20; ii++) {
             std::string collection_name = collection_name_prefix + std::to_string(ii);
-            auto collection = std::make_shared<Collection>(collection_name, collection_name);
+            auto collection = std::make_shared<Collection>(collection_name);
             auto c_ctx = ResourceContextBuilder<Collection>().SetResource(collection).CreatePtr();
             auto status = meta_->Apply<Collection>(c_ctx, result_id);
             ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_GT(result_id, 0);
 
             collection->SetID(result_id);
+            collection->Activate();
             auto c_ctx2 = ResourceContextBuilder<Collection>().SetResource(collection)
-                .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+                                                              .SetOp(Op::oUpdate)
+                                                              .AddAttr(milvus::engine::meta::F_STATE)
+                                                              .CreatePtr();
             status = meta_->Apply<Collection>(c_ctx2, result_id);
             ASSERT_TRUE(status.ok()) << status.ToString();
+
+            CollectionPtr collection2;
+            status = meta_->Select<Collection>(result_id, collection2);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_EQ(collection2->GetID(), result_id);
+            ASSERT_EQ(collection2->GetState(), State::ACTIVE);
+            ASSERT_EQ(collection2->GetName(), collection_name);
+
+            auto c_ctx3 = ResourceContextBuilder<Collection>().SetResource(collection)
+                .SetOp(Op::oUpdate)
+                .AddAttr(milvus::engine::meta::F_STATE)
+                .CreatePtr();
+            meta_->Apply<Collection>(c_ctx3, result_id);
+
+            auto c_ctx4 = ResourceContextBuilder<Collection>().SetID(result_id).SetOp(Op::oDelete).SetTable(Collection::Name).CreatePtr();
+            status = meta_->Apply<Collection>(c_ctx4, result_id);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            CollectionPtr collection3;
+            status = meta_->Select<Collection>(result_id, collection3);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_EQ(collection3, nullptr);
         }
     };
 }
