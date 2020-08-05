@@ -105,7 +105,9 @@ class TestCompactBase:
         info = connect.get_collection_stats(collection)
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
-    
+
+    # TODO
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_insert_and_compact(self, connect, collection):
         '''
@@ -249,7 +251,9 @@ class TestCompactBase:
         logging.getLogger().info(info["partitions"])
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before >= size_after)
-    
+
+    # TODO
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_entity_and_compact_twice(self, connect, collection):
         '''
@@ -306,6 +310,8 @@ class TestCompactBase:
         size_after_twice = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_after == size_after_twice)
 
+    # TODO
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_compact_multi_collections(self, connect):
         '''
@@ -449,6 +455,8 @@ class TestCompactBinary:
     ******************************************************************
     """
     @pytest.mark.timeout(COMPACT_TIMEOUT)
+    # TODO
+    @pytest.mark.level(2)
     def test_add_entity_and_compact(self, connect, binary_collection):
         '''
         target: test add binary vector and compact
@@ -467,7 +475,9 @@ class TestCompactBinary:
         info = connect.get_collection_stats(binary_collection)
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
-    
+
+    # TODO
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_insert_and_compact(self, connect, binary_collection):
         '''
@@ -540,7 +550,9 @@ class TestCompactBinary:
         assert status.OK()
         logging.getLogger().info(info["partitions"])
         assert not info["partitions"][0]["segments"]
-    
+
+    # TODO
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_entity_and_compact_twice(self, connect, binary_collection):
         '''
