@@ -104,7 +104,7 @@ CreateIndexReq::OnExecute() {
             }
 
             // validate index parameters
-            status = ValidateIndexParams(json_params_, dimension, index_type);
+            status = ValidateIndexParams(json_params_[engine::PARAM_INDEX_EXTRA_PARAMS], dimension, index_type);
             if (!status.ok()) {
                 return status;
             }

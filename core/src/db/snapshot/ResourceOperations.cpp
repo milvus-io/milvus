@@ -227,10 +227,12 @@ SegmentCommitOperation::DoExecute(StorePtr store) {
             resource_->GetMappings().erase(stale_segment_file->GetID());
             size -= stale_segment_file->GetSize();
         }
-    } else {
+    } else if (context_.new_segment && GetStartedSS()->GetResource<Partition>(context_.new_segment->GetPartitionId())) {
         resource_ =
             std::make_shared<SegmentCommit>(GetStartedSS()->GetLatestSchemaCommitId(),
                                             context_.new_segment->GetPartitionId(), context_.new_segment->GetID());
+    } else {
+        return Status(SS_STALE_ERROR, "Stale Error");
     }
     for (auto& new_segment_file : context_.new_segment_files) {
         resource_->GetMappings().insert(new_segment_file->GetID());

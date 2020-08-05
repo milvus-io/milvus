@@ -212,7 +212,7 @@ SegmentWriter::CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr&
     try {
         ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
     } catch (std::exception& er) {
-        return Status(DB_ERROR, "Create a new bloom filter fail");
+        return Status(DB_ERROR, "Create a new bloom filter fail: " + std::string(er.what()));
     }
 
     return Status::OK();
