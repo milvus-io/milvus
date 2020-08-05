@@ -111,6 +111,8 @@ class TestGetBase:
         with pytest.raises(Exception) as e:
             res = connect.get_entity_by_id(collection, ids)
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_entity_same_ids(self, connect, id_collection):
         '''
         target: test.get_entity_by_id, with the same ids
@@ -125,6 +127,8 @@ class TestGetBase:
         assert len(res) == 1
         assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_entity_params_same_ids(self, connect, collection):
         '''
         target: test.get_entity_by_id, with the same ids
@@ -397,6 +401,8 @@ class TestGetBase:
         for i in range(get_pos):
             assert res[i] is None
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_entities_after_delete_compact(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -464,6 +470,7 @@ class TestGetBase:
             enable_flush(connect)
 
     # TODO:
+    @pytest.mark.level(2)
     def test_get_entities_after_delete_same_ids(self, connect, id_collection):
         '''
         target: test.get_entity_by_id
