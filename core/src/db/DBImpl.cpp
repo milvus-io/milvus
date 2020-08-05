@@ -991,9 +991,11 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
         }
 
         LOG_ENGINE_DEBUG_ << "Create BuildIndexJob for " << segment_ids.size() << " segments of " << collection_name;
+        cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before build index
         scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_ids);
         scheduler::JobMgrInst::GetInstance()->Put(job);
         job->WaitFinish();
+        cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after build index
 
         if (!job->status().ok()) {
             LOG_ENGINE_ERROR_ << job->status().message();
