@@ -31,10 +31,6 @@ MergeTask::MergeTask(const DBOptions& options, const snapshot::ScopedSnapshotT& 
 
 Status
 MergeTask::Execute() {
-    if (segments_.size() <= 1) {
-        return Status::OK();
-    }
-
     snapshot::OperationContext context;
     for (auto& id : segments_) {
         auto seg = snapshot_->GetResource<snapshot::Segment>(id);
