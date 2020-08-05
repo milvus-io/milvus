@@ -213,6 +213,7 @@ class TestSearchBase:
             assert res[0]._distances[0] < epsilon
             assert check_id_result(res[0], ids[0])
 
+    @pytest.mark.level(2)
     def test_search_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -242,6 +243,7 @@ class TestSearchBase:
             res = connect.search(collection, query, partition_tags=[tag])
             assert len(res) == nq
 
+    @pytest.mark.level(2)
     def test_search_index_partition_B(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -380,6 +382,7 @@ class TestSearchBase:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
 
+    @pytest.mark.level(2)
     def test_search_ip_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -843,6 +846,7 @@ class TestSearchDSL(object):
     """
 
     # TODO: assert exception
+    @pytest.mark.level(2)
     def test_query_no_must(self, connect, collection):
         '''
         method: build query without must expr
@@ -854,6 +858,7 @@ class TestSearchDSL(object):
             res = connect.search(collection, query)
 
     # TODO: 
+    @pytest.mark.level(2)
     def test_query_no_vector_term_only(self, connect, collection):
         '''
         method: build query without must expr
@@ -886,6 +891,7 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
+    @pytest.mark.level(2)
     def test_query_empty(self, connect, collection):
         '''
         method: search with empty query
@@ -1023,6 +1029,7 @@ class TestSearchDSL(object):
             res = connect.search(collection, query)
 
     # TODO
+    @pytest.mark.level(2)
     def test_query_term_wrong_format_null(self, connect, collection):
         '''
         method: build query with wrong format term
@@ -1249,6 +1256,7 @@ class TestSearchInvalid(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
+    @pytest.mark.level(2)
     def test_search_with_empty_params(self, connect, collection, args, get_simple_index):
         '''
         target: test search fuction, with empty search params
