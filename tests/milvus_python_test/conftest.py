@@ -9,7 +9,6 @@ from utils import *
 timeout = 60
 dimension = 128
 delete_timeout = 60
-default_fields = gen_default_fields() 
 
 
 def pytest_addoption(parser):
@@ -101,7 +100,26 @@ def collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     try:
+        default_fields = gen_default_fields()
         connect.create_collection(collection_name, default_fields)
+    except Exception as e:
+        pytest.exit(str(e))
+    def teardown():
+        collection_names = connect.list_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name, timeout=delete_timeout)
+    request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
+    return collection_name
+
+
+@pytest.fixture(scope="function")
+def id_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
+    try:
+        fields = gen_default_fields(auto_id=True)
+        connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
@@ -117,10 +135,26 @@ def collection(request, connect):
 def binary_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    fields = gen_default_fields()
-    fields["fields"][-1] = {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "params": {"dim": dimension}}
-    logging.getLogger().info(fields)
     try:
+        fields = gen_binary_default_fields()
+        connect.create_collection(collection_name, fields)
+    except Exception as e:
+        pytest.exit(str(e))
+    def teardown():
+        collection_names = connect.list_collections()
+        for collection_name in collection_names:
+            connect.drop_collection(collection_name, timeout=delete_timeout)
+    request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
+    return collection_name
+
+
+@pytest.fixture(scope="function")
+def binary_id_collection(request, connect):
+    ori_collection_name = getattr(request.module, "collection_id", "test")
+    collection_name = gen_unique_str(ori_collection_name)
+    try:
+        fields = gen_binary_default_fields(auto_id=True)
         connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
