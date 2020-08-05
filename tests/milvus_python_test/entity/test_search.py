@@ -533,8 +533,9 @@ class TestSearchBase:
         res = connect.search(collection, query)
         assert abs(np.sqrt(res[0]._distances[0]) - min_distance) <= gen_inaccuracy(res[0]._distances[0])
 
-    # TODO:
-    def _test_search_distance_ip(self, connect, collection):
+    # TODO
+    @pytest.mark.level(2)
+    def test_search_distance_ip(self, connect, collection):
         '''
         target: search collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
