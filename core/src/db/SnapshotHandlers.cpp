@@ -12,8 +12,6 @@
 #include "db/SnapshotHandlers.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
-#include "db/meta/MetaConsts.h"
-#include "db/meta/MetaTypes.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshot.h"
@@ -34,8 +32,7 @@ LoadVectorFieldElementHandler::LoadVectorFieldElementHandler(const std::shared_p
 
 Status
 LoadVectorFieldElementHandler::Handle(const snapshot::FieldElementPtr& field_element) {
-    if (field_->GetFtype() != engine::FieldType::VECTOR_FLOAT &&
-        field_->GetFtype() != engine::FieldType::VECTOR_BINARY) {
+    if (field_->GetFtype() != engine::DataType::VECTOR_FLOAT && field_->GetFtype() != engine::DataType::VECTOR_BINARY) {
         return Status(DB_ERROR, "Should be VECTOR field");
     }
     if (field_->GetID() != field_element->GetFieldId()) {
@@ -52,7 +49,7 @@ LoadVectorFieldHandler::LoadVectorFieldHandler(const std::shared_ptr<server::Con
 
 Status
 LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
-    if (field->GetFtype() != engine::FieldType::VECTOR_FLOAT && field->GetFtype() != engine::FieldType::VECTOR_BINARY) {
+    if (field->GetFtype() != engine::DataType::VECTOR_FLOAT && field->GetFtype() != engine::DataType::VECTOR_BINARY) {
         return Status::OK();
     }
     if (context_ && context_->IsConnectionBroken()) {
@@ -93,7 +90,7 @@ SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss,
 
 Status
 SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
-    if (segment_commit->GetRowCount() < meta::BUILD_INDEX_THRESHOLD) {
+    if (segment_commit->GetRowCount() < engine::BUILD_INDEX_THRESHOLD) {
         return Status::OK();
     }
 
@@ -123,8 +120,9 @@ SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commi
 GetEntityByIdSegmentHandler::GetEntityByIdSegmentHandler(const std::shared_ptr<milvus::server::Context>& context,
                                                          engine::snapshot::ScopedSnapshotT ss,
                                                          const std::string& dir_root, const IDNumbers& ids,
-                                                         const std::vector<std::string>& field_names)
-    : BaseT(ss), context_(context), dir_root_(dir_root), ids_(ids), field_names_(field_names) {
+                                                         const std::vector<std::string>& field_names,
+                                                         std::vector<bool>& valid_row)
+    : BaseT(ss), context_(context), dir_root_(dir_root), ids_(ids), field_names_(field_names), valid_row_(valid_row) {
 }
 
 Status
@@ -137,43 +135,44 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     }
     segment::SegmentReader segment_reader(dir_root_, segment_visitor);
 
-    auto uid_field_visitor = segment_visitor->GetFieldVisitor(DEFAULT_UID_NAME);
+    std::vector<int64_t> uids;
+    STATUS_CHECK(segment_reader.LoadUids(uids));
 
-    // load UID's bloom filter file
     segment::IdBloomFilterPtr id_bloom_filter_ptr;
     STATUS_CHECK(segment_reader.LoadBloomFilter(id_bloom_filter_ptr));
 
-    std::vector<int64_t> uids;
     segment::DeletedDocsPtr deleted_docs_ptr;
+    STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
+
     std::vector<int64_t> offsets;
+    int i = 0;
     for (auto id : ids_) {
         // fast check using bloom filter
         if (!id_bloom_filter_ptr->Check(id)) {
+            i++;
             continue;
         }
 
         // check if id really exists in uids
-        if (uids.empty()) {
-            STATUS_CHECK(segment_reader.LoadUids(uids));  // lazy load
-        }
         auto found = std::find(uids.begin(), uids.end(), id);
         if (found == uids.end()) {
+            i++;
             continue;
         }
 
         // check if this id is deleted
         auto offset = std::distance(uids.begin(), found);
-        if (deleted_docs_ptr == nullptr) {
-            STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));  // lazy load
-        }
         if (deleted_docs_ptr) {
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
             if (deleted != deleted_docs.end()) {
+                i++;
                 continue;
             }
         }
+        valid_row_[i] = true;
         offsets.push_back(offset);
+        i++;
     }
 
     STATUS_CHECK(segment_reader.LoadFieldsEntities(field_names_, offsets, data_chunk_));

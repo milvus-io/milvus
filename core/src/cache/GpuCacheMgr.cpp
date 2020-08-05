@@ -40,24 +40,6 @@ GpuCacheMgr::~GpuCacheMgr() {
     ConfigMgr::GetInstance().Detach("gpu.cache_threshold", this);
 }
 
-DataObjPtr
-GpuCacheMgr::GetIndex(const std::string& key) {
-    DataObjPtr obj = GetItem(key);
-    return obj;
-}
-
-void
-GpuCacheMgr::InsertItem(const std::string& key, const milvus::cache::DataObjPtr& data) {
-    if (gpu_enable_) {
-        CacheMgr<DataObjPtr>::InsertItem(key, data);
-    }
-}
-
-bool
-GpuCacheMgr::Reserve(const int64_t size) {
-    return CacheMgr<DataObjPtr>::Reserve(size);
-}
-
 GpuCacheMgrPtr
 GpuCacheMgr::GetInstance(int64_t gpu_id) {
     if (instance_.find(gpu_id) == instance_.end()) {
@@ -69,9 +51,17 @@ GpuCacheMgr::GetInstance(int64_t gpu_id) {
     return instance_[gpu_id];
 }
 
+bool
+GpuCacheMgr::Reserve(const int64_t size) {
+    return CacheMgr<DataObjPtr>::Reserve(size);
+}
+
 void
 GpuCacheMgr::ConfigUpdate(const std::string& name) {
-    for (auto& it : instance_) it.second->SetCapacity(config.gpu.cache_size());
+    std::lock_guard<std::mutex> lock(global_mutex_);
+    for (auto& it : instance_) {
+        it.second->SetCapacity(config.gpu.cache_size());
+    }
 }
 
 #endif

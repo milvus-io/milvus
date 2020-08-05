@@ -51,5 +51,35 @@ GetThreadName() {
     return thread_name;
 }
 
+void
+log_trace_(const std::string& s) {
+    LOG_KNOWHERE_TRACE_ << s;
+}
+
+void
+log_debug_(const std::string& s) {
+    LOG_KNOWHERE_DEBUG_ << s;
+}
+
+void
+log_info_(const std::string& s) {
+    LOG_KNOWHERE_INFO_ << s;
+}
+
+void
+log_warning_(const std::string& s) {
+    LOG_KNOWHERE_WARNING_ << s;
+}
+
+void
+log_error_(const std::string& s) {
+    LOG_KNOWHERE_ERROR_ << s;
+}
+
+void
+log_fatal_(const std::string& s) {
+    LOG_KNOWHERE_FATAL_ << s;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

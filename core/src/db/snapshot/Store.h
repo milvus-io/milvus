@@ -14,6 +14,7 @@
 #include "codecs/Codec.h"
 #include "db/Utils.h"
 #include "db/meta/MetaFactory.h"
+#include "db/meta/MetaSession.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
@@ -23,6 +24,7 @@
 #include "utils/Log.h"
 #include "utils/Status.h"
 
+#include <fiu-local.h>
 #include <stdlib.h>
 #include <time.h>
 #include <any>
@@ -46,6 +48,17 @@
 namespace milvus {
 namespace engine {
 namespace snapshot {
+
+class Store;
+struct ApplyContext {
+    using ApplyFunc = std::function<Status(int64_t&)>;
+    using SuccessCBT = std::function<Status(ID_TYPE)>;
+    using ErrorCBT = std::function<Status(Status)>;
+    using TimeoutCBT = std::function<Status(std::shared_ptr<Store>)>;
+    SuccessCBT on_succes_cb = {};
+    ErrorCBT on_error_cb = {};
+    TimeoutCBT on_timeout_cb = {};
+};
 
 class Store : public std::enable_shared_from_this<Store> {
  public:
@@ -78,7 +91,7 @@ class Store : public std::enable_shared_from_this<Store> {
 
     template <typename OpT>
     Status
-    ApplyOperation(OpT& op) {
+    ApplyOperation(OpT& op, ApplyContext& context) {
         auto session = adapter_->CreateSession();
         std::apply(
             [&](auto&... step_context_set) {
@@ -89,8 +102,17 @@ class Store : public std::enable_shared_from_this<Store> {
 
         ID_TYPE result_id;
         auto status = session->Commit(result_id);
-        if (status.ok()) {
-            op.SetStepResult(result_id);
+        fiu_do_on("Store.ApplyOperation.mock_timeout", { status = Status(SS_TIMEOUT, "Mock Timeout"); });
+
+        if (status.ok() && context.on_succes_cb) {
+            return context.on_succes_cb(result_id);
+        } else if (status.code() == SS_TIMEOUT && context.on_timeout_cb) {
+            return context.on_timeout_cb(shared_from_this());
+            /* return context.on_timeout_cb( */
+            /*         std::bind(static_cast<Status(meta::MetaSession::*)(int64_t&)>( */
+            /*                 &meta::MetaSession::Commit), session, std::placeholders::_1)); */
+        } else if (context.on_error_cb) {
+            return context.on_error_cb(status);
         }
 
         return status;
@@ -262,7 +284,7 @@ class Store : public std::enable_shared_from_this<Store> {
                 std::stringstream fname;
                 fname << "f_" << fi << "_" << ++id_map[FieldElement::Name];
 
-                Field temp_f(fname.str(), fi, FieldType::VECTOR_FLOAT);
+                Field temp_f(fname.str(), fi, DataType::VECTOR_FLOAT);
                 FieldPtr field;
 
                 temp_f.Activate();
@@ -374,7 +396,6 @@ class Store : public std::enable_shared_from_this<Store> {
 };
 
 using StorePtr = Store::Ptr;
-
 }  // namespace snapshot
 }  // namespace engine
 }  // namespace milvus

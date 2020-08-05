@@ -46,7 +46,8 @@ using PartitionContext = milvus::engine::snapshot::PartitionContext;
 using DropIndexOperation = milvus::engine::snapshot::DropIndexOperation;
 using AddFieldElementOperation = milvus::engine::snapshot::AddFieldElementOperation;
 using DropAllIndexOperation = milvus::engine::snapshot::DropAllIndexOperation;
-using AddSegmentFileOperation = milvus::engine::snapshot::AddSegmentFileOperation;
+using ChangeSegmentFileOperation = milvus::engine::snapshot::ChangeSegmentFileOperation;
+using CompoundSegmentsOperation = milvus::engine::snapshot::CompoundSegmentsOperation;
 using MergeOperation = milvus::engine::snapshot::MergeOperation;
 using CreateCollectionOperation = milvus::engine::snapshot::CreateCollectionOperation;
 using NewSegmentOperation = milvus::engine::snapshot::NewSegmentOperation;
@@ -64,6 +65,8 @@ using Segment = milvus::engine::snapshot::Segment;
 using SegmentPtr = milvus::engine::snapshot::SegmentPtr;
 using SegmentFile = milvus::engine::snapshot::SegmentFile;
 using SegmentFilePtr = milvus::engine::snapshot::SegmentFilePtr;
+using SegmentCommit = milvus::engine::snapshot::SegmentCommit;
+using SegmentCommitPtr = milvus::engine::snapshot::SegmentCommitPtr;
 using Field = milvus::engine::snapshot::Field;
 using FieldElement = milvus::engine::snapshot::FieldElement;
 using FieldElementPtr = milvus::engine::snapshot::FieldElementPtr;
@@ -95,10 +98,15 @@ RandomInt(int start, int end) {
 }
 
 inline void
-SFContextBuilder(SegmentFileContext& ctx, ScopedSnapshotT sss) {
+SFContextBuilder(SegmentFileContext& ctx, ScopedSnapshotT sss,
+        const std::set<std::string>& exclude_field_element_names = {}) {
     auto field = sss->GetResources<Field>().begin()->second;
     ctx.field_name = field->GetName();
     for (auto& kv : sss->GetResources<FieldElement>()) {
+        auto name = kv.second->GetName();
+        if (exclude_field_element_names.find(name) != exclude_field_element_names.end()) {
+            continue;
+        }
         ctx.field_element_name = kv.second->GetName();
         break;
     }
@@ -212,11 +220,11 @@ CreateCollection(const std::string& collection_name, const LSN_TYPE& lsn) {
     auto collection_schema = std::make_shared<Collection>(collection_name);
     context.collection = collection_schema;
     auto vector_field = std::make_shared<Field>("vector", 0,
-            milvus::engine::FieldType::VECTOR_FLOAT);
+            milvus::engine::DataType::VECTOR_FLOAT);
     auto vector_field_element = std::make_shared<FieldElement>(0, 0, "ivfsq8",
             milvus::engine::FieldElementType::FET_INDEX);
     auto int_field = std::make_shared<Field>("int", 0,
-            milvus::engine::FieldType::INT32);
+            milvus::engine::DataType::INT32);
     context.fields_schema[vector_field] = {vector_field_element};
     context.fields_schema[int_field] = {};
 
@@ -283,6 +291,30 @@ CreateSegment(ScopedSnapshotT ss, ID_TYPE partition_id, LSN_TYPE lsn, const Segm
     return op->GetSnapshot(ss);
 }
 
+inline Status
+CreateSegment(ScopedSnapshotT ss, ID_TYPE partition_id, LSN_TYPE lsn,
+        const std::vector<SegmentFileContext>& sfs_context,
+        SIZE_TYPE row_cnt) {
+    OperationContext context;
+    context.lsn = lsn;
+    context.prev_partition = ss->GetResource<Partition>(partition_id);
+    auto op = std::make_shared<NewSegmentOperation>(context, ss);
+    SegmentPtr new_seg;
+    STATUS_CHECK(op->CommitNewSegment(new_seg));
+    for (auto& sf_context : sfs_context) {
+        SegmentFilePtr seg_file;
+        auto nsf_context = sf_context;
+        nsf_context.segment_id = new_seg->GetID();
+        nsf_context.partition_id = new_seg->GetPartitionId();
+        STATUS_CHECK(op->CommitNewSegmentFile(nsf_context, seg_file));
+        seg_file->SetSize(row_cnt * 10);
+    }
+    op->CommitRowCount(row_cnt);
+    STATUS_CHECK(op->Push());
+
+    return op->GetSnapshot(ss);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 class BaseTest : public ::testing::Test {
  protected:
@@ -320,6 +352,9 @@ class DBTest : public BaseTest {
     SetUp() override;
     void
     TearDown() override;
+
+ protected:
+    std::shared_ptr<milvus::server::Context> dummy_context_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

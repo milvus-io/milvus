@@ -23,25 +23,24 @@
 namespace milvus {
 namespace server {
 
-constexpr uint64_t MAX_PARTITION_LIMIT = 4096;
+constexpr uint64_t MAX_PARTITION_NUM = 4096;
 
-CreatePartitionReq::CreatePartitionReq(const std::shared_ptr<milvus::server::Context>& context,
-                                       const std::string& collection_name, const std::string& tag)
-    : BaseReq(context, BaseReq::kCreatePartition), collection_name_(collection_name), tag_(tag) {
+CreatePartitionReq::CreatePartitionReq(const ContextPtr& context, const std::string& collection_name,
+                                       const std::string& tag)
+    : BaseReq(context, ReqType::kCreatePartition), collection_name_(collection_name), tag_(tag) {
 }
 
 BaseReqPtr
-CreatePartitionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                           const std::string& tag) {
+CreatePartitionReq::Create(const ContextPtr& context, const std::string& collection_name, const std::string& tag) {
     return std::shared_ptr<BaseReq>(new CreatePartitionReq(context, collection_name, tag));
 }
 
 Status
 CreatePartitionReq::OnExecute() {
-    std::string hdr = "CreatePartitionReq(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
-    TimeRecorderAuto rc(hdr);
-
     try {
+        std::string hdr = "CreatePartitionReq(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
+        TimeRecorderAuto rc(hdr);
+
         // step 1: check arguments
         if (tag_ == milvus::engine::DEFAULT_PARTITON_TAG) {
             return Status(SERVER_INVALID_PARTITION_TAG, "'_default' is built-in partition tag");
@@ -57,15 +56,15 @@ CreatePartitionReq::OnExecute() {
         bool exist = false;
         status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
         // check partition total count
         std::vector<std::string> partition_names;
         status = DBWrapper::DB()->ListPartitions(collection_name_, partition_names);
-        if (partition_names.size() >= MAX_PARTITION_LIMIT) {
+        if (partition_names.size() >= MAX_PARTITION_NUM) {
             std::stringstream err_ss;
-            err_ss << "The number of partitions exceeds the upper limit (" << MAX_PARTITION_LIMIT << ")";
+            err_ss << "The number of partitions exceeds the upper limit (" << MAX_PARTITION_NUM << ")";
             return Status(SERVER_UNSUPPORTED_ERROR, err_ss.str());
         }
 
@@ -76,6 +75,7 @@ CreatePartitionReq::OnExecute() {
         fiu_do_on("CreatePartitionReq.OnExecute.create_partition_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreatePartitionRequest.OnExecute.throw_std_exception", throw std::exception());
+        rc.ElapseFromBegin("done");
         return status;
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());

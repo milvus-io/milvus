@@ -24,14 +24,12 @@ namespace server {
 class InsertReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           const std::string& partition_name, const int64_t& row_count,
-           std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
+    Create(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
+           const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
 
  protected:
-    InsertReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-              const std::string& partition_name, const int64_t& row_count,
-              std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
+    InsertReq(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
+              const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
 
     Status
     OnExecute() override;

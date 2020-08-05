@@ -15,22 +15,18 @@
 #include "utils/TimeRecorder.h"
 
 #include <fiu-local.h>
-#include <memory>
 #include <string>
-#include <vector>
 
 namespace milvus {
 namespace server {
 
-ListCollectionsReq::ListCollectionsReq(const std::shared_ptr<milvus::server::Context>& context,
-                                       std::vector<std::string>& collection_list)
-    : BaseReq(context, BaseReq::kListCollections), collection_list_(collection_list) {
+ListCollectionsReq::ListCollectionsReq(const ContextPtr& context, std::vector<std::string>& collection_list)
+    : BaseReq(context, ReqType::kListCollections), collection_list_(collection_list) {
 }
 
 BaseReqPtr
-ListCollectionsReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                           std::vector<std::string>& collection_name_list) {
-    return std::shared_ptr<BaseReq>(new ListCollectionsReq(context, collection_name_list));
+ListCollectionsReq::Create(const ContextPtr& context, std::vector<std::string>& collection_list) {
+    return std::shared_ptr<BaseReq>(new ListCollectionsReq(context, collection_list));
 }
 
 Status

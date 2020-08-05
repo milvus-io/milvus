@@ -32,10 +32,9 @@
 namespace milvus {
 namespace server {
 
-InsertReq::InsertReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                     const std::string& partition_name, const int64_t& row_count,
-                     std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data)
-    : BaseReq(context, BaseReq::kInsert),
+InsertReq::InsertReq(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
+                     const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data)
+    : BaseReq(context, ReqType::kInsert),
       collection_name_(collection_name),
       partition_name_(partition_name),
       row_count_(row_count),
@@ -43,9 +42,8 @@ InsertReq::InsertReq(const std::shared_ptr<milvus::server::Context>& context, co
 }
 
 BaseReqPtr
-InsertReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                  const std::string& partition_name, const int64_t& row_count,
-                  std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
+InsertReq::Create(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
+                  const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
     return std::shared_ptr<BaseReq>(new InsertReq(context, collection_name, partition_name, row_count, chunk_data));
 }
 
@@ -64,21 +62,24 @@ InsertReq::OnExecute() {
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
         engine::DataChunkPtr data_chunk = std::make_shared<engine::DataChunk>();
         data_chunk->count_ = row_count_;
-        data_chunk->fixed_fields_.swap(chunk_data_);
+        for (auto& pair : chunk_data_) {
+            engine::BinaryDataPtr bin = std::make_shared<engine::BinaryData>();
+            bin->data_.swap(pair.second);
+            data_chunk->fixed_fields_.insert(std::make_pair(pair.first, bin));
+        }
         status = DBWrapper::DB()->Insert(collection_name_, partition_name_, data_chunk);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "Insert", 0, status.message().c_str());
             return status;
         }
-        chunk_data_[engine::DEFAULT_UID_NAME] = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
+        chunk_data_[engine::DEFAULT_UID_NAME] = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME]->data_;
 
-        rc.RecordSection("add entities");
-        rc.ElapseFromBegin("total cost");
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

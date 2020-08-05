@@ -19,7 +19,7 @@
 #include <string>
 #include <thread>
 #include <utility>
-#include <fiu-local.h>
+#include <fiu-control.h>
 #include <random>
 
 #include "cache/CpuCacheMgr.h"
@@ -182,10 +182,13 @@ BaseTest::SnapshotStop() {
 void
 BaseTest::SetUp() {
     InitLog();
+    fiu_init(0);
+    fiu_enable_random("Store.ApplyOperation.mock_timeout", 1, nullptr, 0, 0.2);
 }
 
 void
 BaseTest::TearDown() {
+    fiu_disable("Store.ApplyOperation.mock_timeout");
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -208,6 +211,8 @@ SnapshotTest::TearDown() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 milvus::engine::DBOptions
 DBTest::GetOptions() {
+    milvus::cache::CpuCacheMgr::GetInstance().SetCapacity(256 * milvus::engine::MB);
+
     auto options = milvus::engine::DBOptions();
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
@@ -219,6 +224,15 @@ void
 DBTest::SetUp() {
     BaseTest::SetUp();
     BaseTest::SnapshotStart(false, GetOptions());
+
+    dummy_context_ = std::make_shared<milvus::server::Context>("dummy_request_id");
+    opentracing::mocktracer::MockTracerOptions tracer_options;
+    auto mock_tracer =
+        std::shared_ptr<opentracing::Tracer>{new opentracing::mocktracer::MockTracer{std::move(tracer_options)}};
+    auto mock_span = mock_tracer->StartSpan("mock_span");
+    auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
+    dummy_context_->SetTraceContext(trace_context);
+
     db_ = std::make_shared<milvus::engine::DBImpl>(GetOptions());
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
@@ -241,6 +255,8 @@ DBTest::SetUp() {
 
 void
 DBTest::TearDown() {
+    db_ = nullptr; // db must be stopped before JobMgr and Snapshot
+
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
     milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
@@ -248,7 +264,6 @@ DBTest::TearDown() {
     milvus::scheduler::ResMgrInst::GetInstance()->Clear();
 
     BaseTest::SnapshotStop();
-    db_ = nullptr;
     auto options = GetOptions();
     boost::filesystem::remove_all(options.meta_.path_);
 
@@ -321,13 +336,14 @@ SchedulerTest::SetUp() {
 
 void
 SchedulerTest::TearDown() {
+    db_ = nullptr; // db must be stopped before JobMgr and Snapshot
+
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
     milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
     milvus::scheduler::ResMgrInst::GetInstance()->Stop();
     milvus::scheduler::ResMgrInst::GetInstance()->Clear();
 
-    db_ = nullptr;
     BaseTest::SnapshotStop();
     BaseTest::TearDown();
 }

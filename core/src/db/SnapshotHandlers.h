@@ -25,7 +25,7 @@
 namespace milvus {
 namespace engine {
 
-struct LoadVectorFieldElementHandler : public snapshot::IterateHandler<snapshot::FieldElement> {
+struct LoadVectorFieldElementHandler : public snapshot::FieldElementIterator {
     using ResourceT = snapshot::FieldElement;
     using BaseT = snapshot::IterateHandler<ResourceT>;
     LoadVectorFieldElementHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
@@ -38,7 +38,7 @@ struct LoadVectorFieldElementHandler : public snapshot::IterateHandler<snapshot:
     const snapshot::FieldPtr field_;
 };
 
-struct LoadVectorFieldHandler : public snapshot::IterateHandler<snapshot::Field> {
+struct LoadVectorFieldHandler : public snapshot::FieldIterator {
     using ResourceT = snapshot::Field;
     using BaseT = snapshot::IterateHandler<ResourceT>;
     LoadVectorFieldHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss);
@@ -49,7 +49,7 @@ struct LoadVectorFieldHandler : public snapshot::IterateHandler<snapshot::Field>
     const server::ContextPtr context_;
 };
 
-struct SegmentsToSearchCollector : public snapshot::IterateHandler<snapshot::SegmentCommit> {
+struct SegmentsToSearchCollector : public snapshot::SegmentCommitIterator {
     using ResourceT = snapshot::SegmentCommit;
     using BaseT = snapshot::IterateHandler<ResourceT>;
     SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids);
@@ -60,7 +60,7 @@ struct SegmentsToSearchCollector : public snapshot::IterateHandler<snapshot::Seg
     snapshot::IDS_TYPE& segment_ids_;
 };
 
-struct SegmentsToIndexCollector : public snapshot::IterateHandler<snapshot::SegmentCommit> {
+struct SegmentsToIndexCollector : public snapshot::SegmentCommitIterator {
     using ResourceT = snapshot::SegmentCommit;
     using BaseT = snapshot::IterateHandler<ResourceT>;
     SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss, const std::string& field_name,
@@ -74,12 +74,12 @@ struct SegmentsToIndexCollector : public snapshot::IterateHandler<snapshot::Segm
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-struct GetEntityByIdSegmentHandler : public snapshot::IterateHandler<snapshot::Segment> {
+struct GetEntityByIdSegmentHandler : public snapshot::SegmentIterator {
     using ResourceT = snapshot::Segment;
     using BaseT = snapshot::IterateHandler<ResourceT>;
     GetEntityByIdSegmentHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
                                 const std::string& dir_root, const IDNumbers& ids,
-                                const std::vector<std::string>& field_names);
+                                const std::vector<std::string>& field_names, std::vector<bool>& valid_row);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
@@ -89,6 +89,7 @@ struct GetEntityByIdSegmentHandler : public snapshot::IterateHandler<snapshot::S
     const engine::IDNumbers ids_;
     const std::vector<std::string> field_names_;
     engine::DataChunkPtr data_chunk_;
+    std::vector<bool>& valid_row_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -26,8 +26,9 @@ namespace scheduler {
 
 class SearchTask : public Task {
  public:
-    explicit SearchTask(const server::ContextPtr& context, const engine::DBOptions& options,
-                        const query::QueryPtr& query_ptr, engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
+    explicit SearchTask(const server::ContextPtr& context, engine::snapshot::ScopedSnapshotT snapshot,
+                        const engine::DBOptions& options, const query::QueryPtr& query_ptr,
+                        engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
 
     inline json
     Dump() const override {
@@ -44,6 +45,10 @@ class SearchTask : public Task {
     Status
     OnExecute() override;
 
+    static void
+    MergeTopkToResultSet(const engine::ResultIds& src_ids, const engine::ResultDistances& src_distances, size_t src_k,
+                         size_t nq, size_t topk, bool ascending, engine::QueryResultPtr& result);
+
     int64_t
     nq();
 
@@ -53,12 +58,17 @@ class SearchTask : public Task {
 
  public:
     const std::shared_ptr<server::Context> context_;
+    engine::snapshot::ScopedSnapshotT snapshot_;
 
     const engine::DBOptions& options_;
     query::QueryPtr query_ptr_;
     engine::snapshot::ID_TYPE segment_id_;
 
     engine::ExecutionEnginePtr execution_engine_;
+
+    // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
+    // similarity -- infinity value means two vectors equal, descending reduce, IP
+    bool ascending_reduce_ = true;
 };
 
 }  // namespace scheduler

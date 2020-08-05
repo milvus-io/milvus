@@ -21,39 +21,43 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <memory>
-#include <unordered_map>
-#include <vector>
-
 namespace milvus {
 namespace server {
 
-GetCollectionStatsReq::GetCollectionStatsReq(const std::shared_ptr<milvus::server::Context>& context,
-                                             const std::string& collection_name, std::string& collection_stats)
-    : BaseReq(context, BaseReq::kGetCollectionStats),
+GetCollectionStatsReq::GetCollectionStatsReq(const ContextPtr& context, const std::string& collection_name,
+                                             std::string& collection_stats)
+    : BaseReq(context, ReqType::kGetCollectionStats),
       collection_name_(collection_name),
       collection_stats_(collection_stats) {
 }
 
 BaseReqPtr
-GetCollectionStatsReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                              const std::string& collection_name, std::string& collection_stats) {
+GetCollectionStatsReq::Create(const ContextPtr& context, const std::string& collection_name,
+                              std::string& collection_stats) {
     return std::shared_ptr<BaseReq>(new GetCollectionStatsReq(context, collection_name, collection_stats));
 }
 
 Status
 GetCollectionStatsReq::OnExecute() {
-    std::string hdr = "GetCollectionStatsReq(collection=" + collection_name_ + ")";
-    TimeRecorderAuto rc(hdr);
+    try {
+        std::string hdr = "GetCollectionStatsReq(collection=" + collection_name_ + ")";
+        TimeRecorderAuto rc(hdr);
 
-    bool exist = false;
-    auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
-    if (!exist) {
-        return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+
+        bool exist = false;
+        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
+        }
+
+        milvus::json json_stats;
+        STATUS_CHECK(DBWrapper::DB()->GetCollectionStats(collection_name_, json_stats));
+        collection_stats_ = json_stats.dump();
+        rc.ElapseFromBegin("done");
+    } catch (std::exception& ex) {
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
-
-    STATUS_CHECK(DBWrapper::DB()->GetCollectionStats(collection_name_, collection_stats_));
-    rc.ElapseFromBegin("done");
 
     return Status::OK();
 }

@@ -31,15 +31,5 @@ class Index : public milvus::cache::DataObj {
 
 using IndexPtr = std::shared_ptr<Index>;
 
-// todo: remove from knowhere
-class ToIndexData : public milvus::cache::DataObj {
- public:
-    explicit ToIndexData(int64_t size) : size_(size) {
-    }
-
- private:
-    int64_t size_ = 0;
-};
-
 }  // namespace knowhere
 }  // namespace milvus

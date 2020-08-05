@@ -31,87 +31,84 @@ class ReqHandler {
     ReqHandler() = default;
 
     Status
-    CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-                     std::unordered_map<std::string, milvus::json>& field_index_params,
-                     std::unordered_map<std::string, std::string>& field_params, milvus::json& json_params);
+    CreateCollection(const ContextPtr& context, const std::string& collection_name, FieldsType& fields,
+                     milvus::json& json_params);
 
     Status
-    DropCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
+    DropCollection(const ContextPtr& context, const std::string& collection_name);
 
     Status
-    HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name, bool& has_collection);
+    HasCollection(const ContextPtr& context, const std::string& collection_name, bool& has_collection);
 
     Status
-    ListCollections(const std::shared_ptr<Context>& context, std::vector<std::string>& collections);
+    ListCollections(const ContextPtr& context, std::vector<std::string>& collections);
 
     Status
-    GetCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name,
+    GetCollectionInfo(const ContextPtr& context, const std::string& collection_name,
                       CollectionSchema& collection_schema);
 
     Status
-    GetCollectionStats(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                       std::string& collection_stats);
+    GetCollectionStats(const ContextPtr& context, const std::string& collection_name, std::string& collection_stats);
 
     Status
-    CountEntities(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count);
+    CountEntities(const ContextPtr& context, const std::string& collection_name, int64_t& count);
 
     Status
-    CreatePartition(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                    const std::string& tag);
+    CreatePartition(const ContextPtr& context, const std::string& collection_name, const std::string& tag);
 
     Status
-    DropPartition(const std::shared_ptr<Context>& context, const std::string& collection_name, const std::string& tag);
+    DropPartition(const ContextPtr& context, const std::string& collection_name, const std::string& tag);
 
     Status
-    HasPartition(const std::shared_ptr<Context>& context, const std::string& collection_name, const std::string& tag,
+    HasPartition(const ContextPtr& context, const std::string& collection_name, const std::string& tag,
                  bool& has_partition);
 
     Status
-    ListPartitions(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                   std::vector<std::string>& partitions);
+    ListPartitions(const ContextPtr& context, const std::string& collection_name, std::vector<std::string>& partitions);
 
     Status
-    CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                const std::string& field_name, const std::string& index_name, const milvus::json& json_params);
+    CreateIndex(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+                const std::string& index_name, const milvus::json& json_params);
 
     Status
-    DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-              const std::string& field_name, const std::string& index_name);
+    DescribeIndex(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+                  std::string& index_name, milvus::json& json_params);
 
     Status
-    Insert(const std::shared_ptr<Context>& context, const std::string& collection_name,
-           const std::string& partition_name, const int64_t& row_count,
-           std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
+    DropIndex(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+              const std::string& index_name);
 
     Status
-    GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                  const engine::IDNumbers& ids, std::vector<std::string>& field_names,
-                  engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk);
+    Insert(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
+           const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
 
     Status
-    DeleteEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                     const engine::IDNumbers& ids);
+    GetEntityByID(const ContextPtr& context, const std::string& collection_name, const engine::IDNumbers& ids,
+                  std::vector<std::string>& field_names, std::vector<bool>& valid_row,
+                  engine::snapshot::FieldElementMappings& field_mappings, engine::DataChunkPtr& data_chunk);
 
     Status
-    Search(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-           const milvus::json& json_params, engine::QueryResultPtr& result);
+    DeleteEntityByID(const ContextPtr& context, const std::string& collection_name, const engine::IDNumbers& ids);
 
     Status
-    ListIDInSegment(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t segment_id,
+    Search(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
+           engine::snapshot::FieldElementMappings& collection_mappings, engine::QueryResultPtr& result);
+
+    Status
+    ListIDInSegment(const ContextPtr& context, const std::string& collection_name, int64_t segment_id,
                     engine::IDNumbers& ids);
 
     Status
-    LoadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
+    LoadCollection(const ContextPtr& context, const std::string& collection_name);
 
     Status
-    Flush(const std::shared_ptr<Context>& context, const std::vector<std::string>& collection_names);
+    Flush(const ContextPtr& context, const std::vector<std::string>& collection_names);
 
     Status
-    Compact(const std::shared_ptr<Context>& context, const std::string& collection_name, double compact_threshold);
+    Compact(const ContextPtr& context, const std::string& collection_name, double compact_threshold);
 
     Status
-    Cmd(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& reply);
+    Cmd(const ContextPtr& context, const std::string& cmd, std::string& reply);
 };
 
 }  // namespace server

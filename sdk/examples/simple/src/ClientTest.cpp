@@ -27,7 +27,7 @@ const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 constexpr int64_t COLLECTION_DIMENSION = 512;
 constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ENTITY_COUNT = 6000;
+constexpr int64_t BATCH_ENTITY_COUNT = 4000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 32;
@@ -114,7 +114,7 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     field_ptr4->extra_params = extra_params_4.dump();
 
     JSON extra_params;
-    extra_params["segment_size"] = 1024;
+    extra_params["segment_row_count"] = 1024;
     milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr3, field_ptr4}};
 
     milvus::Status stat = conn_->CreateCollection(mapping, extra_params.dump());
@@ -130,7 +130,7 @@ ClientTest::GetCollectionInfo(const std::string& collection_name) {
 }
 
 void
-ClientTest::Insert(const std::string& collection_name) {
+ClientTest::InsertEntities(const std::string& collection_name) {
     for (int64_t i = 0; i < ADD_ENTITY_LOOP; i++) {
         milvus::FieldValue field_value;
         std::vector<int64_t> entity_ids;
@@ -332,24 +332,25 @@ ClientTest::Test() {
     ListCollections(table_array);
     CountEntities(collection_name);
 
-//    InsertEntities(collection_name);
-//    Flush(collection_name);
-//    CountEntities(collection_name);
-//    GetCollectionStats(collection_name);
-//
-//    BuildVectors(NQ, COLLECTION_DIMENSION);
-//    GetEntityByID(collection_name, search_id_array_);
-//    SearchEntities(collection_name, TOP_K, NPROBE);
-//    GetCollectionStats(collection_name);
-//
-//    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
-//    DeleteByIds(collection_name, delete_ids);
-//    GetEntityByID(collection_name, search_id_array_);
-//    CompactCollection(collection_name);
-//
-//    LoadCollection(collection_name);
-//    SearchEntities(collection_name, TOP_K, NPROBE);  // this line get two search error since we delete two entities
-//
-//    DropIndex(collection_name, "field_vec", "index_3");
-    DropCollection(collection_name);
+    InsertEntities(collection_name);
+    Flush(collection_name);
+    CountEntities(collection_name);
+    //    GetCollectionStats(collection_name);
+    //
+    BuildVectors(NQ, COLLECTION_DIMENSION);
+    //    GetEntityByID(collection_name, search_id_array_);
+    SearchEntities(collection_name, TOP_K, NPROBE);
+    //    GetCollectionStats(collection_name);
+    //
+    //    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
+    //    DeleteByIds(collection_name, delete_ids);
+    //    GetEntityByID(collection_name, search_id_array_);
+    //    CompactCollection(collection_name);
+    //
+    //    LoadCollection(collection_name);
+    //    SearchEntities(collection_name, TOP_K, NPROBE);  // this line get two search error since we delete two
+    //    entities
+    //
+    //    DropIndex(collection_name, "field_vec", "index_3");
+    //    DropCollection(collection_name);
 }

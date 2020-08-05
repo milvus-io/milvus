@@ -27,6 +27,7 @@
 #include "db/snapshot/Snapshots.h"
 #include "insert/MemManagerFactory.h"
 #include "knowhere/index/vector_index/helpers/BuilderSuspend.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "metrics/Metrics.h"
 #include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
@@ -73,10 +74,16 @@ DBImpl::DBImpl(const DBOptions& options)
         //        mxlog_config.mxlog_path = options_.mxlog_path_;
         //        wal_mgr_ = std::make_shared<wal::WalManager>(mxlog_config);
     }
+
+    /* watch on storage.auto_flush_interval */
+    ConfigMgr::GetInstance().Attach("storage.auto_flush_interval", this);
+
     Start();
 }
 
 DBImpl::~DBImpl() {
+    ConfigMgr::GetInstance().Detach("storage.auto_flush_interval", this);
+
     Stop();
 }
 
@@ -97,6 +104,8 @@ DBImpl::Start() {
     snapshot::EventExecutor::Init(store);
     snapshot::EventExecutor::GetInstance().Start();
     snapshot::Snapshots::GetInstance().Init(store);
+
+    knowhere::enable_faiss_logging();
 
     // LOG_ENGINE_TRACE_ << "DB service start";
     initialized_.store(true, std::memory_order_release);
@@ -203,18 +212,25 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     CHECK_INITIALIZED;
 
     auto ctx = context;
-    // check uid existence/validation
+    // check uid params
     bool has_uid = false;
     for (auto& pair : ctx.fields_schema) {
-        if (pair.first->GetFtype() == meta::hybrid::DataType::UID) {
+        if (pair.first->GetName() == DEFAULT_UID_NAME) {
             has_uid = true;
+            json params = pair.first->GetParams();
+            if (params.find(PARAM_UID_AUTOGEN) == params.end()) {
+                params[PARAM_UID_AUTOGEN] = true;
+                pair.first->SetParams(params);
+            }
             break;
         }
     }
 
     // add uid field if not specified
     if (!has_uid) {
-        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, milvus::engine::FieldType::UID);
+        json params;
+        params[PARAM_UID_AUTOGEN] = true;
+        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, DataType::INT64, params);
         auto bloom_filter_element = std::make_shared<snapshot::FieldElement>(
             0, 0, DEFAULT_BLOOM_FILTER_NAME, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
         auto delete_doc_element = std::make_shared<snapshot::FieldElement>(
@@ -245,7 +261,7 @@ DBImpl::DropCollection(const std::string& name) {
         /* wal_mgr_->DropCollection(ss->GetCollectionId()); */
     }
 
-    mem_mgr_->EraseMemVector(ss->GetCollectionId());  // not allow insert
+    mem_mgr_->EraseMem(ss->GetCollectionId());  // not allow insert
 
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
@@ -258,7 +274,7 @@ DBImpl::HasCollection(const std::string& collection_name, bool& has_or_not) {
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
     has_or_not = status.ok();
 
-    return status;
+    return Status::OK();
 }
 
 Status
@@ -271,7 +287,7 @@ DBImpl::ListCollections(std::vector<std::string>& names) {
 
 Status
 DBImpl::GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                          snapshot::CollectionMappings& fields_schema) {
+                          snapshot::FieldElementMappings& fields_schema) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
@@ -286,13 +302,10 @@ DBImpl::GetCollectionInfo(const std::string& collection_name, snapshot::Collecti
 }
 
 Status
-DBImpl::GetCollectionStats(const std::string& collection_name, std::string& collection_stats) {
+DBImpl::GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) {
     CHECK_INITIALIZED;
 
-    nlohmann::json json;
-    STATUS_CHECK(GetSnapshotInfo(collection_name, json));
-
-    collection_stats = json.dump();
+    STATUS_CHECK(GetSnapshotInfo(collection_name, collection_stats));
     return Status::OK();
 }
 
@@ -339,7 +352,7 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     // SS TODO: Is below step needed? Or How to implement it?
-    /* mem_mgr_->EraseMemVector(partition_name); */
+    /* mem_mgr_->EraseMem(partition_name); */
 
     snapshot::PartitionContext context;
     context.name = partition_name;
@@ -382,6 +395,8 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
                     const std::string& field_name, const CollectionIndex& index) {
     CHECK_INITIALIZED;
 
+    LOG_ENGINE_DEBUG_ << "Create index for collection: " << collection_name << " field: " << field_name;
+
     // step 1: wait merge file thread finished to avoid duplicate data bug
     auto status = Flush();
     WaitMergeFileFinish();  // let merge file thread finish
@@ -396,7 +411,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
     }
 
     // step 3: drop old index
-    DropIndex(collection_name);
+    DropIndex(collection_name, field_name);
     WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
 
     // step 4: create field element for index
@@ -435,35 +450,24 @@ Status
 DBImpl::DropIndex(const std::string& collection_name, const std::string& field_name) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
+    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name << " field: " << field_name;
 
     STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
 
     std::set<std::string> merge_collection_names = {collection_name};
     StartMergeTask(merge_collection_names, true);
+
     return Status::OK();
 }
 
 Status
-DBImpl::DropIndex(const std::string& collection_name) {
+DBImpl::DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name;
+    LOG_ENGINE_DEBUG_ << "Describe index for collection: " << collection_name << " field: " << field_name;
 
-    std::vector<std::string> field_names;
-    {
-        snapshot::ScopedSnapshotT ss;
-        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-        field_names = ss->GetFieldNames();
-    }
+    STATUS_CHECK(GetSnapshotIndex(collection_name, field_name, index));
 
-    snapshot::OperationContext context;
-    for (auto& field_name : field_names) {
-        STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
-    }
-
-    std::set<std::string> merge_collection_names = {collection_name};
-    StartMergeTask(merge_collection_names, true);
     return Status::OK();
 }
 
@@ -483,14 +487,43 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         return Status(DB_NOT_FOUND, "Fail to get partition " + partition_name);
     }
 
-    // Generate id
-    if (data_chunk->fixed_fields_.find(engine::DEFAULT_UID_NAME) == data_chunk->fixed_fields_.end()) {
+    auto id_field = ss->GetField(DEFAULT_UID_NAME);
+    if (id_field == nullptr) {
+        return Status(DB_ERROR, "Field '_id' not found");
+    }
+
+    auto& params = id_field->GetParams();
+    bool auto_increment = true;
+    if (params.find(PARAM_UID_AUTOGEN) != params.end()) {
+        auto_increment = params[PARAM_UID_AUTOGEN];
+    }
+
+    // id is auto increment, but client provides id, return error
+    FIXEDX_FIELD_MAP& fields = data_chunk->fixed_fields_;
+    if (auto_increment) {
+        auto pair = fields.find(engine::DEFAULT_UID_NAME);
+        if (pair != fields.end() && pair->second != nullptr) {
+            return Status(DB_ERROR, "Field '_id' is auto increment, no need to provide id");
+        }
+    }
+
+    // id is not auto increment, but client doesn't provide id, return error
+    if (!auto_increment) {
+        auto pair = fields.find(engine::DEFAULT_UID_NAME);
+        if (pair == fields.end() || pair->second == nullptr) {
+            return Status(DB_ERROR, "Field '_id' is user defined");
+        }
+    }
+
+    // generate id
+    if (auto_increment) {
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         IDNumbers ids;
         STATUS_CHECK(id_generator.GetNextIDNumbers(data_chunk->count_, ids));
-        FIXED_FIELD_DATA& id_data = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
-        id_data.resize(ids.size() * sizeof(int64_t));
-        memcpy(id_data.data(), ids.data(), ids.size() * sizeof(int64_t));
+        BinaryDataPtr id_data = std::make_shared<BinaryData>();
+        id_data->data_.resize(ids.size() * sizeof(int64_t));
+        memcpy(id_data->data_.data(), ids.data(), ids.size() * sizeof(int64_t));
+        data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME] = id_data;
     }
 
     if (options_.wal_enable_) {
@@ -524,14 +557,17 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
 
 Status
 DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                      const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) {
+                      const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
+                      DataChunkPtr& data_chunk) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     std::string dir_root = options_.meta_.path_;
-    auto handler = std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, dir_root, id_array, field_names);
+    valid_row.resize(id_array.size(), false);
+    auto handler =
+        std::make_shared<GetEntityByIdSegmentHandler>(nullptr, ss, dir_root, id_array, field_names, valid_row);
     handler->Iterate();
     STATUS_CHECK(handler->GetStatus());
 
@@ -568,77 +604,76 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
     TimeRecorder rc("DBImpl::Query");
 
-    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, options_, query_ptr);
+    if (!query_ptr->root) {
+        return Status{DB_ERROR, "BinaryQuery is null"};
+    }
 
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, query_ptr->collection_id));
+
+    /* collect all valid segment */
+    std::vector<SegmentVisitor::Ptr> segment_visitors;
+    auto exec = [&](const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
+        auto p_id = segment->GetPartitionId();
+        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
+        auto& p_name = p_ptr->GetName();
+
+        /* check partition match pattern */
+        bool match = false;
+        if (query_ptr->partitions.empty()) {
+            match = true;
+        } else {
+            for (auto& pattern : query_ptr->partitions) {
+                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
+                    match = true;
+                    break;
+                }
+            }
+        }
+
+        if (match) {
+            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
+            if (!visitor) {
+                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
+            }
+            segment_visitors.push_back(visitor);
+        }
+        return Status::OK();
+    };
+
+    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
+    segment_iter->Iterate();
+    STATUS_CHECK(segment_iter->GetStatus());
+
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
+
+    engine::snapshot::IDS_TYPE segment_ids;
+    for (auto& sv : segment_visitors) {
+        segment_ids.emplace_back(sv->GetSegment()->GetID());
+    }
+
+    scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, ss, options_, query_ptr, segment_ids);
+
+    cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before query
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitFinish();
+    cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after query
 
     if (!job->status().ok()) {
         return job->status();
     }
 
-    //    snapshot::ScopedSnapshotT ss;
-    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-    //
-    //    /* collect all valid segment */
-    //    std::vector<SegmentVisitor::Ptr> segment_visitors;
-    //    auto exec = [&] (const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
-    //        auto p_id = segment->GetPartitionId();
-    //        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
-    //        auto& p_name = p_ptr->GetName();
-    //
-    //        /* check partition match pattern */
-    //        bool match = false;
-    //        if (partition_patterns.empty()) {
-    //            match = true;
-    //        } else {
-    //            for (auto &pattern : partition_patterns) {
-    //                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
-    //                    match = true;
-    //                    break;
-    //                }
-    //            }
-    //        }
-    //
-    //        if (match) {
-    //            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
-    //            if (!visitor) {
-    //                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
-    //            }
-    //            segment_visitors.push_back(visitor);
-    //        }
-    //        return Status::OK();
-    //    };
-    //
-    //    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
-    //    segment_iter->Iterate();
-    //    STATUS_CHECK(segment_iter->GetStatus());
-    //
-    //    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
-    //
-    //    VectorsData vectors;
-    //    scheduler::SearchJobPtr job =
-    //        std::make_shared<scheduler::SSSearchJob>(tracer.Context(), general_query, query_ptr, attr_type, vectors);
-    //    for (auto& sv : segment_visitors) {
-    //        job->AddSegmentVisitor(sv);
-    //    }
-    //
-    //    // step 2: put search job to scheduler and wait result
-    //    scheduler::JobMgrInst::GetInstance()->Put(job);
-    //    job->WaitResult();
-    //
-    //    if (!job->GetStatus().ok()) {
-    //        return job->GetStatus();
-    //    }
-    //
-    //    // step 3: construct results
-    //    result.row_num_ = job->vector_count();
-    //    result.result_ids_ = job->GetResultIds();
-    //    result.result_distances_ = job->GetResultDistances();
+    if (job->query_result()) {
+        result = job->query_result();
+    }
 
     // step 4: get entities by result ids
-    // STATUS_CHECK(GetEntityByID(collection_name, result.result_ids_, field_names, result.vectors_, result.attrs_));
+    std::vector<bool> valid_row;
+    if (!query_ptr->field_names.empty()) {
+        STATUS_CHECK(GetEntityByID(query_ptr->collection_id, result->result_ids_, query_ptr->field_names, valid_row,
+                                   result->data_chunk_));
+    }
 
     // step 5: filter entities by field names
     //    std::vector<engine::AttrsData> filter_attrs;
@@ -670,6 +705,9 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     auto read_visitor = engine::SegmentVisitor::Build(ss, segment_id);
+    if (!read_visitor) {
+        return Status(SERVER_FILE_NOT_FOUND, "Segment not exist");
+    }
     segment::SegmentReaderPtr segment_reader =
         std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
 
@@ -817,7 +855,7 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
             continue;
         }
 
-        auto deleted_count = deleted_docs->GetSize();
+        auto deleted_count = deleted_docs->GetCount();
         if (deleted_count / (row_count + deleted_count) < threshold) {
             continue;  // no need to compact
         }
@@ -868,8 +906,8 @@ DBImpl::TimingFlushThread() {
 void
 DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(BACKGROUND_METRIC_INTERVAL);
-    int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
-    int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+    int64_t cache_usage = cache::CpuCacheMgr::GetInstance().CacheUsage();
+    int64_t cache_total = cache::CpuCacheMgr::GetInstance().CacheCapacity();
     fiu_do_on("DBImpl.StartMetricTask.InvalidTotalCache", cache_total = 0);
 
     if (cache_total > 0) {
@@ -939,16 +977,25 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
     std::unique_lock<std::mutex> lock(build_index_mutex_);
 
     for (auto collection_name : collection_names) {
-        SnapshotVisitor ss_visitor(collection_name);
+        snapshot::ScopedSnapshotT latest_ss;
+        auto status = snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
+        if (!status.ok()) {
+            return;
+        }
+        SnapshotVisitor ss_visitor(latest_ss);
 
         snapshot::IDS_TYPE segment_ids;
         ss_visitor.SegmentsToIndex("", segment_ids);
+        if (segment_ids.empty()) {
+            continue;
+        }
 
-        scheduler::BuildIndexJobPtr job =
-            std::make_shared<scheduler::BuildIndexJob>(options_, collection_name, segment_ids);
-
+        LOG_ENGINE_DEBUG_ << "Create BuildIndexJob for " << segment_ids.size() << " segments of " << collection_name;
+        cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before build index
+        scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_ids);
         scheduler::JobMgrInst::GetInstance()->Put(job);
         job->WaitFinish();
+        cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after build index
 
         if (!job->status().ok()) {
             LOG_ENGINE_ERROR_ << job->status().message();
@@ -1229,17 +1276,10 @@ void
 DBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all) {
     // LOG_ENGINE_TRACE_ << " Background merge thread start";
 
-    Status status;
     for (auto& collection_name : collection_names) {
         const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-        auto old_strategy = merge_mgr_ptr_->Strategy();
-        if (force_merge_all) {
-            merge_mgr_ptr_->UseStrategy(MergeStrategyType::ADAPTIVE);
-        }
-
-        status = merge_mgr_ptr_->MergeFiles(collection_name);
-        merge_mgr_ptr_->UseStrategy(old_strategy);
+        auto status = merge_mgr_ptr_->MergeFiles(collection_name);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_name
                               << " reason:" << status.message();
@@ -1250,8 +1290,6 @@ DBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_merge
             break;
         }
     }
-
-    // TODO: cleanup with ttl
 }
 
 void
@@ -1279,6 +1317,13 @@ DBImpl::ResumeIfLast() {
     if (--live_search_num_ == 0) {
         LOG_ENGINE_TRACE_ << "live_search_num_: " << live_search_num_;
         knowhere::BuildResume();
+    }
+}
+
+void
+DBImpl::ConfigUpdate(const std::string& name) {
+    if (name == "storage.auto_flush_interval") {
+        options_.auto_flush_interval_ = config.storage.auto_flush_interval();
     }
 }
 

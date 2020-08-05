@@ -23,102 +23,59 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
+aux_source_directory( ${MILVUS_ENGINE_SRC}/scheduler            SCHEDULER_MAIN_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/scheduler/action     SCHEDULER_ACTION_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/scheduler/event      SCHEDULER_EVENT_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/scheduler/job        SCHEDULER_JOB_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/scheduler/selector   SCHEDULER_SELECTOR_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/scheduler/resource   SCHEDULER_RESOURCE_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/scheduler/task       SCHEDULER_TASK_FILES )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/search search_files)
+set( SCHEDULER_FILES  ${SCHEDULER_MAIN_FILES}
+                      ${SCHEDULER_ACTION_FILES}
+                      ${SCHEDULER_EVENT_FILES}
+                      ${SCHEDULER_JOB_FILES}
+                      ${SCHEDULER_SELECTOR_FILES}
+                      ${SCHEDULER_RESOURCE_FILES}
+                      ${SCHEDULER_TASK_FILES}
+                      )
 
-set(grpc_service_files
-        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
-        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
-        )
+set( ENTRY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp )
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/job scheduler_job_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/selector scheduler_selector_files)
-set(scheduler_files
-        ${scheduler_main_files}
-        ${scheduler_action_files}
-        ${scheduler_event_files}
-        ${scheduler_job_files}
-        ${scheduler_resource_files}
-        ${scheduler_task_files}
-        ${scheduler_selector_files}
-        )
+set( UNITTEST_LIBS  sqlite
+                    libboost_system.a
+                    libboost_filesystem.a
+                    mysqlpp
+                    yaml-cpp
+                    gtest
+                    gmock
+                    gtest_main
+                    gmock_main
+                    pthread
+                    gfortran
+                    opentracing
+                    opentracing_mocktracer
+                    fiu
+                    dl
+                    z
+                    )
 
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/init server_init_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_impl_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl/interceptor grpc_interceptor_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/context server_context_files)
-set(grpc_server_files
-        ${grpc_impl_files}
-        ${grpc_interceptor_files}
-        )
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/handler web_handler_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/component web_conponent_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/controller web_controller_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/dto web_dto_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl/utils web_utils_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/web_impl web_impl_files)
-set(web_server_files
-        ${web_handler_files}
-        ${web_conponent_files}
-        ${web_controller_files}
-        ${web_dto_files}
-        ${web_utils_files}
-        ${web_impl_files}
-        )
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery server_delivery_impl_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/request server_delivery_request_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/server/delivery/strategy server_delivery_strategy_files)
-set(server_delivery_files
-        ${server_delivery_impl_files}
-        ${server_delivery_request_files}
-        ${server_delivery_strategy_files}
-        )
-
-set(entry_file
-        ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
-
-set(unittest_libs
-        sqlite
-        libboost_system.a
-        libboost_filesystem.a
-        mysqlpp
-        yaml-cpp
-        gtest
-        gmock
-        gtest_main
-        gmock_main
-        pthread
-        gfortran
-        opentracing
-        opentracing_mocktracer
-        fiu
-        dl
-        z
-        )
-
-if (MILVUS_WITH_AWS)
-    set(s3_client_lib
-            aws-cpp-sdk-s3
-            aws-cpp-sdk-core
+if ( MILVUS_GPU_VERSION )
+    list( APPEND UNITTEST_LIBS   ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+            cudart
+            cublas
             )
-    list(APPEND unittest_libs
-            ${s3_client_lib}
-            curl
-            crypto
-            )
+endif()
 
+if ( MILVUS_WITH_AWS )
+    set( S3_CLIENT_LIB  aws-cpp-sdk-s3
+                        aws-cpp-sdk-core
+                        )
+
+    list( APPEND UNITTEST_LIBS  ${S3_CLIENT_LIB}
+                                curl
+                                crypto
+                                )
 endif ()
 
 add_subdirectory(db)

@@ -32,16 +32,10 @@ CpuCacheMgr::~CpuCacheMgr() {
     ConfigMgr::GetInstance().Detach("cache.cache_size", this);
 }
 
-CpuCacheMgr*
+CpuCacheMgr&
 CpuCacheMgr::GetInstance() {
     static CpuCacheMgr s_mgr;
-    return &s_mgr;
-}
-
-DataObjPtr
-CpuCacheMgr::GetIndex(const std::string& key) {
-    DataObjPtr obj = GetItem(key);
-    return obj;
+    return s_mgr;
 }
 
 void

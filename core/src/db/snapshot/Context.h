@@ -16,7 +16,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "db/meta/MetaTypes.h"
+
+#include "db/Types.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshot.h"
 
@@ -63,12 +64,8 @@ struct OperationContext {
     CollectionCommitPtr new_collection_commit = nullptr;
     CollectionPtr new_collection = nullptr;
 
-    SegmentFilePtr stale_segment_file = nullptr;
     std::vector<SegmentPtr> stale_segments;
 
-    FieldPtr prev_field = nullptr;
-    FieldElementPtr prev_field_element = nullptr;
-    FieldElementPtr stale_field_element = nullptr;
     std::vector<FieldElementPtr> new_field_elements;
     std::vector<FieldElementPtr> stale_field_elements;
 
@@ -83,6 +80,7 @@ struct OperationContext {
     PartitionCommitPtr stale_partition_commit = nullptr;
 
     SegmentFile::VecT new_segment_files;
+    SegmentFile::VecT stale_segment_files;
     CollectionPtr collection = nullptr;
     LSN_TYPE lsn = 0;
 
@@ -90,12 +88,12 @@ struct OperationContext {
     ToString() const;
 };
 
-using CollectionMappings = std::unordered_map<FieldPtr, std::vector<FieldElementPtr>>;
+using FieldElementMappings = std::unordered_map<FieldPtr, std::vector<FieldElementPtr>>;
 
 struct CreateCollectionContext {
     CollectionPtr collection = nullptr;
-    CollectionMappings fields_schema;
     CollectionCommitPtr collection_commit = nullptr;
+    FieldElementMappings fields_schema;
     LSN_TYPE lsn = 0;
 
     std::string

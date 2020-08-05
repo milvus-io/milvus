@@ -19,9 +19,8 @@
 
 #include "config/ServerConfig.h"
 #include "db/Constants.h"
+#include "db/Types.h"
 #include "db/Utils.h"
-#include "db/engine/EngineFactory.h"
-#include "db/meta/MetaTypes.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/Snapshots.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -126,32 +125,31 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
     std::vector<std::string> field_names = ss->GetFieldNames();
     for (auto& name : field_names) {
         snapshot::FieldPtr field = ss->GetField(name);
-        meta::hybrid::DataType ftype = static_cast<meta::hybrid::DataType>(field->GetFtype());
+        DataType ftype = static_cast<DataType>(field->GetFtype());
         switch (ftype) {
-            case meta::hybrid::DataType::BOOL:
+            case DataType::BOOL:
                 single_size += sizeof(bool);
                 break;
-            case meta::hybrid::DataType::DOUBLE:
+            case DataType::DOUBLE:
                 single_size += sizeof(double);
                 break;
-            case meta::hybrid::DataType::FLOAT:
+            case DataType::FLOAT:
                 single_size += sizeof(float);
                 break;
-            case meta::hybrid::DataType::INT8:
+            case DataType::INT8:
                 single_size += sizeof(uint8_t);
                 break;
-            case meta::hybrid::DataType::INT16:
+            case DataType::INT16:
                 single_size += sizeof(uint16_t);
                 break;
-            case meta::hybrid::DataType::INT32:
+            case DataType::INT32:
                 single_size += sizeof(uint32_t);
                 break;
-            case meta::hybrid::DataType::UID:
-            case meta::hybrid::DataType::INT64:
+            case DataType::INT64:
                 single_size += sizeof(uint64_t);
                 break;
-            case meta::hybrid::DataType::VECTOR_FLOAT:
-            case meta::hybrid::DataType::VECTOR_BINARY: {
+            case DataType::VECTOR_FLOAT:
+            case DataType::VECTOR_BINARY: {
                 json params = field->GetParams();
                 if (params.find(knowhere::meta::DIM) == params.end()) {
                     std::string msg = "Vector field params must contain: dimension";
@@ -160,7 +158,7 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
                 }
 
                 int64_t dimension = params[knowhere::meta::DIM];
-                if (ftype == meta::hybrid::DataType::VECTOR_BINARY) {
+                if (ftype == DataType::VECTOR_BINARY) {
                     single_size += (dimension / 8);
                 } else {
                     single_size += (dimension * sizeof(float));
@@ -203,13 +201,13 @@ MemSegment::Delete(segment::doc_id_t doc_id) {
     segment_writer_ptr_->GetSegment(segment_ptr);
 
     // Check wither the doc_id is present, if yes, delete it's corresponding buffer
-    engine::FIXED_FIELD_DATA raw_data;
+    engine::BinaryDataPtr raw_data;
     auto status = segment_ptr->GetFixedFieldData(engine::DEFAULT_UID_NAME, raw_data);
     if (!status.ok()) {
         return Status::OK();
     }
 
-    int64_t* uids = reinterpret_cast<int64_t*>(raw_data.data());
+    int64_t* uids = reinterpret_cast<int64_t*>(raw_data->data_.data());
     int64_t row_count = segment_ptr->GetRowCount();
     for (int64_t i = 0; i < row_count; i++) {
         if (doc_id == uids[i]) {
@@ -232,13 +230,13 @@ MemSegment::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
 
     std::sort(temp.begin(), temp.end());
 
-    engine::FIXED_FIELD_DATA raw_data;
+    engine::BinaryDataPtr raw_data;
     auto status = segment_ptr->GetFixedFieldData(engine::DEFAULT_UID_NAME, raw_data);
     if (!status.ok()) {
         return Status::OK();
     }
 
-    int64_t* uids = reinterpret_cast<int64_t*>(raw_data.data());
+    int64_t* uids = reinterpret_cast<int64_t*>(raw_data->data_.data());
     int64_t row_count = segment_ptr->GetRowCount();
     size_t deleted = 0;
     for (int64_t i = 0; i < row_count; ++i) {

@@ -20,6 +20,7 @@
 #include <fiu-local.h>
 
 #include "config/ServerConfig.h"
+#include "db/Utils.h"
 #include "metrics/SystemInfo.h"
 #include "query/BinaryQuery.h"
 #include "server/delivery/request/BaseReq.h"
@@ -60,7 +61,7 @@ WebErrorMap(ErrorCode code) {
         {SERVER_INVALID_NPROBE, StatusCode::ILLEGAL_ARGUMENT},
         {SERVER_INVALID_INDEX_NLIST, StatusCode::ILLEGAL_NLIST},
         {SERVER_INVALID_INDEX_METRIC_TYPE, StatusCode::ILLEGAL_METRIC_TYPE},
-        {SERVER_INVALID_INDEX_FILE_SIZE, StatusCode::ILLEGAL_ARGUMENT},
+        {SERVER_INVALID_SEGMENT_ROW_COUNT, StatusCode::ILLEGAL_ARGUMENT},
         {SERVER_ILLEGAL_VECTOR_ID, StatusCode::ILLEGAL_VECTOR_ID},
         {SERVER_ILLEGAL_SEARCH_RESULT, StatusCode::ILLEGAL_SEARCH_RESULT},
         {SERVER_CACHE_FULL, StatusCode::CACHE_FAILED},
@@ -108,10 +109,8 @@ WebRequestHandler::IsBinaryCollection(const std::string& collection_name, bool& 
     CollectionSchema schema;
     auto status = req_handler_.GetCollectionInfo(context_ptr_, collection_name, schema);
     if (status.ok()) {
-        auto metric = engine::MetricType(schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE].get<int64_t>());
-        bin = (metric == engine::MetricType::HAMMING || metric == engine::MetricType::JACCARD ||
-               metric == engine::MetricType::TANIMOTO || metric == engine::MetricType::SUPERSTRUCTURE ||
-               metric == engine::MetricType::SUBSTRUCTURE);
+        std::string metric_type = schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE];
+        bin = engine::utils::IsBinaryMetricType(metric_type);
     }
 
     return status;
@@ -158,8 +157,8 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
     STATUS_CHECK(req_handler_.CountEntities(context_ptr_, collection_name, count));
 
     json_out["collection_name"] = schema.collection_name_;
-    json_out["dimension"] = schema.extra_params_[engine::PARAM_COLLECTION_DIMENSION].get<int64_t>();
-    json_out["index_file_size"] = schema.extra_params_[engine::PARAM_SEGMENT_SIZE].get<int64_t>();
+    json_out["dimension"] = schema.extra_params_[engine::PARAM_DIMENSION].get<int64_t>();
+    json_out["segment_row_count"] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT].get<int64_t>();
     json_out["metric_type"] = schema.extra_params_[engine::PARAM_INDEX_METRIC_TYPE].get<int64_t>();
     json_out["index_params"] = schema.extra_params_[engine::PARAM_INDEX_EXTRA_PARAMS].get<std::string>();
     json_out["count"] = count;
@@ -424,10 +423,10 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
         //        term_query->field_value.resize(term_size * sizeof(int64_t));
         //
         //        switch (field_type_.at(field_name)) {
-        //            case engine::meta::hybrid::DataType::INT8:
-        //            case engine::meta::hybrid::DataType::INT16:
-        //            case engine::meta::hybrid::DataType::INT32:
-        //            case engine::meta::hybrid::DataType::INT64: {
+        //            case engine::DataType::INT8:
+        //            case engine::DataType::INT16:
+        //            case engine::DataType::INT32:
+        //            case engine::DataType::INT64: {
         //                std::vector<int64_t> term_value(term_size, 0);
         //                for (uint64_t i = 0; i < term_size; ++i) {
         //                    term_value[i] = term_value_json[i].get<int64_t>();
@@ -435,8 +434,8 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
         //                memcpy(term_query->field_value.data(), term_value.data(), term_size * sizeof(int64_t));
         //                break;
         //            }
-        //            case engine::meta::hybrid::DataType::FLOAT:
-        //            case engine::meta::hybrid::DataType::DOUBLE: {
+        //            case engine::DataType::FLOAT:
+        //            case engine::DataType::DOUBLE: {
         //                std::vector<double> term_value(term_size, 0);
         //                for (uint64_t i = 0; i < term_size; ++i) {
         //                    term_value[i] = term_value_json[i].get<double>();
@@ -607,35 +606,35 @@ ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, const st
             double double_value;
             auto attr_data = attr.attr_data_.at(field_names[i]);
             switch (attr.attr_type_.at(field_names[i])) {
-                case engine::meta::hybrid::DataType::INT8: {
+                case engine::DataType::INT8: {
                     if (attr_data.size() == sizeof(int8_t)) {
                         int_value = attr_data[0];
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::hybrid::DataType::INT16: {
+                case engine::DataType::INT16: {
                     if (attr_data.size() == sizeof(int16_t)) {
                         memcpy(&int_value, attr_data.data(), sizeof(int16_t));
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::hybrid::DataType::INT32: {
+                case engine::DataType::INT32: {
                     if (attr_data.size() == sizeof(int32_t)) {
                         memcpy(&int_value, attr_data.data(), sizeof(int32_t));
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::hybrid::DataType::INT64: {
+                case engine::DataType::INT64: {
                     if (attr_data.size() == sizeof(int64_t)) {
                         memcpy(&int_value, attr_data.data(), sizeof(int64_t));
                         int_data.emplace_back(int_value);
                     }
                     break;
                 }
-                case engine::meta::hybrid::DataType::FLOAT: {
+                case engine::DataType::FLOAT: {
                     if (attr_data.size() == sizeof(float)) {
                         float float_value;
                         memcpy(&float_value, attr_data.data(), sizeof(float));
@@ -644,7 +643,7 @@ ConvertRowToColumnJson(const std::vector<engine::AttrsData>& row_attrs, const st
                     }
                     break;
                 }
-                case engine::meta::hybrid::DataType::DOUBLE: {
+                case engine::DataType::DOUBLE: {
                     if (attr_data.size() == sizeof(double)) {
                         memcpy(&double_value, attr_data.data(), sizeof(double));
                         double_data.emplace_back(double_value);
@@ -699,7 +698,6 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
     if (!status.ok()) {
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }
-    field_type_ = collection_schema.field_types_;
 
     milvus::json extra_params;
     if (json.contains("fields")) {
@@ -736,7 +734,8 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         query_ptr_->root = general_query;
 
         engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-        status = req_handler_.Search(context_ptr_, query_ptr_, extra_params, result);
+        engine::snapshot::FieldElementMappings field_mappings;
+        status = req_handler_.Search(context_ptr_, query_ptr_, extra_params, field_mappings, result);
 
         if (!status.ok()) {
             return status;
@@ -763,7 +762,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
             search_result_json.emplace_back(raw_result_json);
         }
         nlohmann::json attr_json;
-        ConvertRowToColumnJson(result->attrs_, query_ptr_->field_names, result->row_num_, attr_json);
+        //        ConvertRowToColumnJson(result->attrs_, query_ptr_->field_names, result->row_num_, attr_json);
         result_json["Entity"] = attr_json;
         result_json["result"] = search_result_json;
         result_str = result_json.dump();
@@ -804,35 +803,36 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
 Status
 WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
                                   std::vector<std::string>& field_names, nlohmann::json& json_out) {
+    std::vector<bool> valid_row;
     engine::DataChunkPtr data_chunk;
-    engine::snapshot::CollectionMappings field_mappings;
+    engine::snapshot::FieldElementMappings field_mappings;
 
     std::vector<engine::AttrsData> attr_batch;
     std::vector<engine::VectorsData> vector_batch;
-    auto status =
-        req_handler_.GetEntityByID(context_ptr_, collection_name, ids, field_names, field_mappings, data_chunk);
+    auto status = req_handler_.GetEntityByID(context_ptr_, collection_name, ids, field_names, valid_row, field_mappings,
+                                             data_chunk);
     if (!status.ok()) {
         return status;
     }
-    std::vector<uint8_t> id_array = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
+    std::vector<uint8_t> id_array = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME]->data_;
 
     for (const auto& it : field_mappings) {
         std::string name = it.first->GetName();
         uint64_t type = it.first->GetFtype();
-        std::vector<uint8_t> data = data_chunk->fixed_fields_[name];
-        if (type == engine::FieldType::VECTOR_BINARY) {
+        std::vector<uint8_t>& data = data_chunk->fixed_fields_[name]->data_;
+        if (type == engine::DataType::VECTOR_BINARY) {
             engine::VectorsData vectors_data;
             memcpy(vectors_data.binary_data_.data(), data.data(), data.size());
             memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
             vector_batch.emplace_back(vectors_data);
-        } else if (type == engine::FieldType::VECTOR_FLOAT) {
+        } else if (type == engine::DataType::VECTOR_FLOAT) {
             engine::VectorsData vectors_data;
             memcpy(vectors_data.float_data_.data(), data.data(), data.size());
             memcpy(vectors_data.id_array_.data(), id_array.data(), id_array.size());
             vector_batch.emplace_back(vectors_data);
         } else {
             engine::AttrsData attrs_data;
-            attrs_data.attr_type_[name] = static_cast<engine::meta::hybrid::DataType>(type);
+            attrs_data.attr_type_[name] = static_cast<engine::DataType>(type);
             attrs_data.attr_data_[name] = data;
             memcpy(attrs_data.id_array_.data(), id_array.data(), id_array.size());
             attr_batch.emplace_back(attrs_data);
@@ -1201,38 +1201,38 @@ WebRequestHandler::CreateHybridCollection(const milvus::server::web::OString& bo
     std::string collection_name = json_str["collection_name"];
 
     // TODO(yukun): do checking
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
-    std::unordered_map<std::string, milvus::json> field_index_params;
-    std::unordered_map<std::string, std::string> field_extra_params;
+    std::unordered_map<std::string, FieldSchema> fields;
     for (auto& field : json_str["fields"]) {
+        FieldSchema field_schema;
         std::string field_name = field["field_name"];
-        std::string field_type = field["field_type"];
-        auto extra_params = field["extra_params"];
+
+        field_schema.field_params_ = field["extra_params"];
+
+        const std::string& field_type = field["field_type"];
         if (field_type == "int8") {
-            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::INT8));
+            field_schema.field_type_ = engine::DataType::INT8;
         } else if (field_type == "int16") {
-            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::INT16));
+            field_schema.field_type_ = engine::DataType::INT16;
         } else if (field_type == "int32") {
-            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::INT32));
+            field_schema.field_type_ = engine::DataType::INT32;
         } else if (field_type == "int64") {
-            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::INT64));
+            field_schema.field_type_ = engine::DataType::INT64;
         } else if (field_type == "float") {
-            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::FLOAT));
+            field_schema.field_type_ = engine::DataType::FLOAT;
         } else if (field_type == "double") {
-            field_types.insert(std::make_pair(field_name, engine::meta::hybrid::DataType::DOUBLE));
+            field_schema.field_type_ = engine::DataType::DOUBLE;
         } else if (field_type == "vector") {
         } else {
             std::string msg = field_name + " has wrong field_type";
             RETURN_STATUS_DTO(BODY_PARSE_FAIL, msg.c_str());
         }
 
-        field_extra_params.insert(std::make_pair(field_name, extra_params.dump()));
+        fields[field_name] = field_schema;
     }
 
     milvus::json json_params;
 
-    auto status = req_handler_.CreateCollection(context_ptr_, collection_name, field_types, field_index_params,
-                                                field_extra_params, json_params);
+    auto status = req_handler_.CreateCollection(context_ptr_, collection_name, fields, json_params);
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1583,7 +1583,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     std::string partition_name = body_json["partition_tag"];
     int32_t row_num = body_json["row_num"];
 
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
+    std::unordered_map<std::string, engine::DataType> field_types;
     auto status = Status::OK();
     // auto status = req_handler_.DescribeHybridCollection(context_ptr_, collection_name->c_str(), field_types);
 
@@ -1604,23 +1604,23 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 
         std::vector<uint8_t> temp_data;
         switch (field_types.at(field_name)) {
-            case engine::meta::hybrid::DataType::INT32: {
+            case engine::DataType::INT32: {
                 CopyStructuredData<int32_t>(field_value, temp_data);
                 break;
             }
-            case engine::meta::hybrid::DataType::INT64: {
+            case engine::DataType::INT64: {
                 CopyStructuredData<int64_t>(field_value, temp_data);
                 break;
             }
-            case engine::meta::hybrid::DataType::FLOAT: {
+            case engine::DataType::FLOAT: {
                 CopyStructuredData<float>(field_value, temp_data);
                 break;
             }
-            case engine::meta::hybrid::DataType::DOUBLE: {
+            case engine::DataType::DOUBLE: {
                 CopyStructuredData<double>(field_value, temp_data);
                 break;
             }
-            case engine::meta::hybrid::DataType::VECTOR_FLOAT: {
+            case engine::DataType::VECTOR_FLOAT: {
                 bool bin_flag;
                 status = IsBinaryCollection(collection_name->c_str(), bin_flag);
                 if (!status.ok()) {
@@ -1679,6 +1679,7 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
             StringHelpFunctions::SplitStringByDelimeter(query_fields->c_str(), ",", field_names);
         }
 
+        std::vector<bool> valid_row;
         nlohmann::json entity_result_json;
         status = GetEntityByIDs(collection_name->std_str(), entity_ids, field_names, entity_result_json);
         if (!status.ok()) {

@@ -30,8 +30,7 @@ namespace engine {
 class MemManagerImpl : public MemManager {
  public:
     using Ptr = std::shared_ptr<MemManagerImpl>;
-    using MemPartitionMap = std::map<int64_t, MemCollectionPtr>;
-    using MemCollectionMap = std::map<int64_t, MemPartitionMap>;
+    using MemCollectionMap = std::unordered_map<int64_t, MemCollectionPtr>;
     using MemList = std::vector<MemCollectionPtr>;
 
     explicit MemManagerImpl(const DBOptions& options) : options_(options) {
@@ -43,10 +42,10 @@ class MemManagerImpl : public MemManager {
     InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) override;
 
     Status
-    DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t lsn) override;
+    DeleteEntity(int64_t collection_id, IDNumber engity_ids, uint64_t lsn) override;
 
     Status
-    DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) override;
+    DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* engity_idss, uint64_t lsn) override;
 
     Status
     Flush(int64_t collection_id) override;
@@ -55,10 +54,10 @@ class MemManagerImpl : public MemManager {
     Flush(std::set<int64_t>& collection_ids) override;
 
     Status
-    EraseMemVector(int64_t collection_id) override;
+    EraseMem(int64_t collection_id) override;
 
     Status
-    EraseMemVector(int64_t collection_id, int64_t partition_id) override;
+    EraseMem(int64_t collection_id, int64_t partition_id) override;
 
     size_t
     GetCurrentMutableMem() override;
@@ -71,13 +70,10 @@ class MemManagerImpl : public MemManager {
 
  private:
     MemCollectionPtr
-    GetMemByTable(int64_t collection_id, int64_t partition_id);
-
-    std::vector<MemCollectionPtr>
-    GetMemByTable(int64_t collection_id);
+    GetMemByCollection(int64_t collection_id);
 
     Status
-    ValidateChunk(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk);
+    ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk);
 
     Status
     InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const VectorSourcePtr& source, uint64_t lsn);
@@ -89,7 +85,7 @@ class MemManagerImpl : public MemManager {
     ToImmutable(int64_t collection_id);
 
     uint64_t
-    GetMaxLSN(const MemList& tables);
+    GetMaxLSN(const MemList& collections);
 
     MemCollectionMap mem_map_;
     MemList immu_mem_list_;

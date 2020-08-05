@@ -16,17 +16,15 @@
 namespace milvus {
 namespace engine {
 
-const char* ROW_COUNT_PER_SEGMENT = "row_count_per_segment";
-
 Status
 MergeSimpleStrategy::RegroupSegments(const snapshot::ScopedSnapshotT& ss, const Partition2SegmentsMap& part2segment,
                                      SegmentGroups& groups) {
     auto collection = ss->GetCollection();
 
-    int64_t row_count_per_segment = DEFAULT_ROW_COUNT_PER_SEGMENT;
+    int64_t row_count_per_segment = DEFAULT_SEGMENT_ROW_COUNT;
     const json params = collection->GetParams();
-    if (params.find(ROW_COUNT_PER_SEGMENT) != params.end()) {
-        row_count_per_segment = params[ROW_COUNT_PER_SEGMENT];
+    if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
+        row_count_per_segment = params[PARAM_SEGMENT_ROW_COUNT];
     }
 
     for (auto& kv : part2segment) {

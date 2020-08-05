@@ -22,8 +22,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "db/meta/MetaTypes.h"
-#include "knowhere/index/vector_index/VecIndex.h"
+#include "db/Types.h"
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
 
@@ -32,28 +31,10 @@ namespace engine {
 
 extern const char* COLLECTIONS_FOLDER;
 
-using FIELD_TYPE = engine::meta::hybrid::DataType;
-using FIELD_TYPE_MAP = std::unordered_map<std::string, engine::meta::hybrid::DataType>;
-using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;
-using FIXED_FIELD_DATA = std::vector<uint8_t>;
-using FIXEDX_FIELD_MAP = std::unordered_map<std::string, FIXED_FIELD_DATA>;
-using VARIABLE_FIELD_DATA = std::vector<std::string>;
-using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VARIABLE_FIELD_DATA>;
-using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;
-using STRUCTURED_INDEX_MAP = std::unordered_map<std::string, knowhere::IndexPtr>;
-
-struct DataChunk {
-    int64_t count_ = 0;
-    FIXEDX_FIELD_MAP fixed_fields_;
-    VARIABLE_FIELD_MAP variable_fields_;
-};
-
-using DataChunkPtr = std::shared_ptr<DataChunk>;
-
 class Segment {
  public:
     Status
-    AddField(const std::string& field_name, FIELD_TYPE field_type, int64_t field_width = 0);
+    AddField(const std::string& field_name, DataType field_type, int64_t field_width = 0);
 
     Status
     AddChunk(const DataChunkPtr& chunk_ptr);
@@ -65,13 +46,16 @@ class Segment {
     DeleteEntity(int64_t offset);
 
     Status
-    GetFieldType(const std::string& field_name, FIELD_TYPE& type);
+    GetFieldType(const std::string& field_name, DataType& type);
 
     Status
     GetFixedFieldWidth(const std::string& field_name, int64_t& width);
 
     Status
-    GetFixedFieldData(const std::string& field_name, FIXED_FIELD_DATA& data);
+    GetFixedFieldData(const std::string& field_name, BinaryDataPtr& data);
+
+    Status
+    SetFixedFieldData(const std::string& field_name, BinaryDataPtr& data);
 
     Status
     GetVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index);

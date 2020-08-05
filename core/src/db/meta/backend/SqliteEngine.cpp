@@ -44,6 +44,7 @@ static const MetaField MetaUpdatedOnField = MetaField(F_UPDATED_ON, "BIGINT", "N
 static const MetaField MetaParamsField = MetaField(F_PARAMS, "VARCHAR(255)", "NOT NULL");
 static const MetaField MetaSizeField = MetaField(F_SIZE, "BIGINT", "NOT NULL");
 static const MetaField MetaRowCountField = MetaField(F_ROW_COUNT, "BIGINT", "NOT NULL");
+static const MetaField MetaTypeNameField = MetaField(F_TYPE_NAME, "VARCHAR(255)", "NOT NULL");
 
 // Environment schema
 static const MetaSchema COLLECTION_SCHEMA(TABLE_COLLECTION, {MetaIdField, MetaNameField, MetaLSNField, MetaParamsField,
@@ -117,8 +118,8 @@ static const MetaSchema FIELDCOMMIT_SCHEMA(TABLE_FIELD_COMMIT,
 
 static const MetaSchema FIELDELEMENT_SCHEMA(TABLE_FIELD_ELEMENT,
                                             {MetaIdField, MetaCollectionIdField, MetaFieldIdField, MetaNameField,
-                                             MetaFtypeField, MetaParamsField, MetaLSNField, MetaStateField,
-                                             MetaCreatedOnField, MetaUpdatedOnField});
+                                             MetaFtypeField, MetaTypeNameField, MetaParamsField, MetaLSNField,
+                                             MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
 /////////////////////////////////////////////////////
 static AttrsMapList* QueryData = nullptr;

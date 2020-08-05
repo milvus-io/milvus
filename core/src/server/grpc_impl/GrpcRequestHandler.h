@@ -304,8 +304,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return Status
     ::grpc::Status
-    Compact(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
-            ::milvus::grpc::Status* response);
+    Compact(::grpc::ServerContext* context, ::milvus::grpc::CompactParam* request, ::milvus::grpc::Status* response);
 
     /*******************************************New Interface*********************************************/
 
@@ -321,22 +320,20 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     Status
     DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vector_params,
                                const std::string& dsl_string, query::BooleanQueryPtr& boolean_query,
-                               std::unordered_map<std::string, query::VectorQueryPtr>& query_ptr);
+                               query::QueryPtr& query_ptr);
 
     Status
-    ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query);
+    ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
+                            query::QueryPtr& query_ptr);
 
     Status
-    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query);
+    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query, std::string& field_name);
 
  private:
     ReqHandler req_handler_;
 
-    // std::unordered_map<::grpc::ServerContext*, std::shared_ptr<Context>> context_map_;
     std::unordered_map<std::string, std::shared_ptr<Context>> context_map_;
     std::shared_ptr<opentracing::Tracer> tracer_;
-    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_type_;
-    //    std::unordered_map<::grpc::ServerContext*, std::unique_ptr<opentracing::Span>> span_map_;
 
     mutable std::mt19937_64 random_num_generator_;
     mutable std::mutex random_mutex_;

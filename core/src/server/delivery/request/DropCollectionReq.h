@@ -22,10 +22,10 @@ namespace server {
 class DropCollectionReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
+    Create(const ContextPtr& context, const std::string& collection_name);
 
  protected:
-    DropCollectionReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name);
+    DropCollectionReq(const ContextPtr& context, const std::string& collection_name);
 
     Status
     OnExecute() override;

@@ -12,66 +12,62 @@
 #include "server/delivery/request/GetCollectionInfoReq.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
+#include "server/ValidationUtil.h"
 #include "server/web_impl/Constants.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
-#include <memory>
-#include <string>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
 namespace milvus {
 namespace server {
 
-GetCollectionInfoReq::GetCollectionInfoReq(const std::shared_ptr<milvus::server::Context>& context,
-                                           const std::string& collection_name, CollectionSchema& collection_schema)
-    : BaseReq(context, BaseReq::kGetCollectionInfo),
+GetCollectionInfoReq::GetCollectionInfoReq(const ContextPtr& context, const std::string& collection_name,
+                                           CollectionSchema& collection_schema)
+    : BaseReq(context, ReqType::kGetCollectionInfo),
       collection_name_(collection_name),
       collection_schema_(collection_schema) {
 }
 
 BaseReqPtr
-GetCollectionInfoReq::Create(const std::shared_ptr<milvus::server::Context>& context,
-                             const std::string& collection_name, CollectionSchema& collection_schema) {
+GetCollectionInfoReq::Create(const ContextPtr& context, const std::string& collection_name,
+                             CollectionSchema& collection_schema) {
     return std::shared_ptr<BaseReq>(new GetCollectionInfoReq(context, collection_name, collection_schema));
 }
 
 Status
 GetCollectionInfoReq::OnExecute() {
-    std::string hdr = "GetCollectionInfoReq(collection=" + collection_name_ + ")";
-    TimeRecorderAuto rc(hdr);
-
     try {
+        std::string hdr = "GetCollectionInfoReq(collection=" + collection_name_ + ")";
+        TimeRecorderAuto rc(hdr);
+
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+
         engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings collection_mappings;
-        STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, collection_mappings));
+        engine::snapshot::FieldElementMappings field_mappings;
+        STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, field_mappings));
 
         collection_schema_.collection_name_ = collection_name_;
         collection_schema_.extra_params_ = collection->GetParams();
-        for (auto& field_kv : collection_mappings) {
+        for (auto& field_kv : field_mappings) {
             auto field = field_kv.first;
-            if (field->GetFtype() == (engine::snapshot::FTYPE_TYPE)engine::meta::hybrid::DataType::UID) {
-                continue;
-            }
 
-            milvus::json json_index_param;
+            milvus::json field_index_param;
             auto field_elements = field_kv.second;
             for (const auto& element : field_elements) {
                 if (element->GetFtype() == (engine::snapshot::FTYPE_TYPE)engine::FieldElementType::FET_INDEX) {
-                    json_index_param = element->GetParams().dump();
+                    field_index_param = element->GetParams();
                     break;
                 }
             }
 
             auto field_name = field->GetName();
-            collection_schema_.field_types_.insert(
-                std::make_pair(field_name, (engine::meta::hybrid::DataType)field->GetFtype()));
-            collection_schema_.index_params_.insert(std::make_pair(field_name, json_index_param));
-            milvus::json json_extra_param = field->GetParams();
-            collection_schema_.field_params_.insert(std::make_pair(field_name, json_extra_param));
+            FieldSchema field_schema;
+            field_schema.field_type_ = (engine::DataType)field->GetFtype();
+            field_schema.field_params_ = field->GetParams();
+            field_schema.index_params_ = field_index_param;
+
+            collection_schema_.fields_.insert(std::make_pair(field_name, field_schema));
         }
 
         rc.ElapseFromBegin("done");

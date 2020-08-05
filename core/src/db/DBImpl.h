@@ -23,13 +23,14 @@
 
 #include "db/DB.h"
 
+#include "config/ConfigMgr.h"
 #include "utils/ThreadPool.h"
 #include "wal/WalManager.h"
 
 namespace milvus {
 namespace engine {
 
-class DBImpl : public DB {
+class DBImpl : public DB, public ConfigObserver {
  public:
     explicit DBImpl(const DBOptions& options);
 
@@ -55,10 +56,10 @@ class DBImpl : public DB {
 
     Status
     GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                      snapshot::CollectionMappings& fields_schema) override;
+                      snapshot::FieldElementMappings& fields_schema) override;
 
     Status
-    GetCollectionStats(const std::string& collection_name, std::string& collection_stats);
+    GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) override;
 
     Status
     CountEntities(const std::string& collection_name, int64_t& row_count) override;
@@ -80,17 +81,18 @@ class DBImpl : public DB {
                 const std::string& field_name, const CollectionIndex& index) override;
 
     Status
-    DropIndex(const std::string& collection_name, const std::string& field_name) override;
+    DropIndex(const std::string& collection_name, const std::string& field_name = "") override;
 
     Status
-    DropIndex(const std::string& collection_name) override;
+    DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) override;
 
     Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) override;
 
     Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                  const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) override;
+                  const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
+                  DataChunkPtr& data_chunk) override;
 
     Status
     DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers entity_ids) override;
@@ -113,6 +115,9 @@ class DBImpl : public DB {
 
     Status
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold = 0.0) override;
+
+    void
+    ConfigUpdate(const std::string& name) override;
 
  private:
     void

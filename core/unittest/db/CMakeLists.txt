@@ -11,39 +11,37 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set(test_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_segment.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_meta.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_job.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_task.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_event.cpp
-        )
+set( TEST_FILES ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_segment.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_meta.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_job.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_task.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_event.cpp
+                )
 
-add_executable(test_db
-        ${scheduler_files}
-        ${server_context_files}
-        ${test_files}
-        # ${grpc_server_files}
-        # ${grpc_service_files}
-        # ${web_server_files}
-        # ${server_delivery_files}
-        # ${server_files}
-        # ${server_init_files}
-        )
+add_executable( test_db
+                ${SCHEDULER_FILES}
+                ${TEST_FILES}
+                # ${grpc_server_files}
+                # ${grpc_service_files}
+                # ${web_server_files}
+                # ${server_delivery_files}
+                # ${server_files}
+                # ${server_init_files}
+                )
 
-target_link_libraries(test_db
-        metrics
-        config
-        stdc++
-        ${unittest_libs}
-        utils
-        tracing
-        query
-        log
-        milvus_engine
-        )
+target_link_libraries( test_db  ${UNITTEST_LIBS}
+                                server
+                                 milvus_engine
+                                 metrics
+                                 config
+                                 stdc++
+                                 utils
+                                 tracing
+                                 query
+                                 log
+                                )
 
-install(TARGETS test_db DESTINATION unittest)
+install( TARGETS test_db DESTINATION unittest )

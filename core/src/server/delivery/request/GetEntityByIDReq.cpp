@@ -16,7 +16,8 @@
 // under the License.
 
 #include "server/delivery/request/GetEntityByIDReq.h"
-#include "db/meta/MetaTypes.h"
+
+#include "db/Types.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
 #include "utils/TimeRecorder.h"
@@ -29,25 +30,26 @@ namespace server {
 
 constexpr uint64_t MAX_COUNT_RETURNED = 1000;
 
-GetEntityByIDReq::GetEntityByIDReq(const std::shared_ptr<milvus::server::Context>& context,
-                                   const std::string& collection_name, const engine::IDNumbers& id_array,
-                                   std::vector<std::string>& field_names,
-                                   engine::snapshot::CollectionMappings& field_mappings,
+GetEntityByIDReq::GetEntityByIDReq(const ContextPtr& context, const std::string& collection_name,
+                                   const engine::IDNumbers& id_array, std::vector<std::string>& field_names,
+                                   std::vector<bool>& valid_row, engine::snapshot::FieldElementMappings& field_mappings,
                                    engine::DataChunkPtr& data_chunk)
-    : BaseReq(context, BaseReq::kGetEntityByID),
+    : BaseReq(context, ReqType::kGetEntityByID),
       collection_name_(collection_name),
       id_array_(id_array),
       field_names_(field_names),
+      valid_row_(valid_row),
       field_mappings_(field_mappings),
       data_chunk_(data_chunk) {
 }
 
 BaseReqPtr
-GetEntityByIDReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+GetEntityByIDReq::Create(const ContextPtr& context, const std::string& collection_name,
                          const engine::IDNumbers& id_array, std::vector<std::string>& field_names_,
-                         engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
+                         std::vector<bool>& valid_row, engine::snapshot::FieldElementMappings& field_mappings,
+                         engine::DataChunkPtr& data_chunk) {
     return std::shared_ptr<BaseReq>(
-        new GetEntityByIDReq(context, collection_name, id_array, field_names_, field_mappings, data_chunk));
+        new GetEntityByIDReq(context, collection_name, id_array, field_names_, valid_row, field_mappings, data_chunk));
 }
 
 Status
@@ -66,31 +68,30 @@ GetEntityByIDReq::OnExecute() {
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
 
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
 
         // TODO(yukun) ValidateFieldNames
 
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collectionPtr;
-        status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collectionPtr, field_mappings_);
+        engine::snapshot::FieldElementMappings field_mappings;
+        STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collectionPtr, field_mappings));
         if (collectionPtr == nullptr) {
-            return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_INVALID_COLLECTION_NAME, "Collection not exist: " + collection_name_);
         }
 
         if (field_names_.empty()) {
-            for (const auto& schema : field_mappings_) {
-                if (schema.first->GetFtype() != engine::meta::hybrid::DataType::UID)
-                    field_names_.emplace_back(schema.first->GetName());
+            for (const auto& schema : field_mappings) {
+                field_names_.emplace_back(schema.first->GetName());
             }
+            field_mappings_ = field_mappings;
         } else {
             for (const auto& name : field_names_) {
                 bool find_field_name = false;
-                for (const auto& schema : field_mappings_) {
-                    if (name == schema.first->GetName()) {
+                for (const auto& kv : field_mappings) {
+                    if (name == kv.first->GetName()) {
                         find_field_name = true;
+                        field_mappings_.insert(kv);
                         break;
                     }
                 }
@@ -101,11 +102,9 @@ GetEntityByIDReq::OnExecute() {
         }
 
         // step 2: get vector data, now only support get one id
-        status = DBWrapper::DB()->GetEntityByID(collection_name_, id_array_, field_names_, data_chunk_);
-        if (!status.ok()) {
-            return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-        }
-        return Status::OK();
+        STATUS_CHECK(
+            DBWrapper::DB()->GetEntityByID(collection_name_, id_array_, field_names_, valid_row_, data_chunk_));
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

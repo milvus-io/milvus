@@ -17,13 +17,13 @@
 
 #pragma once
 
-#include <src/db/meta/MetaTypes.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "db/SnapshotVisitor.h"
+#include "db/Types.h"
 #include "segment/Segment.h"
 #include "segment/SegmentReader.h"
 #include "storage/FSHandler.h"
@@ -43,6 +43,9 @@ class SegmentWriter {
     AddChunk(const engine::DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
 
     Status
+    CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr);
+
+    Status
     WriteBloomFilter(const std::string& file_path, const IdBloomFilterPtr& bloom_filter_ptr);
 
     Status
@@ -53,9 +56,6 @@ class SegmentWriter {
 
     Status
     Merge(const SegmentReaderPtr& segment_reader);
-
-    size_t
-    Size();
 
     size_t
     RowCount();
@@ -81,12 +81,22 @@ class SegmentWriter {
     std::string
     GetSegmentPath();
 
+    std::string
+    GetRootPath() const {
+        return dir_root_;
+    }
+
+    engine::SegmentVisitorPtr
+    GetSegmentVisitor() const {
+        return segment_visitor_;
+    }
+
  private:
     Status
     Initialize();
 
     Status
-    WriteField(const std::string& file_path, const engine::FIXED_FIELD_DATA& raw);
+    WriteField(const std::string& file_path, const engine::BinaryDataPtr& raw);
 
     Status
     WriteFields();
@@ -101,7 +111,9 @@ class SegmentWriter {
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
     engine::SegmentPtr segment_ptr_;
+
     std::string dir_root_;
+    std::string dir_collections_;
 };
 
 using SegmentWriterPtr = std::shared_ptr<SegmentWriter>;

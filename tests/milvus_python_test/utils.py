@@ -16,7 +16,9 @@ epsilon = 0.000001
 default_flush_interval = 1
 big_flush_interval = 1000
 dimension = 128
-segment_size = 10
+segment_row_count = 5000
+default_float_vec_field_name = "float_vector"
+default_binary_vec_field_name = "binary_vector"
 
 # TODO:
 all_index_types = [
@@ -127,7 +129,7 @@ def gen_inaccuracy(num):
     return num / 255.0
 
 
-def gen_vectors(num, dim, is_normal=False):
+def gen_vectors(num, dim, is_normal=True):
     vectors = [[random.random() for _ in range(dim)] for _ in range(num)]
     vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
     return vectors.tolist()
@@ -199,14 +201,9 @@ def gen_single_filter_fields():
 
 def gen_single_vector_fields():
     fields = []
-    for metric_type in ['HAMMING', 'IP', 'JACCARD', 'L2', 'SUBSTRUCTURE', 'SUPERSTRUCTURE', 'TANIMOTO']:
-        for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
-            if metric_type in ["L2", "IP"] and data_type == DataType.BINARY_VECTOR:
-                continue
-            if metric_type not in ["L2", "IP"] and data_type == DataType.FLOAT_VECTOR:
-                continue
-            field = {"field": data_type.name, "type": data_type, "params": {"metric_type": metric_type, "dim": dimension}}
-            fields.append(field)
+    for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
+        field = {"field": data_type.name, "type": data_type, "params": {"dim": dimension}}
+        fields.append(field)
     return fields
 
 
@@ -215,9 +212,9 @@ def gen_default_fields():
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": "vector", "type": DataType.FLOAT_VECTOR, "params": {"metric_type": "L2", "dim": dimension}}
+            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}}
         ],
-        "segment_size": segment_size
+        "segment_row_count": segment_row_count
     }
     return default_fields
 
@@ -225,9 +222,9 @@ def gen_default_fields():
 def gen_entities(nb, is_normal=False):
     vectors = gen_vectors(nb, dimension, is_normal)
     entities = [
-        {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
-        {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
-        {"field": "vector", "type": DataType.FLOAT_VECTOR, "values": vectors}
+        {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
+        {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
+        {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": vectors}
     ]
     return entities
 
@@ -235,9 +232,9 @@ def gen_entities(nb, is_normal=False):
 def gen_binary_entities(nb):
     raw_vectors, vectors = gen_binary_vectors(nb, dimension)
     entities = [
-        {"field": "int64", "type": DataType.INT64, "values": [2 for i in range(nb)]},
-        {"field": "float", "type": DataType.FLOAT, "values": [3.0 for i in range(nb)]},
-        {"field": "binary_vector", "type": DataType.BINARY_VECTOR, "values": vectors}
+        {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
+        {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
+        {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "values": vectors}
     ]
     return raw_vectors, entities
 
@@ -262,29 +259,48 @@ def assert_equal_entity(a, b):
     pass
 
 
-def gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10}):
-    query_vectors = entities[-1]["values"][:nq]
+def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False, metric_type=None):
+    if rand_vector is True:
+        dimension = len(entities[-1]["values"][0])
+        query_vectors = gen_vectors(nq, dimension)
+    else:
+        query_vectors = entities[-1]["values"][:nq]
+    must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
+    if metric_type is not None:
+        must_param["vector"][field_name]["metric_type"] = metric_type
     query = {
         "bool": {
-            "must": [
-                {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
-            ]
+            "must": [must_param]
         }
     }
     return query, query_vectors
 
 
-def gen_query_vectors_rand_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10}):
-    dimension = len(entities[-1]["values"][0])
-    query_vectors = gen_vectors(nq, dimension)
-    query = {
-        "bool": {
-            "must": [
-                {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
-            ]
-        }
-    }
-    return query, query_vectors
+def update_query_expr(src_query, keep_old=True, expr=None):
+    tmp_query = copy.deepcopy(src_query)
+    if expr is not None:
+        tmp_query["bool"].update(expr)
+    if keep_old is not True:
+        tmp_query["bool"].pop("must")
+    return tmp_query
+
+
+def gen_default_vector_expr(default_query):
+    return default_query["bool"]["must"][0]
+
+
+def gen_default_term_expr(values=None):
+    if values is None:
+        values = [i for i in range(nb/2)]
+    expr = {"term": {"int64": {"values": values}}}
+    return expr
+
+
+def gen_default_range_expr(ranges=None):
+    if ranges is None:
+        ranges = {"GT": 1, "LT": nb/2}
+    expr = {"range": {"int64": {"ranges": ranges}}}
+    return expr
 
 
 
@@ -311,14 +327,14 @@ def add_vector_field(entities, is_normal=False):
     return entities
 
 
-def update_fields_metric_type(fields, metric_type):
-    tmp_fields = copy.deepcopy(fields)
-    if metric_type in ["L2", "IP"]:
-        tmp_fields["fields"][-1]["type"] = DataType.FLOAT_VECTOR
-    else:
-        tmp_fields["fields"][-1]["type"] = DataType.BINARY_VECTOR
-    tmp_fields["fields"][-1]["params"]["metric_type"] = metric_type
-    return tmp_fields
+# def update_fields_metric_type(fields, metric_type):
+#     tmp_fields = copy.deepcopy(fields)
+#     if metric_type in ["L2", "IP"]:
+#         tmp_fields["fields"][-1]["type"] = DataType.FLOAT_VECTOR
+#     else:
+#         tmp_fields["fields"][-1]["type"] = DataType.BINARY_VECTOR
+#     tmp_fields["fields"][-1]["params"]["metric_type"] = metric_type
+#     return tmp_fields
 
 
 def remove_field(entities):
@@ -363,7 +379,7 @@ def add_vector_field(nb, dimension=dimension):
     return field_name
         
 
-def gen_segment_sizes():
+def gen_segment_row_counts():
     sizes = [
             1,
             2,
@@ -656,8 +672,8 @@ def gen_simple_index():
     for i in range(len(all_index_types)):
         if all_index_types[i] in binary_support():
             continue
-        dic = {"index_type": all_index_types[i]}
-        dic.update(default_index_params[i])
+        dic = {"index_type": all_index_types[i], "metric_type": "L2"}
+        dic.update({"params": default_index_params[i]})
         index_params.append(dic)
     return index_params
 
@@ -667,22 +683,25 @@ def gen_binary_index():
     for i in range(len(all_index_types)):
         if all_index_types[i] in binary_support():
             dic = {"index_type": all_index_types[i]}
-            dic.update(default_index_params[i])
+            dic.update({"params": default_index_params[i]})
             index_params.append(dic)
     return index_params
 
 
 def get_search_param(index_type):
+    search_params = {"metric_type": "L2"}
     if index_type in ivf() or index_type in binary_support():
-        return {"nprobe": 32}
+        search_params.update({"nprobe": 32})
     elif index_type == "HNSW":
-        return {"ef": 64}
+        search_params.update({"ef": 64})
     elif index_type == "NSG":
-        return {"search_length": 100}
+        search_params.update({"search_length": 100})
     elif index_type == "ANNOY":
-        return {"search_k": 100}
+        search_params.update({"search_k": 100})
     else:
-        logging.getLogger().info("Invalid index_type.")
+        logging.getLogger().error("Invalid index_type.")
+        raise Exception("Invalid index_type.")
+    return search_params
 
 
 def assert_equal_vector(v1, v2):

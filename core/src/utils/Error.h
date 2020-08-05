@@ -88,7 +88,7 @@ constexpr ErrorCode SERVER_WRITE_ERROR = ToServerErrorCode(112);
 constexpr ErrorCode SERVER_INVALID_NPROBE = ToServerErrorCode(113);
 constexpr ErrorCode SERVER_INVALID_INDEX_NLIST = ToServerErrorCode(114);
 constexpr ErrorCode SERVER_INVALID_INDEX_METRIC_TYPE = ToServerErrorCode(115);
-constexpr ErrorCode SERVER_INVALID_INDEX_FILE_SIZE = ToServerErrorCode(116);
+constexpr ErrorCode SERVER_INVALID_SEGMENT_ROW_COUNT = ToServerErrorCode(116);
 constexpr ErrorCode SERVER_OUT_OF_MEMORY = ToServerErrorCode(117);
 constexpr ErrorCode SERVER_INVALID_PARTITION_TAG = ToServerErrorCode(118);
 constexpr ErrorCode SERVER_INVALID_BINARY_QUERY = ToServerErrorCode(119);
@@ -132,5 +132,7 @@ constexpr ErrorCode SS_NOT_ACTIVE_ERROR = ToSSErrorCode(6);
 constexpr ErrorCode SS_CONSTRAINT_CHECK_ERROR = ToSSErrorCode(7);
 constexpr ErrorCode SS_INVALID_ARGUMENT_ERROR = ToSSErrorCode(8);
 constexpr ErrorCode SS_OPERATION_PENDING = ToSSErrorCode(9);
+constexpr ErrorCode SS_TIMEOUT = ToSSErrorCode(10);
+constexpr ErrorCode SS_NOT_COMMITED = ToSSErrorCode(11);
 
 }  // namespace milvus

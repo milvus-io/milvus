@@ -12,31 +12,31 @@
 #-------------------------------------------------------------------------------
 
 # library
-set(CONFIG_SRCS
-    ConfigMgr.h
-    ConfigMgr.cpp
-    ConfigType.h
-    ConfigType.cpp
-    ServerConfig.h
-    ServerConfig.cpp
-    )
+set( CONFIG_SRCS    ConfigMgr.h
+                    ConfigMgr.cpp
+                    ConfigType.h
+                    ConfigType.cpp
+                    ServerConfig.h
+                    ServerConfig.cpp
+                    )
 
-add_library(config ${CONFIG_SRCS})
-add_dependencies(config yaml-cpp)
+add_library( config ${CONFIG_SRCS} )
+add_dependencies( config yaml-cpp )
 
 # unitests
 if (BUILD_UNIT_TEST STREQUAL "ON")
 
     # config_test
     add_test(
-        TARGET ConfigTypeTest
-        SOURCES
-            ConfigTypeTest1.cpp
-            ConfigTypeTest2.cpp
-        LIBS 
-            config
-            ${gtest_libraries}
-            yaml-cpp
-        )
+            TARGET
+                    ConfigTypeTest
+            SOURCES
+                    ConfigTypeTest1.cpp
+                    ConfigTypeTest2.cpp
+            LIBS 
+                    config
+                    ${gtest_libraries}
+                    yaml-cpp
+            )
 
 endif()

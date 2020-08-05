@@ -24,6 +24,7 @@
 #include "db/snapshot/Context.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
+#include "utils/Json.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -60,10 +61,10 @@ class DB {
 
     virtual Status
     GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
-                      snapshot::CollectionMappings& fields_schema) = 0;
+                      snapshot::FieldElementMappings& fields_schema) = 0;
 
     virtual Status
-    GetCollectionStats(const std::string& collection_name, std::string& collection_stats) = 0;
+    GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) = 0;
 
     virtual Status
     CountEntities(const std::string& collection_name, int64_t& row_count) = 0;
@@ -85,17 +86,18 @@ class DB {
                 const CollectionIndex& index) = 0;
 
     virtual Status
-    DropIndex(const std::string& collection_name, const std::string& field_name) = 0;
+    DropIndex(const std::string& collection_name, const std::string& field_name = "") = 0;
 
     virtual Status
-    DropIndex(const std::string& collection_id) = 0;
+    DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) = 0;
 
     virtual Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) = 0;
 
     virtual Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                  const std::vector<std::string>& field_names, DataChunkPtr& data_chunk) = 0;
+                  const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
+                  DataChunkPtr& data_chunk) = 0;
 
     virtual Status
     DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers entity_ids) = 0;

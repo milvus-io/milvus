@@ -30,6 +30,7 @@
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
+#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/SignalHandler.h"
 #include "utils/TimeRecorder.h"
@@ -44,10 +45,10 @@ SegmentWriter::SegmentWriter(const std::string& dir_root, const engine::SegmentV
 
 Status
 SegmentWriter::Initialize() {
-    dir_root_ += engine::COLLECTIONS_FOLDER;
+    dir_collections_ = dir_root_ + engine::COLLECTIONS_FOLDER;
 
     std::string directory =
-        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
 
     storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
     storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
@@ -61,7 +62,7 @@ SegmentWriter::Initialize() {
     for (auto& iter : field_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
-        engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
+        engine::DataType ftype = static_cast<engine::DataType>(field->GetFtype());
         if (engine::IsVectorField(field)) {
             json params = field->GetParams();
             if (params.find(knowhere::meta::DIM) == params.end()) {
@@ -72,7 +73,7 @@ SegmentWriter::Initialize() {
 
             int64_t field_width = 0;
             int64_t dimension = params[knowhere::meta::DIM];
-            if (ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
+            if (ftype == engine::DataType::VECTOR_BINARY) {
                 field_width += (dimension / 8);
             } else {
                 field_width += (dimension * sizeof(float));
@@ -111,7 +112,7 @@ SegmentWriter::Serialize() {
 }
 
 Status
-SegmentWriter::WriteField(const std::string& file_path, const engine::FIXED_FIELD_DATA& raw) {
+SegmentWriter::WriteField(const std::string& file_path, const engine::BinaryDataPtr& raw) {
     try {
         auto& ss_codec = codec::Codec::instance();
         ss_codec.GetBlockFormat()->Write(fs_ptr_, file_path, raw);
@@ -127,17 +128,29 @@ SegmentWriter::WriteField(const std::string& file_path, const engine::FIXED_FIEL
 
 Status
 SegmentWriter::WriteFields() {
+    TimeRecorder recorder("SegmentWriter::WriteFields");
+
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
     for (auto& iter : field_visitors_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
-        engine::FIXED_FIELD_DATA raw_data;
+        engine::BinaryDataPtr raw_data;
         segment_ptr_->GetFixedFieldData(name, raw_data);
 
         auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-        STATUS_CHECK(WriteField(file_path, raw_data));
+        if (element_visitor && element_visitor->GetFile()) {
+            auto segment_file = element_visitor->GetFile();
+            std::string file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
+            STATUS_CHECK(WriteField(file_path, raw_data));
+
+            auto file_size = milvus::CommonUtil::GetFileSize(file_path);
+            segment_file->SetSize(file_size);
+
+            recorder.RecordSection("Serialize field raw file");
+        } else {
+            return Status(DB_ERROR, "Raw element missed in snapshot");
+        }
     }
 
     return Status::OK();
@@ -148,7 +161,7 @@ SegmentWriter::WriteBloomFilter() {
     try {
         TimeRecorder recorder("SegmentWriter::WriteBloomFilter");
 
-        engine::FIXED_FIELD_DATA uid_data;
+        engine::BinaryDataPtr uid_data;
         auto status = segment_ptr_->GetFixedFieldData(engine::DEFAULT_UID_NAME, uid_data);
         if (!status.ok()) {
             return status;
@@ -157,23 +170,31 @@ SegmentWriter::WriteBloomFilter() {
         auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
         auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
-        std::string uid_blf_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, uid_blf_visitor->GetFile());
+        if (uid_blf_visitor && uid_blf_visitor->GetFile()) {
+            auto segment_file = uid_blf_visitor->GetFile();
+            std::string file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
 
-        auto& ss_codec = codec::Codec::instance();
-        segment::IdBloomFilterPtr bloom_filter_ptr;
-        ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, uid_blf_path, bloom_filter_ptr);
+            auto& ss_codec = codec::Codec::instance();
+            segment::IdBloomFilterPtr bloom_filter_ptr;
+            ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
 
-        int64_t* uids = (int64_t*)(uid_data.data());
-        int64_t row_count = segment_ptr_->GetRowCount();
-        for (int64_t i = 0; i < row_count; i++) {
-            bloom_filter_ptr->Add(uids[i]);
+            int64_t* uids = (int64_t*)(uid_data->data_.data());
+            int64_t row_count = segment_ptr_->GetRowCount();
+            for (int64_t i = 0; i < row_count; i++) {
+                bloom_filter_ptr->Add(uids[i]);
+            }
+            segment_ptr_->SetBloomFilter(bloom_filter_ptr);
+
+            recorder.RecordSection("Initialize bloom filter");
+
+            STATUS_CHECK(WriteBloomFilter(file_path, segment_ptr_->GetBloomFilter()));
+
+            auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::IdBloomFilterFormat::FilePostfix());
+            segment_file->SetSize(file_size);
+        } else {
+            return Status(DB_ERROR, "Bloom filter element missed in snapshot");
         }
-        segment_ptr_->SetBloomFilter(bloom_filter_ptr);
-
-        recorder.RecordSection("Initialize bloom filter");
-
-        return WriteBloomFilter(uid_blf_path, segment_ptr_->GetBloomFilter());
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -181,6 +202,20 @@ SegmentWriter::WriteBloomFilter() {
         engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
+
+    return Status::OK();
+}
+
+Status
+SegmentWriter::CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr) {
+    auto& ss_codec = codec::Codec::instance();
+    try {
+        ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
+    } catch (std::exception& er) {
+        return Status(DB_ERROR, "Create a new bloom filter fail");
+    }
+
+    return Status::OK();
 }
 
 Status
@@ -190,12 +225,10 @@ SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilte
     }
 
     try {
-        TimeRecorder recorder("SegmentWriter::WriteBloomFilter");
+        TimeRecorderAuto recorder("SegmentWriter::WriteBloomFilter: " + file_path);
 
         auto& ss_codec = codec::Codec::instance();
         ss_codec.GetIdBloomFilterFormat()->Write(fs_ptr_, file_path, id_bloom_filter_ptr);
-
-        recorder.RecordSection("Write bloom filter file");
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write bloom filter: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -203,6 +236,7 @@ SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilte
         engine::utils::SendExitSignal();
         return Status(SERVER_WRITE_ERROR, err_msg);
     }
+
     return Status::OK();
 }
 
@@ -211,10 +245,20 @@ SegmentWriter::WriteDeletedDocs() {
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
     auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
     auto del_doc_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
-    std::string file_path =
-        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, del_doc_visitor->GetFile());
+    if (del_doc_visitor && del_doc_visitor->GetFile()) {
+        auto segment_file = del_doc_visitor->GetFile();
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
 
-    return WriteDeletedDocs(file_path, segment_ptr_->GetDeletedDocs());
+        STATUS_CHECK(WriteDeletedDocs(file_path, segment_ptr_->GetDeletedDocs()));
+
+        auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::DeletedDocsFormat::FilePostfix());
+        segment_file->SetSize(file_size);
+    } else {
+        return Status(DB_ERROR, "Deleted-doc element missed in snapshot");
+    }
+
+    return Status::OK();
 }
 
 Status
@@ -224,7 +268,7 @@ SegmentWriter::WriteDeletedDocs(const std::string& file_path, const DeletedDocsP
     }
 
     try {
-        TimeRecorderAuto recorder("SegmentWriter::WriteDeletedDocs");
+        TimeRecorderAuto recorder("SegmentWriter::WriteDeletedDocs: " + file_path);
 
         auto& ss_codec = codec::Codec::instance();
         ss_codec.GetDeletedDocsFormat()->Write(fs_ptr_, file_path, deleted_docs);
@@ -260,7 +304,13 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
 
     LOG_ENGINE_DEBUG_ << "Merging from " << segment_reader->GetSegmentPath() << " to " << GetSegmentPath();
 
-    TimeRecorder recorder("SegmentWriter::Merge");
+    TimeRecorderAuto recorder("SegmentWriter::Merge");
+
+    // load raw data
+    status = segment_reader->LoadFields();
+    if (!status.ok()) {
+        return status;
+    }
 
     // merge deleted docs (Note: this step must before merge raw data)
     segment::DeletedDocsPtr src_deleted_docs;
@@ -288,13 +338,13 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     for (auto& iter : field_visitors_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
-        engine::FIXED_FIELD_DATA raw_data;
+        engine::BinaryDataPtr raw_data;
         segment_reader->LoadField(name, raw_data);
         chunk->fixed_fields_[name] = raw_data;
     }
 
     auto& uid_data = chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
-    chunk->count_ = uid_data.size() / sizeof(int64_t);
+    chunk->count_ = uid_data->data_.size() / sizeof(int64_t);
     status = AddChunk(chunk);
     if (!status.ok()) {
         return status;
@@ -303,11 +353,6 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     // Note: no need to merge bloom filter, the bloom filter will be created during serialize
 
     return Status::OK();
-}
-
-size_t
-SegmentWriter::Size() {
-    return 0;
 }
 
 size_t
@@ -334,24 +379,36 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
         if (field == nullptr) {
             return Status(DB_ERROR, "Invalid filed name: " + field_name);
         }
-
-        auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (element_visitor == nullptr) {
-            return Status(DB_ERROR, "Invalid filed name: " + field_name);
-        }
-
         auto& ss_codec = codec::Codec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
 
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-        ss_codec.GetVectorIndexFormat()->WriteIndex(fs_ptr_, file_path, index);
+        // serialize index file
+        {
+            auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+            if (element_visitor && element_visitor->GetFile()) {
+                auto segment_file = element_visitor->GetFile();
+                std::string file_path =
+                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
+                ss_codec.GetVectorIndexFormat()->WriteIndex(fs_ptr_, file_path, index);
 
-        element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
-        if (element_visitor != nullptr) {
-            file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-            ss_codec.GetVectorIndexFormat()->WriteCompress(fs_ptr_, file_path, index);
+                auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::VectorIndexFormat::FilePostfix());
+                segment_file->SetSize(file_size);
+            }
+        }
+
+        // serialize compress file
+        {
+            auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+            if (element_visitor && element_visitor->GetFile()) {
+                auto segment_file = element_visitor->GetFile();
+                std::string file_path =
+                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
+                ss_codec.GetVectorIndexFormat()->WriteCompress(fs_ptr_, file_path, index);
+
+                auto file_size =
+                    milvus::CommonUtil::GetFileSize(file_path + codec::VectorCompressFormat::FilePostfix());
+                segment_file->SetSize(file_size);
+            }
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
@@ -378,26 +435,27 @@ SegmentWriter::WriteStructuredIndex(const std::string& field_name) {
             return Status(DB_ERROR, "Structured index doesn't exist: " + status.message());
         }
 
-        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
         auto field = segment_visitor_->GetFieldVisitor(field_name);
         if (field == nullptr) {
-            return Status(DB_ERROR, "Invalid filed name: " + field_name);
-        }
-
-        auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (element_visitor == nullptr) {
             return Status(DB_ERROR, "Invalid filed name: " + field_name);
         }
 
         auto& ss_codec = codec::Codec::instance();
         fs_ptr_->operation_ptr_->CreateDirectory();
 
-        engine::FIELD_TYPE field_type;
-        segment_ptr_->GetFieldType(field_name, field_type);
+        // serialize index file
+        auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (element_visitor && element_visitor->GetFile()) {
+            engine::DataType field_type;
+            segment_ptr_->GetFieldType(field_name, field_type);
+            auto segment_file = element_visitor->GetFile();
+            std::string file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
+            ss_codec.GetStructuredIndexFormat()->Write(fs_ptr_, file_path, field_type, index);
 
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-        ss_codec.GetStructuredIndexFormat()->Write(fs_ptr_, file_path, field_type, index);
+            auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::StructuredIndexFormat::FilePostfix());
+            segment_file->SetSize(file_size);
+        }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -431,7 +489,7 @@ SegmentWriter::GetSegmentID(int64_t& id) {
 std::string
 SegmentWriter::GetSegmentPath() {
     std::string seg_path =
-        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
     return seg_path;
 }
 

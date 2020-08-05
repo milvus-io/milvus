@@ -13,9 +13,6 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
 
 #include "server/delivery/request/BaseReq.h"
 
@@ -25,11 +22,10 @@ namespace server {
 class GetCollectionInfoReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           CollectionSchema& collection_schema);
+    Create(const ContextPtr& context, const std::string& collection_name, CollectionSchema& collection_schema);
 
  protected:
-    GetCollectionInfoReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+    GetCollectionInfoReq(const ContextPtr& context, const std::string& collection_name,
                          CollectionSchema& collection_schema);
 
     Status

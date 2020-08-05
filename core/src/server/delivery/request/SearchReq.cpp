@@ -30,15 +30,19 @@
 namespace milvus {
 namespace server {
 
-SearchReq::SearchReq(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                     const milvus::json& json_params, engine::QueryResultPtr& result)
-    : BaseReq(context, BaseReq::kSearch), query_ptr_(query_ptr), json_params_(json_params), result_(result) {
+SearchReq::SearchReq(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
+                     engine::snapshot::FieldElementMappings& field_mappings, engine::QueryResultPtr& result)
+    : BaseReq(context, ReqType::kSearch),
+      query_ptr_(query_ptr),
+      json_params_(json_params),
+      field_mappings_(field_mappings),
+      result_(result) {
 }
 
 BaseReqPtr
-SearchReq::Create(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                  const milvus::json& json_params, engine::QueryResultPtr& result) {
-    return std::shared_ptr<BaseReq>(new SearchReq(context, query_ptr, json_params, result));
+SearchReq::Create(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
+                  engine::snapshot::FieldElementMappings& field_mappings, engine::QueryResultPtr& result) {
+    return std::shared_ptr<BaseReq>(new SearchReq(context, query_ptr, json_params, field_mappings, result));
 }
 
 Status
@@ -46,30 +50,36 @@ SearchReq::OnExecute() {
     try {
         fiu_do_on("SearchReq.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "SearchReq(table=" + query_ptr_->collection_id;
-
         TimeRecorder rc(hdr);
+
+        STATUS_CHECK(ValidateCollectionName(query_ptr_->collection_id));
+        STATUS_CHECK(ValidatePartitionTags(query_ptr_->partitions));
 
         // step 2: check table existence
         // only process root table, ignore partition table
         engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings fields_schema;
+        engine::snapshot::FieldElementMappings fields_schema;
         auto status = DBWrapper::DB()->GetCollectionInfo(query_ptr_->collection_id, collection, fields_schema);
         fiu_do_on("SearchReq.OnExecute.describe_table_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(query_ptr_->collection_id));
+                return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + query_ptr_->collection_id);
             } else {
                 return status;
             }
         }
 
-        int64_t dimension = collection->GetParams()[engine::DIMENSION].get<int64_t>();
+        int64_t dimension = 0;
 
         // step 4: Get field info
-        std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
+        std::unordered_map<std::string, engine::DataType> field_types;
         for (auto& schema : fields_schema) {
-            field_types.insert(
-                std::make_pair(schema.first->GetName(), (engine::meta::hybrid::DataType)schema.first->GetFtype()));
+            auto field = schema.first;
+            field_types.insert(std::make_pair(field->GetName(), (engine::DataType)field->GetFtype()));
+            if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
+                field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
+                dimension = field->GetParams()[engine::PARAM_DIMENSION];
+            }
         }
 
         // step 5: check field names
@@ -81,9 +91,10 @@ SearchReq::OnExecute() {
                         return status;
                     }
                     bool find_field_name = false;
-                    for (const auto& schema : field_types) {
-                        if (name.get<std::string>() == schema.first) {
+                    for (const auto& schema : fields_schema) {
+                        if (name.get<std::string>() == schema.first->GetName()) {
                             find_field_name = true;
+                            field_mappings_.insert(schema);
                             break;
                         }
                     }
@@ -124,7 +135,7 @@ SearchReq::OnExecute() {
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");
-        rc.ElapseFromBegin("totally cost");
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

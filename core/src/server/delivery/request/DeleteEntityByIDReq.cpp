@@ -30,13 +30,13 @@
 namespace milvus {
 namespace server {
 
-DeleteEntityByIDReq::DeleteEntityByIDReq(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name, const engine::IDNumbers& entity_ids)
-    : BaseReq(context, BaseReq::kDeleteEntityByID), collection_name_(collection_name), entity_ids_(entity_ids) {
+DeleteEntityByIDReq::DeleteEntityByIDReq(const ContextPtr& context, const std::string& collection_name,
+                                         const engine::IDNumbers& entity_ids)
+    : BaseReq(context, ReqType::kDeleteEntityByID), collection_name_(collection_name), entity_ids_(entity_ids) {
 }
 
 BaseReqPtr
-DeleteEntityByIDReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+DeleteEntityByIDReq::Create(const ContextPtr& context, const std::string& collection_name,
                             const engine::IDNumbers& entity_ids) {
     return std::shared_ptr<BaseReq>(new DeleteEntityByIDReq(context, collection_name, entity_ids));
 }
@@ -49,21 +49,11 @@ DeleteEntityByIDReq::OnExecute() {
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
-
-#ifdef MILVUS_SUPPORT_SPTAG
-        /* Check collection's index type supports delete */
-        if (collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_BKT ||
-            collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_KDT) {
-            std::string err_msg =
-                "Index type " + std::to_string(collection_schema.engine_type_) + " does not support delete operation";
-            LOG_SERVER_ERROR_ << err_msg;
-            return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
-        }
-#endif
 
         STATUS_CHECK(DBWrapper::DB()->DeleteEntityByID(collection_name_, entity_ids_));
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

@@ -18,11 +18,13 @@
 #include <vector>
 
 #include <fiu-local.h>
+#include <mysql++/mysql++.h>
 
 #include "db/Utils.h"
 #include "db/meta/MetaNames.h"
 #include "db/meta/backend/MetaHelper.h"
 #include "db/meta/backend/MetaSchema.h"
+#include "utils//Log.h"
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
 
@@ -48,6 +50,7 @@ static const MetaField MetaUpdatedOnField = MetaField(F_UPDATED_ON, "BIGINT", "N
 static const MetaField MetaParamsField = MetaField(F_PARAMS, "JSON", "NOT NULL");
 static const MetaField MetaSizeField = MetaField(F_SIZE, "BIGINT", "NOT NULL");
 static const MetaField MetaRowCountField = MetaField(F_ROW_COUNT, "BIGINT", "NOT NULL");
+static const MetaField MetaTypeNameField = MetaField(F_TYPE_NAME, "VARCHAR(255)", "NOT NULL");
 
 // Environment schema
 static const MetaSchema COLLECTION_SCHEMA(TABLE_COLLECTION, {MetaIdField, MetaNameField, MetaLSNField, MetaParamsField,
@@ -70,30 +73,14 @@ static const MetaSchema PARTITIONCOMMIT_SCHEMA(TABLE_PARTITION_COMMIT,
                                                 MetaMappingsField, MetaRowCountField, MetaSizeField, MetaStateField,
                                                 MetaLSNField, MetaCreatedOnField, MetaUpdatedOnField});
 
-static const MetaSchema SEGMENT_SCHEMA(TABLE_SEGMENT, {
-                                                          MetaIdField,
-                                                          MetaCollectionIdField,
-                                                          MetaPartitionIdField,
-                                                          MetaNumField,
-                                                          MetaLSNField,
-                                                          MetaStateField,
-                                                          MetaCreatedOnField,
-                                                          MetaUpdatedOnField,
-                                                      });
+static const MetaSchema SEGMENT_SCHEMA(TABLE_SEGMENT,
+                                       {MetaIdField, MetaCollectionIdField, MetaPartitionIdField, MetaNumField,
+                                        MetaLSNField, MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
-static const MetaSchema SEGMENTCOMMIT_SCHEMA(TABLE_SEGMENT_COMMIT, {
-                                                                       MetaIdField,
-                                                                       MetaSchemaIdField,
-                                                                       MetaPartitionIdField,
-                                                                       MetaSegmentIdField,
-                                                                       MetaMappingsField,
-                                                                       MetaRowCountField,
-                                                                       MetaSizeField,
-                                                                       MetaLSNField,
-                                                                       MetaStateField,
-                                                                       MetaCreatedOnField,
-                                                                       MetaUpdatedOnField,
-                                                                   });
+static const MetaSchema SEGMENTCOMMIT_SCHEMA(TABLE_SEGMENT_COMMIT,
+                                             {MetaIdField, MetaSchemaIdField, MetaPartitionIdField, MetaSegmentIdField,
+                                              MetaMappingsField, MetaRowCountField, MetaSizeField, MetaLSNField,
+                                              MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
 static const MetaSchema SEGMENTFILE_SCHEMA(TABLE_SEGMENT_FILE,
                                            {MetaIdField, MetaCollectionIdField, MetaPartitionIdField,
@@ -101,15 +88,9 @@ static const MetaSchema SEGMENTFILE_SCHEMA(TABLE_SEGMENT_FILE,
                                             MetaRowCountField, MetaSizeField, MetaLSNField, MetaStateField,
                                             MetaCreatedOnField, MetaUpdatedOnField});
 
-static const MetaSchema SCHEMACOMMIT_SCHEMA(TABLE_SCHEMA_COMMIT, {
-                                                                     MetaIdField,
-                                                                     MetaCollectionIdField,
-                                                                     MetaMappingsField,
-                                                                     MetaLSNField,
-                                                                     MetaStateField,
-                                                                     MetaCreatedOnField,
-                                                                     MetaUpdatedOnField,
-                                                                 });
+static const MetaSchema SCHEMACOMMIT_SCHEMA(TABLE_SCHEMA_COMMIT,
+                                            {MetaIdField, MetaCollectionIdField, MetaMappingsField, MetaLSNField,
+                                             MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
 static const MetaSchema FIELD_SCHEMA(TABLE_FIELD,
                                      {MetaIdField, MetaNameField, MetaNumField, MetaFtypeField, MetaParamsField,
@@ -121,8 +102,8 @@ static const MetaSchema FIELDCOMMIT_SCHEMA(TABLE_FIELD_COMMIT,
 
 static const MetaSchema FIELDELEMENT_SCHEMA(TABLE_FIELD_ELEMENT,
                                             {MetaIdField, MetaCollectionIdField, MetaFieldIdField, MetaNameField,
-                                             MetaFtypeField, MetaParamsField, MetaLSNField, MetaStateField,
-                                             MetaCreatedOnField, MetaUpdatedOnField});
+                                             MetaFtypeField, MetaTypeNameField, MetaParamsField, MetaLSNField,
+                                             MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
 }  // namespace
 
@@ -229,6 +210,9 @@ Status
 MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+        if (connectionPtr == nullptr || !connectionPtr->connected()) {
+            return Status(SS_TIMEOUT, "Mysql server is not accessed");
+        }
 
         std::string sql;
         auto status = MetaHelper::MetaQueryContextToSql(context, sql);
@@ -253,9 +237,13 @@ MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
             }
             attrs.push_back(attrs_map);
         }
+    } catch (const mysqlpp::ConnectionFailed& er) {
+        return Status(SS_TIMEOUT, er.what());
     } catch (const mysqlpp::BadQuery& er) {
-        // Handle any query errors
-        //        cerr << "Query error: " << er.what() << endl;
+        LOG_ENGINE_ERROR_ << "Query error: " << er.what();
+        if (er.errnum() == 2006) {
+            return Status(SS_TIMEOUT, er.what());
+        }
         return Status(1, er.what());
     } catch (const mysqlpp::BadConversion& er) {
         // Handle bad conversions
@@ -276,6 +264,10 @@ Status
 MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+        if (connectionPtr == nullptr || !connectionPtr->connected()) {
+            return Status(SS_TIMEOUT, "Mysql server is not accessed");
+        }
+
         mysqlpp::Transaction trans(*connectionPtr, mysqlpp::Transaction::serializable, mysqlpp::Transaction::session);
 
         std::lock_guard<std::mutex> lock(meta_mutex_);
@@ -297,12 +289,13 @@ MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_context
         }
 
         trans.commit();
-        //        std::cout << "[DB] Transaction commit " << std::endl;
+    } catch (const mysqlpp::ConnectionFailed& er) {
+        return Status(SS_TIMEOUT, er.what());
     } catch (const mysqlpp::BadQuery& er) {
-        // Handle any query errors
-        //        cerr << "Query error: " << er.what() << endl;
-        //        return -1;
-        //        std::cout << "[DB] Error: " << er.what() << std::endl;
+        LOG_ENGINE_ERROR_ << "MySql Error Code: " << er.errnum() << ": " << er.what();
+        if (er.errnum() == 2006) {
+            return Status(SS_TIMEOUT, er.what());
+        }
         return Status(SERVER_UNSUPPORTED_ERROR, er.what());
     } catch (const mysqlpp::BadConversion& er) {
         // Handle bad conversions

@@ -23,12 +23,12 @@
 namespace milvus {
 namespace scheduler {
 
-BuildIndexTask::BuildIndexTask(const engine::DBOptions& options, const std::string& collection_name,
+BuildIndexTask::BuildIndexTask(const engine::snapshot::ScopedSnapshotT& snapshot, const engine::DBOptions& options,
                                engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields,
                                TaskLabelPtr label)
     : Task(TaskType::BuildIndexTask, std::move(label)),
+      snapshot_(snapshot),
       options_(options),
-      collection_name_(collection_name),
       segment_id_(segment_id),
       target_fields_(target_fields) {
     CreateExecEngine();
@@ -37,13 +37,13 @@ BuildIndexTask::BuildIndexTask(const engine::DBOptions& options, const std::stri
 void
 BuildIndexTask::CreateExecEngine() {
     if (execution_engine_ == nullptr) {
-        execution_engine_ = engine::EngineFactory::Build(options_.meta_.path_, collection_name_, segment_id_);
+        execution_engine_ = engine::EngineFactory::Build(snapshot_, options_.meta_.path_, segment_id_);
     }
 }
 
 Status
 BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
-    TimeRecorder rc("BuildIndexTask::Load");
+    TimeRecorder rc("BuildIndexTask::OnLoad");
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
@@ -61,7 +61,6 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
             error_msg = "Wrong load type";
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
-        fiu_do_on("XSSBuildIndexTask.Load.throw_std_exception", throw std::exception());
     } catch (std::exception& ex) {
         // typical error: out of disk space or permission denied
         error_msg = "Failed to load to_index file: " + std::string(ex.what());
@@ -80,7 +79,6 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
         }
 
         LOG_ENGINE_ERROR_ << s.message();
-
         return s;
     }
 
@@ -89,7 +87,7 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
 
 Status
 BuildIndexTask::OnExecute() {
-    TimeRecorderAuto rc("XSSBuildIndexTask::Execute " + std::to_string(segment_id_));
+    TimeRecorderAuto rc("BuildIndexTask::OnExecute " + std::to_string(segment_id_));
 
     if (execution_engine_ == nullptr) {
         return Status(DB_ERROR, "execution engine is null");
@@ -97,17 +95,12 @@ BuildIndexTask::OnExecute() {
 
     auto status = execution_engine_->BuildIndex();
     if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to create collection file: " << status.ToString();
+        LOG_ENGINE_ERROR_ << "Failed to build index: " << status.ToString();
         execution_engine_ = nullptr;
         return status;
     }
 
     return Status::OK();
-}
-
-void
-BuildIndexTask::GroupFieldsForIndex(const std::string& collection_name, engine::TargetFieldGroups& groups) {
-    engine::EngineFactory::GroupFieldsForIndex(collection_name, groups);
 }
 
 }  // namespace scheduler

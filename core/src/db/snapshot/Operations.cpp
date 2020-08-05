@@ -70,6 +70,7 @@ Operations::ToString() const {
             ss << " | " << FailureString();
         }
     }
+    ss << " | " << execution_time_ / 1000 << " ms";
     return ss.str();
 }
 
@@ -183,7 +184,6 @@ Operations::GetSnapshot(ScopedSnapshotT& ss) const {
     STATUS_CHECK(CheckPrevSnapshot());
     STATUS_CHECK(CheckDone());
     STATUS_CHECK(CheckIDSNotEmpty());
-    /* status = Snapshots::GetInstance().GetSnapshot(ss, prev_ss_->GetCollectionId(), ids_.back()); */
     ss = context_.latest_ss;
     return Status::OK();
 }
@@ -197,7 +197,11 @@ Operations::ApplyToStore(StorePtr store) {
         Done(store);
         return status_;
     }
+    auto start_time = std::chrono::high_resolution_clock::now();
     auto status = OnExecute(store);
+    execution_time_ =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start_time)
+            .count();
     SetStatus(status);
     Done(store);
     return status_;
@@ -242,8 +246,41 @@ Operations::DoExecute(StorePtr store) {
 }
 
 Status
+Operations::OnApplyTimeoutCallback(StorePtr store) {
+    ApplyContext context;
+    context.on_succes_cb = std::bind(&Operations::OnApplySuccessCallback, this, std::placeholders::_1);
+    context.on_error_cb = std::bind(&Operations::OnApplyErrorCallback, this, std::placeholders::_1);
+
+    auto try_times = 0;
+
+    auto status = store->ApplyOperation(*this, context);
+    while (status.code() == SS_TIMEOUT && !HasAborted()) {
+        std::cout << GetName() << " Timeout! Try " << ++try_times << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        status = store->ApplyOperation(*this, context);
+    }
+    return status;
+}
+
+Status
+Operations::OnApplySuccessCallback(ID_TYPE result_id) {
+    SetStepResult(result_id);
+    return Status::OK();
+}
+
+Status
+Operations::OnApplyErrorCallback(Status status) {
+    return status;
+}
+
+Status
 Operations::PostExecute(StorePtr store) {
-    return store->ApplyOperation(*this);
+    ApplyContext context;
+    context.on_succes_cb = std::bind(&Operations::OnApplySuccessCallback, this, std::placeholders::_1);
+    context.on_error_cb = std::bind(&Operations::OnApplyErrorCallback, this, std::placeholders::_1);
+    context.on_timeout_cb = std::bind(&Operations::OnApplyTimeoutCallback, this, std::placeholders::_1);
+
+    return store->ApplyOperation(*this, context);
 }
 
 template <typename ResourceT>
@@ -263,7 +300,7 @@ Operations::RollBack() {
 }
 
 Operations::~Operations() {
-    if (!status_.ok() || !done_) {
+    if ((!status_.ok() || !done_) && status_.code() != SS_TIMEOUT) {
         RollBack();
     }
 }

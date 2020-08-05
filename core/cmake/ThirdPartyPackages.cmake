@@ -361,6 +361,8 @@ macro(build_gtest)
     ExternalProject_Add(googletest_ep
             URL
             ${GTEST_SOURCE_URL}
+            URL_MD5
+            "2e6fbeb6a91310a16efe181886c59596"
             BUILD_COMMAND
             ${MAKE}
             ${MAKE_BUILD_ARGS}
@@ -424,10 +426,12 @@ macro(build_mysqlpp)
             "CXXFLAGS=${EP_CXX_FLAGS}"
             "LDFLAGS=-pthread")
 
-    externalproject_add(mysqlpp_ep
+    ExternalProject_Add(mysqlpp_ep
             URL
             ${MYSQLPP_SOURCE_URL}
             ${EP_LOG_OPTIONS}
+            URL_MD5
+            "cda38b5ecc0117de91f7c42292dd1e79"
             CONFIGURE_COMMAND
             "./configure"
             ${MYSQLPP_CONFIGURE_ARGS}
@@ -482,10 +486,12 @@ macro(build_prometheus)
             "-DCMAKE_INSTALL_PREFIX=${PROMETHEUS_PREFIX}"
             -DCMAKE_BUILD_TYPE=Release)
 
-    externalproject_add(prometheus_ep
+    ExternalProject_Add(prometheus_ep
             URL
             ${PROMETHEUS_SOURCE_URL}
             ${EP_LOG_OPTIONS}
+            URL_MD5
+            "6550819ae4d61c480a55a69f08159413"
             CMAKE_ARGS
             ${PROMETHEUS_CMAKE_ARGS}
             UPDATE_COMMAND
@@ -561,10 +567,12 @@ macro(build_sqlite)
             "CFLAGS=${EP_C_FLAGS}"
             "CXXFLAGS=${EP_CXX_FLAGS}")
 
-    externalproject_add(sqlite_ep
+    ExternalProject_Add(sqlite_ep
             URL
             ${SQLITE_SOURCE_URL}
             ${EP_LOG_OPTIONS}
+            URL_MD5
+            "3c68eb400f8354605736cd55400e1572"
             CONFIGURE_COMMAND
             "./configure"
             ${SQLITE_CONFIGURE_ARGS}
@@ -607,10 +615,12 @@ macro(build_yamlcpp)
             -DYAML_CPP_BUILD_TESTS=OFF
             -DYAML_CPP_BUILD_TOOLS=OFF)
 
-    externalproject_add(yaml-cpp_ep
+    ExternalProject_Add(yaml-cpp_ep
             URL
             ${YAMLCPP_SOURCE_URL}
             ${EP_LOG_OPTIONS}
+            URL_MD5
+            "5b943e9af0060d0811148b037449ef82"
             BUILD_COMMAND
             ${MAKE}
             ${MAKE_BUILD_ARGS}
@@ -646,7 +656,7 @@ macro(build_libunwind)
     set(LIBUNWIND_SHARED_LIB "${LIBUNWIND_PREFIX}/lib/libunwind${CMAKE_SHARED_LIBRARY_SUFFIX}")
     set(LIBUNWIND_CONFIGURE_ARGS "--prefix=${LIBUNWIND_PREFIX}")
 
-    externalproject_add(libunwind_ep
+    ExternalProject_Add(libunwind_ep
             URL
             ${LIBUNWIND_SOURCE_URL}
             ${EP_LOG_OPTIONS}
@@ -689,7 +699,7 @@ macro(build_gperftools)
     set(GPERFTOOLS_STATIC_LIB "${GPERFTOOLS_PREFIX}/lib/libprofiler${CMAKE_STATIC_LIBRARY_SUFFIX}")
     set(GPERFTOOLS_CONFIGURE_ARGS "--prefix=${GPERFTOOLS_PREFIX}")
 
-    externalproject_add(gperftools_ep
+    ExternalProject_Add(gperftools_ep
             URL
             ${GPERFTOOLS_SOURCE_URL}
             ${EP_LOG_OPTIONS}
@@ -741,10 +751,12 @@ macro(build_grpc)
     set(GRPC_PROTOBUF_STATIC_LIB "${GRPC_PROTOBUF_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}protobuf${CMAKE_STATIC_LIBRARY_SUFFIX}")
     set(GRPC_PROTOC_STATIC_LIB "${GRPC_PROTOBUF_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}protoc${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-    externalproject_add(grpc_ep
+    ExternalProject_Add(grpc_ep
             URL
             ${GRPC_SOURCE_URL}
             ${EP_LOG_OPTIONS}
+            URL_MD5
+            "478215c151a144c2d8625b49ff1b70aa"
             CONFIGURE_COMMAND
             ""
             BUILD_IN_SOURCE
@@ -823,10 +835,12 @@ macro(build_zlib)
     set(ZLIB_CMAKE_ARGS ${EP_COMMON_CMAKE_ARGS} "-DCMAKE_INSTALL_PREFIX=${ZLIB_PREFIX}"
             -DBUILD_SHARED_LIBS=OFF)
 
-    externalproject_add(zlib_ep
+    ExternalProject_Add(zlib_ep
             URL
             ${ZLIB_SOURCE_URL}
             ${EP_LOG_OPTIONS}
+            URL_MD5
+            "0095d2d2d1f3442ce1318336637b695f"
             BUILD_COMMAND
             ${MAKE}
             ${MAKE_BUILD_ARGS}
@@ -865,10 +879,12 @@ macro(build_opentracing)
             "-DCMAKE_INSTALL_PREFIX=${OPENTRACING_PREFIX}"
             -DBUILD_SHARED_LIBS=OFF)
 
-    externalproject_add(opentracing_ep
+    ExternalProject_Add(opentracing_ep
             URL
             ${OPENTRACING_SOURCE_URL}
             ${EP_LOG_OPTIONS}
+            URL_MD5
+            "e598ba4b81ae8e1ceed8cd8bbf86f2fd"
             CMAKE_ARGS
             ${OPENTRACING_CMAKE_ARGS}
             BUILD_COMMAND
@@ -909,10 +925,12 @@ macro(build_fiu)
     set(FIU_SHARED_LIB "${FIU_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}")
     set(FIU_INCLUDE_DIR "${FIU_PREFIX}/include")
 
-    externalproject_add(fiu_ep
+    ExternalProject_Add(fiu_ep
             URL
             ${FIU_SOURCE_URL}
             ${EP_LOG_OPTIONS}
+            URL_MD5
+            "75f9d076daf964c9410611701f07c61b"
             CONFIGURE_COMMAND
             ""
             BUILD_IN_SOURCE
@@ -964,10 +982,12 @@ macro(build_oatpp)
             )
 
 
-    externalproject_add(oatpp_ep
+    ExternalProject_Add(oatpp_ep
             URL
             ${OATPP_SOURCE_URL}
             ${EP_LOG_OPTIONS}
+            URL_MD5
+            "ae7143a8014ffed77c5340ac29af29f4"
             CMAKE_ARGS
             ${OATPP_CMAKE_ARGS}
             BUILD_COMMAND
@@ -1022,7 +1042,7 @@ macro(build_aws)
             -DCMAKE_C_FLAGS=${EP_C_FLAGS}
             -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS})
 
-    externalproject_add(aws_ep
+    ExternalProject_Add(aws_ep
             ${EP_LOG_OPTIONS}
             CMAKE_ARGS
             ${AWS_CMAKE_ARGS}

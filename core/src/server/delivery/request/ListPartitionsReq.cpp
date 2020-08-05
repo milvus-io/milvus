@@ -22,13 +22,13 @@
 namespace milvus {
 namespace server {
 
-ListPartitionsReq::ListPartitionsReq(const std::shared_ptr<milvus::server::Context>& context,
-                                     const std::string& collection_name, std::vector<std::string>& partition_list)
-    : BaseReq(context, BaseReq::kListPartitions), collection_name_(collection_name), partition_list_(partition_list) {
+ListPartitionsReq::ListPartitionsReq(const ContextPtr& context, const std::string& collection_name,
+                                     std::vector<std::string>& partition_list)
+    : BaseReq(context, ReqType::kListPartitions), collection_name_(collection_name), partition_list_(partition_list) {
 }
 
 BaseReqPtr
-ListPartitionsReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
+ListPartitionsReq::Create(const ContextPtr& context, const std::string& collection_name,
                           std::vector<std::string>& partition_list) {
     return std::shared_ptr<BaseReq>(new ListPartitionsReq(context, collection_name, partition_list));
 }
@@ -42,11 +42,14 @@ ListPartitionsReq::OnExecute() {
     bool exist = false;
     auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
     if (!exist) {
-        return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+        return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
     }
 
     /* get partitions */
-    return DBWrapper::DB()->ListPartitions(collection_name_, partition_list_);
+    STATUS_CHECK(DBWrapper::DB()->ListPartitions(collection_name_, partition_list_));
+    rc.ElapseFromBegin("done");
+
+    return Status::OK();
 }
 
 }  // namespace server

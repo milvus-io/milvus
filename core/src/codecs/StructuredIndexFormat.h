@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include "db/meta/MetaTypes.h"
+#include "db/Types.h"
 #include "knowhere/index/Index.h"
 #include "storage/FSHandler.h"
 
@@ -32,14 +32,14 @@ class StructuredIndexFormat {
  public:
     StructuredIndexFormat() = default;
 
-    std::string
+    static std::string
     FilePostfix();
 
     void
     Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::IndexPtr& index);
 
     void
-    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::meta::hybrid::DataType data_type,
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::DataType data_type,
           const knowhere::IndexPtr& index);
 
     // No copy and move
@@ -53,7 +53,7 @@ class StructuredIndexFormat {
 
  private:
     knowhere::IndexPtr
-    CreateStructuredIndex(const engine::meta::hybrid::DataType data_type);
+    CreateStructuredIndex(const engine::DataType data_type);
 };
 
 using StructuredIndexFormatPtr = std::shared_ptr<StructuredIndexFormat>;

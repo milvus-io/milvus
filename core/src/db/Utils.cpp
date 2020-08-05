@@ -29,6 +29,7 @@
 #endif
 #include "config/ServerConfig.h"
 //#include "storage/s3/S3ClientWrapper.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
@@ -48,20 +49,18 @@ GetMicroSecTimeStamp() {
 
 bool
 IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2) {
-    return index1.index_name_ == index2.index_name_ && index1.extra_params_ == index2.extra_params_ &&
+    return index1.index_type_ == index2.index_type_ && index1.extra_params_ == index2.extra_params_ &&
            index1.metric_name_ == index2.metric_name_;
 }
 
 bool
-IsBinaryMetricType(int32_t metric_type) {
-    return (metric_type == (int32_t)engine::MetricType::HAMMING) ||
-           (metric_type == (int32_t)engine::MetricType::JACCARD) ||
-           (metric_type == (int32_t)engine::MetricType::SUBSTRUCTURE) ||
-           (metric_type == (int32_t)engine::MetricType::SUPERSTRUCTURE) ||
-           (metric_type == (int32_t)engine::MetricType::TANIMOTO);
+IsBinaryMetricType(const std::string& metric_type) {
+    return (metric_type == knowhere::Metric::HAMMING) || (metric_type == knowhere::Metric::JACCARD) ||
+           (metric_type == knowhere::Metric::SUBSTRUCTURE) || (metric_type == knowhere::Metric::SUPERSTRUCTURE) ||
+           (metric_type == knowhere::Metric::TANIMOTO);
 }
 
-meta::DateT
+engine::DateT
 GetDate(const std::time_t& t, int day_delta) {
     struct tm ltm;
     localtime_r(&t, &ltm);
@@ -81,12 +80,12 @@ GetDate(const std::time_t& t, int day_delta) {
     return ltm.tm_year * 10000 + ltm.tm_mon * 100 + ltm.tm_mday;
 }
 
-meta::DateT
+engine::DateT
 GetDateWithDelta(int day_delta) {
     return GetDate(std::time(nullptr), day_delta);
 }
 
-meta::DateT
+engine::DateT
 GetDate() {
     return GetDate(std::time(nullptr), 0);
 }
@@ -127,6 +126,24 @@ SendExitSignal() {
     LOG_SERVER_INFO_ << "Send SIGUSR2 signal to exit";
     pid_t pid = getpid();
     kill(pid, SIGUSR2);
+}
+
+void
+GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids) {
+    ids.clear();
+    if (chunk == nullptr) {
+        return;
+    }
+
+    auto pair = chunk->fixed_fields_.find(engine::DEFAULT_UID_NAME);
+    if (pair == chunk->fixed_fields_.end() || pair->second == nullptr) {
+        return;
+    }
+
+    if (!pair->second->data_.empty()) {
+        ids.resize(pair->second->data_.size() / sizeof(engine::IDNumber));
+        memcpy((void*)(ids.data()), pair->second->data_.data(), pair->second->data_.size());
+    }
 }
 
 }  // namespace utils

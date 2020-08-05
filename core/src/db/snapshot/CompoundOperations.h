@@ -11,7 +11,10 @@
 
 #pragma once
 
+#include <map>
+#include <set>
 #include <string>
+#include <utility>
 #include "ResourceOperations.h"
 #include "Snapshot.h"
 
@@ -58,12 +61,12 @@ class CompoundBaseOperation : public Operations {
     }
 };
 
-class AddSegmentFileOperation : public CompoundBaseOperation<AddSegmentFileOperation> {
+class ChangeSegmentFileOperation : public CompoundBaseOperation<ChangeSegmentFileOperation> {
  public:
-    using BaseT = CompoundBaseOperation<AddSegmentFileOperation>;
-    static constexpr const char* Name = "B";
+    using BaseT = CompoundBaseOperation<ChangeSegmentFileOperation>;
+    static constexpr const char* Name = "CSF";
 
-    AddSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+    ChangeSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
     Status DoExecute(StorePtr) override;
 
@@ -79,6 +82,31 @@ class AddSegmentFileOperation : public CompoundBaseOperation<AddSegmentFileOpera
 
     SIZE_TYPE delta_ = 0;
     bool sub_;
+};
+
+class CompoundSegmentsOperation : public CompoundBaseOperation<CompoundSegmentsOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<CompoundSegmentsOperation>;
+    static constexpr const char* Name = "CS";
+
+    CompoundSegmentsOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    Status DoExecute(StorePtr) override;
+
+    Status
+    CommitNewSegment(const OperationContext& context, SegmentPtr&);
+
+    Status
+    CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created);
+
+    Status
+    CommitRowCountDelta(ID_TYPE segment_id, SIZE_TYPE delta, bool sub = true);
+
+ protected:
+    std::map<ID_TYPE, std::pair<SIZE_TYPE, bool>> delta_;
+    std::map<ID_TYPE, SegmentFile::VecT> stale_segment_files_;
+    std::map<ID_TYPE, SegmentFile::VecT> new_segment_files_;
+    std::set<ID_TYPE> modified_segments_;
 };
 
 class AddFieldElementOperation : public CompoundBaseOperation<AddFieldElementOperation> {

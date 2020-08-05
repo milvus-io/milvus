@@ -21,16 +21,14 @@
 namespace milvus {
 namespace engine {
 
-MergeManagerImpl::MergeManagerImpl(const DBOptions& options, MergeStrategyType type)
-    : options_(options), strategy_type_(type) {
-    UseStrategy(type);
+MergeManagerImpl::MergeManagerImpl(const DBOptions& options) : options_(options) {
 }
 
 Status
-MergeManagerImpl::UseStrategy(MergeStrategyType type) {
+MergeManagerImpl::CreateStrategy(MergeStrategyType type, MergeStrategyPtr& strategy) {
     switch (type) {
         case MergeStrategyType::SIMPLE: {
-            strategy_ = std::make_shared<MergeSimpleStrategy>();
+            strategy = std::make_shared<MergeSimpleStrategy>();
             break;
         }
         case MergeStrategyType::LAYERED:
@@ -38,20 +36,19 @@ MergeManagerImpl::UseStrategy(MergeStrategyType type) {
         default: {
             std::string msg = "Unsupported merge strategy type: " + std::to_string((int32_t)type);
             LOG_ENGINE_ERROR_ << msg;
-            throw Exception(DB_ERROR, msg);
+            return Status(DB_ERROR, msg);
         }
     }
-    strategy_type_ = type;
 
     return Status::OK();
 }
 
 Status
-MergeManagerImpl::MergeFiles(const std::string& collection_name) {
-    if (strategy_ == nullptr) {
-        std::string msg = "No merge strategy specified";
-        LOG_ENGINE_ERROR_ << msg;
-        return Status(DB_ERROR, msg);
+MergeManagerImpl::MergeFiles(const std::string& collection_name, MergeStrategyType type) {
+    MergeStrategyPtr strategy;
+    auto status = CreateStrategy(type, strategy);
+    if (!status.ok()) {
+        return status;
     }
 
     while (true) {
@@ -79,7 +76,7 @@ MergeManagerImpl::MergeFiles(const std::string& collection_name) {
         }
 
         SegmentGroups segment_groups;
-        auto status = strategy_->RegroupSegments(latest_ss, part2seg, segment_groups);
+        auto status = strategy->RegroupSegments(latest_ss, part2seg, segment_groups);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to regroup segments for: " << collection_name
                               << ", continue to merge all files into one";

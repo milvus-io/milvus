@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "db/Types.h"
-#include "db/meta/MetaTypes.h"
 #include "segment/Segment.h"
 
 namespace milvus {

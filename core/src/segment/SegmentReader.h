@@ -37,13 +37,13 @@ class SegmentReader {
     Load();
 
     Status
-    LoadField(const std::string& field_name, std::vector<uint8_t>& raw);
+    LoadField(const std::string& field_name, engine::BinaryDataPtr& raw);
 
     Status
     LoadFields();
 
     Status
-    LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets, std::vector<uint8_t>& raw);
+    LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets, engine::BinaryDataPtr& raw);
 
     Status
     LoadFieldsEntities(const std::vector<std::string>& fields_name, const std::vector<int64_t>& offsets,
@@ -79,6 +79,21 @@ class SegmentReader {
     std::string
     GetSegmentPath();
 
+    std::string
+    GetRootPath() const {
+        return dir_root_;
+    }
+
+    std::string
+    GetCollectionsPath() const {
+        return dir_collections_;
+    }
+
+    engine::SegmentVisitorPtr
+    GetSegmentVisitor() const {
+        return segment_visitor_;
+    }
+
  private:
     Status
     Initialize();
@@ -87,7 +102,9 @@ class SegmentReader {
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
     engine::SegmentPtr segment_ptr_;
+
     std::string dir_root_;
+    std::string dir_collections_;
 };
 
 using SegmentReaderPtr = std::shared_ptr<SegmentReader>;

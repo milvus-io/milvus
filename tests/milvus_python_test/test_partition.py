@@ -9,7 +9,7 @@ from utils import *
 
 
 dim = 128
-segment_size = 10
+segment_row_count = 5000
 collection_id = "partition"
 nprobe = 1
 tag = "1970-01-01"
@@ -17,7 +17,6 @@ TIMEOUT = 120
 nb = 6000
 tag = "partition_tag"
 field_name = "float_vector"
-default_index_name = "partition"
 entity = gen_entities(1)
 entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)

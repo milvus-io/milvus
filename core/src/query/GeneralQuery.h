@@ -13,10 +13,12 @@
 
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "db/meta/MetaTypes.h"
+
+#include "db/Types.h"
 #include "utils/Json.h"
 
 namespace milvus {
@@ -76,6 +78,7 @@ struct VectorQuery {
     std::string field_name;
     milvus::json extra_params = {};
     int64_t topk;
+    int64_t nq;
     float boost;
     VectorRecord query_vector;
 };
@@ -114,6 +117,7 @@ struct Query {
     std::string collection_id;
     std::vector<std::string> partitions;
     std::vector<std::string> field_names;
+    std::set<std::string> index_fields;
 };
 using QueryPtr = std::shared_ptr<Query>;
 

@@ -35,9 +35,6 @@ namespace engine {
 namespace snapshot {
 
 using CheckStaleFunc = std::function<Status(ScopedSnapshotT&)>;
-// using StepsHolderT = std::tuple<CollectionCommit::SetT, Collection::SetT, SchemaCommit::SetT, FieldCommit::SetT,
-//                                Field::SetT, FieldElement::SetT, PartitionCommit::SetT, Partition::SetT,
-//                                SegmentCommit::SetT, Segment::SetT, SegmentFile::SetT>;
 template <typename ResourceT>
 using StepsContextSet = std::set<typename ResourceContext<ResourceT>::Ptr>;
 using StepsHolderT =
@@ -50,6 +47,8 @@ enum OperationsType { Invalid, W_Leaf, O_Leaf, W_Compound, O_Compound };
 
 class Operations : public std::enable_shared_from_this<Operations> {
  public:
+    using TimeoutCBT = std::function<Status(const Status&)>;
+
     Operations(const OperationContext& context, ScopedSnapshotT prev_ss,
                const OperationsType& type = OperationsType::Invalid);
 
@@ -161,12 +160,26 @@ class Operations : public std::enable_shared_from_this<Operations> {
     virtual Status
     OnSnapshotDropped();
 
+    void
+    Abort() {
+        aborted_ = true;
+    }
+    bool
+    HasAborted() const {
+        return aborted_;
+    }
+
     virtual ~Operations();
 
     friend std::ostream&
     operator<<(std::ostream& out, const Operations& operation);
 
  protected:
+    virtual Status
+    OnApplySuccessCallback(ID_TYPE result_id);
+    virtual Status OnApplyErrorCallback(Status);
+    virtual Status OnApplyTimeoutCallback(StorePtr);
+
     virtual std::string
     SuccessString() const;
     virtual std::string
@@ -193,6 +206,8 @@ class Operations : public std::enable_shared_from_this<Operations> {
     std::condition_variable finish_cond_;
     ID_TYPE uid_;
     OperationsType type_;
+    double execution_time_ = 0;
+    std::atomic_bool aborted_ = false;
 };
 
 template <typename StepT>

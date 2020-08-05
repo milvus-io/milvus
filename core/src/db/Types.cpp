@@ -10,21 +10,26 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/Types.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace milvus {
 namespace engine {
 
-const char* DEFAULT_UID_NAME = "_uid";
+const char* DEFAULT_UID_NAME = "_id";
+const char* PARAM_UID_AUTOGEN = "auto_increment";
 
 const char* DEFAULT_RAW_DATA_NAME = "_raw";
 const char* DEFAULT_BLOOM_FILTER_NAME = "_blf";
 const char* DEFAULT_DELETED_DOCS_NAME = "_del";
-const char* DEFAULT_INDEX_NAME = "_idx";
+const char* DEFAULT_INDEX_COMPRESS_NAME = "_compress";
 
-const char* PARAM_COLLECTION_DIMENSION = "dim";
-const char* PARAM_INDEX_METRIC_TYPE = "metric_type";
-const char* PARAM_INDEX_EXTRA_PARAMS = "extra_params";
-const char* PARAM_SEGMENT_SIZE = "segment_size";
+const char* DEFAULT_STRUCTURED_INDEX_NAME = "SORTED";  // this string should be defined in knowhere::IndexEnum
+
+const char* PARAM_DIMENSION = knowhere::meta::DIM;
+const char* PARAM_INDEX_TYPE = "index_type";
+const char* PARAM_INDEX_METRIC_TYPE = knowhere::Metric::TYPE;
+const char* PARAM_INDEX_EXTRA_PARAMS = "params";
+const char* PARAM_SEGMENT_ROW_COUNT = "segment_row_count";
 
 }  // namespace engine
 }  // namespace milvus

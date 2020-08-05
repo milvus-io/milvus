@@ -26,10 +26,10 @@
 namespace milvus {
 namespace server {
 
-CreateIndexReq::CreateIndexReq(const std::shared_ptr<milvus::server::Context>& context,
-                               const std::string& collection_name, const std::string& field_name,
-                               const std::string& index_name, const milvus::json& json_params)
-    : BaseReq(context, BaseReq::kCreateIndex),
+CreateIndexReq::CreateIndexReq(const ContextPtr& context, const std::string& collection_name,
+                               const std::string& field_name, const std::string& index_name,
+                               const milvus::json& json_params)
+    : BaseReq(context, ReqType::kCreateIndex),
       collection_name_(collection_name),
       field_name_(field_name),
       index_name_(index_name),
@@ -37,8 +37,8 @@ CreateIndexReq::CreateIndexReq(const std::shared_ptr<milvus::server::Context>& c
 }
 
 BaseReqPtr
-CreateIndexReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                       const std::string& field_name, const std::string& index_name, const milvus::json& json_params) {
+CreateIndexReq::Create(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+                       const std::string& index_name, const milvus::json& json_params) {
     return std::shared_ptr<BaseReq>(new CreateIndexReq(context, collection_name, field_name, index_name, json_params));
 }
 
@@ -49,28 +49,17 @@ CreateIndexReq::OnExecute() {
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        auto status = ValidateCollectionName(collection_name_);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
 
-        status = ValidateFieldName(field_name_);
-        if (!status.ok()) {
-            return status;
-        }
-
-        status = ValidateIndexName(index_name_);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(ValidateFieldName(field_name_));
 
         // only process root collection, ignore partition collection
         engine::snapshot::CollectionPtr collection;
-        engine::snapshot::CollectionMappings fields_schema;
-        status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, fields_schema);
+        engine::snapshot::FieldElementMappings fields_schema;
+        auto status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, fields_schema);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+                return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
             } else {
                 return status;
             }
@@ -92,12 +81,12 @@ CreateIndexReq::OnExecute() {
         if (engine::IsVectorField(field)) {
             int32_t field_type = field->GetFtype();
             auto params = field->GetParams();
-            int64_t dimension = params[engine::DIMENSION].get<int64_t>();
+            int64_t dimension = params[engine::PARAM_DIMENSION].get<int64_t>();
 
             // validate index type
-            std::string index_type = 0;
-            if (json_params_.contains("index_type")) {
-                index_type = json_params_["index_type"].get<std::string>();
+            std::string index_type;
+            if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
+                index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
             }
             status = ValidateIndexType(index_type);
             if (!status.ok()) {
@@ -105,11 +94,11 @@ CreateIndexReq::OnExecute() {
             }
 
             // validate metric type
-            std::string metric_type = 0;
-            if (json_params_.contains("metric_type")) {
-                metric_type = json_params_["metric_type"].get<std::string>();
+            std::string metric_type;
+            if (json_params_.contains(engine::PARAM_INDEX_METRIC_TYPE)) {
+                metric_type = json_params_[engine::PARAM_INDEX_METRIC_TYPE].get<std::string>();
             }
-            status = ValidateMetricType(metric_type);
+            status = ValidateIndexMetricType(metric_type);
             if (!status.ok()) {
                 return status;
             }
@@ -123,16 +112,22 @@ CreateIndexReq::OnExecute() {
             rc.RecordSection("check validation");
 
             index.index_name_ = index_name_;
+            index.index_type_ = index_type;
             index.metric_name_ = metric_type;
-            index.extra_params_ = json_params_;
+            if (json_params_.contains(engine::PARAM_INDEX_EXTRA_PARAMS)) {
+                index.extra_params_ = json_params_[engine::PARAM_INDEX_EXTRA_PARAMS];
+            }
         } else {
             index.index_name_ = index_name_;
+            std::string index_type;
+            if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
+                index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
+            }
+            index.index_type_ = index_type;
         }
 
-        status = DBWrapper::DB()->CreateIndex(context_, collection_name_, field_name_, index);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(DBWrapper::DB()->CreateIndex(context_, collection_name_, field_name_, index));
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

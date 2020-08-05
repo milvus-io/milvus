@@ -16,19 +16,16 @@
 #include "utils/TimeRecorder.h"
 
 #include <fiu-local.h>
-#include <memory>
 
 namespace milvus {
 namespace server {
 
-HasCollectionReq::HasCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
-                                   const std::string& collection_name, bool& exist)
-    : BaseReq(context, BaseReq::kHasCollection), collection_name_(collection_name), exist_(exist) {
+HasCollectionReq::HasCollectionReq(const ContextPtr& context, const std::string& collection_name, bool& exist)
+    : BaseReq(context, ReqType::kHasCollection), collection_name_(collection_name), exist_(exist) {
 }
 
 BaseReqPtr
-HasCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                         bool& exist) {
+HasCollectionReq::Create(const ContextPtr& context, const std::string& collection_name, bool& exist) {
     return std::shared_ptr<BaseReq>(new HasCollectionReq(context, collection_name, exist));
 }
 
@@ -38,6 +35,7 @@ HasCollectionReq::OnExecute() {
         std::string hdr = "HasCollectionReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist_));
 
         rc.ElapseFromBegin("done");

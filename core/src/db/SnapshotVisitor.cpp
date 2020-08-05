@@ -11,8 +11,9 @@
 
 #include "db/SnapshotVisitor.h"
 #include <sstream>
+
 #include "db/SnapshotHandlers.h"
-#include "db/meta/MetaTypes.h"
+#include "db/Types.h"
 #include "db/snapshot/Snapshots.h"
 
 namespace milvus {

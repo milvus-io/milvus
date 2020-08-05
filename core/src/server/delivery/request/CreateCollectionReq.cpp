@@ -13,50 +13,34 @@
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
-#include "server/delivery/request/BaseReq.h"
-#include "server/web_impl/Constants.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
 #include <fiu-local.h>
-#include <src/db/snapshot/Context.h>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <vector>
 
 namespace milvus {
 namespace server {
 
-CreateCollectionReq::CreateCollectionReq(const std::shared_ptr<milvus::server::Context>& context,
-                                         const std::string& collection_name,
-                                         std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-                                         std::unordered_map<std::string, milvus::json>& field_index_params,
-                                         std::unordered_map<std::string, std::string>& field_params,
-                                         milvus::json& extra_params)
-    : BaseReq(context, BaseReq::kCreateCollection),
+CreateCollectionReq::CreateCollectionReq(const ContextPtr& context, const std::string& collection_name,
+                                         FieldsType& fields, milvus::json& extra_params)
+    : BaseReq(context, ReqType::kCreateCollection),
       collection_name_(collection_name),
-      field_types_(field_types),
-      field_index_params_(field_index_params),
-      field_params_(field_params),
+      fields_(fields),
       extra_params_(extra_params) {
 }
 
 BaseReqPtr
-CreateCollectionReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                            std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-                            std::unordered_map<std::string, milvus::json>& field_index_params,
-                            std::unordered_map<std::string, std::string>& field_params, milvus::json& extra_params) {
-    return std::shared_ptr<BaseReq>(
-        new CreateCollectionReq(context, collection_name, field_types, field_index_params, field_params, extra_params));
+CreateCollectionReq::Create(const ContextPtr& context, const std::string& collection_name, FieldsType& fields,
+                            milvus::json& extra_params) {
+    return std::shared_ptr<BaseReq>(new CreateCollectionReq(context, collection_name, fields, extra_params));
 }
 
 Status
 CreateCollectionReq::OnExecute() {
-    std::string hdr = "CreateCollectionReq(collection=" + collection_name_ + ")";
-    TimeRecorderAuto rc(hdr);
-
     try {
+        std::string hdr = "CreateCollectionReq(collection=" + collection_name_ + ")";
+        TimeRecorderAuto rc(hdr);
+
         // step 1: check arguments
         auto status = ValidateCollectionName(collection_name_);
         fiu_do_on("CreateCollectionReq.OnExecute.invalid_collection_name",
@@ -65,41 +49,57 @@ CreateCollectionReq::OnExecute() {
             return status;
         }
 
+        if (!extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
+            extra_params_[engine::PARAM_SEGMENT_ROW_COUNT] = engine::DEFAULT_SEGMENT_ROW_COUNT;
+        } else {
+            auto segment_row = extra_params_[engine::PARAM_SEGMENT_ROW_COUNT].get<int64_t>();
+            STATUS_CHECK(ValidateSegmentRowCount(segment_row));
+        }
+
         rc.RecordSection("check validation");
 
         // step 2: create snapshot collection context
         engine::snapshot::CreateCollectionContext create_collection_context;
-        auto ss_collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_, extra_params_);
-        create_collection_context.collection = ss_collection_schema;
-        for (auto& field_type : field_types_) {
-            std::string field_name = field_type.first;
-            auto index_params = field_index_params_.at(field_name);
+        auto collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_, extra_params_);
+        create_collection_context.collection = collection_schema;
+        for (auto& field_kv : fields_) {
+            auto& field_name = field_kv.first;
+            auto& field_schema = field_kv.second;
+
+            auto& field_type = field_schema.field_type_;
+            auto& field_params = field_schema.field_params_;
+            auto& index_params = field_schema.index_params_;
+
+            STATUS_CHECK(ValidateFieldName(field_name));
+
             std::string index_name;
             if (index_params.contains("name")) {
                 index_name = index_params["name"];
             }
 
-            int64_t dimension = 0;
-            json field_params;
-            if (!field_params_.at(field_name).empty()) {
-                field_params = field_params_.at(field_name);
-                if (field_type.second == engine::meta::hybrid::DataType::VECTOR_FLOAT ||
-                    field_type.second == engine::meta::hybrid::DataType::VECTOR_BINARY) {
-                    if (field_params.contains(engine::PARAM_COLLECTION_DIMENSION)) {
-                        dimension = field_params[engine::PARAM_COLLECTION_DIMENSION].get<int64_t>();
+            // validate id field
+            if (field_name == engine::DEFAULT_UID_NAME) {
+                if (field_type != engine::DataType::INT64) {
+                    return Status(DB_ERROR, "Field '_id' data type must be int64");
+                }
+            }
+
+            // validate vector field dimension
+            if (field_type == engine::DataType::VECTOR_FLOAT || field_type == engine::DataType::VECTOR_BINARY) {
+                if (!field_params.contains(engine::PARAM_DIMENSION)) {
+                    return Status(SERVER_INVALID_VECTOR_DIMENSION, "Dimension not defined in field_params");
+                } else {
+                    auto dim = field_params[engine::PARAM_DIMENSION].get<int64_t>();
+                    if (field_type == engine::DataType::VECTOR_FLOAT) {
+                        STATUS_CHECK(ValidateDimension(dim, false));
                     } else {
-                        return Status{milvus::SERVER_INVALID_VECTOR_DIMENSION,
-                                      "Dimension should be defined in vector field extra_params"};
+                        STATUS_CHECK(ValidateDimension(dim, true));
                     }
                 }
             }
 
-            auto field = std::make_shared<engine::snapshot::Field>(field_name, 0, (engine::FieldType)field_type.second,
-                                                                   field_params);
-
-            auto field_element = std::make_shared<engine::snapshot::FieldElement>(
-                0, 0, index_name, engine::FieldElementType::FET_INDEX, index_params);
-            create_collection_context.fields_schema[field] = {field_element};
+            auto field = std::make_shared<engine::snapshot::Field>(field_name, 0, field_type, field_params);
+            create_collection_context.fields_schema[field] = {};
         }
 
         // step 3: create collection

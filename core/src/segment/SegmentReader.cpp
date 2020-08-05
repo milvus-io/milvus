@@ -21,6 +21,7 @@
 #include <memory>
 #include <utility>
 
+#include "cache/CpuCacheMgr.h"
 #include "codecs/Codec.h"
 #include "db/SnapshotUtils.h"
 #include "db/Types.h"
@@ -44,10 +45,10 @@ SegmentReader::SegmentReader(const std::string& dir_root, const engine::SegmentV
 
 Status
 SegmentReader::Initialize() {
-    dir_root_ += engine::COLLECTIONS_FOLDER;
+    dir_collections_ = dir_root_ + engine::COLLECTIONS_FOLDER;
 
     std::string directory =
-        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
 
     storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
     storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
@@ -60,7 +61,7 @@ SegmentReader::Initialize() {
     for (auto& iter : field_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
-        engine::FIELD_TYPE ftype = static_cast<engine::FIELD_TYPE>(field->GetFtype());
+        engine::DataType ftype = static_cast<engine::DataType>(field->GetFtype());
         if (engine::IsVectorField(field)) {
             json params = field->GetParams();
             if (params.find(knowhere::meta::DIM) == params.end()) {
@@ -71,10 +72,10 @@ SegmentReader::Initialize() {
 
             int64_t field_width = 0;
             int64_t dimension = params[knowhere::meta::DIM];
-            if (ftype == engine::FIELD_TYPE::VECTOR_BINARY) {
-                field_width += (dimension / 8);
+            if (ftype == engine::DataType::VECTOR_BINARY) {
+                field_width = (dimension / 8);
             } else {
-                field_width += (dimension * sizeof(float));
+                field_width = (dimension * sizeof(float));
             }
             segment_ptr_->AddField(name, ftype, field_width);
         } else {
@@ -101,24 +102,34 @@ SegmentReader::Load() {
 }
 
 Status
-SegmentReader::LoadField(const std::string& field_name, std::vector<uint8_t>& raw) {
+SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& raw) {
     try {
-        engine::FIXEDX_FIELD_MAP& field_map = segment_ptr_->GetFixedFields();
-        auto pair = field_map.find(field_name);
-        if (pair != field_map.end()) {
-            raw = pair->second;
+        segment_ptr_->GetFixedFieldData(field_name, raw);
+        if (raw != nullptr) {
             return Status::OK();  // alread exist
         }
 
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        if (field_visitor == nullptr) {
+            return Status(DB_ERROR, "Invalid field name");
+        }
+
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
         std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, raw_visitor->GetFile());
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
 
-        auto& ss_codec = codec::Codec::instance();
-        ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, raw);
+        // if the data is in cache, no need to read file
+        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(file_path);
+        if (data_obj == nullptr) {
+            auto& ss_codec = codec::Codec::instance();
+            ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, raw);
 
-        field_map.insert(std::make_pair(field_name, raw));
+            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, raw);  // put into cache
+        } else {
+            raw = std::static_pointer_cast<engine::BinaryData>(data_obj);
+        }
+
+        segment_ptr_->SetFixedFieldData(field_name, raw);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -133,14 +144,11 @@ SegmentReader::LoadFields() {
     for (auto& iter : field_visitors_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
-        engine::FIXED_FIELD_DATA raw_data;
+        engine::BinaryDataPtr raw_data;
         auto status = segment_ptr_->GetFixedFieldData(name, raw_data);
 
-        if (!status.ok() || raw_data.empty()) {
-            auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
-            std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
-            STATUS_CHECK(LoadField(file_path, raw_data));
+        if (!status.ok() || raw_data == nullptr) {
+            STATUS_CHECK(LoadField(name, raw_data));
         }
     }
 
@@ -149,15 +157,15 @@ SegmentReader::LoadFields() {
 
 Status
 SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets,
-                            std::vector<uint8_t>& raw) {
+                            engine::BinaryDataPtr& raw) {
     try {
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
         std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, raw_visitor->GetFile());
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
 
         int64_t field_width = 0;
-        segment_ptr_->GetFixedFieldWidth(field_name, field_width);
+        STATUS_CHECK(segment_ptr_->GetFixedFieldWidth(field_name, field_width));
         if (field_width <= 0) {
             return Status(DB_ERROR, "Invalid field width");
         }
@@ -180,39 +188,48 @@ SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int
 Status
 SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, const std::vector<int64_t>& offsets,
                                   engine::DataChunkPtr& data_chunk) {
-    data_chunk = std::make_shared<engine::DataChunk>();
-    data_chunk->count_ = offsets.size();
+    if (data_chunk == nullptr) {
+        data_chunk = std::make_shared<engine::DataChunk>();
+    }
+    data_chunk->count_ += offsets.size();
     for (auto& name : fields_name) {
-        engine::FIXED_FIELD_DATA raw_data;
+        engine::BinaryDataPtr raw_data;
         auto status = LoadEntities(name, offsets, raw_data);
-        if (!status.ok()) {
+        if (!status.ok() || raw_data == nullptr) {
             return status;
         }
 
-        data_chunk->fixed_fields_[name] = raw_data;
+        auto& target_data = data_chunk->fixed_fields_[name];
+        if (target_data != nullptr) {
+            auto chunk_size = target_data->Size();
+            auto raw_data_size = raw_data->Size();
+            target_data->data_.resize(chunk_size + raw_data_size);
+            memcpy(target_data->data_.data() + chunk_size, raw_data->data_.data(), raw_data_size);
+        } else {
+            data_chunk->fixed_fields_[name] = raw_data;
+        }
     }
-
     return Status::OK();
 }
 
 Status
 SegmentReader::LoadUids(std::vector<int64_t>& uids) {
-    std::vector<uint8_t> raw;
+    engine::BinaryDataPtr raw;
     auto status = LoadField(engine::DEFAULT_UID_NAME, raw);
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << status.message();
         return status;
     }
 
-    if (raw.size() % sizeof(int64_t) != 0) {
+    if (raw->data_.size() % sizeof(int64_t) != 0) {
         std::string err_msg = "Failed to load uids: illegal file size";
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
     uids.clear();
-    uids.resize(raw.size() / sizeof(int64_t));
-    memcpy(uids.data(), raw.data(), raw.size());
+    uids.resize(raw->data_.size() / sizeof(int64_t));
+    memcpy(uids.data(), raw->data_.data(), raw->data_.size());
 
     return Status::OK();
 }
@@ -237,88 +254,111 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         auto& segment = segment_visitor_->GetSegment();
         auto& snapshot = segment_visitor_->GetSnapshot();
         auto segment_commit = snapshot->GetSegmentCommitBySegmentId(segment->GetID());
-        segment::DeletedDocsPtr deleted_docs_ptr;
-        auto status = LoadDeletedDocs(deleted_docs_ptr);
-        if (!status.ok()) {
-            return status;
-        }
-        auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
         faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
             std::make_shared<faiss::ConcurrentBitset>(segment_commit->GetRowCount());
-        for (auto& offset : deleted_docs) {
-            concurrent_bitset_ptr->set(offset);
+
+        segment::DeletedDocsPtr deleted_docs_ptr;
+        STATUS_CHECK(LoadDeletedDocs(deleted_docs_ptr));
+        if (deleted_docs_ptr != nullptr) {
+            auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+            for (auto& offset : deleted_docs) {
+                concurrent_bitset_ptr->set(offset);
+            }
         }
 
         // load uids
         std::vector<int64_t> uids;
-        status = LoadUids(uids);
-        if (!status.ok()) {
-            return status;
-        }
+        STATUS_CHECK(LoadUids(uids));
 
         knowhere::BinarySet index_data;
         knowhere::BinaryPtr raw_data, compress_data;
 
-        auto read_raw = [&]() -> void {
-            engine::FIXED_FIELD_DATA fixed_data;
+        // if index not specified, or index file not created, return a temp index(IDMAP type)
+        auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
+            auto temp_index_path = engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment);
+            temp_index_path += "/";
+            std::string temp_index_name = field_name + ".idmap";
+            temp_index_path += temp_index_name;
+
+            // if the data is in cache, no need to read file
+            auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(temp_index_path);
+            if (data_obj != nullptr) {
+                index_ptr = std::static_pointer_cast<knowhere::VecIndex>(data_obj);
+                segment_ptr_->SetVectorIndex(field_name, index_ptr);
+            } else {
+                auto& json = field->GetParams();
+                if (json.find(knowhere::meta::DIM) == json.end()) {
+                    return Status(DB_ERROR, "Vector field dimension undefined");
+                }
+                int64_t dimension = json[knowhere::meta::DIM];
+                engine::BinaryDataPtr raw;
+                STATUS_CHECK(LoadField(field_name, raw));
+
+                auto dataset = knowhere::GenDataset(segment_commit->GetRowCount(), dimension, raw->data_.data());
+
+                // construct IDMAP index
+                knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
+                index_ptr = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+                                                             knowhere::IndexMode::MODE_CPU);
+                milvus::json conf{{knowhere::meta::DIM, dimension}};
+                conf[engine::PARAM_INDEX_METRIC_TYPE] = knowhere::Metric::L2;
+                index_ptr->Train(knowhere::DatasetPtr(), conf);
+                index_ptr->AddWithoutIds(dataset, conf);
+                index_ptr->SetUids(uids);
+                index_ptr->SetBlacklist(concurrent_bitset_ptr);
+                segment_ptr_->SetVectorIndex(field_name, index_ptr);
+            }
+
+            return Status::OK();
+        }
+
+        // read index file
+        std::string index_file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, index_visitor->GetFile());
+        // if the data is in cache, no need to read file
+        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(index_file_path);
+        if (data_obj != nullptr) {
+            index_ptr = std::static_pointer_cast<knowhere::VecIndex>(data_obj);
+            segment_ptr_->SetVectorIndex(field_name, index_ptr);
+
+            return Status::OK();
+        }
+
+        ss_codec.GetVectorIndexFormat()->ReadIndex(fs_ptr_, index_file_path, index_data);
+
+        // for some kinds index(IVF), read raw file
+        auto index_type = index_visitor->GetElement()->GetTypeName();
+        if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_type == knowhere::IndexEnum::INDEX_NSG ||
+            index_type == knowhere::IndexEnum::INDEX_HNSW) {
+            engine::BinaryDataPtr fixed_data;
             auto status = segment_ptr_->GetFixedFieldData(field_name, fixed_data);
             if (status.ok()) {
                 ss_codec.GetVectorIndexFormat()->ConvertRaw(fixed_data, raw_data);
             } else if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW)) {
                 auto file_path =
-                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
                 ss_codec.GetVectorIndexFormat()->ReadRaw(fs_ptr_, file_path, raw_data);
             }
-        };
-
-        // if index not specified, or index file not created, return IDMAP
-        auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
-            auto& snapshot = segment_visitor_->GetSnapshot();
-            auto& json = snapshot->GetCollection()->GetParams();
-            int64_t dimension = json[knowhere::meta::DIM];
-            std::vector<uint8_t> raw;
-            LoadField(field_name, raw);
-            auto dataset = knowhere::GenDataset(segment_commit->GetRowCount(), dimension, raw.data());
-
-            knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
-            index_ptr =
-                vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP, knowhere::IndexMode::MODE_CPU);
-            milvus::json conf{{knowhere::meta::DIM, dimension}};
-            index_ptr->AddWithoutIds(dataset, conf);
-            index_ptr->SetUids(uids);
-            index_ptr->SetBlacklist(concurrent_bitset_ptr);
-            segment_ptr_->SetVectorIndex(field_name, index_ptr);
-            return Status::OK();
-        }
-
-        // read index file
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, index_visitor->GetFile());
-        ss_codec.GetVectorIndexFormat()->ReadIndex(fs_ptr_, file_path, index_data);
-
-        auto index_name = index_visitor->GetElement()->GetName();
-
-        // for some kinds index(IVF), read raw file
-        if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_name == knowhere::IndexEnum::INDEX_NSG ||
-            index_name == knowhere::IndexEnum::INDEX_HNSW) {
-            read_raw();
         }
 
         // for some kinds index(SQ8), read compress file
-        if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
-            index_name == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+        if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
+            index_type == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
             if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8)) {
-                file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+                auto file_path =
+                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
                 ss_codec.GetVectorIndexFormat()->ReadCompress(fs_ptr_, file_path, compress_data);
             }
         }
 
-        ss_codec.GetVectorIndexFormat()->ConstructIndex(index_name, index_data, raw_data, compress_data, index_ptr);
+        ss_codec.GetVectorIndexFormat()->ConstructIndex(index_type, index_data, raw_data, compress_data, index_ptr);
 
         index_ptr->SetUids(uids);
         index_ptr->SetBlacklist(concurrent_bitset_ptr);
         segment_ptr_->SetVectorIndex(field_name, index_ptr);
+
+        cache::CpuCacheMgr::GetInstance().InsertItem(index_file_path, index_ptr);  // put into cache
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -346,10 +386,18 @@ SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::Inde
 
         // read field index
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (index_visitor) {
+        if (index_visitor && index_visitor->GetFile() != nullptr) {
             std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, index_visitor->GetFile());
-            ss_codec.GetStructuredIndexFormat()->Read(fs_ptr_, file_path, index_ptr);
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, index_visitor->GetFile());
+
+            // if the data is in cache, no need to read file
+            auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(file_path);
+            if (data_obj == nullptr) {
+                ss_codec.GetStructuredIndexFormat()->Read(fs_ptr_, file_path, index_ptr);
+                cache::CpuCacheMgr::GetInstance().InsertItem(file_path, index_ptr);  // put into cache
+            } else {
+                index_ptr = std::static_pointer_cast<knowhere::Index>(data_obj);
+            }
 
             segment_ptr_->SetStructuredIndex(field_name, index_ptr);
         }
@@ -375,7 +423,7 @@ SegmentReader::LoadVectorIndice() {
         }
 
         std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, element_visitor->GetFile());
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, element_visitor->GetFile());
         if (engine::IsVectorField(field)) {
             knowhere::VecIndexPtr index_ptr;
             STATUS_CHECK(LoadVectorIndex(name, index_ptr));
@@ -399,13 +447,23 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
         std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
+        if (!boost::filesystem::exists(file_path + codec::IdBloomFilterFormat::FilePostfix())) {
+            return Status::OK();  // file doesn't exist
+        }
 
-        auto& ss_codec = codec::Codec::instance();
-        ss_codec.GetIdBloomFilterFormat()->Read(fs_ptr_, file_path, id_bloom_filter_ptr);
+        // if the data is in cache, no need to read file
+        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(file_path);
+        if (data_obj == nullptr) {
+            auto& ss_codec = codec::Codec::instance();
+            ss_codec.GetIdBloomFilterFormat()->Read(fs_ptr_, file_path, id_bloom_filter_ptr);
+        } else {
+            id_bloom_filter_ptr = std::static_pointer_cast<segment::IdBloomFilter>(data_obj);
+        }
 
         if (id_bloom_filter_ptr) {
             segment_ptr_->SetBloomFilter(id_bloom_filter_ptr);
+            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, id_bloom_filter_ptr);  // put into cache
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
@@ -426,16 +484,23 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
-        if (!boost::filesystem::exists(file_path)) {
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
+        if (!boost::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
             return Status::OK();  // file doesn't exist
         }
 
-        auto& ss_codec = codec::Codec::instance();
-        ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, file_path, deleted_docs_ptr);
+        // if the data is in cache, no need to read file
+        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(file_path);
+        if (data_obj == nullptr) {
+            auto& ss_codec = codec::Codec::instance();
+            ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, file_path, deleted_docs_ptr);
+        } else {
+            deleted_docs_ptr = std::static_pointer_cast<segment::DeletedDocs>(data_obj);
+        }
 
         if (deleted_docs_ptr) {
             segment_ptr_->SetDeletedDocs(deleted_docs_ptr);
+            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, deleted_docs_ptr);  // put into cache
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load deleted docs: " + std::string(e.what());
@@ -451,15 +516,15 @@ SegmentReader::ReadDeletedDocsSize(size_t& size) {
         size = 0;
         auto deleted_docs_ptr = segment_ptr_->GetDeletedDocs();
         if (deleted_docs_ptr != nullptr) {
-            size = deleted_docs_ptr->GetSize();
+            size = deleted_docs_ptr->GetCount();
             return Status::OK();  // already exist
         }
 
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_root_, visitor->GetFile());
-        if (!boost::filesystem::exists(file_path)) {
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
+        if (!boost::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
             return Status::OK();  // file doesn't exist
         }
 
@@ -495,7 +560,7 @@ SegmentReader::GetSegmentID(int64_t& id) {
 std::string
 SegmentReader::GetSegmentPath() {
     std::string seg_path =
-        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_root_, segment_visitor_->GetSegment());
+        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
     return seg_path;
 }
 

@@ -27,17 +27,17 @@
 namespace milvus {
 namespace server {
 
-ListIDInSegmentReq::ListIDInSegmentReq(const std::shared_ptr<milvus::server::Context>& context,
-                                       const std::string& collection_name, int64_t segment_id, engine::IDNumbers& ids)
-    : BaseReq(context, BaseReq::kListIDInSegment),
+ListIDInSegmentReq::ListIDInSegmentReq(const ContextPtr& context, const std::string& collection_name,
+                                       int64_t segment_id, engine::IDNumbers& ids)
+    : BaseReq(context, ReqType::kListIDInSegment),
       collection_name_(collection_name),
       segment_id_(segment_id),
       ids_(ids) {
 }
 
 BaseReqPtr
-ListIDInSegmentReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                           int64_t segment_id, engine::IDNumbers& ids) {
+ListIDInSegmentReq::Create(const ContextPtr& context, const std::string& collection_name, int64_t segment_id,
+                           engine::IDNumbers& ids) {
     return std::shared_ptr<BaseReq>(new ListIDInSegmentReq(context, collection_name, segment_id, ids));
 }
 
@@ -49,17 +49,20 @@ ListIDInSegmentReq::OnExecute() {
         TimeRecorderAuto rc(hdr);
 
         bool exist = false;
-        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
         // step 2: get vector data, now only support get one id
         ids_.clear();
-        return DBWrapper::DB()->ListIDInSegment(collection_name_, segment_id_, ids_);
+        STATUS_CHECK(DBWrapper::DB()->ListIDInSegment(collection_name_, segment_id_, ids_));
+        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
+
+    return Status::OK();
 }
 
 }  // namespace server

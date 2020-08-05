@@ -16,16 +16,10 @@
 
 #include "Options.h"
 #include "db/Types.h"
-#include "db/meta/MetaTypes.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
-namespace snapshot {
-class Segment;
-class Partition;
-class Collection;
-}  // namespace snapshot
 namespace utils {
 
 int64_t
@@ -35,13 +29,13 @@ bool
 IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2);
 
 bool
-IsBinaryMetricType(int32_t metric_type);
+IsBinaryMetricType(const std::string& metric_type);
 
-meta::DateT
+engine::DateT
 GetDate(const std::time_t& t, int day_delta = 0);
-meta::DateT
+engine::DateT
 GetDate();
-meta::DateT
+engine::DateT
 GetDateWithDelta(int day_delta);
 
 struct MetaUriInfo {
@@ -58,6 +52,9 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info);
 
 void
 SendExitSignal();
+
+void
+GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids);
 
 }  // namespace utils
 }  // namespace engine

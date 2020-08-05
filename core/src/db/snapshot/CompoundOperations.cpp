@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "db/meta/MetaAdapter.h"
+#include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Snapshots.h"
@@ -26,14 +27,175 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-AddSegmentFileOperation::AddSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+CompoundSegmentsOperation::CompoundSegmentsOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+    for (auto& stale_segment_file : context_.stale_segment_files) {
+        stale_segment_files_[stale_segment_file->GetSegmentId()].push_back(stale_segment_file);
+        modified_segments_.insert(stale_segment_file->GetSegmentId());
+    }
+}
+
+Status
+CompoundSegmentsOperation::CommitRowCountDelta(ID_TYPE segment_id, SIZE_TYPE delta, bool sub) {
+    if (context_.new_segment && (context_.new_segment->GetID() == segment_id)) {
+        delta_[segment_id] = {delta, sub};
+    } else if (modified_segments_.find(segment_id) != modified_segments_.end()) {
+        delta_[segment_id] = {delta, sub};
+    } else {
+        return Status(SS_ERROR, "Cannot commit row count delta for segment " + std::to_string(segment_id));
+    }
+    return Status::OK();
+}
+
+Status
+CompoundSegmentsOperation::CommitNewSegment(const OperationContext& context, SegmentPtr& created) {
+    if (context_.new_segment) {
+        return Status(SS_DUPLICATED_ERROR, "Only one new segment could be created");
+    }
+    auto op = std::make_shared<SegmentOperation>(context, GetStartedSS());
+    STATUS_CHECK(op->Push());
+    STATUS_CHECK(op->GetResource(context_.new_segment));
+    created = context_.new_segment;
+    auto s_ctx_p = ResourceContextBuilder<Segment>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, s_ctx_p);
+    return Status::OK();
+}
+
+Status
+CompoundSegmentsOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
+    auto segment = GetStartedSS()->GetResource<Segment>(context.segment_id);
+    if (!segment) {
+        segment = context_.new_segment;
+    }
+
+    if (!segment || segment->GetID() != context.segment_id) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Invalid segment " << context.segment_id << " in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    }
+
+    auto ctx = context;
+    ctx.partition_id = segment->GetPartitionId();
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
+    STATUS_CHECK(new_sf_op->Push());
+    STATUS_CHECK(new_sf_op->GetResource(created));
+    new_segment_files_[created->GetSegmentId()].push_back(created);
+    modified_segments_.insert(created->GetSegmentId());
+    auto sf_ctx_p = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, sf_ctx_p);
+
+    return Status::OK();
+}
+
+Status
+CompoundSegmentsOperation::DoExecute(StorePtr store) {
+    if (!context_.new_segment && stale_segment_files_.size() == 0 && new_segment_files_.size() == 0) {
+        return Status(SS_INVALID_CONTEX_ERROR, "Nothing to do");
+    }
+    if (context_.new_segment && context_.new_segment->IsActive()) {
+        return Status(SS_INVALID_CONTEX_ERROR, "New segment should not be active");
+    }
+
+    auto update_size = [&](SegmentFilePtr& file) {
+        auto update_ctx = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
+        update_ctx->AddAttr(SizeField::Name);
+        AddStepWithLsn(*file, context_.lsn, update_ctx);
+    };
+
+    for (auto& kv : new_segment_files_) {
+        for (auto& new_file : kv.second) {
+            update_size(new_file);
+        }
+    }
+
+    if (context_.new_segment) {
+        modified_segments_.insert(context_.new_segment->GetID());
+    }
+
+    std::map<ID_TYPE, SegmentCommit::VecT> new_sc_map;
+    for (auto& m_seg_id : modified_segments_) {
+        OperationContext context;
+        context.lsn = context_.lsn;
+        auto itstale = stale_segment_files_.find(m_seg_id);
+        if (itstale != stale_segment_files_.end()) {
+            context.stale_segment_files = std::move(itstale->second);
+            stale_segment_files_.erase(itstale);
+        }
+        auto itnew = new_segment_files_.find(m_seg_id);
+        if (itnew != new_segment_files_.end()) {
+            context.new_segment_files = std::move(itnew->second);
+            new_segment_files_.erase(itnew);
+        }
+
+        if (context_.new_segment && context_.new_segment->GetID() == m_seg_id) {
+            context.new_segment = context_.new_segment;
+        }
+
+        SegmentCommitOperation sc_op(context, GetAdjustedSS());
+        STATUS_CHECK(sc_op(store));
+        SegmentCommitPtr new_sc;
+        STATUS_CHECK(sc_op.GetResource(new_sc));
+        auto segc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(meta::oUpdate).CreatePtr();
+        auto it_delta = delta_.find(m_seg_id);
+        if (it_delta != delta_.end()) {
+            auto delta = std::get<0>(it_delta->second);
+            auto is_sub = std::get<1>(it_delta->second);
+            if (delta != 0) {
+                auto new_row_cnt = 0;
+                if (is_sub && new_sc->GetRowCount() < delta) {
+                    return Status(SS_ERROR, "Invalid row count delta for segment " + std::to_string(m_seg_id));
+                } else if (is_sub) {
+                    new_row_cnt = new_sc->GetRowCount() - delta;
+                } else {
+                    new_row_cnt = new_sc->GetRowCount() + delta;
+                }
+                new_sc->SetRowCount(new_row_cnt);
+                segc_ctx_p->AddAttr(RowCountField::Name);
+            }
+        }
+
+        AddStepWithLsn(*new_sc, context.lsn, segc_ctx_p);
+        new_sc_map[new_sc->GetPartitionId()].push_back(new_sc);
+    }
+
+    for (auto& kv : new_sc_map) {
+        auto& partition_id = kv.first;
+        auto context = context_;
+        context.new_segment_commits = kv.second;
+        PartitionCommitOperation pc_op(context, GetAdjustedSS());
+        STATUS_CHECK(pc_op(store));
+        STATUS_CHECK(pc_op.GetResource(context.new_partition_commit));
+        auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(meta::oUpdate).CreatePtr();
+        AddStepWithLsn(*context.new_partition_commit, context.lsn, pc_ctx_p);
+        context_.new_partition_commits.push_back(context.new_partition_commit);
+    }
+
+    CollectionCommitOperation cc_op(context_, GetAdjustedSS());
+    STATUS_CHECK(cc_op(store));
+    STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn, cc_ctx_p);
+
+    return Status::OK();
+}
+
+ChangeSegmentFileOperation::ChangeSegmentFileOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
 }
 
 Status
-AddSegmentFileOperation::DoExecute(StorePtr store) {
-    STATUS_CHECK(CheckStale(std::bind(&AddSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1,
+ChangeSegmentFileOperation::DoExecute(StorePtr store) {
+    STATUS_CHECK(CheckStale(std::bind(&ChangeSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1,
                                       context_.new_segment_files[0]->GetSegmentId())));
+
+    ID_TYPE segment_id = 0;
+    for (auto& stale_segment_file : context_.stale_segment_files) {
+        if (segment_id == 0) {
+            segment_id = stale_segment_file->GetSegmentId();
+        } else if (segment_id != stale_segment_file->GetSegmentId()) {
+            return Status(SS_INVALID_CONTEX_ERROR, "All segment files should be of same segment");
+        }
+    }
 
     auto update_size = [&](SegmentFilePtr& file) {
         auto update_ctx = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
@@ -42,6 +204,11 @@ AddSegmentFileOperation::DoExecute(StorePtr store) {
     };
 
     for (auto& new_file : context_.new_segment_files) {
+        if (segment_id == 0) {
+            segment_id = new_file->GetSegmentId();
+        } else if (segment_id != new_file->GetSegmentId()) {
+            return Status(SS_INVALID_CONTEX_ERROR, "All segment files should be of same segment");
+        }
         update_size(new_file);
     }
 
@@ -93,7 +260,7 @@ AddSegmentFileOperation::DoExecute(StorePtr store) {
 }
 
 Status
-AddSegmentFileOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const {
+ChangeSegmentFileOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_TYPE segment_id) const {
     auto segment = latest_snapshot->GetResource<Segment>(segment_id);
     if (!segment) {
         std::stringstream emsg;
@@ -104,16 +271,16 @@ AddSegmentFileOperation::CheckSegmentStale(ScopedSnapshotT& latest_snapshot, ID_
 }
 
 Status
-AddSegmentFileOperation::CommitRowCountDelta(SIZE_TYPE delta, bool sub) {
+ChangeSegmentFileOperation::CommitRowCountDelta(SIZE_TYPE delta, bool sub) {
     delta_ = delta;
     sub_ = sub;
     return Status::OK();
 }
 
 Status
-AddSegmentFileOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
+ChangeSegmentFileOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
     STATUS_CHECK(CheckStale(
-        std::bind(&AddSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id)));
+        std::bind(&ChangeSegmentFileOperation::CheckSegmentStale, this, std::placeholders::_1, context.segment_id)));
 
     auto segment = GetStartedSS()->GetResource<Segment>(context.segment_id);
     if (!segment || (context_.new_segment_files.size() > 0 &&
@@ -217,18 +384,21 @@ DropAllIndexOperation::DropAllIndexOperation(const OperationContext& context, Sc
 
 Status
 DropAllIndexOperation::PreCheck() {
-    if (context_.stale_field_element == nullptr) {
+    if (context_.stale_field_elements.size() == 0) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Stale field element is requried";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
 
-    if (!GetStartedSS()->GetResource<FieldElement>(context_.stale_field_element->GetID())) {
-        std::stringstream emsg;
-        emsg << GetRepr() << ".  Specified field element " << context_.stale_field_element->GetName();
-        emsg << " is stale";
-        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    for (auto stale_fe : context_.stale_field_elements) {
+        if (!GetStartedSS()->GetResource<FieldElement>(stale_fe->GetID())) {
+            std::stringstream emsg;
+            emsg << GetRepr() << ".  Specified field element " << stale_fe->GetName();
+            emsg << " is stale";
+            return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+        }
     }
+
     // TODO: Check type
     return Status::OK();
 }
@@ -240,7 +410,6 @@ DropAllIndexOperation::DoExecute(StorePtr store) {
     OperationContext cc_context;
     {
         auto context = context_;
-        context.stale_field_elements.push_back(context.stale_field_element);
 
         FieldCommitOperation fc_op(context, GetAdjustedSS());
         STATUS_CHECK(fc_op(store));
@@ -264,20 +433,40 @@ DropAllIndexOperation::DoExecute(StorePtr store) {
     }
 
     std::map<ID_TYPE, std::vector<SegmentCommitPtr>> p_sc_map;
-    for (auto& kv : segment_files) {
-        if (kv.second->GetFieldElementId() != context_.stale_field_element->GetID()) {
-            continue;
-        }
 
+    std::set<ID_TYPE> stale_fe_ids;
+    for (auto& fe : context_.stale_field_elements) {
+        stale_fe_ids.insert(fe->GetID());
+    }
+
+    auto seg_executor = [&](const SegmentPtr& segment, SegmentIterator* handler) -> Status {
+        auto sf_ids = handler->ss_->GetSegmentFileIds(segment->GetID());
+        if (sf_ids.size() == 0) {
+            return Status::OK();
+        }
         auto context = context_;
-        context.stale_segment_file = kv.second.Get();
+        for (auto& sf_id : sf_ids) {
+            auto sf = handler->ss_->GetResource<SegmentFile>(sf_id);
+            if (stale_fe_ids.find(sf->GetFieldElementId()) == stale_fe_ids.end()) {
+                continue;
+            }
+            context.stale_segment_files.push_back(sf);
+        }
+        if (context.stale_segment_files.size() == 0) {
+            return Status::OK();
+        }
         SegmentCommitOperation sc_op(context, GetAdjustedSS());
         STATUS_CHECK(sc_op(store));
         STATUS_CHECK(sc_op.GetResource(context.new_segment_commit));
         auto segc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(meta::oUpdate).CreatePtr();
         AddStepWithLsn(*context.new_segment_commit, context.lsn, segc_ctx_p);
         p_sc_map[context.new_segment_commit->GetPartitionId()].push_back(context.new_segment_commit);
-    }
+        return Status::OK();
+    };
+
+    auto segment_iter = std::make_shared<SegmentIterator>(GetAdjustedSS(), seg_executor);
+    segment_iter->Iterate();
+    STATUS_CHECK(segment_iter->GetStatus());
 
     for (auto& kv : p_sc_map) {
         auto& partition_id = kv.first;
@@ -306,7 +495,7 @@ DropIndexOperation::DropIndexOperation(const OperationContext& context, ScopedSn
 
 Status
 DropIndexOperation::PreCheck() {
-    if (context_.stale_segment_file == nullptr) {
+    if (context_.stale_segment_files.size() == 0) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Stale segment is requried";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
@@ -732,18 +921,19 @@ CreateCollectionOperation::DoExecute(StorePtr store) {
         AddStepWithLsn(*field, c_context_.lsn, f_ctx_p);
         MappingT element_ids = {};
         FieldElementPtr raw_element;
-        status = store->CreateResource<FieldElement>(
-            FieldElement(collection->GetID(), field->GetID(), DEFAULT_RAW_DATA_NAME, FieldElementType::FET_RAW),
-            raw_element);
+        status =
+            store->CreateResource<FieldElement>(FieldElement(collection->GetID(), field->GetID(), DEFAULT_RAW_DATA_NAME,
+                                                             FieldElementType::FET_RAW, DEFAULT_RAW_DATA_NAME),
+                                                raw_element);
         auto fe_ctx_p = ResourceContextBuilder<FieldElement>().SetOp(meta::oUpdate).CreatePtr();
         AddStepWithLsn(*raw_element, c_context_.lsn, fe_ctx_p);
         element_ids.insert(raw_element->GetID());
         for (auto& element_schema : field_elements) {
             FieldElementPtr element;
-            status =
-                store->CreateResource<FieldElement>(FieldElement(collection->GetID(), field->GetID(),
-                                                                 element_schema->GetName(), element_schema->GetFtype()),
-                                                    element);
+            status = store->CreateResource<FieldElement>(
+                FieldElement(collection->GetID(), field->GetID(), element_schema->GetName(), element_schema->GetFtype(),
+                             element_schema->GetTypeName()),
+                element);
             auto t_fe_ctx_p = ResourceContextBuilder<FieldElement>().SetOp(meta::oUpdate).CreatePtr();
             AddStepWithLsn(*element, c_context_.lsn, t_fe_ctx_p);
             element_ids.insert(element->GetID());

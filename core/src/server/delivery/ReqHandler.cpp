@@ -22,6 +22,7 @@
 #include "server/delivery/request/CreateIndexReq.h"
 #include "server/delivery/request/CreatePartitionReq.h"
 #include "server/delivery/request/DeleteEntityByIDReq.h"
+#include "server/delivery/request/DescribeIndexReq.h"
 #include "server/delivery/request/DropCollectionReq.h"
 #include "server/delivery/request/DropIndexReq.h"
 #include "server/delivery/request/DropPartitionReq.h"
@@ -42,40 +43,36 @@ namespace milvus {
 namespace server {
 
 Status
-ReqHandler::CreateCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                             std::unordered_map<std::string, engine::meta::hybrid::DataType>& field_types,
-                             std::unordered_map<std::string, milvus::json>& field_index_params,
-                             std::unordered_map<std::string, std::string>& field_params, milvus::json& json_param) {
-    BaseReqPtr req_ptr = CreateCollectionReq::Create(context, collection_name, field_types, field_index_params,
-                                                     field_params, json_param);
+ReqHandler::CreateCollection(const ContextPtr& context, const std::string& collection_name, FieldsType& fields,
+                             milvus::json& json_param) {
+    BaseReqPtr req_ptr = CreateCollectionReq::Create(context, collection_name, fields, json_param);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::DropCollection(const std::shared_ptr<Context>& context, const std::string& collection_name) {
+ReqHandler::DropCollection(const ContextPtr& context, const std::string& collection_name) {
     BaseReqPtr req_ptr = DropCollectionReq::Create(context, collection_name);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::HasCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                          bool& has_collection) {
+ReqHandler::HasCollection(const ContextPtr& context, const std::string& collection_name, bool& has_collection) {
     BaseReqPtr req_ptr = HasCollectionReq::Create(context, collection_name, has_collection);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::ListCollections(const std::shared_ptr<Context>& context, std::vector<std::string>& collections) {
+ReqHandler::ListCollections(const ContextPtr& context, std::vector<std::string>& collections) {
     BaseReqPtr req_ptr = ListCollectionsReq::Create(context, collections);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::GetCollectionInfo(const std::shared_ptr<Context>& context, const std::string& collection_name,
+ReqHandler::GetCollectionInfo(const ContextPtr& context, const std::string& collection_name,
                               CollectionSchema& collection_schema) {
     BaseReqPtr req_ptr = GetCollectionInfoReq::Create(context, collection_name, collection_schema);
     ReqScheduler::ExecReq(req_ptr);
@@ -83,7 +80,7 @@ ReqHandler::GetCollectionInfo(const std::shared_ptr<Context>& context, const std
 }
 
 Status
-ReqHandler::GetCollectionStats(const std::shared_ptr<Context>& context, const std::string& collection_name,
+ReqHandler::GetCollectionStats(const ContextPtr& context, const std::string& collection_name,
                                std::string& collection_stats) {
     BaseReqPtr req_ptr = GetCollectionStatsReq::Create(context, collection_name, collection_stats);
     ReqScheduler::ExecReq(req_ptr);
@@ -91,38 +88,36 @@ ReqHandler::GetCollectionStats(const std::shared_ptr<Context>& context, const st
 }
 
 Status
-ReqHandler::CountEntities(const std::shared_ptr<Context>& context, const std::string& collection_name, int64_t& count) {
+ReqHandler::CountEntities(const ContextPtr& context, const std::string& collection_name, int64_t& count) {
     BaseReqPtr req_ptr = CountEntitiesReq::Create(context, collection_name, count);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::CreatePartition(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                            const std::string& tag) {
+ReqHandler::CreatePartition(const ContextPtr& context, const std::string& collection_name, const std::string& tag) {
     BaseReqPtr req_ptr = CreatePartitionReq::Create(context, collection_name, tag);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::DropPartition(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                          const std::string& tag) {
+ReqHandler::DropPartition(const ContextPtr& context, const std::string& collection_name, const std::string& tag) {
     BaseReqPtr req_ptr = DropPartitionReq::Create(context, collection_name, tag);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::HasPartition(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                         const std::string& tag, bool& has_partition) {
+ReqHandler::HasPartition(const ContextPtr& context, const std::string& collection_name, const std::string& tag,
+                         bool& has_partition) {
     BaseReqPtr req_ptr = HasPartitionReq::Create(context, collection_name, tag, has_partition);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::ListPartitions(const std::shared_ptr<Context>& context, const std::string& collection_name,
+ReqHandler::ListPartitions(const ContextPtr& context, const std::string& collection_name,
                            std::vector<std::string>& partitions) {
     BaseReqPtr req_ptr = ListPartitionsReq::Create(context, collection_name, partitions);
     ReqScheduler::ExecReq(req_ptr);
@@ -130,42 +125,49 @@ ReqHandler::ListPartitions(const std::shared_ptr<Context>& context, const std::s
 }
 
 Status
-ReqHandler::CreateIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                        const std::string& field_name, const std::string& index_name, const milvus::json& json_params) {
+ReqHandler::CreateIndex(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+                        const std::string& index_name, const milvus::json& json_params) {
     BaseReqPtr req_ptr = CreateIndexReq::Create(context, collection_name, field_name, index_name, json_params);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::DropIndex(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                      const std::string& field_name, const std::string& index_name) {
+ReqHandler::DescribeIndex(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+                          std::string& index_name, milvus::json& json_params) {
+    BaseReqPtr req_ptr = DescribeIndexReq::Create(context, collection_name, field_name, index_name, json_params);
+    ReqScheduler::ExecReq(req_ptr);
+    return req_ptr->status();
+}
+
+Status
+ReqHandler::DropIndex(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+                      const std::string& index_name) {
     BaseReqPtr req_ptr = DropIndexReq::Create(context, collection_name, index_name, field_name);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::Insert(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                   const std::string& partition_name, const int64_t& row_count,
-                   std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
+ReqHandler::Insert(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
+                   const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
     BaseReqPtr req_ptr = InsertReq::Create(context, collection_name, partition_name, row_count, chunk_data);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::GetEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                          const engine::IDNumbers& ids, std::vector<std::string>& field_names,
-                          engine::snapshot::CollectionMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
+ReqHandler::GetEntityByID(const ContextPtr& context, const std::string& collection_name, const engine::IDNumbers& ids,
+                          std::vector<std::string>& field_names, std::vector<bool>& valid_row,
+                          engine::snapshot::FieldElementMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
     BaseReqPtr req_ptr =
-        GetEntityByIDReq::Create(context, collection_name, ids, field_names, field_mappings, data_chunk);
+        GetEntityByIDReq::Create(context, collection_name, ids, field_names, valid_row, field_mappings, data_chunk);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::DeleteEntityByID(const std::shared_ptr<Context>& context, const std::string& collection_name,
+ReqHandler::DeleteEntityByID(const ContextPtr& context, const std::string& collection_name,
                              const engine::IDNumbers& ids) {
     BaseReqPtr req_ptr = DeleteEntityByIDReq::Create(context, collection_name, ids);
     ReqScheduler::ExecReq(req_ptr);
@@ -173,45 +175,44 @@ ReqHandler::DeleteEntityByID(const std::shared_ptr<Context>& context, const std:
 }
 
 Status
-ReqHandler::Search(const std::shared_ptr<milvus::server::Context>& context, const query::QueryPtr& query_ptr,
-                   const milvus::json& json_params, engine::QueryResultPtr& result) {
-    BaseReqPtr req_ptr = SearchReq::Create(context, query_ptr, json_params, result);
+ReqHandler::Search(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
+                   engine::snapshot::FieldElementMappings& collection_mappings, engine::QueryResultPtr& result) {
+    BaseReqPtr req_ptr = SearchReq::Create(context, query_ptr, json_params, collection_mappings, result);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::ListIDInSegment(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                            int64_t segment_id, engine::IDNumbers& ids) {
+ReqHandler::ListIDInSegment(const ContextPtr& context, const std::string& collection_name, int64_t segment_id,
+                            engine::IDNumbers& ids) {
     BaseReqPtr req_ptr = ListIDInSegmentReq::Create(context, collection_name, segment_id, ids);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::LoadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name) {
+ReqHandler::LoadCollection(const ContextPtr& context, const std::string& collection_name) {
     BaseReqPtr req_ptr = LoadCollectionReq::Create(context, collection_name);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::Flush(const std::shared_ptr<Context>& context, const std::vector<std::string>& collection_names) {
+ReqHandler::Flush(const ContextPtr& context, const std::vector<std::string>& collection_names) {
     BaseReqPtr req_ptr = FlushReq::Create(context, collection_names);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::Compact(const std::shared_ptr<Context>& context, const std::string& collection_name,
-                    double compact_threshold) {
+ReqHandler::Compact(const ContextPtr& context, const std::string& collection_name, double compact_threshold) {
     BaseReqPtr req_ptr = CompactReq::Create(context, collection_name, compact_threshold);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
 
 Status
-ReqHandler::Cmd(const std::shared_ptr<Context>& context, const std::string& cmd, std::string& reply) {
+ReqHandler::Cmd(const ContextPtr& context, const std::string& cmd, std::string& reply) {
     BaseReqPtr req_ptr = CmdReq::Create(context, cmd, reply);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();

@@ -25,7 +25,7 @@
 namespace milvus::engine::snapshot {
 
 template <class ResourceT>
-class ResourceGCEvent : public MetaEvent {
+class ResourceGCEvent : public GCEvent {
  public:
     using Ptr = std::shared_ptr<ResourceGCEvent>;
 
@@ -52,7 +52,7 @@ class ResourceGCEvent : public MetaEvent {
             auto ok = boost::filesystem::remove(res_path);
             std::cout << "[GC] Remove FILE " << res_->ToString() << " " << res_path << " " << ok << std::endl;
         } else {
-            RemoveWithSuffix(res_path, store->GetSuffixSet());
+            RemoveWithSuffix<ResourceT>(res_, res_path, store->GetSuffixSet());
         }
 
         /* remove resource from meta */
@@ -63,23 +63,7 @@ class ResourceGCEvent : public MetaEvent {
     }
 
  private:
-    void
-    RemoveWithSuffix(const std::string& path, const std::set<std::string>& suffix_set) {
-        for (auto& suffix : suffix_set) {
-            if (suffix.empty()) {
-                continue;
-            }
-            auto adjusted = path + suffix;
-            if (boost::filesystem::is_regular_file(adjusted)) {
-                auto ok = boost::filesystem::remove(adjusted);
-                std::cout << "[GC] Remove FILE " << res_->ToString() << " " << adjusted << " " << ok << std::endl;
-                return;
-            }
-        }
-        std::cout << "[GC] Remove STALE OBJECT " << path << " for " << res_->ToString() << std::endl;
-    }
-
-    class ResourceT::Ptr res_;
+    typename ResourceT::Ptr res_;
 };
 
 }  // namespace milvus::engine::snapshot

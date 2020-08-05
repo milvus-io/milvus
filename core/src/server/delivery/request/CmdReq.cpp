@@ -13,6 +13,7 @@
 #include "config/ConfigMgr.h"
 #include "metrics/SystemInfo.h"
 #include "scheduler/SchedInst.h"
+#include "src/version.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -24,12 +25,12 @@
 namespace milvus {
 namespace server {
 
-CmdReq::CmdReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& cmd, std::string& result)
-    : BaseReq(context, BaseReq::kCmd), origin_cmd_(cmd), cmd_(tolower(cmd)), result_(result) {
+CmdReq::CmdReq(const ContextPtr& context, const std::string& cmd, std::string& result)
+    : BaseReq(context, ReqType::kCmd), origin_cmd_(cmd), cmd_(tolower(cmd)), result_(result) {
 }
 
 BaseReqPtr
-CmdReq::Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& cmd, std::string& result) {
+CmdReq::Create(const ContextPtr& context, const std::string& cmd, std::string& result) {
     return std::shared_ptr<BaseReq>(new CmdReq(context, cmd, result));
 }
 

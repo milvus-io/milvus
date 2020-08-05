@@ -29,12 +29,11 @@ namespace server {
 class ListIDInSegmentReq : public BaseReq {
  public:
     static BaseReqPtr
-    Create(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-           int64_t segment_id, engine::IDNumbers& ids);
+    Create(const ContextPtr& context, const std::string& collection_name, int64_t segment_id, engine::IDNumbers& ids);
 
  protected:
-    ListIDInSegmentReq(const std::shared_ptr<milvus::server::Context>& context, const std::string& collection_name,
-                       int64_t segment_id, engine::IDNumbers& ids);
+    ListIDInSegmentReq(const ContextPtr& context, const std::string& collection_name, int64_t segment_id,
+                       engine::IDNumbers& ids);
 
     Status
     OnExecute() override;
