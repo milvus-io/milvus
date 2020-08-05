@@ -813,9 +813,13 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
     for (int i = 0; i < request->extra_params_size(); i++) {
         const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
         if (extra.key() == EXTRA_PARAM_KEY) {
-            json_params = json::parse(extra.value());
+            json_params[EXTRA_PARAM_KEY] = json::parse(extra.value());
+        }
+        else {
+            json_params[extra.key()] = extra.value();
         }
     }
+    std::cout<< json_params.dump()<<std::endl;
 
     Status status = req_handler_.CreateIndex(GetContext(context), request->collection_name(), request->field_name(),
                                              request->index_name(), json_params);

@@ -306,7 +306,7 @@ class TestCollectionCountBinary:
         connect.create_partition(binary_collection, tag)
         res_ids = connect.insert(binary_collection, entities, partition_tag=tag)
         connect.flush([binary_collection])
-        res = connect.count_entities(binary_collections)
+        res = connect.count_entities(binary_collection)
         assert res == insert_count
 
     @pytest.mark.level(2)
@@ -510,7 +510,7 @@ class TestCollectionMultiCollections:
         for i in range(collection_num):
             collection_name = gen_unique_str(collection_id)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, fields)
+            connect.create_collection(collection_name, default_fields)
             res = connect.insert(collection_name, entities)
         connect.flush(collection_list)
         for i in range(collection_num):
@@ -535,7 +535,7 @@ class TestCollectionMultiCollections:
         for i in range(int(collection_num / 2), collection_num):
             collection_name = gen_unique_str(collection_id)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, fields)
+            connect.create_collection(collection_name, default_fields)
             res = connect.insert(collection_name, binary_entities)
         connect.flush(collection_list)
         for i in range(collection_num):
