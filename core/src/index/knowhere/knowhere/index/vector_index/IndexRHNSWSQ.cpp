@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cassert>
 #include <iterator>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -27,7 +28,8 @@ namespace milvus {
 namespace knowhere {
 
 IndexRHNSWSQ::IndexRHNSWSQ(int d, faiss::QuantizerType qtype, int M, milvus::knowhere::MetricType metric) {
-    faiss::MetricType mt = metric == Metric::L2 ? faiss::MetricType::METRIC_L2 : faiss::MetricType::METRIC_INNER_PRODUCT;
+    faiss::MetricType mt =
+        metric == Metric::L2 ? faiss::MetricType::METRIC_L2 : faiss::MetricType::METRIC_INNER_PRODUCT;
     index_ = std::shared_ptr<faiss::Index>(new faiss::IndexRHNSWSQ(d, qtype, M, mt));
 }
 
@@ -83,7 +85,10 @@ IndexRHNSWSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         GET_TENSOR_DATA_DIM(dataset_ptr)
         faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
 
-        index_ = std::shared_ptr<faiss::Index>(new faiss::IndexRHNSWSQ(int(dim), faiss::QuantizerType::QT_8bit, config[IndexParams::M], metric_type));
+        auto idx =
+            new faiss::IndexRHNSWSQ(int(dim), faiss::QuantizerType::QT_8bit, config[IndexParams::M], metric_type);
+        idx->hnsw.efConstruction = config[IndexParams::efConstruction];
+        index_ = std::shared_ptr<faiss::Index>(idx);
         index_->train(rows, (float*)p_data);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());

@@ -302,7 +302,9 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
         if (!status.ok()) {
             return status;
         }
-    } else if (index_type == knowhere::IndexEnum::INDEX_HNSW || index_type == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+    } else if (index_type == knowhere::IndexEnum::INDEX_HNSW || index_type == knowhere::IndexEnum::INDEX_HNSW_SQ8NM ||
+               index_type == knowhere::IndexEnum::INDEX_RHNSWPQ || index_type == knowhere::IndexEnum::INDEX_RHNSWSQ ||
+               index_type == knowhere::IndexEnum::INDEX_RHNSWFlat) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
         if (!status.ok()) {
             return status;
@@ -310,6 +312,38 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
         status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 8, 512);
         if (!status.ok()) {
             return status;
+        }
+
+        if (index_type == knowhere::IndexEnum::INDEX_RHNSWPQ) {
+            status = CheckParameterExistence(index_params, knowhere::IndexParams::PQM);
+            if (!status.ok()) {
+                return status;
+            }
+
+            // special check for 'PQM' parameter
+            std::vector<int64_t> resset;
+            milvus::knowhere::IVFPQConfAdapter::GetValidMList(dimension, resset);
+            int64_t pqm_value = index_params[knowhere::IndexParams::PQM];
+            if (resset.empty()) {
+                std::string msg = "Invalid collection dimension, unable to get reasonable values for 'PQM'";
+                LOG_SERVER_ERROR_ << msg;
+                return Status(SERVER_INVALID_COLLECTION_DIMENSION, msg);
+            }
+
+            auto iter = std::find(std::begin(resset), std::end(resset), pqm_value);
+            if (iter == std::end(resset)) {
+                std::string msg =
+                    "Invalid " + std::string(knowhere::IndexParams::PQM) + ", must be one of the following values: ";
+                for (size_t i = 0; i < resset.size(); i++) {
+                    if (i != 0) {
+                        msg += ",";
+                    }
+                    msg += std::to_string(resset[i]);
+                }
+
+                LOG_SERVER_ERROR_ << msg;
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }
         }
     } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);

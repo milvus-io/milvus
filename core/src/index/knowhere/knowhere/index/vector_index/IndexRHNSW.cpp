@@ -90,7 +90,7 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     size_t dist_size = sizeof(float) * k;
     auto p_id = (int64_t*)malloc(id_size * rows);
     auto p_dist = (float*)malloc(dist_size * rows);
-    for (auto i = 0; i < k * rows; ++ i) {
+    for (auto i = 0; i < k * rows; ++i) {
         p_id[i] = -1;
         p_dist[i] = -1;
     }
@@ -125,7 +125,8 @@ IndexRHNSW::Dim() {
 
 void
 IndexRHNSW::UpdateIndexSize() {
-    KNOWHERE_THROW_MSG("IndexRHNSW has no implementation of UpdateIndexSize, please use IndexRHNSW(Flat/SQ/PQ) instead!");
+    KNOWHERE_THROW_MSG(
+        "IndexRHNSW has no implementation of UpdateIndexSize, please use IndexRHNSW(Flat/SQ/PQ) instead!");
 }
 
 /*
@@ -140,7 +141,7 @@ IndexRHNSW::LoadImpl(const milvus::knowhere::BinarySet &, const milvus::knowhere
 */
 
 void
-IndexRHNSW::AddWithoutIds(const milvus::knowhere::DatasetPtr &dataset, const milvus::knowhere::Config &config) {
+IndexRHNSW::AddWithoutIds(const milvus::knowhere::DatasetPtr& dataset, const milvus::knowhere::Config& config) {
     KNOWHERE_THROW_MSG("IndexRHNSW has no implementation of AddWithoutIds, please use IndexRHNSW(Flat/SQ/PQ) instead!");
 }
 }  // namespace knowhere

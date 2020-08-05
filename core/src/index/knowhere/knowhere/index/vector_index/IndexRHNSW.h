@@ -13,12 +13,12 @@
 
 #include <memory>
 #include <mutex>
-
+#include <utility>
 
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "knowhere/index/vector_index/FaissBaseIndex.h"
 
 #include <faiss/index_io.h>
 #include "faiss/IndexRHNSW.h"
@@ -62,17 +62,6 @@ class IndexRHNSW : public VecIndex, public FaissBaseIndex {
 
     void
     UpdateIndexSize() override;
-
-//    BinarySet
-//    SerializeImpl(const IndexType& type) override;
-//
-//    void
-//    LoadImpl(const BinarySet&, const IndexType& type) override;
-//
-//    void
-//    SealImpl() override;
- private:
 };
-
 }  // namespace knowhere
 }  // namespace milvus

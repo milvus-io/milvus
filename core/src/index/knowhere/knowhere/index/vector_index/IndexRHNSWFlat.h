@@ -13,11 +13,11 @@
 
 #include <memory>
 #include <mutex>
+#include <utility>
 
-
+#include "IndexRHNSW.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/IndexType.h"
-#include "IndexRHNSW.h"
 
 namespace milvus {
 namespace knowhere {

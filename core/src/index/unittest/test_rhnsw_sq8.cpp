@@ -147,4 +147,3 @@ TEST_P(RHNSWSQ8Test, HNSW_serialize) {
         AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     }
 }
-

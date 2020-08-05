@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cassert>
 #include <iterator>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -27,7 +28,8 @@ namespace milvus {
 namespace knowhere {
 
 IndexRHNSWFlat::IndexRHNSWFlat(int d, int M, milvus::knowhere::MetricType metric) {
-    faiss::MetricType mt = metric == Metric::L2 ? faiss::MetricType::METRIC_L2 : faiss::MetricType::METRIC_INNER_PRODUCT;
+    faiss::MetricType mt =
+        metric == Metric::L2 ? faiss::MetricType::METRIC_L2 : faiss::MetricType::METRIC_INNER_PRODUCT;
     index_ = std::shared_ptr<faiss::Index>(new faiss::IndexRHNSWFlat(d, M, mt));
 }
 
@@ -84,7 +86,9 @@ IndexRHNSWFlat::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         GET_TENSOR_DATA_DIM(dataset_ptr)
         faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
 
-        index_ = std::shared_ptr<faiss::Index>(new faiss::IndexRHNSWFlat(int(dim), config[IndexParams::M], metric_type));
+        auto idx = new faiss::IndexRHNSWFlat(int(dim), config[IndexParams::M], metric_type);
+        idx->hnsw.efConstruction = config[IndexParams::efConstruction];
+        index_ = std::shared_ptr<faiss::Index>(idx);
         index_->train(rows, (float*)p_data);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());

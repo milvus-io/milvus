@@ -121,6 +121,7 @@ int main() {
         std::cout << "faiss::read_index return wrong index" << std::endl;
     }
     real_index->storage = faiss::read_index(data_file.c_str());
+    real_index->init_hnsw();
 
     {       // search xq
         std::cout << "search again" << std::endl;
@@ -129,7 +130,7 @@ int main() {
 
         ts = std::chrono::high_resolution_clock::now();
         int correct_cnt = 0;
-        hnsw->search(nq, xq, topk, D, I, nullptr);
+        real_index->search(nq, xq, topk, D, I, nullptr);
         {
             for (auto i = 0; i < nq; ++ i) {
                 if (i == I[i * topk] || D[i * topk] < 1e-5)

@@ -54,9 +54,10 @@ FaissBaseIndex::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
 }
 
 void
-FaissBaseIndex::SealImpl() {}
+FaissBaseIndex::SealImpl() {
+}
 
-//FaissBaseIndex::~FaissBaseIndex() {}
+// FaissBaseIndex::~FaissBaseIndex() {}
 //
 }  // namespace knowhere
 }  // namespace milvus

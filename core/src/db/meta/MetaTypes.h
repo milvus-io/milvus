@@ -44,7 +44,10 @@ enum class EngineType {
     ANNOY = 12,
     FAISS_IVFSQ8NR = 13,
     HNSW_SQ8NM = 14,
-    MAX_VALUE = HNSW_SQ8NM,
+    RHNSW_FLAT = 15,
+    RHNSW_PQ = 16,
+    RHNSW_SQ = 17,
+    MAX_VALUE = RHNSW_SQ,
 };
 
 static std::map<std::string, int32_t> s_index_name2type = {
@@ -64,6 +67,9 @@ static std::map<std::string, int32_t> s_index_name2type = {
     {knowhere::IndexEnum::INDEX_HNSW, (int32_t)EngineType::HNSW},
     {knowhere::IndexEnum::INDEX_HNSW_SQ8NM, (int32_t)EngineType::HNSW_SQ8NM},
     {knowhere::IndexEnum::INDEX_ANNOY, (int32_t)EngineType::ANNOY},
+    {knowhere::IndexEnum::INDEX_RHNSWFlat, (int32_t)EngineType::RHNSW_FLAT},
+    {knowhere::IndexEnum::INDEX_RHNSWPQ, (int32_t)EngineType::RHNSW_PQ},
+    {knowhere::IndexEnum::INDEX_RHNSWSQ, (int32_t)EngineType::RHNSW_SQ},
 };
 
 static std::map<int32_t, std::string> s_index_type2name = {
@@ -83,6 +89,9 @@ static std::map<int32_t, std::string> s_index_type2name = {
     {(int32_t)EngineType::HNSW, knowhere::IndexEnum::INDEX_HNSW},
     {(int32_t)EngineType::HNSW_SQ8NM, knowhere::IndexEnum::INDEX_HNSW_SQ8NM},
     {(int32_t)EngineType::ANNOY, knowhere::IndexEnum::INDEX_ANNOY},
+    {(int32_t)EngineType::RHNSW_FLAT, knowhere::IndexEnum::INDEX_RHNSWFlat},
+    {(int32_t)EngineType::RHNSW_PQ, knowhere::IndexEnum::INDEX_RHNSWPQ},
+    {(int32_t)EngineType::RHNSW_SQ, knowhere::IndexEnum::INDEX_RHNSWSQ},
 };
 
 enum class MetricType {

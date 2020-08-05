@@ -37,6 +37,9 @@ enum class OldIndexType {
     ANNOY,
     FAISS_IVFSQ8NR,
     HNSW_SQ8NM,
+    RHNSW_FLAT,
+    RHNSW_PQ,
+    RHNSW_SQ,
     FAISS_BIN_IDMAP = 100,
     FAISS_BIN_IVFLAT_CPU = 101,
 };
