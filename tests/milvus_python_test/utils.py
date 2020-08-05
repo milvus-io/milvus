@@ -267,7 +267,7 @@ def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 
         query_vectors = entities[-1]["values"][:nq]
     must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
     if metric_type is not None:
-        must_param["vector"]["field_name"]["metric_type"] = metric_type
+        must_param["vector"][field_name]["metric_type"] = metric_type
     query = {
         "bool": {
             "must": [must_param]
