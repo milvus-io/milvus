@@ -90,7 +90,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
  private:
     segment::SegmentReaderPtr segment_reader_;
     TargetFields target_fields_;
-    ExecutionEngineContextPtr context_;
+    ExecutionEngineContext context_;
 
     int64_t entity_count_;
 

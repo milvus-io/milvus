@@ -89,7 +89,7 @@ ExecutionEngineImpl::CreateVecIndex(const std::string& index_name) {
 Status
 ExecutionEngineImpl::Load(ExecutionEngineContext& context) {
     if (context.query_ptr_ != nullptr) {
-        context_ = std::shared_ptr<ExecutionEngineContext>(&context);
+        context_ = context;
         return LoadForSearch(context.query_ptr_);
     } else {
         return Load(context.target_fields_);
@@ -141,7 +141,7 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
         bool index_exist = false;
         if (field_type == DataType::VECTOR_FLOAT || field_type == DataType::VECTOR_BINARY) {
             bool valid_metric_type = false;
-            if (!context_) {
+            if (!context_.query_ptr_) {
                 valid_metric_type = true;
             } else {
                 auto field_visitor = segment_visitor->GetFieldVisitor(name);
@@ -150,9 +150,9 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
                     auto field_element = field_element_visitor->GetElement();
                     if (field_element->GetParams().contains(engine::PARAM_INDEX_METRIC_TYPE)) {
                         std::string metric_type = field_element->GetParams()[engine::PARAM_INDEX_METRIC_TYPE];
-                        if (context_->query_ptr_->metric_types.find(name) == context_->query_ptr_->metric_types.end()) {
+                        if (context_.query_ptr_->metric_types.find(name) == context_.query_ptr_->metric_types.end()) {
                             valid_metric_type = true;
-                        } else if (context_->query_ptr_->metric_types.at(name) == metric_type) {
+                        } else if (context_.query_ptr_->metric_types.at(name) == metric_type) {
                             valid_metric_type = true;
                         }
                     }
