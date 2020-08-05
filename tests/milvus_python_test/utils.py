@@ -211,9 +211,10 @@ def gen_default_fields(auto_id=False):
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}}
+            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}},
         ],
-        "segment_row_count": segment_row_count
+        "segment_row_count": segment_row_count,
+        "auto_id" : True
     }
     if auto_id is True:
         default_fields["auto_id"] = True
