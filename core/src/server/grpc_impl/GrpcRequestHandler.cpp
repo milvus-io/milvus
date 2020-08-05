@@ -1679,6 +1679,9 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
     try {
         nlohmann::json dsl_json = json::parse(dsl_string);
 
+        if (dsl_json.empty()) {
+            return Status{SERVER_INVALID_ARGUMENT, "Query dsl is null"};
+        }
         auto status = Status::OK();
         for (const auto& vector_param : vector_params) {
             const std::string& vector_string = vector_param.json();

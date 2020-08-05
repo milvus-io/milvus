@@ -883,7 +883,7 @@ class TestSearchDSL(object):
         method: build query with wrong term expr
         expected: error raised
         '''
-        expr = gen_default_term_expr
+        expr = gen_default_term_expr()
         expr["term"] = 1
         expr = {"must": [expr]}
         query = update_query_expr(default_query, expr=expr)
@@ -947,7 +947,7 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = {"must": [gen_default_vector_expr(default_query), gen_default_term_expr(values=[i for i in range(nb/2, nb+nb/2)])]}
+        expr = {"must": [gen_default_vector_expr(default_query), gen_default_term_expr(values=[i for i in range(nb//2, nb+nb//2)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
