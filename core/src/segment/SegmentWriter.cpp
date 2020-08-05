@@ -306,6 +306,12 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
 
     TimeRecorderAuto recorder("SegmentWriter::Merge");
 
+    // load raw data
+    status = segment_reader->LoadFields();
+    if (!status.ok()) {
+        return status;
+    }
+
     // merge deleted docs (Note: this step must before merge raw data)
     segment::DeletedDocsPtr src_deleted_docs;
     status = segment_reader->LoadDeletedDocs(src_deleted_docs);

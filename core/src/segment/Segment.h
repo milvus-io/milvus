@@ -55,6 +55,9 @@ class Segment {
     GetFixedFieldData(const std::string& field_name, BinaryDataPtr& data);
 
     Status
+    SetFixedFieldData(const std::string& field_name, BinaryDataPtr& data);
+
+    Status
     GetVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index);
 
     Status
