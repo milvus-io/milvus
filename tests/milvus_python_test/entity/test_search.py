@@ -964,7 +964,7 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = {"must": [gen_default_vector_expr(default_query),
-                         gen_default_term_expr(values=[i for i in range(nb / 2, nb + nb / 2)])]}
+                         gen_default_term_expr(values=[i for i in range(nb // 2, nb + nb // 2)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
