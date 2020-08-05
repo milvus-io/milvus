@@ -287,7 +287,7 @@ MemCollection::ApplyDeletes() {
 
     fiu_do_on("MemCollection.ApplyDeletes.RandomSleep", {
         std::srand(std::time(nullptr));
-        sleep(std::rand() % 10);
+        sleep(std::rand() % 3);
     });
     return segments_op->Push();
 }
