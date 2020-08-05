@@ -304,8 +304,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return Status
     ::grpc::Status
-    Compact(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
-            ::milvus::grpc::Status* response);
+    Compact(::grpc::ServerContext* context, ::milvus::grpc::CompactParam* request, ::milvus::grpc::Status* response);
 
     /*******************************************New Interface*********************************************/
 

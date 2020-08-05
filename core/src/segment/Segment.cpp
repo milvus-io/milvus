@@ -157,6 +157,7 @@ Segment::DeleteEntity(int64_t offset) {
             data->data_.erase(data->data_.begin() + step, data->data_.begin() + step + width);
         }
     }
+    row_count_--;
 
     return Status::OK();
 }
@@ -191,6 +192,25 @@ Segment::GetFixedFieldData(const std::string& field_name, BinaryDataPtr& data) {
     }
 
     data = iter->second;
+    return Status::OK();
+}
+
+Status
+Segment::SetFixedFieldData(const std::string& field_name, BinaryDataPtr& data) {
+    if (data == nullptr) {
+        return Status(DB_ERROR, "Could not set null pointer");
+    }
+
+    int64_t width = 0;
+    auto status = GetFixedFieldWidth(field_name, width);
+    if (!status.ok()) {
+        return status;
+    }
+
+    fixed_fields_[field_name] = data;
+    if (row_count_ == 0) {
+        row_count_ = data->Size() / width;
+    }
     return Status::OK();
 }
 

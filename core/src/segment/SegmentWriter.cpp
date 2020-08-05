@@ -212,7 +212,7 @@ SegmentWriter::CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr&
     try {
         ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
     } catch (std::exception& er) {
-        return Status(DB_ERROR, "Create a new bloom filter fail");
+        return Status(DB_ERROR, "Create a new bloom filter fail: " + std::string(er.what()));
     }
 
     return Status::OK();
@@ -305,6 +305,12 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     LOG_ENGINE_DEBUG_ << "Merging from " << segment_reader->GetSegmentPath() << " to " << GetSegmentPath();
 
     TimeRecorderAuto recorder("SegmentWriter::Merge");
+
+    // load raw data
+    status = segment_reader->LoadFields();
+    if (!status.ok()) {
+        return status;
+    }
 
     // merge deleted docs (Note: this step must before merge raw data)
     segment::DeletedDocsPtr src_deleted_docs;

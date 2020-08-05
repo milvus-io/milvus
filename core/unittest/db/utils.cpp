@@ -211,6 +211,8 @@ SnapshotTest::TearDown() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 milvus::engine::DBOptions
 DBTest::GetOptions() {
+    milvus::cache::CpuCacheMgr::GetInstance().SetCapacity(256 * milvus::engine::MB);
+
     auto options = milvus::engine::DBOptions();
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";

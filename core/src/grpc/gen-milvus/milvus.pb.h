@@ -49,7 +49,7 @@ struct TableStruct_milvus_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[40]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[41]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -82,6 +82,9 @@ extern CollectionRowCountDefaultTypeInternal _CollectionRowCount_default_instanc
 class Command;
 class CommandDefaultTypeInternal;
 extern CommandDefaultTypeInternal _Command_default_instance_;
+class CompactParam;
+class CompactParamDefaultTypeInternal;
+extern CompactParamDefaultTypeInternal _CompactParam_default_instance_;
 class CompareExpr;
 class CompareExprDefaultTypeInternal;
 extern CompareExprDefaultTypeInternal _CompareExpr_default_instance_;
@@ -189,6 +192,7 @@ template<> ::milvus::grpc::CollectionName* Arena::CreateMaybeMessage<::milvus::g
 template<> ::milvus::grpc::CollectionNameList* Arena::CreateMaybeMessage<::milvus::grpc::CollectionNameList>(Arena*);
 template<> ::milvus::grpc::CollectionRowCount* Arena::CreateMaybeMessage<::milvus::grpc::CollectionRowCount>(Arena*);
 template<> ::milvus::grpc::Command* Arena::CreateMaybeMessage<::milvus::grpc::Command>(Arena*);
+template<> ::milvus::grpc::CompactParam* Arena::CreateMaybeMessage<::milvus::grpc::CompactParam>(Arena*);
 template<> ::milvus::grpc::CompareExpr* Arena::CreateMaybeMessage<::milvus::grpc::CompareExpr>(Arena*);
 template<> ::milvus::grpc::DeleteByIDParam* Arena::CreateMaybeMessage<::milvus::grpc::DeleteByIDParam>(Arena*);
 template<> ::milvus::grpc::Entities* Arena::CreateMaybeMessage<::milvus::grpc::Entities>(Arena*);
@@ -4257,6 +4261,150 @@ class FlushParam :
 };
 // -------------------------------------------------------------------
 
+class CompactParam :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.CompactParam) */ {
+ public:
+  CompactParam();
+  virtual ~CompactParam();
+
+  CompactParam(const CompactParam& from);
+  CompactParam(CompactParam&& from) noexcept
+    : CompactParam() {
+    *this = ::std::move(from);
+  }
+
+  inline CompactParam& operator=(const CompactParam& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline CompactParam& operator=(CompactParam&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const CompactParam& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const CompactParam* internal_default_instance() {
+    return reinterpret_cast<const CompactParam*>(
+               &_CompactParam_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    25;
+
+  friend void swap(CompactParam& a, CompactParam& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(CompactParam* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline CompactParam* New() const final {
+    return CreateMaybeMessage<CompactParam>(nullptr);
+  }
+
+  CompactParam* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<CompactParam>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const CompactParam& from);
+  void MergeFrom(const CompactParam& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(CompactParam* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.grpc.CompactParam";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kCollectionNameFieldNumber = 1,
+    kThresholdFieldNumber = 2,
+  };
+  // string collection_name = 1;
+  void clear_collection_name();
+  const std::string& collection_name() const;
+  void set_collection_name(const std::string& value);
+  void set_collection_name(std::string&& value);
+  void set_collection_name(const char* value);
+  void set_collection_name(const char* value, size_t size);
+  std::string* mutable_collection_name();
+  std::string* release_collection_name();
+  void set_allocated_collection_name(std::string* collection_name);
+
+  // double threshold = 2;
+  void clear_threshold();
+  double threshold() const;
+  void set_threshold(double value);
+
+  // @@protoc_insertion_point(class_scope:milvus.grpc.CompactParam)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
+  double threshold_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
 class DeleteByIDParam :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.DeleteByIDParam) */ {
  public:
@@ -4299,7 +4447,7 @@ class DeleteByIDParam :
                &_DeleteByIDParam_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    25;
+    26;
 
   friend void swap(DeleteByIDParam& a, DeleteByIDParam& b) {
     a.Swap(&b);
@@ -4450,7 +4598,7 @@ class CollectionInfo :
                &_CollectionInfo_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    26;
+    27;
 
   friend void swap(CollectionInfo& a, CollectionInfo& b) {
     a.Swap(&b);
@@ -4597,7 +4745,7 @@ class GetEntityIDsParam :
                &_GetEntityIDsParam_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    27;
+    28;
 
   friend void swap(GetEntityIDsParam& a, GetEntityIDsParam& b) {
     a.Swap(&b);
@@ -4741,7 +4889,7 @@ class EntityIdentity :
                &_EntityIdentity_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    28;
+    29;
 
   friend void swap(EntityIdentity& a, EntityIdentity& b) {
     a.Swap(&b);
@@ -4911,7 +5059,7 @@ class VectorFieldParam :
                &_VectorFieldParam_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    29;
+    30;
 
   friend void swap(VectorFieldParam& a, VectorFieldParam& b) {
     a.Swap(&b);
@@ -5048,7 +5196,7 @@ class FieldType :
                &_FieldType_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    30;
+    31;
 
   friend void swap(FieldType& a, FieldType& b) {
     a.Swap(&b);
@@ -5204,7 +5352,7 @@ class FieldParam :
                &_FieldParam_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    31;
+    32;
 
   friend void swap(FieldParam& a, FieldParam& b) {
     a.Swap(&b);
@@ -5381,7 +5529,7 @@ class VectorFieldRecord :
                &_VectorFieldRecord_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    32;
+    33;
 
   friend void swap(VectorFieldRecord& a, VectorFieldRecord& b) {
     a.Swap(&b);
@@ -5518,7 +5666,7 @@ class TermQuery :
                &_TermQuery_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    33;
+    34;
 
   friend void swap(TermQuery& a, TermQuery& b) {
     a.Swap(&b);
@@ -5710,7 +5858,7 @@ class CompareExpr :
                &_CompareExpr_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    34;
+    35;
 
   friend void swap(CompareExpr& a, CompareExpr& b) {
     a.Swap(&b);
@@ -5854,7 +6002,7 @@ class RangeQuery :
                &_RangeQuery_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    35;
+    36;
 
   friend void swap(RangeQuery& a, RangeQuery& b) {
     a.Swap(&b);
@@ -6024,7 +6172,7 @@ class VectorQuery :
                &_VectorQuery_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    36;
+    37;
 
   friend void swap(VectorQuery& a, VectorQuery& b) {
     a.Swap(&b);
@@ -6201,7 +6349,7 @@ class BooleanQuery :
                &_BooleanQuery_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    37;
+    38;
 
   friend void swap(BooleanQuery& a, BooleanQuery& b) {
     a.Swap(&b);
@@ -6353,7 +6501,7 @@ class GeneralQuery :
                &_GeneralQuery_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    38;
+    39;
 
   friend void swap(GeneralQuery& a, GeneralQuery& b) {
     a.Swap(&b);
@@ -6531,7 +6679,7 @@ class SearchParamPB :
                &_SearchParamPB_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    39;
+    40;
 
   friend void swap(SearchParamPB& a, SearchParamPB& b) {
     a.Swap(&b);
@@ -9586,6 +9734,75 @@ FlushParam::mutable_collection_name_array() {
 
 // -------------------------------------------------------------------
 
+// CompactParam
+
+// string collection_name = 1;
+inline void CompactParam::clear_collection_name() {
+  collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& CompactParam::collection_name() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.CompactParam.collection_name)
+  return collection_name_.GetNoArena();
+}
+inline void CompactParam::set_collection_name(const std::string& value) {
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.CompactParam.collection_name)
+}
+inline void CompactParam::set_collection_name(std::string&& value) {
+  
+  collection_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.CompactParam.collection_name)
+}
+inline void CompactParam::set_collection_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.grpc.CompactParam.collection_name)
+}
+inline void CompactParam::set_collection_name(const char* value, size_t size) {
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.CompactParam.collection_name)
+}
+inline std::string* CompactParam::mutable_collection_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.CompactParam.collection_name)
+  return collection_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* CompactParam::release_collection_name() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.CompactParam.collection_name)
+  
+  return collection_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void CompactParam::set_allocated_collection_name(std::string* collection_name) {
+  if (collection_name != nullptr) {
+    
+  } else {
+    
+  }
+  collection_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), collection_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.CompactParam.collection_name)
+}
+
+// double threshold = 2;
+inline void CompactParam::clear_threshold() {
+  threshold_ = 0;
+}
+inline double CompactParam::threshold() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.CompactParam.threshold)
+  return threshold_;
+}
+inline void CompactParam::set_threshold(double value) {
+  
+  threshold_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.CompactParam.threshold)
+}
+
+// -------------------------------------------------------------------
+
 // DeleteByIDParam
 
 // string collection_name = 1;
@@ -11209,6 +11426,8 @@ SearchParamPB::extra_params() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
