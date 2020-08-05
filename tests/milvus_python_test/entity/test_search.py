@@ -900,7 +900,7 @@ class TestSearchDSL(object):
         method: build query with wrong term expr
         expected: error raised
         '''
-        expr = gen_default_term_expr
+        expr = gen_default_term_expr()
         expr["term"] = 1
         expr = {"must": [expr]}
         query = update_query_expr(default_query, expr=expr)
