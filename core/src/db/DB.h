@@ -100,7 +100,7 @@ class DB {
                   DataChunkPtr& data_chunk) = 0;
 
     virtual Status
-    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers entity_ids) = 0;
+    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) = 0;
 
     virtual Status
     ListIDInSegment(const std::string& collection_id, int64_t segment_id, IDNumbers& entity_ids) = 0;
