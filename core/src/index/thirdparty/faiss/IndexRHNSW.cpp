@@ -189,6 +189,10 @@ IndexRHNSW::~IndexRHNSW() {
     }
 }
 
+void IndexRHNSW::init_hnsw() {
+    hnsw.init(ntotal);
+}
+
 void IndexRHNSW::train(idx_t n, const float* x)
 {
     FAISS_THROW_IF_NOT_MSG(storage,
@@ -226,7 +230,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
 
                 maxheap_heapify (k, simi, idxi);
 
-                hnsw.searchKnn(*dis, k, idxi, simi);
+                hnsw.searchKnn(*dis, k, idxi, simi, bitset);
 
                 maxheap_reorder (k, simi, idxi);
 

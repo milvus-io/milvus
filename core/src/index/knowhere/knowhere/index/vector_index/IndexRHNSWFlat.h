@@ -16,6 +16,7 @@
 
 
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/IndexType.h"
 #include "IndexRHNSW.h"
 
 namespace milvus {
@@ -41,23 +42,6 @@ class IndexRHNSWFlat : public IndexRHNSW {
 
     void
     Train(const DatasetPtr& dataset_ptr, const Config& config) override;
-
-    void
-    Add(const DatasetPtr& dataset_ptr, const Config& config) override;
-
-    void
-    AddWithoutIds(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("Incremental index is not supported");
-    }
-
-    DatasetPtr
-    Query(const DatasetPtr& dataset_ptr, const Config& config) override;
-
-    int64_t
-    Count() override;
-
-    int64_t
-    Dim() override;
 
     void
     UpdateIndexSize() override;

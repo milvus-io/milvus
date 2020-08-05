@@ -196,6 +196,7 @@ struct RHNSW {
   explicit RHNSW(int M = 32);
   ~RHNSW();
 
+  void init(int ntotal);
   /// pick a random level for a new point, arg = 1/log(M)
   int random_level(double arg) {
       std::uniform_real_distribution<double> distribution(0.0, 1.0);
@@ -222,7 +223,8 @@ struct RHNSW {
   search_base_layer (DistanceComputer& ptdis,
                      storage_idx_t nearest,
                      storage_idx_t ef,
-                     float d_nearest) const;
+                     float d_nearest,
+                     ConcurrentBitsetPtr bitset = nullptr) const;
 
   void make_connection(DistanceComputer& ptdis,
                        storage_idx_t pt_id,
@@ -235,7 +237,8 @@ struct RHNSW {
 
   /// search interface inspired by hnswlib
   void searchKnn(DistanceComputer& qdis, int k,
-              idx_t *I, float *D) const;
+                 idx_t *I, float *D,
+                 ConcurrentBitsetPtr bitset = nullptr) const;
 
   size_t cal_size();
 

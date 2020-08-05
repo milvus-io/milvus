@@ -34,7 +34,7 @@ IndexRHNSW::Serialize(const Config& config) {
 
     try {
         MemoryIOWriter writer;
-        writer.name = "Index";
+        writer.name = this->index_type() + "_Index";
         faiss::write_index(index_.get(), &writer);
         std::shared_ptr<uint8_t[]> data(writer.data_);
 
@@ -50,7 +50,7 @@ void
 IndexRHNSW::Load(const BinarySet& index_binary) {
     try {
         MemoryIOReader reader;
-        reader.name = "Index";
+        reader.name = this->index_type() + "_Index";
         auto binary = index_binary.GetByName(reader.name);
 
         reader.total = (size_t)binary->size;
@@ -128,5 +128,20 @@ IndexRHNSW::UpdateIndexSize() {
     KNOWHERE_THROW_MSG("IndexRHNSW has no implementation of UpdateIndexSize, please use IndexRHNSW(Flat/SQ/PQ) instead!");
 }
 
+/*
+BinarySet
+IndexRHNSW::SerializeImpl(const milvus::knowhere::IndexType &type) { return BinarySet(); }
+
+void
+IndexRHNSW::SealImpl() {}
+
+void
+IndexRHNSW::LoadImpl(const milvus::knowhere::BinarySet &, const milvus::knowhere::IndexType &type) {}
+*/
+
+void
+IndexRHNSW::AddWithoutIds(const milvus::knowhere::DatasetPtr &dataset, const milvus::knowhere::Config &config) {
+    KNOWHERE_THROW_MSG("IndexRHNSW has no implementation of AddWithoutIds, please use IndexRHNSW(Flat/SQ/PQ) instead!");
+}
 }  // namespace knowhere
 }  // namespace milvus

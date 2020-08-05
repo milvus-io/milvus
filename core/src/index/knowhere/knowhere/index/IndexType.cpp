@@ -34,6 +34,9 @@ const char* INDEX_SPTAG_KDT_RNT = "SPTAG_KDT_RNT";
 const char* INDEX_SPTAG_BKT_RNT = "SPTAG_BKT_RNT";
 #endif
 const char* INDEX_HNSW = "HNSW";
+const char* INDEX_RHNSWFlat = "INDEX_RHNSWFlat";
+const char* INDEX_RHNSWPQ = "INDEX_RHNSWPQ";
+const char* INDEX_RHNSWSQ = "INDEX_RHNSWSQ";
 const char* INDEX_ANNOY = "ANNOY";
 const char* INDEX_HNSW_SQ8NM = "HNSW_SQ8NM";
 }  // namespace IndexEnum

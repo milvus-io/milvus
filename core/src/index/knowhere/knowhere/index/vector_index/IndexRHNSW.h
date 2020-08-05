@@ -37,7 +37,7 @@ class IndexRHNSW : public VecIndex, public FaissBaseIndex {
     }
 
     BinarySet
-    Serialize(const Config& config = Config()) override;
+    Serialize(const Config& config) override;
 
     void
     Load(const BinarySet& index_binary) override;
@@ -49,9 +49,7 @@ class IndexRHNSW : public VecIndex, public FaissBaseIndex {
     Add(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    AddWithoutIds(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("Incremental index is not supported");
-    }
+    AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
     Query(const DatasetPtr& dataset_ptr, const Config& config) override;
@@ -65,6 +63,14 @@ class IndexRHNSW : public VecIndex, public FaissBaseIndex {
     void
     UpdateIndexSize() override;
 
+//    BinarySet
+//    SerializeImpl(const IndexType& type) override;
+//
+//    void
+//    LoadImpl(const BinarySet&, const IndexType& type) override;
+//
+//    void
+//    SealImpl() override;
  private:
 };
 

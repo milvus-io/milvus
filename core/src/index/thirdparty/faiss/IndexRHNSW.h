@@ -100,6 +100,7 @@ struct IndexRHNSW : Index {
 
     size_t cal_size();
 
+    void init_hnsw();
 };
 
 

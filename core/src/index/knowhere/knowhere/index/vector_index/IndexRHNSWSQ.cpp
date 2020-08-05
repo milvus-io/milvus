@@ -40,7 +40,7 @@ IndexRHNSWSQ::Serialize(const Config& config) {
     try {
         auto res_set = IndexRHNSW::Serialize(config);
         MemoryIOWriter writer;
-        writer.name = "Data";
+        writer.name = this->index_type() + "_Data";
         auto real_idx = dynamic_cast<faiss::IndexRHNSWSQ*>(index_.get());
         if (real_idx == nullptr) {
             KNOWHERE_THROW_MSG("dynamic_cast<faiss::IndexRHNSWSQ*>(index_) failed during Serialize!");
@@ -60,7 +60,7 @@ IndexRHNSWSQ::Load(const BinarySet& index_binary) {
     try {
         IndexRHNSW::Load(index_binary);
         MemoryIOReader reader;
-        reader.name = "Data";
+        reader.name = this->index_type() + "_Data";
         auto binary = index_binary.GetByName(reader.name);
 
         reader.total = (size_t)binary->size;
@@ -71,6 +71,7 @@ IndexRHNSWSQ::Load(const BinarySet& index_binary) {
             KNOWHERE_THROW_MSG("dynamic_cast<faiss::IndexRHNSWSQ*>(index_) failed during Load!");
         }
         real_idx->storage = faiss::read_index(&reader);
+        real_idx->init_hnsw();
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }

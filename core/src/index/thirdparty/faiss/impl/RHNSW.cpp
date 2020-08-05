@@ -32,6 +32,14 @@ RHNSW::RHNSW(int M) : M(M), rng(12345) {
   level0_links = nullptr;
   linkLists = nullptr;
   level_constant = 1 / log(1.0 * M);
+  visited_list_pool = nullptr;
+}
+
+void RHNSW::init(int ntotal) {
+  level_generator.seed(100);
+  if (visited_list_pool) delete visited_list_pool;
+  visited_list_pool = new VisitedListPool(1, ntotal);
+  std::vector<std::mutex>(ntotal).swap(link_list_locks);
 }
 
 RHNSW::~RHNSW() {
@@ -237,7 +245,8 @@ std::priority_queue<Node, std::vector<Node>, CompareByFirst>
 RHNSW::search_base_layer(DistanceComputer& ptdis,
                          storage_idx_t nearest,
                          storage_idx_t ef,
-                         float d_nearest) const {
+                         float d_nearest,
+                         ConcurrentBitsetPtr bitset) const {
   VisitedList *vl = visited_list_pool->getFreeVisitedList();
   vl_type *visited_array = vl->mass;
   vl_type visited_array_tag = vl->curV;
@@ -245,9 +254,15 @@ RHNSW::search_base_layer(DistanceComputer& ptdis,
   std::priority_queue<Node, std::vector<Node>, CompareByFirst> top_candidates;
   std::priority_queue<Node, std::vector<Node>, CompareByFirst> candidate_set;
 
-  float lb = d_nearest;
-  top_candidates.emplace(d_nearest, nearest);
-  candidate_set.emplace(-d_nearest, nearest);
+  float lb;
+  if (bitset == nullptr || !bitset->test((faiss::ConcurrentBitset::id_type_t)(nearest))) {
+    lb = d_nearest;
+    top_candidates.emplace(d_nearest, nearest);
+    candidate_set.emplace(-d_nearest, nearest);
+  } else {
+    lb = std::numeric_limits<float>::max();
+    candidate_set.emplace(-lb, nearest);
+  }
   visited_array[nearest] = visited_array_tag;
 
   while (!candidate_set.empty()) {
@@ -265,7 +280,8 @@ RHNSW::search_base_layer(DistanceComputer& ptdis,
         float dcand = ptdis(candidate_id);
         if (top_candidates.size() < ef || lb > dcand) {
           candidate_set.emplace(-dcand, candidate_id);
-          top_candidates.emplace(dcand, candidate_id);
+          if (bitset == nullptr || !bitset->test((faiss::ConcurrentBitset::id_type_t)(candidate_id)))
+            top_candidates.emplace(dcand, candidate_id);
           if (top_candidates.size() > ef)
             top_candidates.pop();
           if (!top_candidates.empty())
@@ -370,7 +386,8 @@ void RHNSW::prune_neighbors(DistanceComputer& ptdis,
 }
 
 void RHNSW::searchKnn(DistanceComputer& qdis, int k,
-            idx_t *I, float *D) const {
+            idx_t *I, float *D,
+            ConcurrentBitsetPtr bitset) const {
   if (levels.size() == 0)
     return;
   int ep = entry_point;
@@ -395,7 +412,7 @@ void RHNSW::searchKnn(DistanceComputer& qdis, int k,
       }
     }
   }
-  std::priority_queue<Node, std::vector<Node>, CompareByFirst> top_candidates = search_base_layer(qdis, ep, std::max(efSearch, k), dist);
+  std::priority_queue<Node, std::vector<Node>, CompareByFirst> top_candidates = search_base_layer(qdis, ep, std::max(efSearch, k), dist, bitset);
   while (top_candidates.size() > k)
     top_candidates.pop();
   int i = 0;
