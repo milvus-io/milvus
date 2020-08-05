@@ -101,7 +101,7 @@ class TestIndexBase:
         connect.flush()
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_index_without_connect(self, dis_connect, collection):
         '''
         target: test create index without connection
@@ -129,7 +129,7 @@ class TestIndexBase:
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_index_multithread(self, connect, collection, args):
         '''
         target: test create index interface with multiprocess
@@ -176,7 +176,7 @@ class TestIndexBase:
         count = connect.count_entities(collection)
         assert count == nb
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_same_index_repeatedly(self, connect, collection, get_simple_index):
         '''
@@ -187,7 +187,7 @@ class TestIndexBase:
         connect.create_index(collection, field_name, get_simple_index)
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly(self, connect, collection):
         '''
@@ -270,7 +270,7 @@ class TestIndexBase:
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_index_multithread_ip(self, connect, collection, args):
         '''
         target: test create index interface with multiprocess
@@ -295,7 +295,7 @@ class TestIndexBase:
             t.join()
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_index_collection_not_existed_ip(self, connect, collection):
         '''
         target: test create index interface when collection name not existed
@@ -309,7 +309,7 @@ class TestIndexBase:
             connect.create_index(collection, field_name, default_index)
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_insert_ip(self, connect, collection, get_simple_index):
         '''
@@ -324,7 +324,7 @@ class TestIndexBase:
         count = connect.count_entities(collection)
         assert count == nb
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_same_index_repeatedly_ip(self, connect, collection, get_simple_index):
         '''
@@ -336,7 +336,7 @@ class TestIndexBase:
         connect.create_index(collection, field_name, get_simple_index)
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_ip(self, connect, collection):
         '''
@@ -371,7 +371,7 @@ class TestIndexBase:
         # assert stats["partitions"][0]["segments"][0]["index_name"] == default_index_type
         assert not stats["partitions"][0]["segments"]
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_drop_index_repeatly(self, connect, collection, get_simple_index):
         '''
         target: test drop index repeatly
@@ -387,7 +387,7 @@ class TestIndexBase:
         # assert stats["partitions"][0]["segments"][0]["index_name"] == default_index_type
         assert not stats["partitions"][0]["segments"]
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_drop_index_without_connect(self, dis_connect, collection):
         '''
         target: test drop index without connection
@@ -418,7 +418,7 @@ class TestIndexBase:
         # no create index
         connect.drop_index(collection, field_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_drop_index_repeatly(self, connect, collection, get_simple_index):
         '''
         target: test create / drop index repeatly, use the same index params
@@ -443,7 +443,7 @@ class TestIndexBase:
         # assert stats["partitions"][0]["segments"][0]["index_name"] == default_index_type
         assert not stats["partitions"][0]["segments"]
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_drop_index_repeatly_ip(self, connect, collection, get_simple_index):
         '''
         target: test drop index repeatly
@@ -460,7 +460,7 @@ class TestIndexBase:
         # assert stats["partitions"][0]["segments"][0]["index_name"] == default_index_type
         assert not stats["partitions"][0]["segments"]
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_drop_index_without_connect_ip(self, dis_connect, collection):
         '''
         target: test drop index without connection
@@ -480,7 +480,7 @@ class TestIndexBase:
         # no create index
         connect.drop_index(collection, field_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_drop_index_repeatly_ip(self, connect, collection, get_simple_index):
         '''
         target: test create / drop index repeatly, use the same index params
@@ -648,7 +648,7 @@ class TestIndexBinary:
 
 class TestIndexMultiCollections(object):
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def _test_create_index_multithread_multicollection(self, connect, args):
         '''
@@ -711,13 +711,13 @@ class TestIndexInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.level(1)
+    @pytest.mark.level("pr")
     def test_create_index_with_invalid_collectionname(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
 
-    @pytest.mark.level(1)
+    @pytest.mark.level("pr")
     def test_drop_index_with_invalid_collectionname(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
@@ -730,7 +730,7 @@ class TestIndexInvalid(object):
     def get_index(self, request):
         yield request.param
 
-    @pytest.mark.level(1)
+    @pytest.mark.level("pr")
     def test_create_index_with_invalid_index_params(self, connect, collection, get_index):
         logging.getLogger().info(get_index)
         with pytest.raises(Exception) as e:

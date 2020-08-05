@@ -112,7 +112,7 @@ class TestGetBase:
             res = connect.get_entity_by_id(collection, ids)
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_get_entity_same_ids(self, connect, id_collection):
         '''
         target: test.get_entity_by_id, with the same ids
@@ -128,7 +128,7 @@ class TestGetBase:
         assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_get_entity_params_same_ids(self, connect, collection):
         '''
         target: test.get_entity_by_id, with the same ids
@@ -402,7 +402,7 @@ class TestGetBase:
             assert res[i] is None
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_get_entities_after_delete_compact(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -470,7 +470,7 @@ class TestGetBase:
             enable_flush(connect)
 
     # TODO:
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_get_entities_after_delete_same_ids(self, connect, id_collection):
         '''
         target: test.get_entity_by_id
@@ -542,7 +542,7 @@ class TestGetInvalid(object):
     def get_entity_id(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_ids_invalid(self, connect, collection, get_entity_id):
         '''
         target: test insert, with using customize ids, which are not int64
@@ -554,7 +554,7 @@ class TestGetInvalid(object):
         with pytest.raises(Exception):
             connect.get_entity_by_id(collection, ids)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_parts_ids_invalid(self, connect, collection, get_entity_id):
         '''
         target: test insert, with using customize ids, which are not int64
@@ -567,14 +567,14 @@ class TestGetInvalid(object):
         with pytest.raises(Exception):
             connect.get_entity_by_id(collection, ids)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_get_entities_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         ids = [1]
         with pytest.raises(Exception):
             res = connect.get_entity_by_id(collection_name, ids)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_get_entities_with_invalid_field_name(self, connect, collection, get_field_name):
         field_name = get_field_name
         ids = [1]

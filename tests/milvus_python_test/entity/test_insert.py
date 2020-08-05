@@ -353,7 +353,7 @@ class TestInsertBase:
         res_count = connect.count_entities(collection)
         assert res_count == 2 * nb
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_without_connect(self, dis_connect, collection):
         '''
         target: test insert entities without connection
@@ -489,7 +489,7 @@ class TestInsertBase:
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     @pytest.mark.timeout(30)
     def test_collection_insert_rows_count_multi_threading(self, args, collection):
         '''
@@ -555,7 +555,7 @@ class TestAddAsync:
         connect.flush([collection])
         assert len(ids) == nb
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_async_false(self, connect, collection, insert_count):
         '''
         target: test insert vectors with different length of vectors
@@ -579,7 +579,7 @@ class TestAddAsync:
         future.done()
 
     # TODO:
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def _test_insert_async_long(self, connect, collection):
         '''
         target: test insert vectors with different length of vectors
@@ -925,7 +925,7 @@ class TestInsertInvalidBinary(object):
     def get_field_vectors_value(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_ids_invalid(self, connect, binary_id_collection, get_entity_id):
         '''
         target: test insert, with using customize ids, which are not int64
@@ -937,7 +937,7 @@ class TestInsertInvalidBinary(object):
         with pytest.raises(Exception):
             connect.insert(binary_id_collection, binary_entities, ids)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_with_invalid_tag_name(self, connect, binary_collection, get_tag_name):
         tag_name = get_tag_name
         connect.create_partition(binary_collection, tag)
@@ -947,21 +947,21 @@ class TestInsertInvalidBinary(object):
         else:
             connect.insert(binary_collection, binary_entity, partition_tag=tag_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_with_invalid_field_name(self, connect, binary_collection, get_field_name):
         field_name = get_field_name
         tmp_entity = update_field_name(copy.deepcopy(binary_entity), "int64", get_field_name)
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entity)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_with_invalid_field_value(self, connect, binary_collection, get_field_int_value):
         field_value = get_field_int_value
         tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int64', field_value)
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entity)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_with_invalid_field_vector_value(self, connect, binary_collection, get_field_vectors_value):
         tmp_entity = copy.deepcopy(binary_entity)
         src_vector = tmp_entity[-1]["values"]
@@ -969,7 +969,7 @@ class TestInsertInvalidBinary(object):
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entity)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_ids_invalid(self, connect, binary_id_collection, get_entity_id):
         '''
         target: test insert, with using customize ids, which are not int64
@@ -981,28 +981,28 @@ class TestInsertInvalidBinary(object):
         with pytest.raises(Exception):
             connect.insert(binary_id_collection, binary_entities, ids)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_with_invalid_field_name(self, connect, binary_collection, get_field_name):
         field_name = get_field_name
         tmp_entity = update_field_name(copy.deepcopy(binary_entity), "int64", get_field_name)
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entity)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_with_invalid_field_type(self, connect, binary_collection, get_field_type):
         field_type = get_field_type
         tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int64', field_type)
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entity)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_with_invalid_field_value(self, connect, binary_collection, get_field_int_value):
         field_value = get_field_int_value
         tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int64', field_value)
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entity)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_with_invalid_field_vector_value(self, connect, binary_collection, get_field_vectors_value):
         tmp_entity = copy.deepcopy(binary_entities)
         src_vector = tmp_entity[-1]["values"]

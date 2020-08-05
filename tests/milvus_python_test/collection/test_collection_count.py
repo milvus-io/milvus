@@ -158,7 +158,7 @@ class TestCollectionCount:
         res = connect.count_entities(collection)
         assert res == insert_count
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_count_without_connection(self, collection, dis_connect):
         '''
         target: test count_entities, without connection
@@ -309,7 +309,7 @@ class TestCollectionCountBinary:
         res = connect.count_entities(binary_collection)
         assert res == insert_count
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_collection_count_multi_partitions_A(self, connect, binary_collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -326,7 +326,7 @@ class TestCollectionCountBinary:
         res = connect.count_entities(binary_collection)
         assert res == insert_count
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_collection_count_multi_partitions_B(self, connect, binary_collection, insert_count):
         '''
         target: test collection rows_count is correct or not
@@ -360,7 +360,7 @@ class TestCollectionCountBinary:
         res = connect.count_entities(binary_collection)
         assert res == insert_count * 2
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_collection_count_multi_partitions_D(self, connect, binary_collection, insert_count):
         '''
         target: test collection rows_count is correct or not

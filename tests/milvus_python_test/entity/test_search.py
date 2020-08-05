@@ -186,7 +186,7 @@ class TestSearchBase:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_search_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -270,7 +270,7 @@ class TestSearchBase:
                 assert res[0]._distances[0] < epsilon
                 assert check_id_result(res[0], ids[0])
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_search_index_partition_C(self, connect, collection, get_top_k, get_nq):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -289,7 +289,7 @@ class TestSearchBase:
             assert len(res) == nq
             assert len(res[0]) == 0
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_search_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -323,7 +323,7 @@ class TestSearchBase:
             assert res[1]._distances[0] > epsilon
 
     # TODO:
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def _test_search_index_partitions_B(self, connect, collection, get_simple_index, get_top_k):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -360,7 +360,7 @@ class TestSearchBase:
     # 
     # test for ip metric
     # 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_search_ip_flat(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
         target: test basic search fuction, all the search params is corrent, change top-k value
@@ -407,7 +407,7 @@ class TestSearchBase:
             assert check_id_result(res[0], ids[0])
             assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_search_ip_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -439,7 +439,7 @@ class TestSearchBase:
             res = connect.search(collection, query, partition_tags=[tag])
             assert len(res) == nq
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -475,7 +475,7 @@ class TestSearchBase:
             # TODO:
             # assert res[1]._distances[0] >= 1 - gen_inaccuracy(res[1]._distances[0])
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_search_without_connect(self, dis_connect, collection):
         '''
         target: test search vectors without connection
@@ -534,7 +534,7 @@ class TestSearchBase:
         assert abs(np.sqrt(res[0]._distances[0]) - min_distance) <= gen_inaccuracy(res[0]._distances[0])
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_search_distance_ip(self, connect, collection):
         '''
         target: search collection, and check the result: distance
@@ -1171,25 +1171,25 @@ class TestSearchInvalid(object):
                 pytest.skip("sq8h not support in CPU mode")
         return request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_search_with_invalid_collection(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             res = connect.search(collection_name, default_query)
 
-    @pytest.mark.level(1)
+    @pytest.mark.level("pr")
     def test_search_with_invalid_tag(self, connect, collection):
         tag = " "
         with pytest.raises(Exception) as e:
             res = connect.search(collection, default_query, partition_tags=tag)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_search_with_invalid_field_name(self, connect, collection, get_invalid_field):
         fields = [get_invalid_field]
         with pytest.raises(Exception) as e:
             res = connect.search(collection, default_query, fields=fields)
 
-    @pytest.mark.level(1)
+    @pytest.mark.level("pr")
     def test_search_with_not_existed_field_name(self, connect, collection):
         fields = [gen_unique_str("field_name")]
         with pytest.raises(Exception) as e:
@@ -1206,7 +1206,7 @@ class TestSearchInvalid(object):
     def get_top_k(self, request):
         yield request.param
 
-    @pytest.mark.level(1)
+    @pytest.mark.level("pr")
     def test_search_with_invalid_top_k(self, connect, collection, get_top_k):
         '''
         target: test search fuction, with the wrong top_k
@@ -1230,7 +1230,7 @@ class TestSearchInvalid(object):
         yield request.param
 
     # TODO: This case can all pass, but it's too slow
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def _test_search_with_invalid_params(self, connect, collection, get_simple_index, get_search_params):
         '''
         target: test search fuction, with the wrong nprobe

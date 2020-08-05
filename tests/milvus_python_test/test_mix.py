@@ -71,7 +71,7 @@ class TestMixBase:
         p_create.start()
         p_create.join()
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def _test_mix_multi_collections(self, connect):
         '''
         target: test functions with multiple collections of different metric_types and index_types

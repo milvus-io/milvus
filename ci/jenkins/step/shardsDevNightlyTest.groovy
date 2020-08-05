@@ -30,6 +30,6 @@ timeout(time: 180, unit: 'MINUTES') {
     
     dir ("tests/milvus_python_test") {
         sh 'python3 -m pip install -r requirements.txt'
-        sh "pytest . --level=2 --alluredir=\"test_out/dev/shards/\" --ip ${env.SHARDS_HELM_RELEASE_NAME}.milvus.svc.cluster.local >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_shards_dev_test.log"
+        sh "pytest . --alluredir=\"test_out/dev/shards/\" --ip ${env.SHARDS_HELM_RELEASE_NAME}.milvus.svc.cluster.local >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_shards_dev_test.log"
     }
 }

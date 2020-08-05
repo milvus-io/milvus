@@ -40,7 +40,7 @@ class TestListCollections:
             connect.create_collection(collection_name, default_fields)
             assert collection_name in connect.list_collections()
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_list_collections_without_connection(self, dis_connect):
         '''
         target: test list collections, without connection
@@ -75,7 +75,7 @@ class TestListCollections:
         result = connect.list_collections()
         assert len(result) == 0
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_list_collections_multithread(self, connect):
         '''
         target: test create collection with multithread

@@ -132,7 +132,7 @@ class TestCreateCollection:
             connect.create_collection(collection, default_fields)
 
     # TODO: assert exception
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_collection_without_connection(self, dis_connect):
         '''
         target: test create collection, without connection
@@ -154,7 +154,7 @@ class TestCreateCollection:
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, default_fields)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_collection_multithread(self, connect):
         '''
         target: test create collection with multithread
@@ -221,7 +221,7 @@ class TestCreateCollectionInvalid(object):
     def get_field_type(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_collection_with_invalid_segment_row_count(self, connect, get_segment_row_count):
         collection_name = gen_unique_str()
         fields = copy.deepcopy(default_fields)
@@ -229,7 +229,7 @@ class TestCreateCollectionInvalid(object):
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
 
-    # @pytest.mark.level(2)
+    # @pytest.mark.tag("nightly")
     # def test_create_collection_with_invalid_metric_type(self, connect, get_metric_type):
     #     collection_name = gen_unique_str()
     #     fields = copy.deepcopy(default_fields)
@@ -237,7 +237,7 @@ class TestCreateCollectionInvalid(object):
     #     with pytest.raises(Exception) as e:
     #         connect.create_collection(collection_name, fields)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_collection_with_invalid_dimension(self, connect, get_dim):
         dimension = get_dim
         collection_name = gen_unique_str()
@@ -246,19 +246,19 @@ class TestCreateCollectionInvalid(object):
         with pytest.raises(Exception) as e:
              connect.create_collection(collection_name, fields)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_collection_with_invalid_collectionname(self, connect, get_invalid_string):
         collection_name = get_invalid_string
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, default_fields)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_collection_with_empty_collectionname(self, connect):
         collection_name = ''
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, default_fields)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_collection_with_none_collectionname(self, connect):
         collection_name = None
         with pytest.raises(Exception) as e:

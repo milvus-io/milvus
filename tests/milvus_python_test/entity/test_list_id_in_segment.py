@@ -102,7 +102,7 @@ class TestListIdInSegmentBase:
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection, seg_id + 10000)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_list_id_in_segment_without_index_A(self, connect, collection):
         '''
         target: get vector ids when there is no index
@@ -116,7 +116,7 @@ class TestListIdInSegmentBase:
         assert len(vector_ids) == nb
         assert vector_ids[0] == ids[0]
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_list_id_in_segment_without_index_B(self, connect, collection):
         '''
         target: get vector ids when there is no index but with partition
@@ -146,7 +146,7 @@ class TestListIdInSegmentBase:
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_list_id_in_segment_with_index_A(self, connect, collection, get_simple_index):
         '''
         target: get vector ids when there is index
@@ -160,7 +160,7 @@ class TestListIdInSegmentBase:
             assert False, str(e)
         # TODO: 
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_list_id_in_segment_with_index_B(self, connect, collection, get_simple_index):
         '''
         target: get vector ids when there is index and with partition
@@ -179,7 +179,7 @@ class TestListIdInSegmentBase:
         # vector_ids should match ids
         # TODO
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_list_id_in_segment_after_delete_vectors(self, connect, collection):
         '''
         target: get vector ids after vectors are deleted
@@ -196,7 +196,7 @@ class TestListIdInSegmentBase:
         assert len(vector_ids) == 1
         assert vector_ids[0] == ids[1]
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_list_id_in_segment_with_index_ip(self, connect, collection, get_simple_index):
         '''
         target: get vector ids when there is index
@@ -215,7 +215,7 @@ class TestListIdInSegmentBinary:
       The following cases are used to test `list_id_in_segment` function
     ******************************************************************
     """
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_list_id_in_segment_without_index_A(self, connect, binary_collection):
         '''
         target: get vector ids when there is no index
@@ -233,7 +233,7 @@ class TestListIdInSegmentBinary:
         for i in range(nb):
             assert vector_ids[i] == ids[i]
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_list_id_in_segment_without_index_B(self, connect, binary_collection):
         '''
         target: get vector ids when there is no index but with partition

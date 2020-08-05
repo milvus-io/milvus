@@ -51,7 +51,7 @@ class TestLoadCollection:
         '''
         connect.load_collection(collection)
 
-    @pytest.mark.level(1)
+    @pytest.mark.level("pr")
     def test_load_collection_dis_connect(self, dis_connect, collection):
         '''
         target: test load collection, without connection
@@ -61,7 +61,7 @@ class TestLoadCollection:
         with pytest.raises(Exception) as e:
             dis_connect.load_collection(collection)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_load_collection_not_existed(self, connect, collection):
         collection_name = gen_unique_str(collection_id)
         with pytest.raises(Exception) as e:
@@ -79,7 +79,7 @@ class TestLoadCollectionInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_load_collection_with_invalid_collectionname(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:

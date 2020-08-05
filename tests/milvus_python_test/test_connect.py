@@ -181,7 +181,7 @@ class TestConnectIPInvalid(object):
     def get_invalid_ip(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     @pytest.mark.timeout(CONNECT_TIMEOUT)
     def test_connect_with_invalid_ip(self, args, get_invalid_ip):
         ip = get_invalid_ip
@@ -202,7 +202,7 @@ class TestConnectPortInvalid(object):
     def get_invalid_port(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     @pytest.mark.timeout(CONNECT_TIMEOUT)
     def test_connect_with_invalid_port(self, args, get_invalid_port):
         '''
@@ -227,7 +227,7 @@ class TestConnectURIInvalid(object):
     def get_invalid_uri(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     @pytest.mark.timeout(CONNECT_TIMEOUT)
     def test_connect_with_invalid_uri(self, get_invalid_uri, args):
         '''

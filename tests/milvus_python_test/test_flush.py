@@ -88,7 +88,7 @@ class TestFlushBase:
         #     connect.flush([collection])
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_add_partition_flush(self, connect, id_collection):
         '''
         method: add entities into partition in collection, flush serveral times
@@ -109,7 +109,7 @@ class TestFlushBase:
         assert res_count == nb * 2
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_add_partitions_flush(self, connect, collection):
         '''
         method: add entities into partitions in collection, flush one
@@ -128,7 +128,7 @@ class TestFlushBase:
         assert res == 2 * nb
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_add_collections_flush(self, connect, collection):
         '''
         method: add entities into collections, flush one
@@ -150,7 +150,7 @@ class TestFlushBase:
         assert res == nb
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_add_collections_fields_flush(self, connect, collection, get_filter_field, get_vector_field):
         '''
         method: create collection with different fields, and add entities into collections, flush one
@@ -198,7 +198,7 @@ class TestFlushBase:
         assert res
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     # TODO: stable case
     def test_add_flush_auto(self, connect, id_collection):
         '''
@@ -229,7 +229,7 @@ class TestFlushBase:
         yield request.param
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_add_flush_same_ids(self, connect, id_collection, same_ids):
         '''
         method: add entities, with same ids, count(same ids) < 15, > 15
@@ -350,7 +350,7 @@ class TestCollectionNameInvalid(object):
     def get_invalid_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_flush_with_invalid_collection_name(self, connect, get_invalid_collection_name):
         collection_name = get_invalid_collection_name
         if collection_name is None or not collection_name:

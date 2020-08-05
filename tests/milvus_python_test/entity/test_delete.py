@@ -176,7 +176,7 @@ class TestDeleteBase:
         assert res_count == nb - len(delete_ids)
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_flush_after_delete_binary(self, connect, binary_collection):
         '''
         target: test delete entity
@@ -230,7 +230,7 @@ class TestDeleteBase:
         assert res_count == nb - 1
 
     # TODO:
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_search_after_delete(self, connect, collection):
         '''
         target: test delete entity
@@ -252,7 +252,7 @@ class TestDeleteBase:
         assert res[2]._distances[0] < epsilon
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_index_after_delete(self, connect, collection, get_simple_index):
         '''
         method: add entitys and delete, then create index
@@ -282,7 +282,7 @@ class TestDeleteBase:
             assert status
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_index_insert_batch_delete_get(self, connect, collection, get_simple_index):
         '''
         method: create index, insert entities, and delete
@@ -301,7 +301,7 @@ class TestDeleteBase:
         assert res_get[0] is None
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_index_insert_single_delete_get(self, connect, collection, get_simple_index):
         '''
         method: create index, insert entities, and delete
@@ -370,7 +370,7 @@ class TestDeleteBase:
         assert res_count == 2 * (nb - 1)
 
     # TODO:
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_insert_tags_index_delete(self, connect, collection, get_simple_index):
         '''
         method: add entitys with given tag, create index, delete entities with the return ids
@@ -410,7 +410,7 @@ class TestDeleteInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.level(1)
+    @pytest.mark.level("pr")
     def test_delete_entity_id_invalid(self, connect, collection, gen_entity_id):
         invalid_id = gen_entity_id
         with pytest.raises(Exception) as e:

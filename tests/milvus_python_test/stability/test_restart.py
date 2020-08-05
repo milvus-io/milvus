@@ -31,7 +31,7 @@ class TestRestartBase:
             pytest.skip(reason)
 
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def _test_create_partition_insert_restart(self, connect, collection, args):
         '''
         target: return the same row count after server restart
@@ -66,7 +66,7 @@ class TestRestartBase:
         assert status.OK()
         assert res == nq
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def _test_during_creating_index_restart(self, connect, collection, args):
         '''
         target: return the same row count after server restart

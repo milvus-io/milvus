@@ -99,7 +99,7 @@ class TestCreateBase:
         assert "_default" in tag_list
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_partition_insert_default(self, connect, id_collection):
         '''
         target: test create partition, and insert vectors, check status returned
@@ -112,7 +112,7 @@ class TestCreateBase:
         assert len(insert_ids) == len(ids)
  
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_partition_insert_with_tag(self, connect, collection):
         '''
         target: test create partition, and insert vectors, check status returned
@@ -137,7 +137,7 @@ class TestCreateBase:
             insert_ids = connect.insert(collection, entities, ids, partition_tag=tag_new)
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_create_partition_insert_same_tags(self, connect, collection):
         '''
         target: test create partition, and insert vectors, check status returned
@@ -271,7 +271,7 @@ class TestHasBase:
         with pytest.raises(Exception) as e:
             res = connect.has_partition("not_existed_collection", tag)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_has_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
         '''
         target: test has partition, with invalid tag name, check status returned
@@ -329,7 +329,7 @@ class TestDropBase:
         with pytest.raises(Exception) as e:
             connect.drop_partition(new_collection, tag)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_drop_partition_repeatedly(self, connect, collection):
         '''
         target: test drop partition twice, check status and partition if existed

@@ -77,7 +77,7 @@ class TestInfoBase:
         # assert segment size
 
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_get_collection_info_without_connection(self, collection, dis_connect):
         '''
         target: test get collection info, without connection
@@ -99,7 +99,7 @@ class TestInfoBase:
             res = connect.get_collection_info(connect, collection_name)
 
     # TODO
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_get_collection_info_multithread(self, connect):
         '''
         target: test create collection with multithread
@@ -179,19 +179,19 @@ class TestInfoInvalid(object):
         yield request.param
 
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_get_collection_info_with_invalid_collectionname(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.get_collection_info(collection_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_get_collection_info_with_empty_collectionname(self, connect):
         collection_name = ''
         with pytest.raises(Exception) as e:
             connect.get_collection_info(collection_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def test_get_collection_info_with_none_collectionname(self, connect):
         collection_name = None
         with pytest.raises(Exception) as e:

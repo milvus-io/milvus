@@ -74,7 +74,7 @@ def gen_sequence():
 
 class TestCollectionLogic(object):
     @pytest.mark.parametrize("logic_seq", gen_sequence())
-    @pytest.mark.level(2)
+    @pytest.mark.tag("nightly")
     def _test_logic(self, connect, logic_seq, args):
         if args["handler"] == "HTTP":
             pytest.skip("Skip in http mode")
