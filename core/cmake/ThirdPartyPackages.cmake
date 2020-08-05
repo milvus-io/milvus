@@ -11,7 +11,7 @@
 
 set(MILVUS_THIRDPARTY_DEPENDENCIES
 
-        GTest
+        # GTest
         MySQLPP
         Prometheus
         SQLite
@@ -398,16 +398,16 @@ macro(build_gtest)
 
 endmacro()
 
-if (MILVUS_BUILD_TESTS)
-    resolve_dependency(GTest)
-
-    if (NOT GTEST_VENDORED)
-    endif ()
-
-    get_target_property(GTEST_INCLUDE_DIR gtest INTERFACE_INCLUDE_DIRECTORIES)
-    link_directories(SYSTEM "${GTEST_PREFIX}/lib")
-    include_directories(SYSTEM ${GTEST_INCLUDE_DIR})
-endif ()
+# if (MILVUS_BUILD_TESTS)
+#     resolve_dependency(GTest)
+#
+#     if (NOT GTEST_VENDORED)
+#     endif ()
+#
+#     get_target_property(GTEST_INCLUDE_DIR gtest INTERFACE_INCLUDE_DIRECTORIES)
+#     link_directories(SYSTEM "${GTEST_PREFIX}/lib")
+#     include_directories(SYSTEM ${GTEST_INCLUDE_DIR})
+# endif ()
 
 # ----------------------------------------------------------------------
 # MySQL++

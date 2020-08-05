@@ -50,13 +50,19 @@ set( MILVUS_ENGINE_SRC      ${PROJECT_SOURCE_DIR}/src )
 set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
 
 # **************************** Dependencies ****************************
-include(CTest)
+include( CTest )
 include( BuildUtils )
 import_mysql_inc()
 
 include( ExternalProject )
 include( DefineOptions )
 include( ThirdPartyPackages )
+
+# INCLUDE DIRS of thirdparty libs need to be set here
+add_subdirectory( thirdparty )
+foreach (DIR ${THIRDPARTY_INCLUDE_DIRS})
+    include_directories(${DIR})
+endforeach ()
 
 using_ccache_if_defined( MILVUS_USE_CCACHE )
 
