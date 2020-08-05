@@ -997,6 +997,7 @@ class TestSearchDSL(object):
         assert len(res[0]) == 0
 
     # TODO
+    @pytest.mark.level(2)
     def test_query_term_key_error(self, connect, collection):
         '''
         method: build query with term key error
@@ -1035,6 +1036,7 @@ class TestSearchDSL(object):
             res = connect.search(collection, query)
 
     # TODO
+    @pytest.mark.level(2)
     def test_query_term_field_named_term(self, connect, collection):
         '''
         method: build query with field named "term"
