@@ -108,6 +108,8 @@ Status
 MemCollection::Serialize(uint64_t wal_lsn) {
     TimeRecorder recorder("MemCollection::Serialize collection " + collection_id_);
 
+    std::lock_guard<std::mutex> lock(mutex_);
+
     if (!doc_ids_to_delete_.empty()) {
         while (true) {
             auto status = ApplyDeletes();
@@ -117,6 +119,7 @@ MemCollection::Serialize(uint64_t wal_lsn) {
                 LOG_ENGINE_WARNING_ << "ApplyDeletes is stale, try again";
                 continue;
             } else {
+                LOG_ENGINE_ERROR_ << "ApplyDeletes failed: " << status.ToString();
                 return status;
             }
         }
@@ -124,7 +127,6 @@ MemCollection::Serialize(uint64_t wal_lsn) {
 
     doc_ids_to_delete_.clear();
 
-    std::lock_guard<std::mutex> lock(mutex_);
     for (auto& partition_segments : mem_segments_) {
         MemSegmentList& segments = partition_segments.second;
         for (auto& segment : segments) {
@@ -179,6 +181,8 @@ MemCollection::ApplyDeletes() {
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
         segment::IdBloomFilterPtr pre_bloom_filter;
         STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
+        std::vector<engine::id_t> uids;
+        STATUS_CHECK(segment_reader->LoadUids(uids));
 
         // Step 1: Check delete_id in mem
         std::vector<id_t> delete_ids;
@@ -197,9 +201,13 @@ MemCollection::ApplyDeletes() {
         STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
         std::vector<engine::offset_t> pre_del_ids;
         if (prev_del_docs) {
-            pre_del_ids = prev_del_docs->GetDeletedDocs();
-            if (!pre_del_ids.empty())
+            auto pre_doc_ids = prev_del_docs->GetDeletedDocs();
+            if (!pre_doc_ids.empty()) {
+                for (auto & id : pre_doc_ids) {
+                    pre_del_ids.push_back(uids[id]);
+                }
                 delete_ids.insert(delete_ids.end(), pre_del_ids.begin(), pre_del_ids.end());
+            }
         }
 
         // TODO(yhz): Update blacklist in cache
@@ -265,8 +273,7 @@ MemCollection::ApplyDeletes() {
         segment::IdBloomFilterPtr bloom_filter;
         STATUS_CHECK(segment_writer->CreateBloomFilter(bloom_filter_file_path, bloom_filter));
         auto delete_docs = std::make_shared<segment::DeletedDocs>();
-        std::vector<id_t> uids;
-        STATUS_CHECK(segment_reader->LoadUids(uids));
+
         for (size_t i = 0; i < uids.size(); i++) {
             if (std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i])) {
                 delete_docs->AddDeletedDoc(i);
