@@ -162,6 +162,8 @@ class TestInsertBase:
     def insert_count(self, request):
         yield request.param
 
+    # TODO
+    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_ids(self, connect, collection, insert_count):
         '''
@@ -178,6 +180,8 @@ class TestInsertBase:
         res_count = connect.count_entities(collection)
         assert res_count == nb
 
+    # TODO
+    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_the_same_ids(self, connect, collection, insert_count):
         '''
@@ -302,6 +306,8 @@ class TestInsertBase:
         ids = connect.insert(collection, entities, partition_tag=tag)
         assert len(ids) == nb
 
+    # TODO
+    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_tag_with_ids(self, connect, id_collection):
         '''
