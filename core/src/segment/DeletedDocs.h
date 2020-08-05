@@ -20,12 +20,14 @@
 #include <memory>
 #include <vector>
 
+#include "cache/DataObj.h"
+
 namespace milvus {
 namespace segment {
 
 using offset_t = int32_t;
 
-class DeletedDocs {
+class DeletedDocs : public cache::DataObj {
  public:
     explicit DeletedDocs(const std::vector<offset_t>& deleted_doc_offsets);
 
@@ -42,7 +44,10 @@ class DeletedDocs {
     //    GetName() const;
 
     size_t
-    GetSize() const;
+    GetCount() const;
+
+    int64_t
+    Size() override;
 
     //    void
     //    GetBitset(faiss::ConcurrentBitsetPtr& bitset);

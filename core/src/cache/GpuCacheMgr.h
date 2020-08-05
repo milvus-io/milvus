@@ -36,12 +36,6 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
     static GpuCacheMgrPtr
     GetInstance(int64_t gpu_id);
 
-    DataObjPtr
-    GetDataObj(const std::string& key);
-
-    void
-    SetDataObj(const std::string& key, const DataObjPtr& data);
-
     bool
     Reserve(const int64_t size);
 

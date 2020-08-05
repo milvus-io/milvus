@@ -223,9 +223,9 @@ BuildEntities2(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& d
     }
 
     milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+    data_chunk->fixed_fields_["float_vector"] = raw;
     raw->data_.resize(vectors.float_data_.size() * sizeof(float));
     memcpy(raw->data_.data(), vectors.float_data_.data(), vectors.float_data_.size() * sizeof(float));
-    data_chunk->fixed_fields_["float_vector"] = raw;
 
     std::vector<int64_t> value_1;
     value_1.resize(n);
@@ -236,9 +236,9 @@ BuildEntities2(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& d
 
     {
         milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+        data_chunk->fixed_fields_["int64"] = raw;
         raw->data_.resize(value_1.size() * sizeof(int64_t));
         memcpy(raw->data_.data(), value_1.data(), value_1.size() * sizeof(int64_t));
-        data_chunk->fixed_fields_["int64"] = raw;
     }
 }
 }  // namespace
@@ -508,6 +508,8 @@ TEST_F(DBTest, MergeTest) {
         status = db_->Insert(collection_name, "", data_chunk);
         ASSERT_TRUE(status.ok());
 
+        data_chunk->fixed_fields_.erase(milvus::engine::DEFAULT_UID_NAME); // clear auto-generated id
+
         status = db_->Flush();
         ASSERT_TRUE(status.ok());
     }
@@ -566,6 +568,42 @@ TEST_F(DBTest, MergeTest) {
 
     // TODO: Fix segment file suffix issue.
     ASSERT_EQ(expect_file_paths.size(), segment_file_paths.size());
+}
+
+TEST_F(DBTest, CompactTest) {
+    std::string collection_name = "COMPACT_TEST";
+    auto status = CreateCollection2(db_, collection_name, 0);
+    ASSERT_TRUE(status.ok());
+
+    const uint64_t entity_count = 10000;
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities(entity_count, 0, data_chunk);
+
+    status = db_->Insert(collection_name, "", data_chunk);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok());
+
+    milvus::engine::IDNumbers entity_ids;
+    milvus::engine::utils::GetIDFromChunk(data_chunk, entity_ids);
+    ASSERT_EQ(entity_ids.size(), entity_count);
+
+//    int64_t delete_count = 10;
+//    entity_ids.resize(delete_count);
+//    status = db_->DeleteEntityByID(collection_name, entity_ids);
+//    ASSERT_TRUE(status.ok());
+//
+//    status = db_->Flush();
+//    ASSERT_TRUE(status.ok());
+//
+//    status = db_->Compact(dummy_context_, collection_name);
+//    ASSERT_TRUE(status.ok());
+//
+//    int64_t row_count = 0;
+//    status = db_->CountEntities(collection_name, row_count);
+//    ASSERT_TRUE(status.ok());
+//    ASSERT_EQ(row_count, entity_count - delete_count);
 }
 
 TEST_F(DBTest, IndexTest) {
@@ -655,6 +693,8 @@ TEST_F(DBTest, StatsTest) {
 
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
+
+    data_chunk->fixed_fields_.erase(milvus::engine::DEFAULT_UID_NAME); // clear auto-generated id
 
     status = db_->Insert(collection_name, partition_name, data_chunk);
     ASSERT_TRUE(status.ok());
