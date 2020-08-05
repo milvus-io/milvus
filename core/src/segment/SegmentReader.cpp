@@ -104,14 +104,16 @@ SegmentReader::Load() {
 Status
 SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& raw) {
     try {
-        engine::FIXEDX_FIELD_MAP& field_map = segment_ptr_->GetFixedFields();
-        auto pair = field_map.find(field_name);
-        if (pair != field_map.end()) {
-            raw = pair->second;
+        segment_ptr_->GetFixedFieldData(field_name, raw);
+        if (raw != nullptr) {
             return Status::OK();  // alread exist
         }
 
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        if (field_visitor == nullptr) {
+            return Status(DB_ERROR, "Invalid field name");
+        }
+
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
@@ -127,7 +129,7 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
             raw = std::static_pointer_cast<engine::BinaryData>(data_obj);
         }
 
-        field_map.insert(std::make_pair(field_name, raw));
+        segment_ptr_->SetFixedFieldData(field_name, raw);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -146,10 +148,7 @@ SegmentReader::LoadFields() {
         auto status = segment_ptr_->GetFixedFieldData(name, raw_data);
 
         if (!status.ok() || raw_data == nullptr) {
-            auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
-            std::string file_path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(
-                dir_collections_, element_visitor->GetFile());
-            STATUS_CHECK(LoadField(file_path, raw_data));
+            STATUS_CHECK(LoadField(name, raw_data));
         }
     }
 

@@ -1267,13 +1267,12 @@ GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::
 }
 
 ::grpc::Status
-GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+GrpcRequestHandler::Compact(::grpc::ServerContext* context, ::milvus::grpc::CompactParam* request,
                             ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-    double compact_threshold = 0.1;  // compact trigger threshold: delete_counts/segment_counts
-    Status status = req_handler_.Compact(GetContext(context), request->collection_name(), compact_threshold);
+    Status status = req_handler_.Compact(GetContext(context), request->collection_name(), request->threshold());
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);

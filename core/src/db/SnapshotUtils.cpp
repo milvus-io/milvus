@@ -35,7 +35,7 @@ const char* JSON_FIELD = "field";
 const char* JSON_FIELD_ELEMENT = "field_element";
 const char* JSON_PARTITION_TAG = "tag";
 const char* JSON_FILES = "files";
-const char* JSON_INDEX_NAME = "index_name";
+const char* JSON_NAME = "name";
 const char* JSON_INDEX_TYPE = "index_type";
 const char* JSON_DATA_SIZE = "data_size";
 const char* JSON_PATH = "path";
@@ -222,10 +222,10 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
                     // if the element is index, print index name/type
                     // else print element name
                     if (element->GetFtype() == engine::FieldElementType::FET_INDEX) {
-                        json_file[JSON_INDEX_NAME] = element->GetName();
+                        json_file[JSON_NAME] = element->GetName();
                         json_file[JSON_INDEX_TYPE] = element->GetTypeName();
                     } else {
-                        json_file[JSON_FIELD_ELEMENT] = element->GetName();
+                        json_file[JSON_NAME] = element->GetName();
                     }
                 }
                 json_files.push_back(json_file);
