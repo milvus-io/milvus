@@ -87,23 +87,23 @@ class TestFlushBase:
         # with pytest.raises(Exception) as e:
         #     connect.flush([collection])
 
-    def test_add_partition_flush(self, connect, collection):
+    def test_add_partition_flush(self, connect, id_collection):
         '''
         method: add entities into partition in collection, flush serveral times
         expected: the length of ids and the collection row count
         '''
         # vector = gen_vector(nb, dim)
-        connect.create_partition(collection, tag)
+        connect.create_partition(id_collection, tag)
         # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        ids = connect.insert(collection, entities, ids)
-        connect.flush([collection])
-        res_count = connect.count_entities(collection)
+        ids = connect.insert(id_collection, entities, ids)
+        connect.flush([id_collection])
+        res_count = connect.count_entities(id_collection)
         assert res_count == nb
-        ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
         assert len(ids) == nb
-        connect.flush([collection])
-        res_count = connect.count_entities(collection)
+        connect.flush([id_collection])
+        res_count = connect.count_entities(id_collection)
         assert res_count == nb * 2
 
     def test_add_partitions_flush(self, connect, collection):
@@ -190,19 +190,19 @@ class TestFlushBase:
         assert res
 
     # TODO: stable case
-    def test_add_flush_auto(self, connect, collection):
+    def test_add_flush_auto(self, connect, id_collection):
         '''
         method: add entities
         expected: no error raised
         '''
         # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        ids = connect.insert(collection, entities, ids)
+        ids = connect.insert(id_collection, entities, ids)
         timeout = 10
         start_time = time.time()
         while (time.time() - start_time < timeout):
             time.sleep(1)
-            res = connect.count_entities(collection)
+            res = connect.count_entities(id_collection)
             if res == nb:
                 break
         if time.time() - start_time > timeout:
@@ -218,7 +218,7 @@ class TestFlushBase:
     def same_ids(self, request):
         yield request.param
 
-    def test_add_flush_same_ids(self, connect, collection, same_ids):
+    def test_add_flush_same_ids(self, connect, id_collection, same_ids):
         '''
         method: add entities, with same ids, count(same ids) < 15, > 15
         expected: the length of ids and the collection row count
@@ -228,9 +228,9 @@ class TestFlushBase:
         for i, item in enumerate(ids):
             if item <= same_ids:
                 ids[i] = 0
-        ids = connect.insert(collection, entities, ids)
-        connect.flush([collection])
-        res = connect.count_entities(collection)
+        ids = connect.insert(id_collection, entities, ids)
+        connect.flush([id_collection])
+        res = connect.count_entities(id_collection)
         assert res == nb
 
     @pytest.mark.skip(reason="search not support yet")

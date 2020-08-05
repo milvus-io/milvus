@@ -207,7 +207,7 @@ def gen_single_vector_fields():
     return fields
 
 
-def gen_default_fields():
+def gen_default_fields(auto_id=False):
     default_fields = {
         "fields": [
             {"field": "int64", "type": DataType.INT64},
@@ -216,6 +216,22 @@ def gen_default_fields():
         ],
         "segment_row_count": segment_row_count
     }
+    if auto_id is True:
+        default_fields["auto_id"] = True
+    return default_fields
+
+
+def gen_binary_default_fields(auto_id=False):
+    default_fields = {
+        "fields": [
+            {"field": "int64", "type": DataType.INT64},
+            {"field": "float", "type": DataType.FLOAT},
+            {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": dimension}}
+        ],
+        "segment_row_count": segment_row_count
+    }
+    if auto_id is True:
+        default_fields["auto_id"] = True
     return default_fields
 
 

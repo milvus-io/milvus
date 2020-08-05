@@ -226,7 +226,7 @@ class TestSearchBase:
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors_(field_name, entities, top_k, nq, search_params=search_param)
+        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, search_params=search_param)
         if top_k > top_k_limit:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
