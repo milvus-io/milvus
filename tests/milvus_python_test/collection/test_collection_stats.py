@@ -122,6 +122,8 @@ class TestStatsBase:
         assert stats["partitions"][0]["tag"] == "_default"
         assert stats["partitions"][0]["row_count"] == nb
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_collection_stats_after_delete(self, connect, collection):
         '''
         target: get row count with collection_stats
@@ -138,6 +140,8 @@ class TestStatsBase:
         assert stats["partitions"][0]["segments"][0]["data_size"] > 0
         assert stats["partitions"][0]["segments"][0]["index_name"] == "FLAT"
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_collection_stats_after_compact_parts(self, connect, collection):
         '''
         target: get row count with collection_stats
@@ -160,6 +164,8 @@ class TestStatsBase:
         # pdb.set_trace()
         assert compact_before > compact_after
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_collection_stats_after_compact_delete_one(self, connect, collection):
         '''
         target: get row count with collection_stats
@@ -219,6 +225,8 @@ class TestStatsBase:
             if partition["tag"] in [tag, new_tag]:
                 assert partition["row_count"] == nb
     
+    # TODO
+    @pytest.mark.level(2)
     def test_get_collection_stats_after_index_created(self, connect, collection, get_simple_index):
         '''
         target: test collection info after index created
@@ -233,6 +241,8 @@ class TestStatsBase:
         assert stats["partitions"][0]["segments"][0]["row_count"] == nb
         assert stats["partitions"][0]["segments"][0]["index_name"] == get_simple_index["index_type"]
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_collection_stats_after_index_created_ip(self, connect, collection, get_simple_index):
         '''
         target: test collection info after index created
@@ -263,6 +273,8 @@ class TestStatsBase:
         assert stats["partitions"][0]["segments"][0]["row_count"] == nb
         assert stats["partitions"][0]["segments"][0]["index_name"] == get_jaccard_index["index_type"]
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_collection_stats_after_create_different_index(self, connect, collection):
         '''
         target: test collection info after index created repeatedly
@@ -272,7 +284,7 @@ class TestStatsBase:
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         for index_type in ["IVF_FLAT", "IVF_SQ8"]:
-            connect.create_index(collection, field_name, {"index_type": index_type, "nlist": 1024, "metric_type": "L2"})
+            connect.create_index(collection, field_name, {"index_type": index_type, "params":{"nlist": 1024}, "metric_type": "L2"})
             stats = connect.get_collection_stats(collection)
             logging.getLogger().info(stats)
             assert stats["partitions"][0]["segments"][0]["index_name"] == index_type
@@ -298,6 +310,8 @@ class TestStatsBase:
             assert stats["partitions"][0]["segments"][0]["row_count"] == nb
             connect.drop_collection(collection_list[i])
 
+    # TODO
+    @pytest.mark.level(2)
     def test_collection_count_multi_collections_indexed(self, connect):
         '''
         target: test collection rows_count is correct or not with multiple collections of L2
@@ -314,9 +328,9 @@ class TestStatsBase:
             res = connect.insert(collection_name, entities)
             connect.flush(collection_list)
             if i % 2:
-                connect.create_index(collection_name, field_name, {"index_type": "IVF_SQ8", "params": {"nlist": 1024}, "metric_type": "L2"})
+                connect.create_index(collection_name, field_name, {"index_type": "IVF_SQ8", "params":{"nlist": 1024}, "metric_type": "L2"})
             else:
-                connect.create_index(collection_name, field_name, {"index_type": "IVF_FLAT", "params": {"nlist": 1024}, "metric_type": "L2"})
+                connect.create_index(collection_name, field_name, {"index_type": "IVF_FLAT","params":{ "nlist": 1024}, "metric_type": "L2"})
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
             assert stats["partitions"][0]["segments"][0]["row_count"] == nb
