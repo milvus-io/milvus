@@ -57,7 +57,6 @@ import_mysql_inc()
 include( ExternalProject )
 include( DefineOptions )
 include( ThirdPartyPackages )
-add_subdirectory( thirdparty )
 
 using_ccache_if_defined( MILVUS_USE_CCACHE )
 
