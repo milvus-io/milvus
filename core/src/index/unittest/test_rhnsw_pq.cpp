@@ -55,14 +55,14 @@ TEST_P(RHNSWPQTest, HNSW_basic) {
     // Serialize and Load before Query
     milvus::knowhere::BinarySet bs = index_->Serialize();
     auto result1 = index_->Query(query_dataset, conf);
-//    AssertAnns(result1, nq, k);
+    //    AssertAnns(result1, nq, k);
 
     auto tmp_index = std::make_shared<milvus::knowhere::IndexRHNSWPQ>();
 
     tmp_index->Load(bs);
 
     auto result2 = tmp_index->Query(query_dataset, conf);
-//    AssertAnns(result2, nq, k);
+    //    AssertAnns(result2, nq, k);
 }
 
 TEST_P(RHNSWPQTest, HNSW_delete) {
@@ -79,11 +79,11 @@ TEST_P(RHNSWPQTest, HNSW_delete) {
     }
 
     auto result1 = index_->Query(query_dataset, conf);
-//    AssertAnns(result1, nq, k);
+    //    AssertAnns(result1, nq, k);
 
     index_->SetBlacklist(bitset);
     auto result2 = index_->Query(query_dataset, conf);
-//    AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
+    //    AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
     /*
      * delete result checked by eyes
