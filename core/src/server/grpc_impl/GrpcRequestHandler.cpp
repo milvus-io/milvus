@@ -1597,6 +1597,9 @@ Status
 GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
                                             query::QueryPtr& query_ptr) {
     auto status = Status::OK();
+    if (query_json.empty()) {
+        return Status{SERVER_INVALID_ARGUMENT, "BoolQuery is null"};
+    }
     for (auto& el : query_json.items()) {
         if (el.key() == "must") {
             boolean_query->SetOccur(query::Occur::MUST);
@@ -1662,7 +1665,7 @@ GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, qu
                 }
             }
         } else {
-            std::string msg = "Must json string doesnot include right query";
+            std::string msg = "BoolQuery json string does not include bool query";
             return Status{SERVER_INVALID_DSL_PARAMETER, msg};
         }
     }

@@ -17,6 +17,7 @@ default_flush_interval = 1
 big_flush_interval = 1000
 dimension = 128
 segment_row_count = 5000
+nb = 1000
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
 
