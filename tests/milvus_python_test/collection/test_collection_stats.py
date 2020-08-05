@@ -106,20 +106,6 @@ class TestStatsBase:
         assert stats["partitions"][0]["tag"] == "_default"
         assert stats["partitions"][0]["row_count"] == nb
 
-    def test_get_collection_stats_batch_ip(self, connect, ip_collection):
-        '''
-        target: get row count with collection_stats
-        method: add entities, check count in collection info
-        expected: count as expected
-        '''
-        ids = connect.insert(ip_collection, entities)
-        connect.flush([ip_collection])
-        stats = connect.get_collection_stats(ip_collection)
-        assert stats["row_count"] == nb
-        assert len(stats["partitions"]) == 1
-        assert stats["partitions"][0]["tag"] == "_default"
-        assert stats["partitions"][0]["row_count"] == nb
-
     def test_get_collection_stats_single(self, connect, collection):
         '''
         target: get row count with collection_stats
@@ -247,31 +233,32 @@ class TestStatsBase:
         assert stats["partitions"][0]["segments"][0]["row_count"] == nb
         assert stats["partitions"][0]["segments"][0]["index_name"] == get_simple_index["index_type"]
 
-    def test_get_collection_stats_after_index_created_ip(self, connect, ip_collection, get_simple_index):
+    def test_get_collection_stats_after_index_created_ip(self, connect, collection, get_simple_index):
         '''
         target: test collection info after index created
         method: create collection, add vectors, create index and call collection_stats 
         expected: status ok, index created and shown in segments
         '''
-        ids = connect.insert(ip_collection, entities)
-        connect.flush([ip_collection])
+        get_simple_index["metric_type"] = "IP"
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
         get_simple_index.update({"metric_type": "IP"})
-        connect.create_index(ip_collection, field_name, get_simple_index)
-        stats = connect.get_collection_stats(ip_collection)
+        connect.create_index(collection, field_name, get_simple_index)
+        stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
         assert stats["partitions"][0]["segments"][0]["row_count"] == nb
         assert stats["partitions"][0]["segments"][0]["index_name"] == get_simple_index["index_type"]
 
-    def test_get_collection_stats_after_index_created_jac(self, connect, jac_collection, get_jaccard_index):
+    def test_get_collection_stats_after_index_created_jac(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test collection info after index created
         method: create collection, add binary entities, create index and call collection_stats 
         expected: status ok, index created and shown in segments
         '''
-        ids = connect.insert(jac_collection, binary_entities)
-        connect.flush([jac_collection])
-        connect.create_index(jac_collection, "binary_vector", get_jaccard_index)
-        stats = connect.get_collection_stats(jac_collection)
+        ids = connect.insert(binary_collection, binary_entities)
+        connect.flush([binary_collection])
+        connect.create_index(binary_collection, "binary_vector", get_jaccard_index)
+        stats = connect.get_collection_stats(binary_collection)
         logging.getLogger().info(stats)
         assert stats["partitions"][0]["segments"][0]["row_count"] == nb
         assert stats["partitions"][0]["segments"][0]["index_name"] == get_jaccard_index["index_type"]

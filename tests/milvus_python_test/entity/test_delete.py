@@ -181,36 +181,19 @@ class TestDeleteBase:
 
     # TODO
     @pytest.mark.level(2)
-    def test_flush_after_delete_ip(self, connect, ip_collection):
+    def test_flush_after_delete_binary(self, connect, binary_collection):
         '''
         target: test delete entity
         method: add entities and delete, then flush
         expected: entity deleted and no error raised
         '''
-        ids = connect.insert(ip_collection, entities)
-        connect.flush([ip_collection])
+        ids = connect.insert(binary_collection, binary_entities)
+        connect.flush([binary_collection])
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_entity_by_id(ip_collection, delete_ids)
+        status = connect.delete_entity_by_id(binary_collection, delete_ids)
         assert status
-        connect.flush([ip_collection])
-        res_count = connect.count_entities(ip_collection)
-        assert res_count == nb - len(delete_ids)
-
-    # TODO
-    @pytest.mark.level(2)
-    def test_flush_after_delete_jac(self, connect, jac_collection):
-        '''
-        target: test delete entity
-        method: add entities and delete, then flush
-        expected: entity deleted and no error raised
-        '''
-        ids = connect.insert(jac_collection, binary_entities)
-        connect.flush([jac_collection])
-        delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_entity_by_id(jac_collection, delete_ids)
-        assert status
-        connect.flush([jac_collection])
-        res_count = connect.count_entities(jac_collection)
+        connect.flush([binary_collection])
+        res_count = connect.count_entities(binary_collection)
         assert res_count == nb - len(delete_ids)
 
     # TODO
@@ -234,40 +217,21 @@ class TestDeleteBase:
 
     # TODO
     @pytest.mark.level(2)
-    def test_insert_same_ids_after_delete_ip(self, connect, ip_collection):
-        '''
-        method: add entities and delete
-        expected: status DELETED
-        '''
-        insert_ids = [i for i in range(nb)]
-        ids = connect.insert(ip_collection, entities, insert_ids)
-        connect.flush([ip_collection])
-        delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_entity_by_id(ip_collection, delete_ids)
-        assert status
-        new_ids = connect.insert(ip_collection, entity, [ids[0]])
-        assert new_ids == [ids[0]]
-        connect.flush([ip_collection])
-        res_count = connect.count_entities(ip_collection)
-        assert res_count == nb - 1
-
-    # TODO
-    @pytest.mark.level(2)
-    def test_insert_same_ids_after_delete_jac(self, connect, jac_collection):
+    def test_insert_same_ids_after_delete_binary(self, connect, binary_collection):
         '''
         method: add entities, with the same id and delete the ids
         expected: status DELETED, all id deleted
         '''
         insert_ids = [i for i in range(nb)]
-        ids = connect.insert(jac_collection, binary_entities, insert_ids)
-        connect.flush([jac_collection])
+        ids = connect.insert(binary, binary_entities, insert_ids)
+        connect.flush([binary])
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_entity_by_id(jac_collection, delete_ids)
+        status = connect.delete_entity_by_id(binary, delete_ids)
         assert status
-        new_ids = connect.insert(jac_collection, binary_entity, [ids[0]])
+        new_ids = connect.insert(binary, binary_entity, [ids[0]])
         assert new_ids == [ids[0]]
-        connect.flush([jac_collection])
-        res_count = connect.count_entities(jac_collection)
+        connect.flush([binary])
+        res_count = connect.count_entities(binary)
         assert res_count == nb - 1
 
     # TODO:
