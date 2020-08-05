@@ -89,7 +89,7 @@ ExecutionEngineImpl::CreateVecIndex(const std::string& index_name) {
 Status
 ExecutionEngineImpl::Load(ExecutionEngineContext& context) {
     if (context.query_ptr_ != nullptr) {
-        context_ = context;
+        context_ = std::shared_ptr<ExecutionEngineContext>(&context);
         return LoadForSearch(context.query_ptr_);
     } else {
         return Load(context.target_fields_);
@@ -141,18 +141,30 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
         bool index_exist = false;
         if (field_type == DataType::VECTOR_FLOAT || field_type == DataType::VECTOR_BINARY) {
             bool valid_metric_type = false;
-            auto field_visitor = segment_visitor->GetFieldVisitor(name);
-            auto field_element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-            if (field_element_visitor) {
-                auto field_element = field_element_visitor->GetElement();
-                if (field_element->GetParams().contains(engine::PARAM_INDEX_METRIC_TYPE)) {
-                    auto metric_type = field_element->GetParams()[engine::PARAM_INDEX_METRIC_TYPE];
-                    if (context_.query_ptr_->metric_types.find(name) != context_.query_ptr_->metric_types.end()) {
-                        if (context_.query_ptr_->metric_types.at(name) == metric_type) {
+            if (!context_) {
+                valid_metric_type = true;
+            } else {
+                auto field_visitor = segment_visitor->GetFieldVisitor(name);
+                auto field_element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+                if (field_element_visitor) {
+                    auto field_element = field_element_visitor->GetElement();
+                    if (field_element->GetParams().contains(engine::PARAM_INDEX_METRIC_TYPE)) {
+                        std::string metric_type = field_element->GetParams()[engine::PARAM_INDEX_METRIC_TYPE];
+                        if (context_->query_ptr_->metric_types.find(name) == context_->query_ptr_->metric_types.end()) {
+                            valid_metric_type = true;
+                        } else if (context_->query_ptr_->metric_types.at(name) == metric_type) {
                             valid_metric_type = true;
                         }
                     }
                 }
+                //                else {
+                //                    if (context_->query_ptr_->metric_types.find(name) ==
+                //                    context_->query_ptr_->metric_types.end()) {
+                //                        return Status{DB_ERROR,
+                //                                      "Please provide a metric_type in search params since index is
+                //                                      not created"};
+                //                    }
+                //                }
             }
 
             knowhere::VecIndexPtr index_ptr;
