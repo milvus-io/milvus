@@ -756,7 +756,7 @@ macro(build_grpc)
             ${GRPC_SOURCE_URL}
             ${EP_LOG_OPTIONS}
             URL_MD5
-            "6c7ba1c3097a6fa377e9804f7b087abe"
+            "478215c151a144c2d8625b49ff1b70aa"
             CONFIGURE_COMMAND
             ""
             BUILD_IN_SOURCE
