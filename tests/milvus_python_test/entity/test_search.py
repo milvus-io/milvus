@@ -885,6 +885,7 @@ class TestSearchDSL(object):
         '''
         expr = gen_default_term_expr
         expr["term"] = 1
+        expr = {"must": [expr]}
         query = update_query_expr(default_query, expr=expr)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
@@ -901,7 +902,7 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = gen_default_term_expr(values=[100000])
+        expr = {"must": [gen_default_term_expr(values=[100000])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
@@ -912,7 +913,7 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = gen_default_term_expr(values=[1])
+        expr = {"must": [gen_default_term_expr(values=[1])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
@@ -923,7 +924,7 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = gen_default_term_expr(values=[i for i in range(100000, 100010)])
+        expr = {"must": [gen_default_term_expr(values=[i for i in range(100000, 100010)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
@@ -934,7 +935,7 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = gen_default_term_expr()
+        expr = {"must": [gen_default_term_expr()]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
@@ -945,7 +946,7 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = gen_default_term_expr(values=[i for i in range(nb/2, nb+nb/2)])
+        expr = {"must": [gen_default_term_expr(values=[i for i in range(nb/2, nb+nb/2)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
@@ -956,7 +957,7 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = gen_default_term_expr(values=[1 for i in range(1, nb)])
+        expr = {"must": [gen_default_term_expr(values=[1 for i in range(1, nb)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
