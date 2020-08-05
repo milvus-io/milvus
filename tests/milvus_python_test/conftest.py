@@ -17,6 +17,25 @@ def pytest_addoption(parser):
     parser.addoption("--port", action="store", default=19530)
     parser.addoption("--http-port", action="store", default=19121)
     parser.addoption("--handler", action="store", default="GRPC")
+    parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
+
+
+def pytest_configure(config):
+    # register an additional marker
+    config.addinivalue_line(
+        "markers", "tag(name): mark test to run only matching the tag"
+    )
+
+
+def pytest_runtest_setup(item):
+    tags = list()
+    for marker in item.iter_markers(name="tag"):
+        for tag in marker.args:
+            tags.append(tag)
+    if tags:
+        cmd_tag = item.config.getoption("--tag")
+        if cmd_tag != "all" and cmd_tag not in tags:
+            pytest.skip("test requires tag in {!r}".format(tags))
 
 
 def check_server_connection(request):
