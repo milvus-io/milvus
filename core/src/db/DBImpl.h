@@ -95,7 +95,7 @@ class DBImpl : public DB, public ConfigObserver {
                   DataChunkPtr& data_chunk) override;
 
     Status
-    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers entity_ids) override;
+    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) override;
 
     Status
     Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) override;

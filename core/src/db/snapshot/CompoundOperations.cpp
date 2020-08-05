@@ -88,6 +88,14 @@ CompoundSegmentsOperation::CommitNewSegmentFile(const SegmentFileContext& contex
 }
 
 Status
+CompoundSegmentsOperation::AddStaleSegmentFile(const SegmentFilePtr& stale_segment_file) {
+    stale_segment_files_[stale_segment_file->GetSegmentId()].push_back(stale_segment_file);
+    modified_segments_.insert(stale_segment_file->GetSegmentId());
+
+    return Status::OK();
+}
+
+Status
 CompoundSegmentsOperation::DoExecute(StorePtr store) {
     if (!context_.new_segment && stale_segment_files_.size() == 0 && new_segment_files_.size() == 0) {
         return Status(SS_INVALID_CONTEX_ERROR, "Nothing to do");

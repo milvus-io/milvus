@@ -94,6 +94,9 @@ class CompoundSegmentsOperation : public CompoundBaseOperation<CompoundSegmentsO
     Status DoExecute(StorePtr) override;
 
     Status
+    AddStaleSegmentFile(const SegmentFilePtr&);
+
+    Status
     CommitNewSegment(const OperationContext& context, SegmentPtr&);
 
     Status
