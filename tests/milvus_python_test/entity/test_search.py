@@ -18,6 +18,7 @@ tag = "1970-01-01"
 insert_interval_time = 1.5
 nb = 6000
 top_k = 10
+nq = 1
 nprobe = 1
 epsilon = 0.001
 field_name = default_float_vec_field_name
@@ -27,7 +28,8 @@ entity = gen_entities(1, is_normal=True)
 raw_vector, binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(nb)
-default_query, default_query_vecs = gen_query_vectors(field_name, entities, top_k, 1)
+default_query, default_query_vecs = gen_query_vectors(field_name, entities, top_k, nq)
+
 
 def init_data(connect, collection, nb=6000, partition_tags=None):
     '''
@@ -44,6 +46,7 @@ def init_data(connect, collection, nb=6000, partition_tags=None):
         ids = connect.insert(collection, insert_entities, partition_tag=partition_tags)
     connect.flush([collection])
     return insert_entities, ids
+
 
 def init_binary_data(connect, collection, nb=6000, insert=True, partition_tags=None):
     '''
@@ -67,11 +70,10 @@ def init_binary_data(connect, collection, nb=6000, insert=True, partition_tags=N
 
 
 class TestSearchBase:
-
-
     """
     generate valid create_index params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_index()
@@ -128,6 +130,7 @@ class TestSearchBase:
     """
     generate top-k params
     """
+
     @pytest.fixture(
         scope="function",
         params=[1, 10, 2049]
@@ -422,7 +425,8 @@ class TestSearchBase:
         get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, metric_type=metric_type, search_params=search_param)
+        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, metric_type=metric_type,
+                                        search_params=search_param)
         if top_k > top_k_limit:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
@@ -498,7 +502,7 @@ class TestSearchBase:
         expected: the return distance equals to the computed value
         '''
         nq = 2
-        search_param = {"nprobe" : 1}
+        search_param = {"nprobe": 1}
         entities, ids = init_data(connect, collection, nb=nq)
         query, vecs = gen_query_vectors(field_name, entities, top_k, nq, rand_vector=True, search_params=search_param)
         inside_query, inside_vecs = gen_query_vectors(field_name, entities, top_k, nq, search_params=search_param)
@@ -538,9 +542,10 @@ class TestSearchBase:
         '''
         nq = 2
         metirc_type = "IP"
-        search_param = {"nprobe" : 1}
+        search_param = {"nprobe": 1}
         entities, ids = init_data(connect, collection, nb=nq)
-        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, rand_vector=True, metric_type=metirc_type, search_params=search_param)
+        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, rand_vector=True, metric_type=metirc_type,
+                                        search_params=search_param)
         inside_query, inside_vecs = gen_query_vectors(field_name, entities, top_k, nq, search_params=search_param)
         distance_0 = ip(vecs[0], inside_vecs[0])
         distance_1 = ip(vecs[0], inside_vecs[1])
@@ -561,7 +566,8 @@ class TestSearchBase:
         get_simple_index["metric_type"] = metirc_type
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, rand_vector=True, metric_type=metirc_type, search_params=search_param)
+        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, rand_vector=True, metric_type=metirc_type,
+                                        search_params=search_param)
         inside_vecs = entities[-1]["values"]
         max_distance = 0
         for i in range(nb):
@@ -757,14 +763,16 @@ class TestSearchBase:
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
         milvus.create_collection(collection, default_fields)
         entities, ids = init_data(milvus, collection)
+
         def search(milvus):
             res = connect.search(collection, default_query)
             assert len(res) == 1
             assert res[0]._entities[0].id in ids
             assert res[0]._distances[0] < epsilon
+
         for i in range(threads_num):
             milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-            t = threading.Thread(target=search, args=(milvus, ))
+            t = threading.Thread(target=search, args=(milvus,))
             threads.append(t)
             t.start()
             time.sleep(0.2)
@@ -788,13 +796,15 @@ class TestSearchBase:
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
         milvus.create_collection(collection, default_fields)
         entities, ids = init_data(milvus, collection)
+
         def search(milvus):
             res = connect.search(collection, default_query)
             assert len(res) == 1
             assert res[0]._entities[0].id in ids
             assert res[0]._distances[0] < epsilon
+
         for i in range(threads_num):
-            t = threading.Thread(target=search, args=(milvus, ))
+            t = threading.Thread(target=search, args=(milvus,))
             threads.append(t)
             t.start()
             time.sleep(0.2)
@@ -811,7 +821,7 @@ class TestSearchBase:
         top_k = 10
         nq = 20
         for i in range(num):
-            collection = gen_unique_str(collection_id+str(i))
+            collection = gen_unique_str(collection_id + str(i))
             connect.create_collection(collection, default_fields)
             entities, ids = init_data(connect, collection)
             assert len(ids) == nb
@@ -825,7 +835,6 @@ class TestSearchBase:
 
 
 class TestSearchDSL(object):
-
     """
     ******************************************************************
     #  The following cases are used to build invalid query expr
@@ -856,6 +865,12 @@ class TestSearchDSL(object):
         query = update_query_expr(default_query, keep_old=False, expr=expr)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
+
+    def test_query_vector_only(self, connect, collection):
+        entities, ids = init_data(connect, collection)
+        res = connect.search(collection, default_query)
+        assert len(res) == nq
+        assert len(res[0]) == top_k
 
     def test_query_wrong_format(self, connect, collection):
         '''
@@ -891,12 +906,12 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-
     """
     ******************************************************************
     #  The following cases are used to build valid query expr
     ******************************************************************
     """
+
     def test_query_term_value_not_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with no term can be filtered
@@ -926,7 +941,8 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = {"must": [gen_default_vector_expr(default_query), gen_default_term_expr(values=[i for i in range(100000, 100010)])]}
+        expr = {"must": [gen_default_vector_expr(default_query),
+                         gen_default_term_expr(values=[i for i in range(100000, 100010)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
@@ -948,7 +964,8 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = {"must": [gen_default_vector_expr(default_query), gen_default_term_expr(values=[i for i in range(nb//2, nb+nb//2)])]}
+        expr = {"must": [gen_default_vector_expr(default_query),
+                         gen_default_term_expr(values=[i for i in range(nb // 2, nb + nb // 2)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
@@ -959,19 +976,96 @@ class TestSearchDSL(object):
         expected: filter pass
         '''
         entities, ids = init_data(connect, collection)
-        expr = {"must": [gen_default_vector_expr(default_query), gen_default_term_expr(values=[1 for i in range(1, nb)])]}
+        expr = {
+            "must": [gen_default_vector_expr(default_query), gen_default_term_expr(values=[1 for i in range(1, nb)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:
 
+    def test_query_term_value_empty(self, connect, collection):
+        '''
+        method: build query with term value empty
+        expected: return null
+        '''
+        expr = {"must": [gen_default_vector_expr(default_query), gen_default_term_expr(values=[])]}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        res = connect.search(collection, query)
+        logging.getLogger().info(res)
+        assert len(res) == nq
+        assert len(res[0]) == 0
+
+    # TODO
+    def test_query_term_key_error(self, connect, collection):
+        '''
+        method: build query with term key error
+        expected: error raised
+        '''
+        expr = {"must": [gen_default_vector_expr(default_query),
+                         gen_default_term_expr(keyword="terrm", values=[i for i in range(nb // 2)])]}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    def test_query_term_wrong_format(self, connect, collection):
+        '''
+        method: build query with wrong format term
+        expected: error raised
+        '''
+        term = {"term": 1}
+        expr = {"must": [gen_default_vector_expr(default_query), term]}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    # TODO
+    def test_query_term_wrong_format_null(self, connect, collection):
+        '''
+        method: build query with wrong format term
+        expected: error raised
+        '''
+        term = {"term": {}}
+        expr = {"must": [gen_default_vector_expr(default_query), term]}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    # TODO
+    def test_query_term_field_named_term(self, connect, collection):
+        '''
+        method: build query with field named "term"
+        expected: error raised
+        '''
+        term_fields = add_field_default(default_fields, field_name="term")
+        collection_term = gen_unique_str("term")
+        connect.create_collection(collection_term, term_fields)
+        term_entities = add_field(entities, field_name="term")
+        ids = connect.insert(collection_term, term_entities)
+        assert len(ids) == nb
+        connect.flush([collection_term])
+        count = connect.count_entities(collection_term)
+        assert count == nb
+        term_param = {"term": {"term": {"values": [i for i in range(nb // 2)]}}}
+        expr = {"must": [gen_default_vector_expr(default_query),
+                         term_param]}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == top_k
+        connect.drop_collection(collection_term)
+
 
 class TestSearchDSLBools(object):
-
     """
     ******************************************************************
     #  The following cases are used to build invalid query expr
     ******************************************************************
     """
+
     def test_query_no_bool(self, connect, collection):
         '''
         method: build query without bool expr
@@ -1039,11 +1133,12 @@ class TestSearchDSLBools(object):
 ******************************************************************
 """
 
-class TestSearchInvalid(object):
 
+class TestSearchInvalid(object):
     """
     Test search collection with invalid collection names
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_strs()
@@ -1102,6 +1197,7 @@ class TestSearchInvalid(object):
     """
     Test search collection with invalid query
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_ints()
@@ -1124,6 +1220,7 @@ class TestSearchInvalid(object):
     """
     Test search collection with invalid search params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invaild_search_params()
