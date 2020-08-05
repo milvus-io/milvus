@@ -314,9 +314,9 @@ class TestStatsBase:
             res = connect.insert(collection_name, entities)
             connect.flush(collection_list)
             if i % 2:
-                connect.create_index(collection_name, field_name, {"index_type": "IVF_SQ8", "nlist": 1024, "metric_type": "L2"})
+                connect.create_index(collection_name, field_name, {"index_type": "IVF_SQ8", "params": {"nlist": 1024}, "metric_type": "L2"})
             else:
-                connect.create_index(collection_name, field_name, {"index_type": "IVF_FLAT", "nlist": 1024, "metric_type": "L2"})
+                connect.create_index(collection_name, field_name, {"index_type": "IVF_FLAT", "params": {"nlist": 1024}, "metric_type": "L2"})
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
             assert stats["partitions"][0]["segments"][0]["row_count"] == nb
