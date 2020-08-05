@@ -212,25 +212,26 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     CHECK_INITIALIZED;
 
     auto ctx = context;
+
+    // default id is auto-generated
+    auto params = ctx.collection->GetParams();
+    if (params.find(PARAM_UID_AUTOGEN) == params.end()) {
+        params[PARAM_UID_AUTOGEN] = true;
+        ctx.collection->SetParams(params);
+    }
+
     // check uid params
     bool has_uid = false;
     for (auto& pair : ctx.fields_schema) {
         if (pair.first->GetName() == DEFAULT_UID_NAME) {
             has_uid = true;
-            json params = pair.first->GetParams();
-            if (params.find(PARAM_UID_AUTOGEN) == params.end()) {
-                params[PARAM_UID_AUTOGEN] = true;
-                pair.first->SetParams(params);
-            }
             break;
         }
     }
 
     // add uid field if not specified
     if (!has_uid) {
-        json params;
-        params[PARAM_UID_AUTOGEN] = true;
-        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, DataType::INT64, params);
+        auto uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, DataType::INT64);
         auto bloom_filter_element = std::make_shared<snapshot::FieldElement>(
             0, 0, DEFAULT_BLOOM_FILTER_NAME, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
         auto delete_doc_element = std::make_shared<snapshot::FieldElement>(
@@ -492,24 +493,21 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         return Status(DB_ERROR, "Field '_id' not found");
     }
 
-    auto& params = id_field->GetParams();
+    auto& params = ss->GetCollection()->GetParams();
     bool auto_increment = true;
     if (params.find(PARAM_UID_AUTOGEN) != params.end()) {
         auto_increment = params[PARAM_UID_AUTOGEN];
     }
 
-    // id is auto increment, but client provides id, return error
     FIXEDX_FIELD_MAP& fields = data_chunk->fixed_fields_;
+    auto pair = fields.find(engine::DEFAULT_UID_NAME);
     if (auto_increment) {
-        auto pair = fields.find(engine::DEFAULT_UID_NAME);
+        // id is auto increment, but client provides id, return error
         if (pair != fields.end() && pair->second != nullptr) {
             return Status(DB_ERROR, "Field '_id' is auto increment, no need to provide id");
         }
-    }
-
-    // id is not auto increment, but client doesn't provide id, return error
-    if (!auto_increment) {
-        auto pair = fields.find(engine::DEFAULT_UID_NAME);
+    } else {
+        // id is not auto increment, but client doesn't provide id, return error
         if (pair == fields.end() || pair->second == nullptr) {
             return Status(DB_ERROR, "Field '_id' is user defined");
         }

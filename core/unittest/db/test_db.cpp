@@ -471,27 +471,70 @@ TEST_F(DBTest, QueryTest) {
 }
 
 TEST_F(DBTest, InsertTest) {
-    std::string collection_name = "MERGE_TEST";
-    auto status = CreateCollection2(db_, collection_name, 0);
-    ASSERT_TRUE(status.ok());
+    auto do_insert = [&](bool autogen_id, bool provide_id) -> void {
+        CreateCollectionContext context;
+        context.lsn = 0;
+        std::string collection_name = "INSERT_TEST";
+        auto collection_schema = std::make_shared<Collection>(collection_name);
+        milvus::json params;
+        params[milvus::engine::PARAM_UID_AUTOGEN] = autogen_id;
+        collection_schema->SetParams(params);
+        context.collection = collection_schema;
 
-    status = db_->Flush();
-    ASSERT_TRUE(status.ok());
+        std::string field_name = "field_0";
+        auto field = std::make_shared<Field>(field_name, 0, milvus::engine::DataType::INT32);
+        context.fields_schema[field] = {};
 
-    const uint64_t entity_count = 100;
-    milvus::engine::DataChunkPtr data_chunk;
-    BuildEntities(entity_count, 0, data_chunk);
+        auto status = db_->CreateCollection(context);
 
-    status = db_->Insert(collection_name, "", data_chunk);
-    ASSERT_TRUE(status.ok());
+        milvus::engine::DataChunkPtr data_chunk = std::make_shared<milvus::engine::DataChunk>();
+        data_chunk->count_ = 100;
+        if (provide_id) {
+            milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+            raw->data_.resize(100 * sizeof(int64_t));
+            int64_t* p = (int64_t*)raw->data_.data();
+            for (auto i = 0; i < data_chunk->count_; ++i) {
+                p[i] = i;
+            }
+            data_chunk->fixed_fields_[milvus::engine::DEFAULT_UID_NAME] = raw;
+        }
+        {
+            milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+            raw->data_.resize(100 * sizeof(int32_t));
+            int32_t* p = (int32_t*)raw->data_.data();
+            for (auto i = 0; i < data_chunk->count_; ++i) {
+                p[i] = i + 5000;
+            }
+            data_chunk->fixed_fields_[field_name] = raw;
+        }
 
-    status = db_->Flush();
-    ASSERT_TRUE(status.ok());
+        status = db_->Insert(collection_name, "", data_chunk);
+        if (autogen_id == provide_id) {
+            ASSERT_FALSE(status.ok());
+        } else {
+            ASSERT_TRUE(status.ok());
+        }
 
-    int64_t row_count = 0;
-    status = db_->CountEntities(collection_name, row_count);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(row_count, entity_count);
+        status = db_->Flush();
+        ASSERT_TRUE(status.ok());
+
+        int64_t row_count = 0;
+        status = db_->CountEntities(collection_name, row_count);
+        ASSERT_TRUE(status.ok());
+        if (autogen_id == provide_id) {
+            ASSERT_EQ(row_count, 0);
+        } else {
+            ASSERT_EQ(row_count, data_chunk->count_);
+        }
+
+        status = db_->DropCollection(collection_name);
+        ASSERT_TRUE(status.ok());
+    };
+
+    do_insert(true, true);
+    do_insert(true, false);
+    do_insert(false, true);
+    do_insert(false, false);
 }
 
 TEST_F(DBTest, MergeTest) {
