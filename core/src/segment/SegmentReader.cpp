@@ -235,7 +235,7 @@ SegmentReader::LoadUids(std::vector<int64_t>& uids) {
 }
 
 Status
-SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr) {
+SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr, bool flat) {
     try {
         segment_ptr_->GetVectorIndex(field_name, index_ptr);
         if (index_ptr != nullptr) {
@@ -275,7 +275,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
 
         // if index not specified, or index file not created, return a temp index(IDMAP type)
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
+        if (flat || index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
             auto temp_index_path = engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment);
             temp_index_path += "/";
             std::string temp_index_name = field_name + ".idmap";
