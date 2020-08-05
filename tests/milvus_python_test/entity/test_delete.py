@@ -129,20 +129,20 @@ class TestDeleteBase:
         res_count = connect.count_entities(collection)
         assert res_count == nb - 1
 
-    def test_insert_delete_B(self, connect, collection):
+    def test_insert_delete_B(self, connect, id_collection):
         '''
         target: test delete entity
         method: add entities with the same ids, and delete the id in collection
         expected: no error raised, all entities deleted
         '''
         ids = [1 for i in range(nb)]
-        res_ids = connect.insert(collection, entities, ids)
+        res_ids = connect.insert(id_collection, entities, ids)
         connect.flush([collection])
         delete_ids = [1]
-        status = connect.delete_entity_by_id(collection, delete_ids)
+        status = connect.delete_entity_by_id(id_collection, delete_ids)
         assert status
-        connect.flush([collection])
-        res_count = connect.count_entities(collection)
+        connect.flush([id_collection])
+        res_count = connect.count_entities(id_collection)
         assert res_count == 0
 
     def test_delete_exceed_limit(self, connect, collection):

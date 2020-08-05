@@ -229,7 +229,7 @@ class TestSearchBase:
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors_(field_name, entities, top_k, nq, search_params=search_param)
+        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, search_params=search_param)
         if top_k > top_k_limit:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
@@ -964,7 +964,7 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         expr = {"must": [gen_default_vector_expr(default_query),
-                         gen_default_term_expr(values=[i for i in range(nb / 2, nb + nb / 2)])]}
+                         gen_default_term_expr(values=[i for i in range(nb // 2, nb + nb // 2)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         # TODO:

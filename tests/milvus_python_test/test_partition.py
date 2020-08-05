@@ -98,15 +98,15 @@ class TestCreateBase:
         assert tag_name in tag_list
         assert "_default" in tag_list
 
-    def test_create_partition_insert_default(self, connect, collection):
+    def test_create_partition_insert_default(self, connect, id_collection):
         '''
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition
         expected: status ok
         '''
-        connect.create_partition(collection, tag)
+        connect.create_partition(id_collection, tag)
         ids = [i for i in range(nb)]
-        insert_ids = connect.insert(collection, entities, ids)
+        insert_ids = connect.insert(id_collection, entities, ids)
         assert len(insert_ids) == len(ids)
  
     def test_create_partition_insert_with_tag(self, connect, collection):
