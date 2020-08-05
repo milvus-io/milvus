@@ -89,6 +89,7 @@ ExecutionEngineImpl::CreateVecIndex(const std::string& index_name) {
 Status
 ExecutionEngineImpl::Load(ExecutionEngineContext& context) {
     if (context.query_ptr_ != nullptr) {
+        context_ = context;
         return LoadForSearch(context.query_ptr_);
     } else {
         return Load(context.target_fields_);
@@ -131,6 +132,7 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
 
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
+    auto segment_visitor = segment_reader_->GetSegmentVisitor();
 
     for (auto& name : field_names) {
         DataType field_type = DataType::NONE;
@@ -138,9 +140,29 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
 
         bool index_exist = false;
         if (field_type == DataType::VECTOR_FLOAT || field_type == DataType::VECTOR_BINARY) {
+            bool valid_metric_type = false;
+            auto field_visitor = segment_visitor->GetFieldVisitor(name);
+            auto field_element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+            if (field_element_visitor) {
+                auto field_element = field_element_visitor->GetElement();
+                if (field_element->GetParams().contains(engine::PARAM_INDEX_METRIC_TYPE)) {
+                    auto metric_type = field_element->GetParams()[engine::PARAM_INDEX_METRIC_TYPE];
+                    if (context_.query_ptr_->metric_types.find(name) != context_.query_ptr_->metric_types.end()) {
+                        if (context_.query_ptr_->metric_types.at(name) == metric_type) {
+                            valid_metric_type = true;
+                        }
+                    }
+                }
+            }
+
             knowhere::VecIndexPtr index_ptr;
-            segment_reader_->LoadVectorIndex(name, index_ptr);
-            index_exist = (index_ptr != nullptr);
+            if (valid_metric_type) {
+                segment_reader_->LoadVectorIndex(name, index_ptr);
+                index_exist = (index_ptr != nullptr);
+            } else {
+                segment_reader_->LoadVectorIndex(name, index_ptr, true);
+                index_exist = (index_ptr != nullptr);
+            }
         } else {
             knowhere::IndexPtr index_ptr;
             segment_reader_->LoadStructuredIndex(name, index_ptr);
@@ -225,13 +247,8 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
         return Status(DB_ERROR, "index is null");
     }
 
-    uint64_t nq = 0;
+    uint64_t nq = vector_param->nq;
     auto query_vector = vector_param->query_vector;
-    if (!query_vector.float_data.empty()) {
-        nq = vector_param->query_vector.float_data.size() / vec_index->Dim();
-    } else if (!query_vector.binary_data.empty()) {
-        nq = vector_param->query_vector.binary_data.size() * 8 / vec_index->Dim();
-    }
     uint64_t topk = vector_param->topk;
 
     context.query_result_ = std::make_shared<QueryResult>();
@@ -283,15 +300,14 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
 
         auto segment_visitor = segment_reader_->GetSegmentVisitor();
         auto field_visitors = segment_visitor->GetFieldVisitors();
-        for (auto& pair : field_visitors) {
-            auto& field_visitor = pair.second;
-            auto& field = field_visitor->GetField();
-            auto type = field->GetFtype();
+        for (const auto& name : context.query_ptr_->index_fields) {
+            auto field_visitor = segment_visitor->GetFieldVisitor(name);
+            auto field = field_visitor->GetField();
             if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
                 field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
-                STATUS_CHECK(segment_ptr->GetVectorIndex(field->GetName(), vec_index));
+                STATUS_CHECK(segment_ptr->GetVectorIndex(name, vec_index));
             } else {
-                attr_type.insert(std::make_pair(field->GetName(), (engine::DataType)type));
+                attr_type.insert(std::make_pair(name, (engine::DataType)field->GetFtype()));
             }
         }
 

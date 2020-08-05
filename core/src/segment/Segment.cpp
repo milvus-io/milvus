@@ -219,7 +219,7 @@ Segment::GetVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& in
     index = nullptr;
     auto iter = vector_indice_.find(field_name);
     if (iter == vector_indice_.end()) {
-        return Status(DB_ERROR, "invalid field name: " + field_name);
+        return Status(DB_ERROR, "Invalid field name: " + field_name);
     }
 
     index = iter->second;
