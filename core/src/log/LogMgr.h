@@ -21,6 +21,7 @@ namespace milvus {
 
 class LogMgr {
  public:
+    /* InitLog */
     static Status
     InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_enable, bool error_enable,
             bool fatal_enable, const std::string& logs_path, int64_t max_log_file_size, int64_t delete_exceeds);
