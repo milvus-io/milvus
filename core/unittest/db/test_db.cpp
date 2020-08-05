@@ -589,21 +589,25 @@ TEST_F(DBTest, CompactTest) {
     milvus::engine::utils::GetIDFromChunk(data_chunk, entity_ids);
     ASSERT_EQ(entity_ids.size(), entity_count);
 
-//    int64_t delete_count = 10;
-//    entity_ids.resize(delete_count);
-//    status = db_->DeleteEntityByID(collection_name, entity_ids);
-//    ASSERT_TRUE(status.ok());
-//
-//    status = db_->Flush();
-//    ASSERT_TRUE(status.ok());
-//
-//    status = db_->Compact(dummy_context_, collection_name);
-//    ASSERT_TRUE(status.ok());
-//
-//    int64_t row_count = 0;
-//    status = db_->CountEntities(collection_name, row_count);
-//    ASSERT_TRUE(status.ok());
-//    ASSERT_EQ(row_count, entity_count - delete_count);
+    int64_t delete_count = 10;
+    entity_ids.resize(delete_count);
+    status = db_->DeleteEntityByID(collection_name, entity_ids);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok());
+
+    int64_t row_count = 0;
+    status = db_->CountEntities(collection_name, row_count);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(row_count, entity_count - delete_count);
+
+    status = db_->Compact(dummy_context_, collection_name);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->CountEntities(collection_name, row_count);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(row_count, entity_count - delete_count);
 }
 
 TEST_F(DBTest, IndexTest) {
@@ -727,6 +731,6 @@ TEST_F(DBTest, StatsTest) {
     int64_t row_count = json_stats[milvus::engine::JSON_ROW_COUNT];
     ASSERT_EQ(row_count, entity_count * 2);
 
-    //    std::string ss = json_stats.dump();
-    //    std::cout << ss << std::endl;
+    std::string ss = json_stats.dump();
+    std::cout << ss << std::endl;
 }
