@@ -37,6 +37,8 @@ macro ( build_gtest )
     ExternalProject_Get_Property( googletest_ep INSTALL_DIR )
     message( STATUS "gtest install directory: " ${INSTALL_DIR} )
 
+    # The include directory must exist before it is referenced by a target.
+    file(MAKE_DIRECTORY ${INSTALL_DIR}/include)
     # Add Target gtest, gtest_main, gmock, gmock_main
     add_library( gtest STATIC IMPORTED GLOBAL )
     set_target_properties(
