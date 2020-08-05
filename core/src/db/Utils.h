@@ -20,11 +20,6 @@
 
 namespace milvus {
 namespace engine {
-namespace snapshot {
-class Segment;
-class Partition;
-class Collection;
-}  // namespace snapshot
 namespace utils {
 
 int64_t
@@ -57,6 +52,9 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info);
 
 void
 SendExitSignal();
+
+void
+GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids);
 
 }  // namespace utils
 }  // namespace engine

@@ -238,7 +238,7 @@ MemCollection::ApplyDeletes() {
             }
         }
 
-        segments_op->CommitRowCountDelta(segment->GetID(), delete_docs->GetSize() - pre_del_ids.size(), true);
+        segments_op->CommitRowCountDelta(segment->GetID(), delete_docs->GetCount() - pre_del_ids.size(), true);
 
         segment_writer->WriteDeletedDocs(del_docs_path, delete_docs);
         segment_writer->WriteBloomFilter(bloom_filter_file_path, bloom_filter);

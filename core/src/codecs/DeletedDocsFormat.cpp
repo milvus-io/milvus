@@ -98,7 +98,7 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     }
 
     auto deleted_docs_list = deleted_docs->GetDeletedDocs();
-    size_t new_num_bytes = old_num_bytes + sizeof(segment::offset_t) * deleted_docs->GetSize();
+    size_t new_num_bytes = old_num_bytes + sizeof(segment::offset_t) * deleted_docs->GetCount();
     if (!deleted_docs_list.empty()) {
         delete_ids.insert(delete_ids.end(), deleted_docs_list.begin(), deleted_docs_list.end());
     }

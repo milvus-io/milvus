@@ -38,17 +38,6 @@ CpuCacheMgr::GetInstance() {
     return s_mgr;
 }
 
-DataObjPtr
-CpuCacheMgr::GetDataObj(const std::string& key) {
-    DataObjPtr obj = GetItem(key);
-    return obj;
-}
-
-void
-CpuCacheMgr::SetDataObj(const std::string& key, const milvus::cache::DataObjPtr& data) {
-    CacheMgr<DataObjPtr>::InsertItem(key, data);
-}
-
 void
 CpuCacheMgr::ConfigUpdate(const std::string& name) {
     SetCapacity(config.cache.cache_size());

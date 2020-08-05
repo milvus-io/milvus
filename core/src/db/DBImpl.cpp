@@ -516,10 +516,6 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     }
 
     // generate id
-    DataChunkPtr new_chunk = std::make_shared<DataChunk>();
-    new_chunk->fixed_fields_ = data_chunk->fixed_fields_;
-    new_chunk->variable_fields_ = data_chunk->variable_fields_;
-    new_chunk->count_ = data_chunk->count_;
     if (auto_increment) {
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         IDNumbers ids;
@@ -527,7 +523,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         BinaryDataPtr id_data = std::make_shared<BinaryData>();
         id_data->data_.resize(ids.size() * sizeof(int64_t));
         memcpy(id_data->data_.data(), ids.data(), ids.size() * sizeof(int64_t));
-        new_chunk->fixed_fields_[engine::DEFAULT_UID_NAME] = id_data;
+        data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME] = id_data;
     }
 
     if (options_.wal_enable_) {
@@ -549,8 +545,8 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         record.lsn = 0;
         record.collection_id = collection_name;
         record.partition_tag = partition_name;
-        record.data_chunk = new_chunk;
-        record.length = new_chunk->count_;
+        record.data_chunk = data_chunk;
+        record.length = data_chunk->count_;
         record.type = wal::MXLogType::Entity;
 
         STATUS_CHECK(ExecWalRecord(record));
@@ -614,7 +610,6 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, query_ptr->collection_id));
-    auto ss_id = ss->GetID();
 
     /* collect all valid segment */
     std::vector<SegmentVisitor::Ptr> segment_visitors;
@@ -659,9 +654,11 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, ss, options_, query_ptr, segment_ids);
 
+    cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before query
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitFinish();
+    cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after query
 
     if (!job->status().ok()) {
         return job->status();
@@ -858,7 +855,7 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
             continue;
         }
 
-        auto deleted_count = deleted_docs->GetSize();
+        auto deleted_count = deleted_docs->GetCount();
         if (deleted_count / (row_count + deleted_count) < threshold) {
             continue;  // no need to compact
         }
