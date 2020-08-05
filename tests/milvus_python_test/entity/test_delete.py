@@ -114,7 +114,6 @@ class TestDeleteBase:
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status
 
-    @pytest.mark.level(2)
     def test_insert_delete_A(self, connect, collection):
         '''
         target: test delete entity
@@ -130,7 +129,6 @@ class TestDeleteBase:
         res_count = connect.count_entities(collection)
         assert res_count == nb - 1
 
-    @pytest.mark.level(2)
     def test_insert_delete_B(self, connect, collection):
         '''
         target: test delete entity
@@ -147,7 +145,6 @@ class TestDeleteBase:
         res_count = connect.count_entities(collection)
         assert res_count == 0
 
-    @pytest.mark.level(2)
     def test_delete_exceed_limit(self, connect, collection):
         '''
         target: test delete entity
@@ -163,7 +160,6 @@ class TestDeleteBase:
         assert res_count == 0
 
     # TODO
-    @pytest.mark.level(2)
     def test_flush_after_delete(self, connect, collection):
         '''
         target: test delete entity
@@ -197,11 +193,11 @@ class TestDeleteBase:
         assert res_count == nb - len(delete_ids)
 
     # TODO
-    @pytest.mark.level(2)
     def test_insert_same_ids_after_delete(self, connect, collection):
         '''
         method: add entities and delete
         expected: status DELETED
+        note: Not flush after delete
         '''
         insert_ids = [i for i in range(nb)]
         ids = connect.insert(collection, entities, insert_ids)
@@ -216,7 +212,6 @@ class TestDeleteBase:
         assert res_count == nb - 1
 
     # TODO
-    @pytest.mark.level(2)
     def test_insert_same_ids_after_delete_binary(self, connect, binary_collection):
         '''
         method: add entities, with the same id and delete the ids
@@ -356,7 +351,6 @@ class TestDeleteBase:
         assert status
 
     # TODO:
-    @pytest.mark.level(2)
     def test_insert_tags_delete(self, connect, collection):
         '''
         method: add entitys with given two tags, delete entities with the return ids
@@ -422,13 +416,11 @@ class TestDeleteInvalid(object):
         with pytest.raises(Exception) as e:
             status = connect.delete_entity_by_id(collection, [invalid_id])
 
-    @pytest.mark.level(2)
     def test_delete_entity_ids_invalid(self, connect, collection, gen_entity_id):
         invalid_id = gen_entity_id
         with pytest.raises(Exception) as e:
             status = connect.delete_entity_by_id(collection, [1, invalid_id])
 
-    @pytest.mark.level(2)
     def test_delete_entity_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
