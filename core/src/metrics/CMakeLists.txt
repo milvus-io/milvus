@@ -25,9 +25,10 @@ add_library(    metrics STATIC ${METRICS_FILES})
 
 if ( MILVUS_WITH_PROMETHEUS )
     target_sources( metrics PRIVATE ${METRICS_PROMETHEUS_FILES} )
+    add_dependencies( metrics ${PROMETHEUS_LIB} )
     list( APPEND metrics_lib ${PROMETHEUS_LIB} )
 endif ()
 
 
 target_link_libraries( metrics PRIVATE ${METRICS_LIB} )
-add_dependencies( metrics ${PROMETHEUS_LIB} )
+add_dependencies( metrics fiu )
