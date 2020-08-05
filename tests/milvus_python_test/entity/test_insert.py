@@ -116,6 +116,7 @@ class TestInsertBase:
         connect.flush([collection])
         connect.drop_collection(collection)
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_create_index(self, connect, collection, get_simple_index):
         '''
@@ -128,6 +129,7 @@ class TestInsertBase:
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
         '''
@@ -688,6 +690,7 @@ class TestInsertMultiCollections:
         connect.flush([collection_name])
         assert len(ids) == 1
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_create_index_insert_vector_another(self, connect, collection, get_simple_index):
         '''
@@ -701,6 +704,7 @@ class TestInsertMultiCollections:
         ids = connect.insert(collection, entity)
         connect.drop_collection(collection_name)
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_vector_create_index_another(self, connect, collection, get_simple_index):
         '''
@@ -715,6 +719,7 @@ class TestInsertMultiCollections:
         count = connect.count_entities(collection_name)
         assert count == 0
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_vector_sleep_create_index_another(self, connect, collection, get_simple_index):
         '''
