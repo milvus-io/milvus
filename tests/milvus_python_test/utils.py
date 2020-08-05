@@ -285,6 +285,10 @@ def update_query_expr(src_query, keep_old=True, expr=None):
     return tmp_query
 
 
+def gen_default_vector_expr(default_query):
+    return default_query["bool"]["must"][0]
+
+
 def gen_default_term_expr(values=None):
     if values is None:
         values = [i for i in range(nb/2)]
