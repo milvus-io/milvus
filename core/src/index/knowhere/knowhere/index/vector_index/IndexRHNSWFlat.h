@@ -45,8 +45,6 @@ class IndexRHNSWFlat : public IndexRHNSW {
 
     void
     UpdateIndexSize() override;
-
- private:
 };
 
 }  // namespace knowhere
