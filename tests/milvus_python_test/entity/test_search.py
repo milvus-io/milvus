@@ -963,6 +963,53 @@ class TestSearchDSL(object):
         res = connect.search(collection, query)
         # TODO:
 
+    # TODO
+    def test_query_term_value_empty(self, connect, collection):
+        '''
+        method: build query with term value empty
+        expected: return null
+        '''
+        expr = gen_default_term_expr(values=[])
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        res = connect.search(collection, query)
+        logging.getLogger().info(res)
+        assert len(res) == 1
+        assert len(res[0]) == 0
+
+    def test_query_term_key_error(self, connect, collection):
+        '''
+        method: build query with term key error
+        expected: error raised
+        '''
+        expr = {"terrm": {"int64": {"values": [i for i in range(nb // 2)]}}}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    def test_query_term_wrong_format(self, connect, collection):
+        '''
+        method: build query with wrong format term
+        expected: error raised
+        '''
+        expr = {"term": 1}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    def test_query_term_wrong_format_null(self, connect, collection):
+        '''
+        method: build query with wrong format term
+        expected: error raised
+        '''
+        expr = {"term": {}}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
 
 class TestSearchDSLBools(object):
 
