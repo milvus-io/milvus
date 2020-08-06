@@ -48,6 +48,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2893 Insert binary data failed
 -   \#2952 Fix the result merging of IVF_PQ IP
 -   \#2957 There is no exisitence check of annoy search parameter
+-   \#3154 Remove IndexHNSW_NM, IndexHNSW_SQ8NM and IndexIVFSQ8NR
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC

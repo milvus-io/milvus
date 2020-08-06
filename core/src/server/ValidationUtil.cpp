@@ -183,7 +183,9 @@ ValidateIndexType(const std::string& index_type) {
         knowhere::IndexEnum::INDEX_NSG,
         knowhere::IndexEnum::INDEX_HNSW,
         knowhere::IndexEnum::INDEX_ANNOY,
-        knowhere::IndexEnum::INDEX_HNSW_SQ8NM,
+        knowhere::IndexEnum::INDEX_RHNSWFlat,
+        knowhere::IndexEnum::INDEX_RHNSWPQ,
+        knowhere::IndexEnum::INDEX_RHNSWSQ,
     };
 
     if (s_valid_index_names.find(index_type) == s_valid_index_names.end()) {
@@ -279,7 +281,7 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
         if (!status.ok()) {
             return status;
         }
-    } else if (index_type == knowhere::IndexEnum::INDEX_HNSW || index_type == knowhere::IndexEnum::INDEX_HNSW_SQ8NM ||
+    } else if (index_type == knowhere::IndexEnum::INDEX_HNSW || index_type == knowhere::IndexEnum::INDEX_RHNSWFlat ||
                index_type == knowhere::IndexEnum::INDEX_RHNSWPQ || index_type == knowhere::IndexEnum::INDEX_RHNSWSQ ||
                index_type == knowhere::IndexEnum::INDEX_RHNSWFlat) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);

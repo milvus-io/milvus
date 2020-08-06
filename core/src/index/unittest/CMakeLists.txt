@@ -200,24 +200,13 @@ install(TARGETS test_nsg DESTINATION unittest)
 ################################################################################
 #<HNSW-TEST>
 set(hnsw_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexHNSW_NM.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexHNSW.cpp
         )
 if (NOT TARGET test_hnsw)
     add_executable(test_hnsw test_hnsw.cpp ${hnsw_srcs} ${util_srcs})
 endif ()
 target_link_libraries(test_hnsw ${depend_libs} ${unittest_libs} ${basic_libs})
 install(TARGETS test_hnsw DESTINATION unittest)
-
-################################################################################
-#<HNSWSQ8NR-TEST>
-set(hnsw_sq8nm_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexHNSW_SQ8NM.cpp
-        )
-if (NOT TARGET test_hnsw_sq8nm)
-    add_executable(test_hnsw_sq8nm test_hnsw_sq8nm.cpp ${hnsw_sq8nm_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_hnsw_sq8nm ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_hnsw_sq8nm DESTINATION unittest)
 
 ################################################################################
 #<RHNSW_FLAT-TEST>

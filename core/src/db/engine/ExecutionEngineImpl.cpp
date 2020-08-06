@@ -712,8 +712,7 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
 
     // create snapshot compress file
     std::string index_name = index_element->GetName();
-    if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
-        index_name == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+    if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR || index_name == knowhere::IndexEnum::INDEX_RHNSWSQ) {
         auto compress_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
         if (compress_visitor == nullptr) {
             return Status(DB_ERROR,

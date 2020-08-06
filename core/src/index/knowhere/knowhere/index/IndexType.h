@@ -36,7 +36,6 @@ enum class OldIndexType {
     HNSW,
     ANNOY,
     FAISS_IVFSQ8NR,
-    HNSW_SQ8NM,
     RHNSW_FLAT,
     RHNSW_PQ,
     RHNSW_SQ,
@@ -67,7 +66,6 @@ extern const char* INDEX_RHNSWFlat;
 extern const char* INDEX_RHNSWPQ;
 extern const char* INDEX_RHNSWSQ;
 extern const char* INDEX_ANNOY;
-extern const char* INDEX_HNSW_SQ8NM;
 }  // namespace IndexEnum
 
 enum class IndexMode { MODE_CPU = 0, MODE_GPU = 1 };

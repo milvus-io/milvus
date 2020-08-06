@@ -38,7 +38,6 @@ const char* INDEX_RHNSWFlat = "RHNSW_FLAT";
 const char* INDEX_RHNSWPQ = "RHNSW_PQ";
 const char* INDEX_RHNSWSQ = "RHNSW_SQ";
 const char* INDEX_ANNOY = "ANNOY";
-const char* INDEX_HNSW_SQ8NM = "HNSW_SQ8NM";
 }  // namespace IndexEnum
 
 }  // namespace knowhere

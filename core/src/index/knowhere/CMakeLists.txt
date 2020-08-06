@@ -64,6 +64,7 @@ set(vector_index_srcs
         knowhere/index/vector_index/VecIndexFactory.cpp
         knowhere/index/vector_index/IndexAnnoy.cpp
         knowhere/index/vector_index/IndexRHNSW.cpp
+        knowhere/index/vector_index/IndexHNSW.cpp
         knowhere/index/vector_index/IndexRHNSWFlat.cpp
         knowhere/index/vector_index/IndexRHNSWSQ.cpp
         knowhere/index/vector_index/IndexRHNSWPQ.cpp
@@ -73,9 +74,7 @@ set(vector_offset_index_srcs
         knowhere/index/vector_offset_index/OffsetBaseIndex.cpp
         knowhere/index/vector_offset_index/IndexIVF_NM.cpp
         knowhere/index/vector_offset_index/IndexIVFSQNR_NM.cpp
-        knowhere/index/vector_offset_index/IndexHNSW_NM.cpp
         knowhere/index/vector_offset_index/IndexNSG_NM.cpp
-        knowhere/index/vector_offset_index/IndexHNSW_SQ8NM.cpp
         )
 
 if (MILVUS_SUPPORT_SPTAG)
