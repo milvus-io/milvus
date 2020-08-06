@@ -59,6 +59,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2802 Add new index: IVFSQ8NR
 -   \#2834 Add C++ sdk support 4 hnsw_sq8nr
 -   \#2940 Add option to build.sh for cuda arch
+-   \#3132 Refine the implementation of hnsw in faiss and add support for hnsw-flat, hnsw-pq and hnsw-sq8 based on faiss
 
 ## Improvement
 -   \#2543 Remove secondary_path related code

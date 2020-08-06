@@ -34,8 +34,7 @@ class FaissBaseIndex {
     LoadImpl(const BinarySet&, const IndexType& type);
 
     virtual void
-    SealImpl() { /* do nothing */
-    }
+    SealImpl();
 
  public:
     std::shared_ptr<faiss::Index> index_ = nullptr;
