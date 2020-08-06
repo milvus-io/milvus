@@ -75,6 +75,7 @@ struct ScalarQuantizer {
         (MetricType mt, const Index *quantizer, bool store_pairs,
          bool by_residual=false) const;
 
+    size_t cal_size() { return sizeof(*this) + trained.size() * sizeof(float); }
 };
 
 template<class DCClass>
