@@ -58,11 +58,7 @@ include( ExternalProject )
 include( DefineOptions )
 include( ThirdPartyPackages )
 
-# INCLUDE DIRS of thirdparty libs need to be set here
 add_subdirectory( thirdparty )
-foreach (DIR ${THIRDPARTY_INCLUDE_DIRS})
-    include_directories(${DIR})
-endforeach ()
 
 using_ccache_if_defined( MILVUS_USE_CCACHE )
 
