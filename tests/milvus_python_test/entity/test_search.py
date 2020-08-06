@@ -845,8 +845,6 @@ class TestSearchDSL(object):
     ******************************************************************
     """
 
-    # TODO: assert exception
-    @pytest.mark.level(2)
     def test_query_no_must(self, connect, collection):
         '''
         method: build query without must expr
@@ -857,8 +855,6 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    # TODO: 
-    @pytest.mark.level(2)
     def test_query_no_vector_term_only(self, connect, collection):
         '''
         method: build query without must expr
@@ -891,7 +887,6 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.level(2)
     def test_query_empty(self, connect, collection):
         '''
         method: search with empty query
@@ -901,24 +896,13 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    def test_query_with_wrong_format_term(self, connect, collection):
-        '''
-        method: build query with wrong term expr
-        expected: error raised
-        '''
-        expr = gen_default_term_expr()
-        expr["term"] = 1
-        expr = {"must": [expr]}
-        query = update_query_expr(default_query, expr=expr)
-        with pytest.raises(Exception) as e:
-            res = connect.search(collection, query)
-
     """
     ******************************************************************
     #  The following cases are used to build valid query expr
     ******************************************************************
     """
 
+    @pytest.mark.level(2)
     def test_query_term_value_not_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with no term can be filtered
@@ -929,8 +913,11 @@ class TestSearchDSL(object):
             "must": [gen_default_vector_expr(default_query), gen_default_term_expr(values=[100000])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == 0
         # TODO:
 
+    @pytest.mark.level(2)
     def test_query_term_value_all_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with all term can be filtered
@@ -940,8 +927,11 @@ class TestSearchDSL(object):
         expr = {"must": [gen_default_vector_expr(default_query), gen_default_term_expr(values=[1])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == 1
         # TODO:
 
+    @pytest.mark.level(2)
     def test_query_term_values_not_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with no term can be filtered
@@ -952,6 +942,8 @@ class TestSearchDSL(object):
                          gen_default_term_expr(values=[i for i in range(100000, 100010)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == 0
         # TODO:
 
     def test_query_term_values_all_in(self, connect, collection):
@@ -963,6 +955,8 @@ class TestSearchDSL(object):
         expr = {"must": [gen_default_vector_expr(default_query), gen_default_term_expr()]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == top_k
         # TODO:
 
     def test_query_term_values_parts_in(self, connect, collection):
@@ -975,8 +969,11 @@ class TestSearchDSL(object):
                          gen_default_term_expr(values=[i for i in range(nb // 2, nb + nb // 2)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == top_k
         # TODO:
 
+    @pytest.mark.level(2)
     def test_query_term_values_repeat(self, connect, collection):
         '''
         method: build query with vector and term expr, with the same values
@@ -987,6 +984,8 @@ class TestSearchDSL(object):
             "must": [gen_default_vector_expr(default_query), gen_default_term_expr(values=[1 for i in range(1, nb)])]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == 1
         # TODO:
 
     def test_query_term_value_empty(self, connect, collection):
@@ -996,49 +995,45 @@ class TestSearchDSL(object):
         '''
         expr = {"must": [gen_default_vector_expr(default_query), gen_default_term_expr(values=[])]}
         query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
         res = connect.search(collection, query)
-        logging.getLogger().info(res)
         assert len(res) == nq
         assert len(res[0]) == 0
+
+    """
+    ******************************************************************
+    #  The following cases are used to build invalid term query expr
+    ******************************************************************
+    """
 
     # TODO
     @pytest.mark.level(2)
     def test_query_term_key_error(self, connect, collection):
         '''
         method: build query with term key error
-        expected: error raised
+        expected: Exception raised
         '''
         expr = {"must": [gen_default_vector_expr(default_query),
                          gen_default_term_expr(keyword="terrm", values=[i for i in range(nb // 2)])]}
         query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    def test_query_term_wrong_format(self, connect, collection):
-        '''
-        method: build query with wrong format term
-        expected: error raised
-        '''
-        term = {"term": 1}
-        expr = {"must": [gen_default_vector_expr(default_query), term]}
-        query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
-        with pytest.raises(Exception) as e:
-            res = connect.search(collection, query)
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_term()
+    )
+    def get_invalid_term(self, request):
+        return request.param
 
     # TODO
-    @pytest.mark.level(2)
-    def test_query_term_wrong_format_null(self, connect, collection):
+    def test_query_term_wrong_format(self, connect, collection, get_invalid_term):
         '''
         method: build query with wrong format term
-        expected: error raised
+        expected: Exception raised
         '''
-        term = {"term": {}}
+        term = get_invalid_term
         expr = {"must": [gen_default_vector_expr(default_query), term]}
         query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
@@ -1062,11 +1057,68 @@ class TestSearchDSL(object):
         expr = {"must": [gen_default_vector_expr(default_query),
                          term_param]}
         query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
         res = connect.search(collection, query)
         assert len(res) == nq
         assert len(res[0]) == top_k
         connect.drop_collection(collection_term)
+
+    """
+    ******************************************************************
+    #  The following cases are used to build valid range query expr
+    ******************************************************************
+    """
+
+    # TODO
+    def test_query_range_key_error(self, connect, collection):
+        '''
+        method: build query with range key error
+        expected: Exception raised
+        '''
+        range = gen_default_range_expr(keyword="ranges")
+        expr = {"must": [gen_default_vector_expr(default_query), range]}
+        query = update_query_expr(default_query, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_range()
+    )
+    def get_invalid_range(self, request):
+        return request.param
+
+    # TODO
+    def test_query_range_wrong_format(self, connect, collection, get_invalid_range):
+        '''
+        method: build query with wrong format range
+        expected: Exception raised
+        '''
+        range = get_invalid_range
+        expr = {"must": [gen_default_vector_expr(default_query), range]}
+        query = update_query_expr(default_query, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_valid_ranges()
+    )
+    def get_valid_ranges(self, request):
+        return request.param
+
+    def test_query_range_valid_ranges(self, connect, collection, get_valid_ranges):
+        '''
+        method: build query with valid ranges
+        expected: pass
+        '''
+        entities, ids = init_data(connect, collection)
+        ranges = get_valid_ranges
+        range = gen_default_range_expr(ranges=ranges)
+        expr = {"must": [gen_default_vector_expr(default_query), range]}
+        query = update_query_expr(default_query, expr=expr)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == top_k
 
 
 class TestSearchDSLBools(object):

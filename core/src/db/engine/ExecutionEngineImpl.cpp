@@ -269,7 +269,7 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
 
     milvus::json conf = vector_param->extra_params;
     conf[knowhere::meta::TOPK] = topk;
-    conf[knowhere::Metric::TYPE] = knowhere::Metric::L2;
+    conf[knowhere::Metric::TYPE] = vector_param->metric_type;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(vec_index->index_type());
     if (!adapter->CheckSearch(conf, vec_index->index_type(), vec_index->index_mode())) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
@@ -499,6 +499,7 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, const 
                                       std::unordered_map<std::string, DataType>& attr_type) {
     auto status = Status::OK();
     auto term_query_json = term_query->json_obj;
+    JSON_NULL_CHECK(term_query_json);
     auto term_it = term_query_json.begin();
     if (term_it != term_query_json.end()) {
         const std::string& field_name = term_it.key();
@@ -579,6 +580,7 @@ ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, Dat
 
     auto status = Status::OK();
     auto range_query_json = range_query->json_obj;
+    JSON_NULL_CHECK(range_query_json);
     auto range_it = range_query_json.begin();
     if (range_it != range_query_json.end()) {
         const std::string& field_name = range_it.key();
@@ -713,8 +715,7 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
 
     // create snapshot compress file
     std::string index_name = index_element->GetName();
-    if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
-        index_name == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+    if (index_name == knowhere::IndexEnum::INDEX_RHNSWSQ) {
         auto compress_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
         if (compress_visitor == nullptr) {
             return Status(DB_ERROR,
