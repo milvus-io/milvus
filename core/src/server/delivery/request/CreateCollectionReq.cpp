@@ -62,7 +62,7 @@ CreateCollectionReq::OnExecute() {
         engine::snapshot::CreateCollectionContext create_collection_context;
         LOG_SERVER_FATAL_ << "make collection_schema";
         auto collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_, extra_params_);
-        if(collection_schema== nullptr){
+        if (collection_schema == nullptr) {
             LOG_SERVER_FATAL_ << "collection_schema null";
         }
 
