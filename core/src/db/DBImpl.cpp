@@ -632,6 +632,16 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
 
     STATUS_CHECK(segment_reader->LoadUids(entity_ids));
 
+    // remove delete id from the id list
+    segment::DeletedDocsPtr deleted_docs_ptr;
+    STATUS_CHECK(segment_reader->LoadDeletedDocs(deleted_docs_ptr));
+    if (deleted_docs_ptr) {
+        const std::vector<offset_t>& delete_ids = deleted_docs_ptr->GetDeletedDocs();
+        for (auto offset : delete_ids) {
+            entity_ids.erase(entity_ids.begin() + offset, entity_ids.begin() + offset + 1);
+        }
+    }
+
     return Status::OK();
 }
 

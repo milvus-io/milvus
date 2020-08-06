@@ -78,7 +78,7 @@ target_link_libraries( server
 get_property( dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES )
 
 foreach ( dir ${dirs} )
-    message( STATUS "Current Include DIRS: "${dir} )
+    message( STATUS "Current Include DIRS: " ${dir} )
 endforeach ()
 
 set( SERVER_LIBS server )

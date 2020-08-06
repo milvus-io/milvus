@@ -326,10 +326,8 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     }
 
     if (src_deleted_docs) {
-        const std::vector<offset_t>& delete_ids = src_deleted_docs->GetDeletedDocs();
-        for (auto offset : delete_ids) {
-            src_segment->DeleteEntity(offset);
-        }
+        std::vector<engine::offset_t> delete_ids = src_deleted_docs->GetDeletedDocs();
+        src_segment->DeleteEntity(delete_ids);
     }
 
     // merge filed raw data
@@ -358,6 +356,32 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
 size_t
 SegmentWriter::RowCount() {
     return segment_ptr_->GetRowCount();
+}
+
+Status
+SegmentWriter::LoadUids(std::vector<engine::id_t>& uids) {
+    engine::BinaryDataPtr raw;
+    auto status = segment_ptr_->GetFixedFieldData(engine::DEFAULT_UID_NAME, raw);
+    if (!status.ok()) {
+        LOG_ENGINE_ERROR_ << status.message();
+        return status;
+    }
+
+    if (raw == nullptr) {
+        return Status(DB_ERROR, "Invalid id field");
+    }
+
+    if (raw->data_.size() % sizeof(engine::id_t) != 0) {
+        std::string err_msg = "Failed to load uids: illegal file size";
+        LOG_ENGINE_ERROR_ << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    uids.clear();
+    uids.resize(raw->data_.size() / sizeof(engine::id_t));
+    memcpy(uids.data(), raw->data_.data(), raw->data_.size());
+
+    return Status::OK();
 }
 
 Status
