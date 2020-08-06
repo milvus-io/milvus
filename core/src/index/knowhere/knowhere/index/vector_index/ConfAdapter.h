@@ -94,12 +94,6 @@ class ANNOYConfAdapter : public ConfAdapter {
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
 
-class IVFSQ8NRConfAdapter : public IVFConfAdapter {
- public:
-    bool
-    CheckTrain(Config& oricfg, const IndexMode mode) override;
-};
-
 class RHNSWFlatConfAdapter : public ConfAdapter {
  public:
     bool

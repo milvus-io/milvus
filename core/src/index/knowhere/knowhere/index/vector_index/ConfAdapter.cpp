@@ -132,14 +132,6 @@ IVFSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 }
 
 bool
-IVFSQ8NRConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t DEFAULT_NBITS = 8;
-    oricfg[knowhere::IndexParams::nbits] = DEFAULT_NBITS;
-
-    return IVFConfAdapter::CheckTrain(oricfg, mode);
-}
-
-bool
 IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     static int64_t DEFAULT_NBITS = 8;
     static int64_t MAX_NLIST = 999999;

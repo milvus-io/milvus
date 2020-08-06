@@ -176,7 +176,6 @@ ValidateIndexType(const std::string& index_type) {
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
         knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
-        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR,
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H,
         knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
         knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
@@ -222,7 +221,6 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
         return Status::OK();
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
-               index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
