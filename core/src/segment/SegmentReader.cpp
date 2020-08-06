@@ -299,10 +299,14 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
 
                 // construct IDMAP index
                 knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
-                index_ptr = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP,
-                                                             knowhere::IndexMode::MODE_CPU);
+                if (field->GetFtype() == engine::DataType::VECTOR_FLOAT) {
+                    index_ptr = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+                                                                 knowhere::IndexMode::MODE_CPU);
+                } else {
+                    index_ptr = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+                                                                 knowhere::IndexMode::MODE_CPU);
+                }
                 milvus::json conf{{knowhere::meta::DIM, dimension}};
-                conf[engine::PARAM_INDEX_METRIC_TYPE] = knowhere::Metric::L2;
                 index_ptr->Train(knowhere::DatasetPtr(), conf);
                 index_ptr->AddWithoutIds(dataset, conf);
                 index_ptr->SetUids(uids);

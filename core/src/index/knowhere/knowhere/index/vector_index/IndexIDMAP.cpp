@@ -54,9 +54,12 @@ IDMAP::Load(const BinarySet& binary_set) {
 
 void
 IDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+    // users will assign the metric type when querying
+    // so we let L2 be the default type
+    faiss::MetricType metric_type = faiss::METRIC_L2;
+
     const char* desc = "IDMap,Flat";
     int64_t dim = config[meta::DIM].get<int64_t>();
-    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     auto index = faiss::index_factory(dim, desc, metric_type);
     index_.reset(index);
 }
@@ -221,6 +224,8 @@ IDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
 
 void
 IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+    // assign the metric type
+    index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     index_->search(n, (float*)data, k, distances, labels, bitset_);
 }
 
