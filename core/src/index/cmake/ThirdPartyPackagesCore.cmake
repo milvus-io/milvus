@@ -515,6 +515,8 @@ macro(build_faiss)
 
     set(FAISS_CONFIGURE_ARGS
             "--prefix=${FAISS_PREFIX}"
+            "CC='${CCACHE_FOUND} ${CMAKE_C_COMPILER}'"
+            "CXX='${CCACHE_FOUND} ${CMAKE_CXX_COMPILER}'"
             "CFLAGS=${EP_C_FLAGS}"
             "CXXFLAGS=${EP_CXX_FLAGS} -mf16c -O3"
             --without-python)
