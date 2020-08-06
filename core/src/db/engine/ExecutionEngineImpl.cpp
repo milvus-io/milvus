@@ -269,7 +269,7 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
 
     milvus::json conf = vector_param->extra_params;
     conf[knowhere::meta::TOPK] = topk;
-    conf[PARAM_INDEX_METRIC_TYPE] = vector_param->metric_type;
+    conf[knowhere::Metric::TYPE] = vector_param->metric_type;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(vec_index->index_type());
     if (!adapter->CheckSearch(conf, vec_index->index_type(), vec_index->index_mode())) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
