@@ -115,12 +115,14 @@ Utils::IndexTypeName(const milvus::IndexType& index_type) {
             return "SPTAGBKT";
         case milvus::IndexType::HNSW:
             return "HNSW";
-        case milvus::IndexType::HNSW_SQ8NM:
-            return "HNSW_SQ8NM";
+        case milvus::IndexType::RHNSWFLAT:
+            return "RHNSWFLAT";
+        case milvus::IndexType::RHNSWSQ:
+            return "RHNSWSQ";
+        case milvus::IndexType::RHNSWPQ:
+            return "RHNSWPQ";
         case milvus::IndexType::ANNOY:
             return "ANNOY";
-        case milvus::IndexType::IVFSQ8NR:
-            return "IVFSQ8NR";
         default:
             return "Unknown index type";
     }

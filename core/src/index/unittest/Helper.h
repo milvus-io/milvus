@@ -17,7 +17,6 @@
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "knowhere/index/vector_offset_index/IndexIVFSQNR_NM.h"
 #include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 
 #ifdef MILVUS_GPU_VERSION
@@ -25,7 +24,6 @@
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFPQ.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
-#include "knowhere/index/vector_offset_index/gpu/IndexGPUIVFSQNR_NM.h"
 #include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
 #endif
 
@@ -60,8 +58,6 @@ IndexFactory(const milvus::knowhere::IndexType& type, const milvus::knowhere::In
             return std::make_shared<milvus::knowhere::GPUIVFPQ>(DEVICEID);
         } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
             return std::make_shared<milvus::knowhere::GPUIVFSQ>(DEVICEID);
-        } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR) {
-            return std::make_shared<milvus::knowhere::GPUIVFSQNR_NM>(DEVICEID);
         } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H) {
             return std::make_shared<milvus::knowhere::IVFSQHybrid>(DEVICEID);
         } else {
@@ -77,8 +73,6 @@ IndexFactoryNM(const milvus::knowhere::IndexType& type, const milvus::knowhere::
     if (mode == milvus::knowhere::IndexMode::MODE_CPU) {
         if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
             return std::make_shared<milvus::knowhere::IVF_NM>();
-        } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR) {
-            return std::make_shared<milvus::knowhere::IVFSQNR_NM>();
         } else {
             std::cout << "Invalid IndexType " << type << std::endl;
         }
@@ -117,7 +111,6 @@ class ParamGenerator {
                 {milvus::knowhere::meta::DEVICEID, DEVICEID},
             };
         } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
-                   type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
                    type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H) {
             return milvus::knowhere::Config{
                 {milvus::knowhere::meta::DIM, DIM},
