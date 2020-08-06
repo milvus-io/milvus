@@ -329,6 +329,7 @@ class TestDeleteBase:
     ******************************************************************
     """
     # TODO:
+    @pytest.mark.level(2)
     def test_insert_tag_delete(self, connect, collection):
         '''
         method: add entitys with given tag, delete entities with the return ids
