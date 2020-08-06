@@ -27,8 +27,6 @@
 namespace milvus {
 namespace segment {
 
-using doc_id_t = int64_t;
-
 class IdBloomFilter : public cache::DataObj {
  public:
     explicit IdBloomFilter(scaling_bloom_t* bloom_filter);
@@ -39,13 +37,13 @@ class IdBloomFilter : public cache::DataObj {
     GetBloomFilter();
 
     bool
-    Check(doc_id_t uid);
+    Check(id_t uid);
 
     Status
-    Add(doc_id_t uid);
+    Add(id_t uid);
 
     Status
-    Remove(doc_id_t uid);
+    Remove(id_t uid);
 
     int64_t
     Size() override;
