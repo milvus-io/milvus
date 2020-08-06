@@ -24,7 +24,6 @@ const char* INDEX_FAISS_IDMAP = "FLAT";
 const char* INDEX_FAISS_IVFFLAT = "IVF_FLAT";
 const char* INDEX_FAISS_IVFPQ = "IVF_PQ";
 const char* INDEX_FAISS_IVFSQ8 = "IVF_SQ8";
-const char* INDEX_FAISS_IVFSQ8NR = "IVF_SQ8NR";
 const char* INDEX_FAISS_IVFSQ8H = "IVF_SQ8_HYBRID";
 const char* INDEX_FAISS_BIN_IDMAP = "BIN_FLAT";
 const char* INDEX_FAISS_BIN_IVFFLAT = "BIN_IVF_FLAT";
@@ -38,7 +37,6 @@ const char* INDEX_RHNSWFlat = "RHNSW_FLAT";
 const char* INDEX_RHNSWPQ = "RHNSW_PQ";
 const char* INDEX_RHNSWSQ = "RHNSW_SQ";
 const char* INDEX_ANNOY = "ANNOY";
-const char* INDEX_HNSW_SQ8NM = "HNSW_SQ8NM";
 }  // namespace IndexEnum
 
 }  // namespace knowhere
