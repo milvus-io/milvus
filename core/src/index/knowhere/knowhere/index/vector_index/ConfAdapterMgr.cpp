@@ -51,6 +51,9 @@ AdapterMgr::RegisterAdapter() {
     REGISTER_CONF_ADAPTER(ANNOYConfAdapter, IndexEnum::INDEX_ANNOY, annoy_adapter);
     REGISTER_CONF_ADAPTER(HNSWSQ8NRConfAdapter, IndexEnum::INDEX_HNSW_SQ8NM, hnswsq8nr_adapter);
     REGISTER_CONF_ADAPTER(IVFSQ8NRConfAdapter, IndexEnum::INDEX_FAISS_IVFSQ8NR, ivfsq8nr_adapter);
+    REGISTER_CONF_ADAPTER(RHNSWFlatConfAdapter, IndexEnum::INDEX_RHNSWFlat, rhnswflat_adapter);
+    REGISTER_CONF_ADAPTER(RHNSWPQConfAdapter, IndexEnum::INDEX_RHNSWPQ, rhnswpq_adapter);
+    REGISTER_CONF_ADAPTER(RHNSWSQConfAdapter, IndexEnum::INDEX_RHNSWSQ, rhnswsq_adapter);
 }
 
 }  // namespace knowhere
