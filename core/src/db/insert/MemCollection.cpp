@@ -27,6 +27,7 @@
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/Snapshots.h"
+#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -277,6 +278,10 @@ MemCollection::ApplyDeletes() {
 
         STATUS_CHECK(segment_writer->WriteDeletedDocs(del_docs_path, delete_docs));
         STATUS_CHECK(segment_writer->WriteBloomFilter(bloom_filter_file_path, bloom_filter));
+
+        delete_file->SetSize(CommonUtil::GetFileSize(del_docs_path + codec::DeletedDocsFormat::FilePostfix()));
+        bloom_filter_file->SetSize(
+            CommonUtil::GetFileSize(bloom_filter_file_path + codec::IdBloomFilterFormat::FilePostfix()));
 
         return Status::OK();
     };
