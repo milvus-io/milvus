@@ -109,5 +109,31 @@ class IVFSQ8NRConfAdapter : public IVFConfAdapter {
     CheckTrain(Config& oricfg, const IndexMode mode) override;
 };
 
+class RHNSWFlatConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
+class RHNSWPQConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
+class RHNSWSQConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
 }  // namespace knowhere
 }  // namespace milvus

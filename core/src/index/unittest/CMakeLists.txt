@@ -220,6 +220,42 @@ target_link_libraries(test_hnsw_sq8nm ${depend_libs} ${unittest_libs} ${basic_li
 install(TARGETS test_hnsw_sq8nm DESTINATION unittest)
 
 ################################################################################
+#<RHNSW_FLAT-TEST>
+set(rhnsw_flat_srcs
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSW.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSWFlat.cpp
+        )
+if (NOT TARGET test_rhnsw_flat)
+    add_executable(test_rhnsw_flat test_rhnsw_flat.cpp ${rhnsw_flat_srcs} ${util_srcs} ${faiss_srcs})
+endif ()
+target_link_libraries(test_rhnsw_flat ${depend_libs} ${unittest_libs} ${basic_libs})
+install(TARGETS test_rhnsw_flat DESTINATION unittest)
+
+################################################################################
+#<RHNSW_PQ-TEST>
+set(rhnsw_pq_srcs
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSW.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSWPQ.cpp
+        )
+if (NOT TARGET test_rhnsw_pq)
+    add_executable(test_rhnsw_pq test_rhnsw_pq.cpp ${rhnsw_pq_srcs} ${util_srcs} ${faiss_srcs})
+endif ()
+target_link_libraries(test_rhnsw_pq ${depend_libs} ${unittest_libs} ${basic_libs})
+install(TARGETS test_rhnsw_pq DESTINATION unittest)
+
+################################################################################
+#<RHNSW_SQ8-TEST>
+set(rhnsw_sq8_srcs
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSW.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSWSQ.cpp
+        )
+if (NOT TARGET test_rhnsw_sq8)
+    add_executable(test_rhnsw_sq8 test_rhnsw_sq8.cpp ${rhnsw_sq8_srcs} ${util_srcs} ${faiss_srcs})
+endif ()
+target_link_libraries(test_rhnsw_sq8 ${depend_libs} ${unittest_libs} ${basic_libs})
+install(TARGETS test_rhnsw_sq8 DESTINATION unittest)
+
+################################################################################
 #<SPTAG-TEST>
 if (MILVUS_SUPPORT_SPTAG)
     set(sptag_srcs
