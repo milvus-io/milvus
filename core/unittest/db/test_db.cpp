@@ -630,7 +630,7 @@ TEST_F(DBTest, CompactTest) {
     auto status = CreateCollection2(db_, collection_name, 0);
     ASSERT_TRUE(status.ok());
 
-    const uint64_t entity_count = 10000;
+    const uint64_t entity_count = 1000;
     milvus::engine::DataChunkPtr data_chunk;
     BuildEntities(entity_count, 0, data_chunk);
 
@@ -640,29 +640,61 @@ TEST_F(DBTest, CompactTest) {
     status = db_->Flush();
     ASSERT_TRUE(status.ok());
 
-    milvus::engine::IDNumbers entity_ids;
-    milvus::engine::utils::GetIDFromChunk(data_chunk, entity_ids);
-    ASSERT_EQ(entity_ids.size(), entity_count);
+    milvus::engine::IDNumbers batch_entity_ids;
+    milvus::engine::utils::GetIDFromChunk(data_chunk, batch_entity_ids);
+    ASSERT_EQ(batch_entity_ids.size(), entity_count);
 
-    int64_t delete_count = 10;
-    entity_ids.resize(delete_count);
-    status = db_->DeleteEntityByID(collection_name, entity_ids);
+    auto validate_entity_data = [&]() -> void {
+        std::vector<std::string> field_names = {"field_0"};
+        std::vector<bool> valid_row;
+        milvus::engine::DataChunkPtr fetch_chunk;
+        status = db_->GetEntityByID(collection_name, batch_entity_ids, field_names, valid_row, fetch_chunk);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(valid_row.size(), batch_entity_ids.size());
+        auto& chunk = fetch_chunk->fixed_fields_["field_0"];
+        int32_t* p = (int32_t*)(chunk->data_.data());
+        int64_t index = 0;
+        for (uint64_t i = 0; i < valid_row.size(); ++i) {
+            if (!valid_row[i]) {
+                continue;
+            }
+            ASSERT_EQ(p[index++], i);
+        }
+    };
+    validate_entity_data();
+
+    int64_t delete_count = 100;
+    int64_t gap = entity_count / delete_count - 1;
+    std::vector<milvus::engine::id_t> delete_ids;
+    for (auto i = 1; i <= delete_count; ++i) {
+        delete_ids.push_back(batch_entity_ids[i * gap]);
+    }
+    status = db_->DeleteEntityByID(collection_name, delete_ids);
     ASSERT_TRUE(status.ok());
 
     status = db_->Flush();
     ASSERT_TRUE(status.ok());
 
-    int64_t row_count = 0;
-    status = db_->CountEntities(collection_name, row_count);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(row_count, entity_count - delete_count);
+    auto validate_compact = [&](double threshold) -> void {
+        int64_t row_count = 0;
+        status = db_->CountEntities(collection_name, row_count);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(row_count, entity_count - delete_count);
 
-    status = db_->Compact(dummy_context_, collection_name);
-    ASSERT_TRUE(status.ok());
+        status = db_->Compact(dummy_context_, collection_name, threshold);
+        ASSERT_TRUE(status.ok());
 
-    status = db_->CountEntities(collection_name, row_count);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(row_count, entity_count - delete_count);
+        validate_entity_data();
+
+        status = db_->CountEntities(collection_name, row_count);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(row_count, entity_count - delete_count);
+
+        validate_entity_data();
+    };
+
+    validate_compact(0.001); // compact skip
+    validate_compact(0.5); // do compact
 }
 
 TEST_F(DBTest, IndexTest) {
@@ -903,11 +935,11 @@ TEST_F(DBTest, FetchTest) {
         std::cout << status.message() << std::endl;
         ASSERT_TRUE(status.ok());
 
-//        if (tag == partition_name) {
-//            ASSERT_EQ(segment_entity_ids.size(), batch_entity_ids.size() - delete_entity_ids.size());
-//        } else {
+        if (tag == partition_name) {
+            ASSERT_EQ(segment_entity_ids.size(), batch_entity_ids.size() - delete_entity_ids.size());
+        } else {
             ASSERT_EQ(segment_entity_ids.size(), batch_entity_ids.size());
-//        }
+        }
     }
 }
 

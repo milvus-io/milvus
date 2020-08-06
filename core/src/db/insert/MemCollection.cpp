@@ -74,19 +74,19 @@ MemCollection::Add(int64_t partition_id, const milvus::engine::VectorSourcePtr& 
 }
 
 Status
-MemCollection::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
+MemCollection::Delete(std::vector<id_t>& ids) {
     // Locate which collection file the doc id lands in
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto& partition_segments : mem_segments_) {
             MemSegmentList& segments = partition_segments.second;
             for (auto& segment : segments) {
-                segment->Delete(doc_ids);
+                segment->Delete(ids);
             }
         }
     }
     // Add the id to delete list so it can be applied to other segments on disk during the next flush
-    for (auto& id : doc_ids) {
+    for (auto& id : ids) {
         doc_ids_to_delete_.insert(id);
     }
 
@@ -179,7 +179,7 @@ MemCollection::ApplyDeletes() {
         STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
 
         // Step 1: Check delete_id in mem
-        std::vector<segment::doc_id_t> delete_ids;
+        std::vector<id_t> delete_ids;
         for (auto& id : doc_ids_to_delete_) {
             if (pre_bloom_filter->Check(id)) {
                 delete_ids.push_back(id);
@@ -193,7 +193,7 @@ MemCollection::ApplyDeletes() {
         // Step 2: Load previous delete_id and merge into 'delete_ids'
         segment::DeletedDocsPtr prev_del_docs;
         STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
-        std::vector<segment::offset_t> pre_del_ids;
+        std::vector<engine::offset_t> pre_del_ids;
         if (prev_del_docs) {
             pre_del_ids = prev_del_docs->GetDeletedDocs();
             if (!pre_del_ids.empty())
@@ -206,7 +206,7 @@ MemCollection::ApplyDeletes() {
         std::string collection_root_path = options_.meta_.path_ + COLLECTIONS_FOLDER;
 
         std::sort(delete_ids.begin(), delete_ids.end());
-        std::set<segment::doc_id_t> ids_to_check(delete_ids.begin(), delete_ids.end());
+        std::set<id_t> ids_to_check(delete_ids.begin(), delete_ids.end());
 
         // Step 3: Mark previous deleted docs file and bloom filter file stale
         auto& field_visitors_map = seg_visitor->GetFieldVisitors();
@@ -263,7 +263,7 @@ MemCollection::ApplyDeletes() {
         segment::IdBloomFilterPtr bloom_filter;
         STATUS_CHECK(segment_writer->CreateBloomFilter(bloom_filter_file_path, bloom_filter));
         auto delete_docs = std::make_shared<segment::DeletedDocs>();
-        std::vector<segment::doc_id_t> uids;
+        std::vector<id_t> uids;
         STATUS_CHECK(segment_reader->LoadUids(uids));
         for (size_t i = 0; i < uids.size(); i++) {
             if (std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i])) {
