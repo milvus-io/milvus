@@ -617,8 +617,113 @@ TEST_F(DBTest, MergeTest) {
     ASSERT_EQ(expect_file_paths.size(), segment_file_paths.size());
 }
 
+
+TEST_F(DBTest, GetEntityTest){
+    auto insert_entities = [&](const std::string& collection, const std::string& partition,
+                               uint64_t count, uint64_t batch_index, milvus::engine::IDNumbers& ids,
+                               milvus::engine::DataChunkPtr& data_chunk) -> Status {
+        BuildEntities(count, batch_index, data_chunk);
+        STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
+        STATUS_CHECK(db_->Flush(collection));
+        auto iter = data_chunk->fixed_fields_.find(milvus::engine::DEFAULT_UID_NAME);
+        if (iter == data_chunk->fixed_fields_.end()) {
+            return Status(1, "Cannot find uid field");
+        }
+        auto& ids_buffer = iter->second;
+        ids.resize(data_chunk->count_);
+        memcpy(ids.data(), ids_buffer->data_.data(), ids_buffer->Size());
+
+        return Status::OK();
+    };
+
+    auto fill_field_names = [&](const milvus::engine::snapshot::FieldElementMappings& field_mappings,
+            std::vector<std::string> field_names) -> void {
+        if (field_names.empty()) {
+            for (const auto& schema : field_mappings) {
+                field_names.emplace_back(schema.first->GetName());
+            }
+        } else {
+            for (const auto& name : field_names) {
+                bool find_field_name = false;
+                for (const auto& kv : field_mappings) {
+                    if (name == kv.first->GetName()) {
+                        find_field_name = true;
+                        break;
+                    }
+                }
+                if (not find_field_name) {
+                    return;
+                }
+            }
+        }
+    };
+
+    auto get_row_size = [&](const std::vector<bool>& valid_row) -> int {
+        int valid_row_size = 0;
+        for (auto valid : valid_row){
+            if(valid)
+                valid_row_size++;
+        }
+        return valid_row_size;
+    };
+
+    std::string collection_name = "GET_ENTITY_TEST";
+    auto status = CreateCollection2(db_, collection_name, 0);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    milvus::engine::IDNumbers entity_ids;
+    milvus::engine::DataChunkPtr dataChunkPtr;
+    insert_entities(collection_name, "", 10000, 0, entity_ids, dataChunkPtr);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    milvus::engine::snapshot::CollectionPtr collection;
+    milvus::engine::snapshot::FieldElementMappings field_mappings;
+    status = db_->GetCollectionInfo(collection_name,collection,field_mappings);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    std::vector<std::string> field_names;
+    fill_field_names(field_mappings,field_names);
+
+    milvus::engine::DataChunkPtr get_data_chunk;
+    std::vector<bool> valid_row;
+
+
+    {
+        status = db_->GetEntityByID(collection_name, entity_ids, field_names, valid_row, get_data_chunk);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+
+        for (const auto &name : field_names) {
+            ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->Size() == get_row_size(valid_row));
+            ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->Size() == dataChunkPtr->fixed_fields_[name]->Size());
+            ASSERT_TRUE(get_data_chunk->fixed_fields_[name] == dataChunkPtr->fixed_fields_[name]);
+        }
+    }
+
+
+    {
+        field_names.emplace_back("Hello World");
+        field_names.emplace_back("GoodBye World");
+        ASSERT_ANY_THROW(db_->GetEntityByID(collection_name, entity_ids, field_names, valid_row, get_data_chunk));
+    }
+
+
+    /*
+    {
+        status = db_->GetEntityByID(collection_name, entity_ids, field_names, valid_row, get_data_chunk);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+
+        for (const auto &name : field_names) {
+            ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->Size() == get_row_size(valid_row));
+            ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->Size() == dataChunkPtr->fixed_fields_[name]->Size());
+            ASSERT_TRUE(get_data_chunk->fixed_fields_[name] == dataChunkPtr->fixed_fields_[name]);
+        }
+    }
+     */
+
+}
+
 TEST_F(DBTest, CompactTest) {
-    std::string collection_name = "COMPACT_TEST";
+std::string collection_name = "COMPACT_TEST";
     auto status = CreateCollection2(db_, collection_name, 0);
     ASSERT_TRUE(status.ok());
 
