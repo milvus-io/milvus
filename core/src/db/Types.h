@@ -29,6 +29,9 @@
 namespace milvus {
 namespace engine {
 
+using id_t = int64_t;
+using offset_t = int32_t;
+
 using DateT = int;
 
 using IDNumber = int64_t;
@@ -74,7 +77,7 @@ class VaribleData : public cache::DataObj {
  public:
     int64_t
     Size() {
-        return data_.size();
+        return data_.size() + offset_.size() * sizeof(int64_t);
     }
 
  public:

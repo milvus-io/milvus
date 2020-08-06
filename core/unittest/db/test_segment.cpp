@@ -94,7 +94,7 @@ TEST_F(SegmentTest, SegmentTest) {
         break;
     }
 
-    std::vector<milvus::segment::doc_id_t> raw_uids = {123};
+    std::vector<milvus::engine::id_t> raw_uids = {123};
     std::vector<uint8_t> raw_vectors = {1, 2, 3, 4};
 
     {
