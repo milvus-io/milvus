@@ -343,6 +343,7 @@ class TestDeleteBase:
         assert status
 
     # TODO:
+    @pytest.mark.level(2)
     def test_insert_default_tag_delete(self, connect, collection):
         '''
         method: add entitys, delete entities with the return ids
@@ -356,6 +357,7 @@ class TestDeleteBase:
         assert status
 
     # TODO:
+    @pytest.mark.level(2)
     def test_insert_tags_delete(self, connect, collection):
         '''
         method: add entitys with given two tags, delete entities with the return ids
