@@ -50,13 +50,15 @@ set( MILVUS_ENGINE_SRC      ${PROJECT_SOURCE_DIR}/src )
 set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
 
 # **************************** Dependencies ****************************
+include( CTest )
 include( BuildUtils )
 import_mysql_inc()
 
 include( ExternalProject )
 include( DefineOptions )
 include( ThirdPartyPackages )
-include( cmake/test.cmake )
+
+add_subdirectory( thirdparty )
 
 using_ccache_if_defined( MILVUS_USE_CCACHE )
 
@@ -175,16 +177,12 @@ message( STATUS "Found cpplint executable at ${CPPLINT_BIN}" )
 # "make lint" targets
 #
 add_custom_target( lint
-        ${PYTHON_EXECUTABLE}
-        ${BUILD_SUPPORT_DIR}/run_cpplint.py
-        --cpplint_binary
-        ${CPPLINT_BIN}
-        --exclude_globs
-        ${LINT_EXCLUSIONS_FILE}
-        --source_dir
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${MILVUS_LINT_QUIET}
-        )
+    ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_cpplint.py
+                            --cpplint_binary    ${CPPLINT_BIN}
+                            --exclude_globs     ${LINT_EXCLUSIONS_FILE}
+                            --source_dir        ${CMAKE_CURRENT_SOURCE_DIR}
+                            ${MILVUS_LINT_QUIET}
+                            )
 
 #
 # "make clang-format" and "make check-clang-format" targets
@@ -192,29 +190,20 @@ add_custom_target( lint
 if ( ${CLANG_FORMAT_FOUND} )
     # runs clang format and updates files in place.
     add_custom_target( clang-format
-            ${PYTHON_EXECUTABLE}
-            ${BUILD_SUPPORT_DIR}/run_clang_format.py
-            --clang_format_binary
-            ${CLANG_FORMAT_BIN}
-            --exclude_globs
-            ${LINT_EXCLUSIONS_FILE}
-            --source_dir
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
-            --fix
-            ${MILVUS_LINT_QUIET}
-            )
+        ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_clang_format.py
+                                --clang_format_binary   ${CLANG_FORMAT_BIN}
+                                --exclude_globs         ${LINT_EXCLUSIONS_FILE}
+                                --source_dir            ${CMAKE_CURRENT_SOURCE_DIR}/src
+                                --fix
+                                ${MILVUS_LINT_QUIET} )
 
     # runs clang format and exits with a non-zero exit code if any files need to be reformatted
     add_custom_target( check-clang-format
-            ${PYTHON_EXECUTABLE}
-            ${BUILD_SUPPORT_DIR}/run_clang_format.py
-            --clang_format_binary
-            ${CLANG_FORMAT_BIN}
-            --exclude_globs
-            ${LINT_EXCLUSIONS_FILE}
-            --source_dir
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
-            ${MILVUS_LINT_QUIET} )
+        ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_clang_format.py
+                                --clang_format_binary   ${CLANG_FORMAT_BIN}
+                                --exclude_globs         ${LINT_EXCLUSIONS_FILE}
+                                --source_dir            ${CMAKE_CURRENT_SOURCE_DIR}/src
+                                ${MILVUS_LINT_QUIET} )
 endif ()
 
 #
@@ -222,31 +211,21 @@ endif ()
 #
 if ( ${CLANG_TIDY_FOUND} )
     # runs clang-tidy and attempts to fix any warning automatically
-    add_custom_target(clang-tidy
-            ${PYTHON_EXECUTABLE}
-            ${BUILD_SUPPORT_DIR}/run_clang_tidy.py
-            --clang_tidy_binary
-            ${CLANG_TIDY_BIN}
-            --exclude_globs
-            ${LINT_EXCLUSIONS_FILE}
-            --compile_commands
-            ${CMAKE_BINARY_DIR}/compile_commands.json
-            --source_dir
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
-            --fix
-            ${MILVUS_LINT_QUIET} )
+    add_custom_target( clang-tidy
+        ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_clang_tidy.py
+                                --clang_tidy_binary ${CLANG_TIDY_BIN}
+                                --exclude_globs     ${LINT_EXCLUSIONS_FILE}
+                                --compile_commands  ${CMAKE_BINARY_DIR}/compile_commands.json
+                                --source_dir        ${CMAKE_CURRENT_SOURCE_DIR}/src
+                                --fix
+                                ${MILVUS_LINT_QUIET} )
 
     # runs clang-tidy and exits with a non-zero exit code if any errors are found.
     add_custom_target( check-clang-tidy
-            ${PYTHON_EXECUTABLE}
-            ${BUILD_SUPPORT_DIR}/run_clang_tidy.py
-            --clang_tidy_binary
-            ${CLANG_TIDY_BIN}
-            --exclude_globs
-            ${LINT_EXCLUSIONS_FILE}
-            --compile_commands
-            ${CMAKE_BINARY_DIR}/compile_commands.json
-            --source_dir
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
-            ${MILVUS_LINT_QUIET} )
+        ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_clang_tidy.py
+                                --clang_tidy_binary ${CLANG_TIDY_BIN}
+                                --exclude_globs     ${LINT_EXCLUSIONS_FILE}
+                                --compile_commands  ${CMAKE_BINARY_DIR}/compile_commands.json
+                                --source_dir        ${CMAKE_CURRENT_SOURCE_DIR}/src
+                                ${MILVUS_LINT_QUIET} )
 endif ()

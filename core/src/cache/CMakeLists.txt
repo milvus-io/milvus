@@ -17,3 +17,4 @@ target_sources( cache PRIVATE   ${CACHE_FILES}
                                 Cache.inl
                                 )
 target_include_directories( cache PUBLIC ${MILVUS_ENGINE_SRC}/cache )
+add_dependencies( cache fiu )
