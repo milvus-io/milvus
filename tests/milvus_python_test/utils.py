@@ -17,6 +17,7 @@ default_flush_interval = 1
 big_flush_interval = 1000
 dimension = 128
 segment_row_count = 5000
+nb = 1000
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
 
@@ -211,9 +212,10 @@ def gen_default_fields(auto_id=False):
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}}
+            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}},
         ],
-        "segment_row_count": segment_row_count
+        "segment_row_count": segment_row_count,
+        "auto_id" : True
     }
     if auto_id is True:
         default_fields["auto_id"] = True
