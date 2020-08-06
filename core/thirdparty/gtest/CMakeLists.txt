@@ -28,7 +28,8 @@ macro ( build_gtest )
         URL             ${GTEST_SOURCE_URL}
         URL_MD5         "2e6fbeb6a91310a16efe181886c59596"
         BUILD_COMMAND   ${MAKE} ${MAKE_BUILD_ARGS}
-        CMAKE_ARGS      -D CMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
+        CMAKE_ARGS      ${EP_COMMON_CMAKE_ARGS}
+                        -D CMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
                         -D CMAKE_CXX_FLAGS=${GTEST_CMAKE_CXX_FLAGS}
                         -D CMAKE_BUILD_TYPE=Release
         ${EP_LOG_OPTIONS}
