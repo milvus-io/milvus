@@ -17,4 +17,11 @@ namespace milvus {
 
 using json = nlohmann::json;
 
+#define JSON_NULL_CHECK(json)                                       \
+    do {                                                            \
+        if (json.empty()) {                                         \
+            return Status{SERVER_INVALID_ARGUMENT, "Json is null"}; \
+        }                                                           \
+    } while (false)
+
 }  // namespace milvus
