@@ -848,12 +848,12 @@ TEST_F(DBTest, FetchTest) {
     status = db_->Flush();
     ASSERT_TRUE(status.ok());
 
-    milvus::engine::IDNumbers all_entity_ids;
-    milvus::engine::utils::GetIDFromChunk(data_chunk, all_entity_ids);
-    ASSERT_EQ(all_entity_ids.size(), entity_count);
+    milvus::engine::IDNumbers batch_entity_ids;
+    milvus::engine::utils::GetIDFromChunk(data_chunk, batch_entity_ids);
+    ASSERT_EQ(batch_entity_ids.size(), entity_count);
 
     int64_t delete_count = 10;
-    milvus::engine::IDNumbers delete_entity_ids = all_entity_ids;
+    milvus::engine::IDNumbers delete_entity_ids = batch_entity_ids;
     delete_entity_ids.resize(delete_count);
     status = db_->DeleteEntityByID(collection_name, delete_entity_ids);
     ASSERT_TRUE(status.ok());
@@ -872,23 +872,42 @@ TEST_F(DBTest, FetchTest) {
     }
 
     fetch_chunk = nullptr;
-    status = db_->GetEntityByID(collection_name, all_entity_ids, field_names, valid_row, fetch_chunk);
+    status = db_->GetEntityByID(collection_name, batch_entity_ids, field_names, valid_row, fetch_chunk);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(fetch_chunk->count_, all_entity_ids.size() - delete_entity_ids.size());
+    ASSERT_EQ(fetch_chunk->count_, batch_entity_ids.size() - delete_entity_ids.size());
     auto& uid = fetch_chunk->fixed_fields_[milvus::engine::DEFAULT_UID_NAME];
     ASSERT_EQ(uid->Size() / sizeof(int64_t), fetch_chunk->count_);
     auto& vectors = fetch_chunk->fixed_fields_[VECTOR_FIELD_NAME];
     ASSERT_EQ(vectors->Size() / (COLLECTION_DIM * sizeof(float)), fetch_chunk->count_);
 
-    milvus::engine::IDNumbers segment_entity_ids;
-    status = db_->ListIDInSegment(collection_name, 1, segment_entity_ids);
+    milvus::json json_stats;
+    status = db_->GetCollectionStats(collection_name, json_stats);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(segment_entity_ids.size(), entity_count);
 
-    segment_entity_ids.clear();
-    status = db_->ListIDInSegment(collection_name, 2, segment_entity_ids);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(segment_entity_ids.size(), entity_count);
+    auto partitions = json_stats[milvus::engine::JSON_PARTITIONS];
+    ASSERT_EQ(partitions.size(), 2);
+
+    for (int32_t i = 0; i < 2; ++i) {
+        auto partition = partitions[i];
+        std::string tag = partition[milvus::engine::JSON_PARTITION_TAG].get<std::string>();
+
+        auto segments = partition[milvus::engine::JSON_SEGMENTS];
+        ASSERT_EQ(segments.size(), 1);
+
+        auto segment = segments[0];
+        int64_t id = segment[milvus::engine::JSON_ID].get<int64_t>();
+
+        milvus::engine::IDNumbers segment_entity_ids;
+        status = db_->ListIDInSegment(collection_name, id, segment_entity_ids);
+        std::cout << status.message() << std::endl;
+        ASSERT_TRUE(status.ok());
+
+//        if (tag == partition_name) {
+//            ASSERT_EQ(segment_entity_ids.size(), batch_entity_ids.size() - delete_entity_ids.size());
+//        } else {
+            ASSERT_EQ(segment_entity_ids.size(), batch_entity_ids.size());
+//        }
+    }
 }
 
 TEST_F(DBTest, DeleteEntitiesTest) {
