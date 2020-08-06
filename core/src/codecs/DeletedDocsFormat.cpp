@@ -58,8 +58,8 @@ DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& 
     size_t num_bytes;
     fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 
-    auto deleted_docs_size = num_bytes / sizeof(segment::offset_t);
-    std::vector<segment::offset_t> deleted_docs_list;
+    auto deleted_docs_size = num_bytes / sizeof(engine::offset_t);
+    std::vector<engine::offset_t> deleted_docs_list;
     deleted_docs_list.resize(deleted_docs_size);
 
     fs_ptr->reader_ptr_->read(deleted_docs_list.data(), num_bytes);
@@ -82,7 +82,7 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
 
     // Write to the temp file, in order to avoid possible race condition with search (concurrent read and write)
     size_t old_num_bytes;
-    std::vector<segment::offset_t> delete_ids;
+    std::vector<engine::offset_t> delete_ids;
     if (exists) {
         if (!fs_ptr->reader_ptr_->open(temp_path)) {
             std::string err_msg = "Failed to read from file: " + temp_path;  // + ", error: " + std::strerror(errno);
@@ -98,7 +98,7 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     }
 
     auto deleted_docs_list = deleted_docs->GetDeletedDocs();
-    size_t new_num_bytes = old_num_bytes + sizeof(segment::offset_t) * deleted_docs->GetCount();
+    size_t new_num_bytes = old_num_bytes + sizeof(engine::offset_t) * deleted_docs->GetCount();
     if (!deleted_docs_list.empty()) {
         delete_ids.insert(delete_ids.end(), deleted_docs_list.begin(), deleted_docs_list.end());
     }
@@ -129,7 +129,7 @@ DeletedDocsFormat::ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::stri
     size_t num_bytes;
     fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 
-    size = num_bytes / sizeof(segment::offset_t);
+    size = num_bytes / sizeof(engine::offset_t);
     fs_ptr->reader_ptr_->close();
 }
 
