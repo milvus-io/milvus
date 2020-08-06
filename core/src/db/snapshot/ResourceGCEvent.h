@@ -39,7 +39,6 @@ class ResourceGCEvent : public GCEvent {
         /* mark resource as 'deleted' in meta */
         auto sd_op = std::make_shared<SoftDeleteOperation<ResourceT>>(res_->GetID());
         STATUS_CHECK((*sd_op)(store));
-        return Status::OK();
 
         /* TODO: physically clean resource */
         auto res_prefix = store->GetRootPath();

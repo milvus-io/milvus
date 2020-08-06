@@ -215,17 +215,15 @@ DBTest::GetOptions() {
 
     auto options = milvus::engine::DBOptions();
     options.meta_.path_ = "/tmp/milvus_ss";
-    options.meta_.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus";//"mock://:@:/";
+    options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     return options;
 }
 
 void
 DBTest::SetUp() {
-    auto options = GetOptions();
-    boost::filesystem::remove_all(options.meta_.path_);
     BaseTest::SetUp();
-    BaseTest::SnapshotStart(false, options);
+    BaseTest::SnapshotStart(false, GetOptions());
 
     dummy_context_ = std::make_shared<milvus::server::Context>("dummy_request_id");
     opentracing::mocktracer::MockTracerOptions tracer_options;
@@ -267,7 +265,7 @@ DBTest::TearDown() {
 
     BaseTest::SnapshotStop();
     auto options = GetOptions();
-//    boost::filesystem::remove_all(options.meta_.path_);
+    boost::filesystem::remove_all(options.meta_.path_);
 
     BaseTest::TearDown();
 }

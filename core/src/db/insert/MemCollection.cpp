@@ -207,7 +207,7 @@ MemCollection::ApplyDeletes() {
         if (prev_del_docs) {
             auto pre_doc_ids = prev_del_docs->GetDeletedDocs();
             if (!pre_doc_ids.empty()) {
-                for (auto & id : pre_doc_ids) {
+                for (auto& id : pre_doc_ids) {
                     pre_del_ids.push_back(uids[id]);
                 }
                 delete_ids.insert(delete_ids.end(), pre_del_ids.begin(), pre_del_ids.end());
@@ -308,26 +308,22 @@ MemCollection::ApplyDeletes() {
         return Status::OK();  // no segment, nothing to do
     }
 
-    fiu_do_on("MemCollection.ApplyDeletes.RandomSleep", {
-//        std::srand(std::time(nullptr));
-//        sleep(std::rand() % 2 + 1);
-        sleep(1);
-    });
+    fiu_do_on("MemCollection.ApplyDeletes.RandomSleep", sleep(1));
 
-//    snapshot::ScopedSnapshotT new_ss;
-//    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(new_ss, collection_id_));
-//    if (new_ss->GetID() != ss->GetID()) {
-//        for (auto& seg : modified_segments) {
-//            auto pre_seg_commit = ss->GetSegmentCommitBySegmentId(seg->GetID());
-//            auto new_seg_commit = new_ss->GetSegmentCommitBySegmentId(seg->GetID());
-//            if (new_seg_commit->GetID() != pre_seg_commit->GetID()) {
-//                // TODO: Rollback CompoundSegmentsOp
-//                std::string err = "[CSOE] Segment " + std::to_string(seg->GetID()) + " is stale.";
-//                LOG_ENGINE_ERROR_ << err;
-//                return Status(SS_STALE_ERROR, err);
-//            }
-//        }
-//    }
+    //    snapshot::ScopedSnapshotT new_ss;
+    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(new_ss, collection_id_));
+    //    if (new_ss->GetID() != ss->GetID()) {
+    //        for (auto& seg : modified_segments) {
+    //            auto pre_seg_commit = ss->GetSegmentCommitBySegmentId(seg->GetID());
+    //            auto new_seg_commit = new_ss->GetSegmentCommitBySegmentId(seg->GetID());
+    //            if (new_seg_commit->GetID() != pre_seg_commit->GetID()) {
+    //                // TODO: Rollback CompoundSegmentsOp
+    //                std::string err = "[CSOE] Segment " + std::to_string(seg->GetID()) + " is stale.";
+    //                LOG_ENGINE_ERROR_ << err;
+    //                return Status(SS_STALE_ERROR, err);
+    //            }
+    //        }
+    //    }
 
     return segments_op->Push();
 }
