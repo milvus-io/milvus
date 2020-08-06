@@ -158,6 +158,7 @@ CompoundSegmentsOperation::DoExecute(StorePtr store) {
                     new_row_cnt = new_sc->GetRowCount() + delta;
                 }
                 new_sc->SetRowCount(new_row_cnt);
+                std::cout << "[CSO] " << this << " | Seg Id " << new_sc->GetSegmentId() << ", new count " << new_row_cnt << std::endl;
                 segc_ctx_p->AddAttr(RowCountField::Name);
             }
         }

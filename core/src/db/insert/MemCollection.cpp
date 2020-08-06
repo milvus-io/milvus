@@ -108,18 +108,20 @@ Status
 MemCollection::Serialize(uint64_t wal_lsn) {
     TimeRecorder recorder("MemCollection::Serialize collection " + collection_id_);
 
-    std::lock_guard<std::mutex> lock(mutex_);
-
     if (!doc_ids_to_delete_.empty()) {
         while (true) {
             auto status = ApplyDeletes();
             if (status.ok()) {
                 break;
             } else if (status.code() == SS_STALE_ERROR) {
-                LOG_ENGINE_WARNING_ << "ApplyDeletes is stale, try again";
+                std::string err = "ApplyDeletes is stale, try again";
+                LOG_ENGINE_WARNING_ << err;
+                std::cout << err << std::endl;
                 continue;
             } else {
-                LOG_ENGINE_ERROR_ << "ApplyDeletes failed: " << status.ToString();
+                std::string err = "ApplyDeletes failed: " + status.ToString();
+                LOG_ENGINE_ERROR_ << err;
+                std::cout << err << std::endl;
                 return status;
             }
         }
@@ -127,6 +129,7 @@ MemCollection::Serialize(uint64_t wal_lsn) {
 
     doc_ids_to_delete_.clear();
 
+    std::lock_guard<std::mutex> lock(mutex_);
     for (auto& partition_segments : mem_segments_) {
         MemSegmentList& segments = partition_segments.second;
         for (auto& segment : segments) {
@@ -174,6 +177,7 @@ MemCollection::ApplyDeletes() {
     auto segments_op = std::make_shared<snapshot::CompoundSegmentsOperation>(context, ss);
 
     int64_t segment_iterated = 0;
+//    std::vector<snapshot::SegmentPtr> modified_segments;
     auto segment_executor = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* iterator) -> Status {
         segment_iterated++;
         auto seg_visitor = engine::SegmentVisitor::Build(ss, segment->GetID());
@@ -291,6 +295,7 @@ MemCollection::ApplyDeletes() {
         delete_file->SetSize(CommonUtil::GetFileSize(del_docs_path + codec::DeletedDocsFormat::FilePostfix()));
         bloom_filter_file->SetSize(
             CommonUtil::GetFileSize(bloom_filter_file_path + codec::IdBloomFilterFormat::FilePostfix()));
+//        modified_segments.push_back(segment);
 
         return Status::OK();
     };
@@ -304,9 +309,25 @@ MemCollection::ApplyDeletes() {
     }
 
     fiu_do_on("MemCollection.ApplyDeletes.RandomSleep", {
-        std::srand(std::time(nullptr));
-        sleep(std::rand() % 3);
+//        std::srand(std::time(nullptr));
+//        sleep(std::rand() % 2 + 1);
+        sleep(1);
     });
+
+//    snapshot::ScopedSnapshotT new_ss;
+//    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(new_ss, collection_id_));
+//    if (new_ss->GetID() != ss->GetID()) {
+//        for (auto& seg : modified_segments) {
+//            auto pre_seg_commit = ss->GetSegmentCommitBySegmentId(seg->GetID());
+//            auto new_seg_commit = new_ss->GetSegmentCommitBySegmentId(seg->GetID());
+//            if (new_seg_commit->GetID() != pre_seg_commit->GetID()) {
+//                // TODO: Rollback CompoundSegmentsOp
+//                std::string err = "[CSOE] Segment " + std::to_string(seg->GetID()) + " is stale.";
+//                LOG_ENGINE_ERROR_ << err;
+//                return Status(SS_STALE_ERROR, err);
+//            }
+//        }
+//    }
 
     return segments_op->Push();
 }
