@@ -11,20 +11,22 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set(gtest_libraries
-    gtest
-    gmock
-    gtest_main
-    gmock_main
-    )
+# ****************************************************************
+# googletest download and extract template
+# ****************************************************************
+cmake_minimum_required( VERSION 3.14 )
+project( googletest-download NONE )
 
-macro(ADD_TEST)
-    cmake_parse_arguments(UT "" "TARGET" "SOURCES;LIBS" ${ARGN})
-    #    message("UT_TARGET = ${UT_TARGET}")
-    #    message("UT_SOURCES = ${UT_SOURCES}")
-    #    message("UT_LIBS = ${UT_LIBS}")
-    #    message("ARGN = ${ARGN}")
 
-    add_executable(${UT_TARGET} ${UT_SOURCES})
-    target_link_libraries(${UT_TARGET} ${UT_LIBS})
-endmacro()
+include(ExternalProject)
+ExternalProject_Add( googletest_ep
+    URL             ${GTEST_SOURCE_URL}
+    URL_MD5         "f9137c5bc18b7d74027936f0f1bfa5c8"
+    SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-src
+    BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-build
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    TEST_COMMAND ""
+)
+
