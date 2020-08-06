@@ -1568,6 +1568,7 @@ GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::Bool
         auto leaf_query = std::make_shared<query::LeafQuery>();
         auto term_query = std::make_shared<query::TermQuery>();
         nlohmann::json json_obj = json["term"];
+        JSON_NULL_CHECK(json_obj);
         term_query->json_obj = json_obj;
         nlohmann::json::iterator json_it = json_obj.begin();
         field_name = json_it.key();
@@ -1578,6 +1579,7 @@ GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::Bool
         auto leaf_query = std::make_shared<query::LeafQuery>();
         auto range_query = std::make_shared<query::RangeQuery>();
         nlohmann::json json_obj = json["range"];
+        JSON_NULL_CHECK(json_obj);
         range_query->json_obj = json_obj;
         nlohmann::json::iterator json_it = json_obj.begin();
         field_name = json_it.key();
@@ -1587,9 +1589,12 @@ GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::Bool
     } else if (json.contains("vector")) {
         auto leaf_query = std::make_shared<query::LeafQuery>();
         auto vector_json = json["vector"];
+        JSON_NULL_CHECK(vector_json);
 
         leaf_query->vector_placeholder = vector_json.get<std::string>();
         query->AddLeafQuery(leaf_query);
+    } else {
+        return Status{SERVER_INVALID_ARGUMENT, "Leaf query get wrong key"};
     }
     return status;
 }
@@ -1704,6 +1709,8 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
                 }
                 vector_query->topk = topk;
                 if (vector_json.contains("metric_type")) {
+                    std::string metric_type = vector_json["metric_type"];
+                    vector_query->metric_type = metric_type;
                     query_ptr->metric_types.insert({field_name, vector_json["metric_type"]});
                 }
                 if (!vector_param_it.value()["params"].empty()) {
@@ -1722,6 +1729,7 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
         }
         if (dsl_json.contains("bool")) {
             auto boolean_query_json = dsl_json["bool"];
+            JSON_NULL_CHECK(boolean_query_json);
             status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr);
             if (!status.ok()) {
                 return status;
