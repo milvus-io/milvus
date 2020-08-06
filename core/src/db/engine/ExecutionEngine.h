@@ -32,6 +32,7 @@ struct ExecutionEngineContext {
     QueryResultPtr query_result_;
     TargetFields target_fields_;  // for build index task, which field should be build
 };
+using ExecutionEngineContextPtr = std::shared_ptr<ExecutionEngineContext>;
 
 class ExecutionEngine {
  public:

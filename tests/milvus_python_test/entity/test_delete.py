@@ -129,6 +129,8 @@ class TestDeleteBase:
         res_count = connect.count_entities(collection)
         assert res_count == nb - 1
 
+    # TODO
+    @pytest.mark.level(2)
     def test_insert_delete_B(self, connect, id_collection):
         '''
         target: test delete entity
@@ -193,6 +195,7 @@ class TestDeleteBase:
         assert res_count == nb - len(delete_ids)
 
     # TODO
+    @pytest.mark.level(2)
     def test_insert_same_ids_after_delete(self, connect, collection):
         '''
         method: add entities and delete
@@ -212,16 +215,17 @@ class TestDeleteBase:
         assert res_count == nb - 1
 
     # TODO
+    @pytest.mark.level(2)
     def test_insert_same_ids_after_delete_binary(self, connect, binary_collection):
         '''
         method: add entities, with the same id and delete the ids
         expected: status DELETED, all id deleted
         '''
         insert_ids = [i for i in range(nb)]
-        ids = connect.insert(binary, binary_entities, insert_ids)
-        connect.flush([binary])
+        ids = connect.insert(binary_collection, binary_entities, insert_ids)
+        connect.flush([binary_collection])
         delete_ids = [ids[0], ids[-1]]
-        status = connect.delete_entity_by_id(binary, delete_ids)
+        status = connect.delete_entity_by_id(binary_collection, delete_ids)
         assert status
         new_ids = connect.insert(binary, binary_entity, [ids[0]])
         assert new_ids == [ids[0]]
