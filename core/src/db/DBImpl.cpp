@@ -167,6 +167,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 
     auto ctx = context;
 
+    LOG_SERVER_FATAL_ << "check id auto gen";
     // default id is auto-generated
     auto params = ctx.collection->GetParams();
     if (params.find(PARAM_UID_AUTOGEN) == params.end()) {
@@ -174,6 +175,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
         ctx.collection->SetParams(params);
     }
 
+    LOG_SERVER_FATAL_ << "check uid existence";
     // check uid existence
     snapshot::FieldPtr uid_field;
     for (auto& pair : ctx.fields_schema) {
@@ -183,6 +185,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
         }
     }
 
+    LOG_SERVER_FATAL_ << "add uid field";
     // add uid field if not specified
     if (uid_field == nullptr) {
         uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, DataType::INT64);
@@ -195,7 +198,9 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
         0, 0, DEFAULT_DELETED_DOCS_NAME, milvus::engine::FieldElementType::FET_DELETED_DOCS);
     ctx.fields_schema[uid_field] = {bloom_filter_element, delete_doc_element};
 
+    LOG_SERVER_FATAL_ << "Create Collection Operation";
     auto op = std::make_shared<snapshot::CreateCollectionOperation>(ctx);
+    LOG_SERVER_FATAL_ << "Create Collection Operation end";
     return op->Push();
 }
 
