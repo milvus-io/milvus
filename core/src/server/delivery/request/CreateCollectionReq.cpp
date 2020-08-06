@@ -60,13 +60,13 @@ CreateCollectionReq::OnExecute() {
 
         // step 2: create snapshot collection context
         engine::snapshot::CreateCollectionContext create_collection_context;
-        LOG_SERVER_FATAL_ << "make collection_schema";
+        LOG_SERVER_DEBUG_ << "make collection_schema";
         auto collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_, extra_params_);
         if (collection_schema == nullptr) {
-            LOG_SERVER_FATAL_ << "collection_schema null";
+            LOG_SERVER_DEBUG_ << "collection_schema null";
         }
 
-        LOG_SERVER_FATAL_ << "create_collection_context";
+        LOG_SERVER_DEBUG_ << "create_collection_context";
         create_collection_context.collection = collection_schema;
         for (auto& field_kv : fields_) {
             auto& field_name = field_kv.first;
@@ -83,7 +83,7 @@ CreateCollectionReq::OnExecute() {
                 index_name = index_params["name"];
             }
 
-            LOG_SERVER_FATAL_ << "checkout Default_UID_NAME";
+            LOG_SERVER_DEBUG_ << "checkout Default_UID_NAME";
             // validate id field
             if (field_name == engine::DEFAULT_UID_NAME) {
                 if (field_type != engine::DataType::INT64) {
