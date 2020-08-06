@@ -515,8 +515,10 @@ macro(build_faiss)
 
     if (CCACHE_FOUND)
         set(FAISS_C_COMPILER "${CCACHE_FOUND} ${CMAKE_C_COMPILER}")
-    else ()
         set(FAISS_CXX_COMPILER "${CCACHE_FOUND} ${CMAKE_CXX_COMPILER}")
+    else ()
+        set(FAISS_C_COMPILER "${CMAKE_C_COMPILER}")
+        set(FAISS_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
     endif()
 
     set(FAISS_CONFIGURE_ARGS
