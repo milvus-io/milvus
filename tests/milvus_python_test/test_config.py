@@ -26,7 +26,7 @@ class TestCacheConfig:
     """
     @pytest.fixture(scope="function", autouse=True)
     def skip_http_check(self, args):
-        if args["handler"] == "HTTP":
+        if args["handler"] in ["HTTP", "GRPC"]:
             pytest.skip("skip in http mode")
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
