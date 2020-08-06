@@ -203,6 +203,7 @@ BuildQueryPtr(const std::string& collection_name, int64_t n, int64_t topk, std::
 
     query_ptr->root = general_query;
     query_ptr->vectors.insert(std::make_pair(placeholder, vector_query));
+    query_ptr->metric_types.insert({"float_vector", "L2"});
 }
 
 void
@@ -245,7 +246,9 @@ BuildEntities2(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& d
 
 TEST_F(DBTest, CollectionTest) {
     LSN_TYPE lsn = 0;
-    auto next_lsn = [&]() -> decltype(lsn) { return ++lsn; };
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
     std::string c1 = "c1";
     auto status = CreateCollection(db_, c1, next_lsn());
     ASSERT_TRUE(status.ok());
@@ -299,7 +302,9 @@ TEST_F(DBTest, CollectionTest) {
 
 TEST_F(DBTest, PartitionTest) {
     LSN_TYPE lsn = 0;
-    auto next_lsn = [&]() -> decltype(lsn) { return ++lsn; };
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
     std::string c1 = "c1";
     auto status = CreateCollection(db_, c1, next_lsn());
     ASSERT_TRUE(status.ok());
@@ -336,7 +341,9 @@ TEST_F(DBTest, PartitionTest) {
 
 TEST_F(DBTest, VisitorTest) {
     LSN_TYPE lsn = 0;
-    auto next_lsn = [&]() -> decltype(lsn) { return ++lsn; };
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
 
     std::string c1 = "c1";
     auto status = CreateCollection(db_, c1, next_lsn());
@@ -440,7 +447,9 @@ TEST_F(DBTest, VisitorTest) {
 
 TEST_F(DBTest, QueryTest) {
     LSN_TYPE lsn = 0;
-    auto next_lsn = [&]() -> decltype(lsn) { return ++lsn; };
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
 
     std::string c1 = "c1";
     auto status = CreateCollection3(db_, c1, next_lsn());
@@ -471,27 +480,73 @@ TEST_F(DBTest, QueryTest) {
 }
 
 TEST_F(DBTest, InsertTest) {
-    std::string collection_name = "MERGE_TEST";
-    auto status = CreateCollection2(db_, collection_name, 0);
-    ASSERT_TRUE(status.ok());
+    auto do_insert = [&](bool autogen_id, bool provide_id) -> void {
+        CreateCollectionContext context;
+        context.lsn = 0;
+        std::string collection_name = "INSERT_TEST";
+        auto collection_schema = std::make_shared<Collection>(collection_name);
+        milvus::json params;
+        params[milvus::engine::PARAM_UID_AUTOGEN] = autogen_id;
+        collection_schema->SetParams(params);
+        context.collection = collection_schema;
 
-    status = db_->Flush();
-    ASSERT_TRUE(status.ok());
+        std::string field_name = "field_0";
+        auto field = std::make_shared<Field>(field_name, 0, milvus::engine::DataType::INT32);
+        context.fields_schema[field] = {};
 
-    const uint64_t entity_count = 100;
-    milvus::engine::DataChunkPtr data_chunk;
-    BuildEntities(entity_count, 0, data_chunk);
+        field = std::make_shared<Field>(milvus::engine::DEFAULT_UID_NAME, 0, milvus::engine::DataType::INT64);
+        context.fields_schema[field] = {};
 
-    status = db_->Insert(collection_name, "", data_chunk);
-    ASSERT_TRUE(status.ok());
+        auto status = db_->CreateCollection(context);
 
-    status = db_->Flush();
-    ASSERT_TRUE(status.ok());
+        milvus::engine::DataChunkPtr data_chunk = std::make_shared<milvus::engine::DataChunk>();
+        data_chunk->count_ = 100;
+        if (provide_id) {
+            milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+            raw->data_.resize(100 * sizeof(int64_t));
+            int64_t* p = (int64_t*)raw->data_.data();
+            for (auto i = 0; i < data_chunk->count_; ++i) {
+                p[i] = i;
+            }
+            data_chunk->fixed_fields_[milvus::engine::DEFAULT_UID_NAME] = raw;
+        }
+        {
+            milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+            raw->data_.resize(100 * sizeof(int32_t));
+            int32_t* p = (int32_t*)raw->data_.data();
+            for (auto i = 0; i < data_chunk->count_; ++i) {
+                p[i] = i + 5000;
+            }
+            data_chunk->fixed_fields_[field_name] = raw;
+        }
 
-    int64_t row_count = 0;
-    status = db_->CountEntities(collection_name, row_count);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(row_count, entity_count);
+        status = db_->Insert(collection_name, "", data_chunk);
+        if (autogen_id == provide_id) {
+            ASSERT_FALSE(status.ok());
+        } else {
+            ASSERT_TRUE(status.ok());
+        }
+
+        status = db_->Flush();
+        ASSERT_TRUE(status.ok());
+
+        int64_t row_count = 0;
+        status = db_->CountEntities(collection_name, row_count);
+        ASSERT_TRUE(status.ok());
+        if (autogen_id == provide_id) {
+            ASSERT_EQ(row_count, 0);
+        } else {
+            ASSERT_EQ(row_count, data_chunk->count_);
+        }
+
+        status = db_->DropCollection(collection_name);
+        ASSERT_TRUE(status.ok());
+    };
+
+    do_insert(true, true);
+    do_insert(true, false);
+    do_insert(false, true);
+    do_insert(false, false);
 }
 
 TEST_F(DBTest, MergeTest) {
@@ -728,11 +783,132 @@ TEST_F(DBTest, StatsTest) {
 
     milvus::json json_stats;
     status = db_->GetCollectionStats(collection_name, json_stats);
-    int64_t row_count = json_stats[milvus::engine::JSON_ROW_COUNT];
-    ASSERT_EQ(row_count, entity_count * 2);
 
     std::string ss = json_stats.dump();
-    std::cout << ss << std::endl;
+    ASSERT_FALSE(ss.empty());
+
+    int64_t row_count = json_stats[milvus::engine::JSON_ROW_COUNT].get<int64_t>();
+    ASSERT_EQ(row_count, entity_count * 2);
+
+    int64_t data_size = json_stats[milvus::engine::JSON_DATA_SIZE].get<int64_t>();
+    ASSERT_GT(data_size, 0);
+
+    auto partitions = json_stats[milvus::engine::JSON_PARTITIONS];
+    ASSERT_EQ(partitions.size(), 2);
+
+    for (int32_t i = 0; i < 2; ++i) {
+        auto partition = partitions[i];
+        row_count = partition[milvus::engine::JSON_ROW_COUNT].get<int64_t>();
+        ASSERT_EQ(row_count, entity_count);
+        auto segments = partition[milvus::engine::JSON_SEGMENTS];
+        ASSERT_EQ(segments.size(), 1);
+
+        auto segment = segments[0];
+        row_count = segment[milvus::engine::JSON_ROW_COUNT].get<int64_t>();
+        ASSERT_EQ(row_count, entity_count);
+
+        data_size = segment[milvus::engine::JSON_DATA_SIZE].get<int64_t>();
+        ASSERT_GT(data_size, 0);
+
+        auto files = segment[milvus::engine::JSON_FILES];
+        ASSERT_GT(files.size(), 0);
+
+        for (uint64_t k = 0; k < files.size(); ++k) {
+            auto file = files[k];
+            std::string field_name = file[milvus::engine::JSON_FIELD].get<std::string>();
+            ASSERT_FALSE(field_name.empty());
+            std::string path = file[milvus::engine::JSON_PATH].get<std::string>();
+            ASSERT_FALSE(path.empty());
+            data_size = file[milvus::engine::JSON_DATA_SIZE].get<int64_t>();
+            ASSERT_GE(data_size, 0);
+        }
+    }
+}
+
+TEST_F(DBTest, FetchTest) {
+    std::string collection_name = "STATS_TEST";
+    auto status = CreateCollection2(db_, collection_name, 0);
+    ASSERT_TRUE(status.ok());
+
+    std::string partition_name = "p1";
+    status = db_->CreatePartition(collection_name, partition_name);
+    ASSERT_TRUE(status.ok());
+
+    const uint64_t entity_count = 1000;
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities(entity_count, 0, data_chunk);
+
+    status = db_->Insert(collection_name, "", data_chunk);
+    ASSERT_TRUE(status.ok());
+
+    data_chunk->fixed_fields_.erase(milvus::engine::DEFAULT_UID_NAME); // clear auto-generated id
+
+    status = db_->Insert(collection_name, partition_name, data_chunk);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok());
+
+    milvus::engine::IDNumbers batch_entity_ids;
+    milvus::engine::utils::GetIDFromChunk(data_chunk, batch_entity_ids);
+    ASSERT_EQ(batch_entity_ids.size(), entity_count);
+
+    int64_t delete_count = 10;
+    milvus::engine::IDNumbers delete_entity_ids = batch_entity_ids;
+    delete_entity_ids.resize(delete_count);
+    status = db_->DeleteEntityByID(collection_name, delete_entity_ids);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok());
+
+    std::vector<std::string> field_names = {milvus::engine::DEFAULT_UID_NAME, VECTOR_FIELD_NAME, "field_0"};
+    std::vector<bool> valid_row;
+    milvus::engine::DataChunkPtr fetch_chunk;
+    status = db_->GetEntityByID(collection_name, delete_entity_ids, field_names, valid_row, fetch_chunk);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(fetch_chunk->count_, 0);
+    for (auto valid : valid_row) {
+        ASSERT_FALSE(valid);
+    }
+
+    fetch_chunk = nullptr;
+    status = db_->GetEntityByID(collection_name, batch_entity_ids, field_names, valid_row, fetch_chunk);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(fetch_chunk->count_, batch_entity_ids.size() - delete_entity_ids.size());
+    auto& uid = fetch_chunk->fixed_fields_[milvus::engine::DEFAULT_UID_NAME];
+    ASSERT_EQ(uid->Size() / sizeof(int64_t), fetch_chunk->count_);
+    auto& vectors = fetch_chunk->fixed_fields_[VECTOR_FIELD_NAME];
+    ASSERT_EQ(vectors->Size() / (COLLECTION_DIM * sizeof(float)), fetch_chunk->count_);
+
+    milvus::json json_stats;
+    status = db_->GetCollectionStats(collection_name, json_stats);
+    ASSERT_TRUE(status.ok());
+
+    auto partitions = json_stats[milvus::engine::JSON_PARTITIONS];
+    ASSERT_EQ(partitions.size(), 2);
+
+    for (int32_t i = 0; i < 2; ++i) {
+        auto partition = partitions[i];
+        std::string tag = partition[milvus::engine::JSON_PARTITION_TAG].get<std::string>();
+
+        auto segments = partition[milvus::engine::JSON_SEGMENTS];
+        ASSERT_EQ(segments.size(), 1);
+
+        auto segment = segments[0];
+        int64_t id = segment[milvus::engine::JSON_ID].get<int64_t>();
+
+        milvus::engine::IDNumbers segment_entity_ids;
+        status = db_->ListIDInSegment(collection_name, id, segment_entity_ids);
+        std::cout << status.message() << std::endl;
+        ASSERT_TRUE(status.ok());
+
+//        if (tag == partition_name) {
+//            ASSERT_EQ(segment_entity_ids.size(), batch_entity_ids.size() - delete_entity_ids.size());
+//        } else {
+            ASSERT_EQ(segment_entity_ids.size(), batch_entity_ids.size());
+//        }
+    }
 }
 
 TEST_F(DBTest, DeleteEntitiesTest) {
@@ -860,7 +1036,7 @@ TEST_F(DBTest, DeleteStaleTest) {
     status = db_->Flush(collection_name);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
-    for (size_t i = 0; i < 5; i ++) {
+    for (size_t i = 0; i < 5; i++) {
         del_ids.push_back(entity_ids[i]);
         del_ids.push_back(entity_ids2[i]);
     }

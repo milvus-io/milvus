@@ -111,20 +111,24 @@ class TestGetBase:
         with pytest.raises(Exception) as e:
             res = connect.get_entity_by_id(collection, ids)
 
-    def test_get_entity_same_ids(self, connect, collection):
+    # TODO
+    @pytest.mark.level(2)
+    def test_get_entity_same_ids(self, connect, id_collection):
         '''
         target: test.get_entity_by_id, with the same ids
         method: add entity, and get one id
         expected: entity returned equals insert
         '''
         ids = [1 for i in range(nb)]
-        res_ids = connect.insert(collection, entities, ids)
-        connect.flush([collection])
+        res_ids = connect.insert(id_collection, entities, ids)
+        connect.flush([id_collection])
         get_ids = [ids[0]]
-        res = connect.get_entity_by_id(collection, get_ids)
+        res = connect.get_entity_by_id(id_collection, get_ids)
         assert len(res) == 1
         assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_entity_params_same_ids(self, connect, collection):
         '''
         target: test.get_entity_by_id, with the same ids
@@ -261,6 +265,7 @@ class TestGetBase:
         for i in range(get_pos, get_pos*2):
             assert_equal_vector(res[i].get(default_float_vec_field_name), new_entities[-1]["values"][i-get_pos])
 
+    @pytest.mark.level(2)
     def test_get_entities_indexed_tag(self, connect, collection, get_simple_index, get_pos):
         '''
         target: test.get_entity_by_id
@@ -397,6 +402,8 @@ class TestGetBase:
         for i in range(get_pos):
             assert res[i] is None
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_entities_after_delete_compact(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -414,6 +421,7 @@ class TestGetBase:
         for i in range(get_pos):
             assert res[i] is None
 
+    @pytest.mark.level(2)
     def test_get_entities_indexed_batch(self, connect, collection, get_simple_index, get_pos):
         '''
         target: test.get_entity_by_id
@@ -428,6 +436,7 @@ class TestGetBase:
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
+    @pytest.mark.level(2)
     def test_get_entities_indexed_single(self, connect, collection, get_simple_index, get_pos):
         '''
         target: test.get_entity_by_id
@@ -464,7 +473,8 @@ class TestGetBase:
             enable_flush(connect)
 
     # TODO:
-    def test_get_entities_after_delete_same_ids(self, connect, collection):
+    @pytest.mark.level(2)
+    def test_get_entities_after_delete_same_ids(self, connect, id_collection):
         '''
         target: test.get_entity_by_id
         method: add entities with the same ids, and delete, get entity by the given id
@@ -472,12 +482,12 @@ class TestGetBase:
         '''
         ids = [i for i in range(nb)]
         ids[0] = 1
-        res_ids = connect.insert(collection, entities, ids)
-        connect.flush([collection])
-        status = connect.delete_entity_by_id(collection, [1])
-        connect.flush([collection])
+        res_ids = connect.insert(id_collection, entities, ids)
+        connect.flush([id_collection])
+        status = connect.delete_entity_by_id(id_collection, [1])
+        connect.flush([id_collection])
         get_ids = [1]
-        res = connect.get_entity_by_id(collection, get_ids)
+        res = connect.get_entity_by_id(id_collection, get_ids)
         assert res[0] is None
 
     def test_get_entity_after_delete_with_partition(self, connect, collection, get_pos):
