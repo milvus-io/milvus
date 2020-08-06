@@ -35,7 +35,7 @@ struct MXLogRecord {
     std::string collection_id;
     std::string partition_tag;
     uint32_t length;
-    const IDNumber* ids;
+    const id_t* ids;
     uint32_t data_size;
     const void* data;
     std::vector<std::string> field_names;  // will be removed

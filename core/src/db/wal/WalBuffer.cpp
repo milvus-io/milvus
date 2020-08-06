@@ -188,7 +188,7 @@ MXLogBuffer::SurplusSpace() {
 uint32_t
 MXLogBuffer::RecordSize(const MXLogRecord& record) {
     return SizeOfMXLogRecordHeader + (uint32_t)record.collection_id.size() + (uint32_t)record.partition_tag.size() +
-           record.length * (uint32_t)sizeof(IDNumber) + record.data_size;
+           record.length * (uint32_t)sizeof(id_t) + record.data_size;
 }
 
 uint32_t
@@ -260,8 +260,8 @@ MXLogBuffer::Append(MXLogRecord& record) {
         current_write_offset += record.partition_tag.size();
     }
     if (record.ids != nullptr && record.length > 0) {
-        memcpy(current_write_buf + current_write_offset, record.ids, record.length * sizeof(IDNumber));
-        current_write_offset += record.length * sizeof(IDNumber);
+        memcpy(current_write_buf + current_write_offset, record.ids, record.length * sizeof(id_t));
+        current_write_offset += record.length * sizeof(id_t);
     }
 
     if (record.data != nullptr && record.data_size > 0) {
@@ -353,8 +353,8 @@ MXLogBuffer::AppendEntity(milvus::engine::wal::MXLogRecord& record) {
         current_write_offset += record.partition_tag.size();
     }
     if (record.ids != nullptr && record.length > 0) {
-        memcpy(current_write_buf + current_write_offset, record.ids, record.length * sizeof(IDNumber));
-        current_write_offset += record.length * sizeof(IDNumber);
+        memcpy(current_write_buf + current_write_offset, record.ids, record.length * sizeof(id_t));
+        current_write_offset += record.length * sizeof(id_t);
     }
 
     if (record.data != nullptr && record.data_size > 0) {
@@ -455,8 +455,8 @@ MXLogBuffer::Next(const uint64_t last_applied_lsn, MXLogRecord& record) {
     }
 
     if (head->vector_num != 0) {
-        record.ids = (IDNumber*)(current_read_buf + current_read_offset);
-        current_read_offset += head->vector_num * sizeof(IDNumber);
+        record.ids = (id_t*)(current_read_buf + current_read_offset);
+        current_read_offset += head->vector_num * sizeof(id_t);
     } else {
         record.ids = nullptr;
     }
@@ -554,8 +554,8 @@ MXLogBuffer::NextEntity(const uint64_t last_applied_lsn, milvus::engine::wal::MX
     }
 
     if (head->vector_num != 0) {
-        record.ids = (IDNumber*)(current_read_buf + current_read_offset);
-        current_read_offset += head->vector_num * sizeof(IDNumber);
+        record.ids = (id_t*)(current_read_buf + current_read_offset);
+        current_read_offset += head->vector_num * sizeof(id_t);
     } else {
         record.ids = nullptr;
     }

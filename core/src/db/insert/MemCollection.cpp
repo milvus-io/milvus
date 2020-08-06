@@ -171,7 +171,9 @@ MemCollection::ApplyDeletes() {
     context.lsn = lsn_;
     auto segments_op = std::make_shared<snapshot::CompoundSegmentsOperation>(context, ss);
 
+    int64_t segment_iterated = 0;
     auto segment_executor = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* iterator) -> Status {
+        segment_iterated++;
         auto seg_visitor = engine::SegmentVisitor::Build(ss, segment->GetID());
         segment::SegmentReaderPtr segment_reader =
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
@@ -290,10 +292,15 @@ MemCollection::ApplyDeletes() {
     segment_iterator->Iterate();
     STATUS_CHECK(segment_iterator->GetStatus());
 
+    if (segment_iterated == 0) {
+        return Status::OK();  // no segment, nothing to do
+    }
+
     fiu_do_on("MemCollection.ApplyDeletes.RandomSleep", {
         std::srand(std::time(nullptr));
         sleep(std::rand() % 3);
     });
+
     return segments_op->Push();
 }
 

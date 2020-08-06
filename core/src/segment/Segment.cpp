@@ -144,7 +144,7 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
 Status
 Segment::DeleteEntity(std::vector<offset_t>& offsets) {
     // sort offset in descendant
-    std::sort(offsets.begin(), offsets.end(), std::less<offset_t>());
+    std::sort(offsets.begin(), offsets.end(), std::greater<offset_t>());
 
     // delete entity data
     for (auto& pair : fixed_fields_) {
