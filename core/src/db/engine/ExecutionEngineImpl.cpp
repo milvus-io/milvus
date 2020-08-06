@@ -226,8 +226,8 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 }
 
 void
-MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::segment::doc_id_t>& uids, int64_t nq,
-                 int64_t k, float* distances, int64_t* labels) {
+MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<id_t>& uids, int64_t nq, int64_t k,
+                 float* distances, int64_t* labels) {
     int64_t* res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
     float* res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
 
@@ -787,7 +787,7 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
 
-    std::vector<segment::doc_id_t> uids;
+    std::vector<id_t> uids;
     faiss::ConcurrentBitsetPtr blacklist;
     if (from_index) {
         auto dataset =
