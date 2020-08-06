@@ -64,7 +64,6 @@ set(faiss_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFPQ.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/OffsetBaseIndex.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexIVF_NM.cpp
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexIVFSQNR_NM.cpp
         )
 if (MILVUS_GPU_VERSION)
 set(faiss_srcs ${faiss_srcs}
@@ -75,7 +74,6 @@ set(faiss_srcs ${faiss_srcs}
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu/IndexGPUIVFPQ.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu/IndexIVFSQHybrid.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.cpp
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/gpu/IndexGPUIVFSQNR_NM.cpp
         )
 endif ()
 
@@ -134,28 +132,12 @@ target_link_libraries(test_ivf_cpu_nm ${depend_libs} ${unittest_libs} ${basic_li
 install(TARGETS test_ivf_cpu_nm DESTINATION unittest)
 
 ################################################################################
-#<IVFSQ8NM-TEST-CPU>
-if (NOT TARGET test_ivfsq_cpu_nm)
-    add_executable(test_ivfsq_cpu_nm test_ivfsq_cpu_nm.cpp ${faiss_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_ivfsq_cpu_nm ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_ivfsq_cpu_nm DESTINATION unittest)
-
-################################################################################
 #<IVFNM-TEST-GPU>
 if (NOT TARGET test_ivf_gpu_nm)
     add_executable(test_ivf_gpu_nm test_ivf_gpu_nm.cpp ${faiss_srcs} ${util_srcs})
 endif ()
 target_link_libraries(test_ivf_gpu_nm ${depend_libs} ${unittest_libs} ${basic_libs})
 install(TARGETS test_ivf_gpu_nm DESTINATION unittest)
-
-################################################################################
-#<IVFSQ8NM-TEST-GPU>
-if (NOT TARGET test_ivfsq_gpu_nm)
-    add_executable(test_ivfsq_gpu_nm test_ivfsq_gpu_nm.cpp ${faiss_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_ivfsq_gpu_nm ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_ivfsq_gpu_nm DESTINATION unittest)
 
 ################################################################################
 #<BinaryIDMAP-TEST>
@@ -200,24 +182,13 @@ install(TARGETS test_nsg DESTINATION unittest)
 ################################################################################
 #<HNSW-TEST>
 set(hnsw_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexHNSW_NM.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexHNSW.cpp
         )
 if (NOT TARGET test_hnsw)
     add_executable(test_hnsw test_hnsw.cpp ${hnsw_srcs} ${util_srcs})
 endif ()
 target_link_libraries(test_hnsw ${depend_libs} ${unittest_libs} ${basic_libs})
 install(TARGETS test_hnsw DESTINATION unittest)
-
-################################################################################
-#<HNSWSQ8NR-TEST>
-set(hnsw_sq8nm_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexHNSW_SQ8NM.cpp
-        )
-if (NOT TARGET test_hnsw_sq8nm)
-    add_executable(test_hnsw_sq8nm test_hnsw_sq8nm.cpp ${hnsw_sq8nm_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_hnsw_sq8nm ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_hnsw_sq8nm DESTINATION unittest)
 
 ################################################################################
 #<RHNSW_FLAT-TEST>
