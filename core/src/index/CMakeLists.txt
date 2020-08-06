@@ -50,7 +50,7 @@ include(ExternalProject)
 include(DefineOptionsCore)
 include(BuildUtilsCore)
 
-using_ccache_if_defined( MILVUS_USE_CCACHE )
+using_ccache_if_defined( KNOWHERE_USE_CCACHE )
 
 if (MILVUS_GPU_VERSION)
     message(STATUS "Building Knowhere GPU version")
