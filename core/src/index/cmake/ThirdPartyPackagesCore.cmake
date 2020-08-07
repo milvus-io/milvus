@@ -169,7 +169,7 @@ if ("${MAKE}" STREQUAL "")
     endif ()
 endif ()
 
-set(MAKE_BUILD_ARGS "-j8")
+set(MAKE_BUILD_ARGS "-j6")
 
 
 # ----------------------------------------------------------------------
