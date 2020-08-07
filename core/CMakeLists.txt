@@ -98,6 +98,7 @@ append_flags( CMAKE_CXX_FLAGS
                     "-DELPP_THREAD_SAFE"
                     "-fopenmp"
                     "-Werror=return-type"
+                    "-fpch-preprocess"
                     )
 
 # **************************** Source files ****************************
