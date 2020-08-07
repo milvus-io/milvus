@@ -199,7 +199,8 @@ BuildQueryPtr(const std::string& collection_name, int64_t n, int64_t topk, std::
         vector_record.float_data[COLLECTION_DIM * i] += i / 2000.;
     }
     vector_query->query_vector = vector_record;
-    vector_query->extra_params = {{"metric_type", "L2"}, {"nprobe", 1024}};
+    vector_query->metric_type = "L2";
+    vector_query->extra_params = {{"nprobe", 1024}};
 
     query_ptr->root = general_query;
     query_ptr->vectors.insert(std::make_pair(placeholder, vector_query));
