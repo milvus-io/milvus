@@ -31,11 +31,11 @@ IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2);
 bool
 IsBinaryMetricType(const std::string& metric_type);
 
-engine::DateT
+engine::date_t
 GetDate(const std::time_t& t, int day_delta = 0);
-engine::DateT
+engine::date_t
 GetDate();
-engine::DateT
+engine::date_t
 GetDateWithDelta(int day_delta);
 
 struct MetaUriInfo {

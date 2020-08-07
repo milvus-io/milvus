@@ -448,7 +448,7 @@ WalManager::Insert(const std::string& collection_id, const std::string& partitio
         return false;
     }
     size_t dim = vectors.size() / vector_num;
-    size_t unit_size = dim * sizeof(T) + sizeof(IDNumber);
+    size_t unit_size = dim * sizeof(T) + sizeof(id_t);
     size_t head_size = SizeOfMXLogRecordHeader + collection_id.length() + partition_tag.length();
 
     MXLogRecord record;
@@ -522,7 +522,7 @@ WalManager::InsertEntities(const std::string& collection_id, const std::string& 
         attr_unit_size += attr_it->second;
     }
 
-    size_t unit_size = dim * sizeof(T) + sizeof(IDNumber) + attr_unit_size;
+    size_t unit_size = dim * sizeof(T) + sizeof(id_t) + attr_unit_size;
     size_t head_size = SizeOfMXLogRecordHeader + collection_id.length() + partition_tag.length();
 
     // TODO(yukun): field_name put into MXLogRecord??？
@@ -588,7 +588,7 @@ WalManager::DeleteById(const std::string& collection_id, const IDNumbers& entity
         return false;
     }
 
-    size_t unit_size = sizeof(IDNumber);
+    size_t unit_size = sizeof(id_t);
     size_t head_size = SizeOfMXLogRecordHeader + collection_id.length();
 
     MXLogRecord record;

@@ -42,10 +42,10 @@ class MemManagerImpl : public MemManager {
     InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) override;
 
     Status
-    DeleteEntity(int64_t collection_id, IDNumber engity_ids, uint64_t lsn) override;
+    DeleteEntity(int64_t collection_id, id_t entity_ids, uint64_t lsn) override;
 
     Status
-    DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* engity_idss, uint64_t lsn) override;
+    DeleteEntities(int64_t collection_id, int64_t length, const id_t* entity_ids, uint64_t lsn) override;
 
     Status
     Flush(int64_t collection_id) override;
