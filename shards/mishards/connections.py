@@ -224,6 +224,16 @@ logger = logging.getLogger(__name__)
 #         connection = Connection(name=self.name, uri=self.uri, max_retry=self.max_retry, **self.kwargs)
 #         return connection
 
+def version_supported(version):
+    version_pattern = lambda v : ".".join(v.split(".")[:2])
+
+    sv_patterns = set()
+    for supported_version in settings.SERVER_VERSIONS:
+        sv_patterns.add(version_pattern(supported_version))
+
+    v_pattern = version_pattern(version)
+    return v_pattern in sv_patterns
+
 
 class ConnectionGroup(topology.TopoGroup):
     def __init__(self, name):
@@ -243,7 +253,7 @@ class ConnectionGroup(topology.TopoGroup):
         if not status.OK():
             logger.error('Cannot connect to newly added address: {}. Remove it now'.format(topo_object.name))
             return False
-        if version not in settings.SERVER_VERSIONS:
+        if not version_supported(version):
             logger.error('Cannot connect to server of version: {}. Only {} supported'.format(version,
                 settings.SERVER_VERSIONS))
             return False
