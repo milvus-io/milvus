@@ -637,12 +637,27 @@ TEST_F(DBTest, CompactTest) {
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
-    status = db_->Flush();
-    ASSERT_TRUE(status.ok());
-
     milvus::engine::IDNumbers batch_entity_ids;
     milvus::engine::utils::GetIDFromChunk(data_chunk, batch_entity_ids);
     ASSERT_EQ(batch_entity_ids.size(), entity_count);
+
+    auto delete_entity = [&](int64_t from, int64_t to) -> void {
+        int64_t delete_count = to - from;
+        if (delete_count < 0) {
+            return;
+        }
+        std::vector<milvus::engine::id_t> delete_ids;
+        for (auto i = from; i < to; ++i) {
+            delete_ids.push_back(batch_entity_ids[i]);
+        }
+        status = db_->DeleteEntityByID(collection_name, delete_ids);
+        ASSERT_TRUE(status.ok());
+    };
+    int64_t delete_count_1 = 200;
+    delete_entity(100, 100 + delete_count_1);
+
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok());
 
     auto validate_entity_data = [&]() -> void {
         std::vector<std::string> field_names = {"field_0"};
@@ -663,14 +678,8 @@ TEST_F(DBTest, CompactTest) {
     };
     validate_entity_data();
 
-    int64_t delete_count = 100;
-    int64_t gap = entity_count / delete_count - 1;
-    std::vector<milvus::engine::id_t> delete_ids;
-    for (auto i = 1; i <= delete_count; ++i) {
-        delete_ids.push_back(batch_entity_ids[i * gap]);
-    }
-    status = db_->DeleteEntityByID(collection_name, delete_ids);
-    ASSERT_TRUE(status.ok());
+    int64_t delete_count_2 = 100;
+    delete_entity(700, 700 + delete_count_2);
 
     status = db_->Flush();
     ASSERT_TRUE(status.ok());
@@ -679,7 +688,7 @@ TEST_F(DBTest, CompactTest) {
         int64_t row_count = 0;
         status = db_->CountEntities(collection_name, row_count);
         ASSERT_TRUE(status.ok());
-        ASSERT_EQ(row_count, entity_count - delete_count);
+        ASSERT_EQ(row_count, entity_count - delete_count_1 - delete_count_2);
 
         status = db_->Compact(dummy_context_, collection_name, threshold);
         ASSERT_TRUE(status.ok());
@@ -688,7 +697,7 @@ TEST_F(DBTest, CompactTest) {
 
         status = db_->CountEntities(collection_name, row_count);
         ASSERT_TRUE(status.ok());
-        ASSERT_EQ(row_count, entity_count - delete_count);
+        ASSERT_EQ(row_count, entity_count - delete_count_1 - delete_count_2);
 
         validate_entity_data();
     };
@@ -953,14 +962,8 @@ TEST_F(DBTest, DeleteEntitiesTest) {
         BuildEntities(count, batch_index, data_chunk);
         STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
         STATUS_CHECK(db_->Flush(collection));
-        auto iter = data_chunk->fixed_fields_.find(milvus::engine::DEFAULT_UID_NAME);
-        if (iter == data_chunk->fixed_fields_.end()) {
-            return Status(1, "Cannot find uid field");
-        }
-        auto& ids_buffer = iter->second;
-        ids.resize(data_chunk->count_);
-        memcpy(ids.data(), ids_buffer->data_.data(), ids_buffer->Size());
 
+        milvus::engine::utils::GetIDFromChunk(data_chunk, ids);
         return Status::OK();
     };
 
