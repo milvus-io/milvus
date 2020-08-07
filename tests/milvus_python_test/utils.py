@@ -278,15 +278,14 @@ def assert_equal_entity(a, b):
 
 
 def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
-                      metric_type=None):
+                      metric_type="L2"):
     if rand_vector is True:
         dimension = len(entities[-1]["values"][0])
         query_vectors = gen_vectors(nq, dimension)
     else:
         query_vectors = entities[-1]["values"][:nq]
     must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
-    if metric_type is not None:
-        must_param["vector"][field_name]["metric_type"] = metric_type
+    must_param["vector"][field_name]["metric_type"] = metric_type
     query = {
         "bool": {
             "must": [must_param]
@@ -324,9 +323,9 @@ def gen_default_range_expr(keyword="range", ranges=None):
 
 def gen_invalid_range():
     range = [
-        {"range": 1},
-        {"range": {}},
-        {"range": []},
+        # {"range": 1},
+        # {"range": {}},
+        # {"range": []},
         {"range": {"range": {"int64": {"ranges": {"GT": 0, "LT": nb//2}}}}}
     ]
     return range

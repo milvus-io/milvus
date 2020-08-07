@@ -277,7 +277,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
 
         auto single_size = data->data_.size() / id_size;
 
-        if (name == engine::DEFAULT_UID_NAME) {
+        if (name == engine::FIELD_UID) {
             int64_t int64_value;
             auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
             for (int i = 0; i < id_size; i++) {
@@ -1363,7 +1363,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         int64_t size = request->entity_id_array_size() * sizeof(int64_t);
         std::vector<uint8_t> temp_data(size, 0);
         memcpy(temp_data.data(), request->entity_id_array().data(), size);
-        chunk_data.insert(std::make_pair(engine::DEFAULT_UID_NAME, temp_data));
+        chunk_data.insert(std::make_pair(engine::FIELD_UID, temp_data));
     }
 
     std::string collection_name = request->collection_name();
@@ -1375,7 +1375,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     }
 
     // return generated ids
-    auto pair = chunk_data.find(engine::DEFAULT_UID_NAME);
+    auto pair = chunk_data.find(engine::FIELD_UID);
     if (pair != chunk_data.end()) {
         response->mutable_entity_id_array()->Resize(static_cast<int>(pair->second.size() / sizeof(int64_t)), 0);
         memcpy(response->mutable_entity_id_array()->mutable_data(), pair->second.data(), pair->second.size());
@@ -1569,6 +1569,7 @@ GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::Bool
         auto term_query = std::make_shared<query::TermQuery>();
         nlohmann::json json_obj = json["term"];
         JSON_NULL_CHECK(json_obj);
+        JSON_OBJECT_CHECK(json_obj);
         term_query->json_obj = json_obj;
         nlohmann::json::iterator json_it = json_obj.begin();
         field_name = json_it.key();
@@ -1580,6 +1581,7 @@ GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::Bool
         auto range_query = std::make_shared<query::RangeQuery>();
         nlohmann::json json_obj = json["range"];
         JSON_NULL_CHECK(json_obj);
+        JSON_OBJECT_CHECK(json_obj);
         range_query->json_obj = json_obj;
         nlohmann::json::iterator json_it = json_obj.begin();
         field_name = json_it.key();
