@@ -736,6 +736,11 @@ GetSnapshotIDsOperation::GetSnapshotIDsOperation(ID_TYPE collection_id, bool rev
 
 Status
 GetSnapshotIDsOperation::DoExecute(StorePtr store) {
+    CollectionPtr collection;
+    STATUS_CHECK(store->GetResource<Collection>(collection_id_, collection));
+    if (!collection || !collection->IsActive()) {
+        return Status::OK();
+    }
     ids_ = store->AllActiveCollectionCommitIds(collection_id_, reversed_);
     return Status::OK();
 }
