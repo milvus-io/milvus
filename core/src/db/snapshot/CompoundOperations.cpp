@@ -95,13 +95,31 @@ CompoundSegmentsOperation::AddStaleSegmentFile(const SegmentFilePtr& stale_segme
     return Status::OK();
 }
 
+bool
+CompoundSegmentsOperation::StaleSegmentFilesModified() {
+    for (auto& kv : stale_segment_files_) {
+        for (auto& file : kv.second) {
+            auto segment_file = GetStartedSS()->GetResource<SegmentFile>(file->GetID());
+            if (segment_file == nullptr || segment_file->IsDeactive()) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 Status
 CompoundSegmentsOperation::DoExecute(StorePtr store) {
-    if (!context_.new_segment && stale_segment_files_.size() == 0 && new_segment_files_.size() == 0) {
+    if (!context_.new_segment && stale_segment_files_.empty() && new_segment_files_.empty()) {
         return Status(SS_INVALID_CONTEX_ERROR, "Nothing to do");
     }
     if (context_.new_segment && context_.new_segment->IsActive()) {
         return Status(SS_INVALID_CONTEX_ERROR, "New segment should not be active");
+    }
+
+    if (StaleSegmentFilesModified()) {
+        return Status(SS_STALE_ERROR, "Segment file has been stale");
     }
 
     auto update_size = [&](SegmentFilePtr& file) {
