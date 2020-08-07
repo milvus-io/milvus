@@ -64,6 +64,8 @@ define_option_string(KNOWHERE_DEPENDENCY_SOURCE
         "BUNDLED"
         "SYSTEM")
 
+define_option(KNOWHERE_USE_CCACHE "Use ccache when compiling (if available)" ON)
+
 define_option(KNOWHERE_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 
