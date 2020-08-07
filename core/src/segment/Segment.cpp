@@ -149,7 +149,7 @@ Segment::DeleteEntity(std::vector<offset_t>& offsets) {
     // sort offset in descendant
     std::sort(offsets.begin(), offsets.end(), std::greater<offset_t>());
 
-    // delete entity data
+    // delete entity data from max offset to min offset
     for (auto& pair : fixed_fields_) {
         int64_t width = fixed_fields_width_[pair.first];
         if (width == 0 || pair.second == nullptr) {
