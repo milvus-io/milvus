@@ -386,6 +386,9 @@ SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::Inde
         // check field type
         auto& ss_codec = codec::Codec::instance();
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        if (!field_visitor) {
+            return Status(DB_ERROR, "Field: " + field_name + " is not exist");
+        }
         const engine::snapshot::FieldPtr& field = field_visitor->GetField();
         if (engine::IsVectorField(field)) {
             return Status(DB_ERROR, "Field is not structured type");
