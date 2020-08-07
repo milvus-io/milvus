@@ -17,6 +17,7 @@
 #include "utils/StringHelpFunctions.h"
 
 #include <fiu-local.h>
+#include <algorithm>
 #include <limits>
 #include <set>
 #include <string>
@@ -162,13 +163,15 @@ ValidateFieldName(const std::string& field_name) {
 }
 
 Status
-ValidateIndexType(const std::string& index_type) {
+ValidateIndexType(std::string& index_type) {
     // Index name shouldn't be empty.
     if (index_type.empty()) {
         std::string msg = "Index type should not be empty.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_FIELD_NAME, msg);
     }
+
+    std::transform(index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
 
     static std::set<std::string> s_valid_index_names = {
         knowhere::IndexEnum::INVALID,
@@ -185,6 +188,9 @@ ValidateIndexType(const std::string& index_type) {
         knowhere::IndexEnum::INDEX_RHNSWFlat,
         knowhere::IndexEnum::INDEX_RHNSWPQ,
         knowhere::IndexEnum::INDEX_RHNSWSQ,
+
+        // structured index names
+        engine::DEFAULT_STRUCTURED_INDEX_NAME,
     };
 
     if (s_valid_index_names.find(index_type) == s_valid_index_names.end()) {
