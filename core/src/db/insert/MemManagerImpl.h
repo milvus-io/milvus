@@ -84,6 +84,10 @@ class MemManagerImpl : public MemManager {
     uint64_t
     GetMaxLSN(const MemList& collections);
 
+    Status
+    InternalFlush(std::set<int64_t>& collection_ids);
+
+ private:
     MemCollectionMap mem_map_;
     MemList immu_mem_list_;
 
