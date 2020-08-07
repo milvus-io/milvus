@@ -58,20 +58,34 @@ add_subdirectory( db ) # target milvus_engine
 add_subdirectory( log )
 add_subdirectory( server )
 
+set(link_lib
+        milvus_engine
+        config
+        metrics
+        tracing
+        log
+        oatpp
+        query
+        utils
+        )
+
+if (MILVUS_WITH_PROMETHEUS)
+    set(link_lib
+            ${link_lib}
+            # dependency prometheus
+            prometheus-cpp-push
+            prometheus-cpp-pull
+            prometheus-cpp-core
+            )
+endif ()
+
+set(link_lib
+        ${link_lib}
+        curl
+        )
+
 target_link_libraries( server
-                PUBLIC milvus_engine
-                       config
-                       metrics
-                       tracing
-                       log
-                       oatpp
-                       query
-                       utils
-                       # dependency prometheus
-                       prometheus-cpp-push
-                       prometheus-cpp-pull
-                       prometheus-cpp-core
-                       curl
+                PUBLIC ${link_lib}
                        )
 
 # **************************** Get&Print Include Directories ****************************
