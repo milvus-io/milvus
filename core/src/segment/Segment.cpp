@@ -143,17 +143,20 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
 
 Status
 Segment::DeleteEntity(std::vector<offset_t>& offsets) {
+    if (offsets.size() == 0) {
+        return Status::OK();
+    }
     // sort offset in descendant
-    std::sort(offsets.begin(), offsets.end(), std::less<offset_t>());
+    std::sort(offsets.begin(), offsets.end(), std::greater<offset_t>());
 
-    // delete entity data
+    // delete entity data from max offset to min offset
     for (auto& pair : fixed_fields_) {
         int64_t width = fixed_fields_width_[pair.first];
         if (width == 0 || pair.second == nullptr) {
             continue;
         }
 
-        BinaryDataPtr& data = pair.second;
+        auto& data = pair.second;
         for (auto offset : offsets) {
             if (offset >= 0 && offset < row_count_) {
                 auto step = offset * width;

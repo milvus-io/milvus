@@ -23,7 +23,7 @@ namespace engine {
 
 class IDGenerator {
  public:
-    virtual IDNumber
+    virtual id_t
     GetNextIDNumber() = 0;
 
     virtual Status
@@ -36,7 +36,7 @@ class SimpleIDGenerator : public IDGenerator {
  public:
     ~SimpleIDGenerator() override = default;
 
-    IDNumber
+    id_t
     GetNextIDNumber() override;
 
     Status
@@ -59,7 +59,7 @@ class SafeIDGenerator : public IDGenerator {
 
     ~SafeIDGenerator() override = default;
 
-    IDNumber
+    id_t
     GetNextIDNumber() override;
 
     Status

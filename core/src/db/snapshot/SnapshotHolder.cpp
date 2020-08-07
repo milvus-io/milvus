@@ -114,10 +114,7 @@ SnapshotHolder::Get(ScopedSnapshotT& ss, ID_TYPE id, bool scoped) const {
 bool
 SnapshotHolder::IsActive(Snapshot::Ptr& ss) {
     auto collection = ss->GetCollection();
-    if (collection && collection->IsActive()) {
-        return true;
-    }
-    return false;
+    return collection && collection->IsActive();
 }
 
 Status
