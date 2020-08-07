@@ -13,3 +13,4 @@
 aux_source_directory( ${MILVUS_ENGINE_SRC}/codecs           CODECS_FILES )
 add_library( codecs STATIC )
 target_sources( codecs PRIVATE ${CODECS_FILES} )
+add_dependencies( codecs fiu )

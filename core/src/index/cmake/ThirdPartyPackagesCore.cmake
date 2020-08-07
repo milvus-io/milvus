@@ -455,7 +455,8 @@ macro(build_gtest)
 
 endmacro()
 
-if (KNOWHERE_BUILD_TESTS AND NOT TARGET googletest_ep)
+# if (KNOWHERE_BUILD_TESTS AND NOT TARGET googletest_ep)
+if ( NOT TARGET gtest AND KNOWHERE_BUILD_TESTS )
     resolve_dependency(GTest)
 
     if (NOT GTEST_VENDORED)
