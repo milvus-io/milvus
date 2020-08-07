@@ -77,21 +77,17 @@ CreateIndexReq::OnExecute() {
             return Status(SERVER_INVALID_FIELD_NAME, "Invalid field name");
         }
 
+        // validate index type
+        std::string index_type;
+        if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
+            index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
+        }
+        STATUS_CHECK(ValidateIndexType(index_type));
+
         engine::CollectionIndex index;
         if (engine::IsVectorField(field)) {
-            int32_t field_type = field->GetFtype();
             auto params = field->GetParams();
             int64_t dimension = params[engine::PARAM_DIMENSION].get<int64_t>();
-
-            // validate index type
-            std::string index_type;
-            if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
-                index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
-            }
-            status = ValidateIndexType(index_type);
-            if (!status.ok()) {
-                return status;
-            }
 
             // validate metric type
             std::string metric_type;
@@ -119,10 +115,6 @@ CreateIndexReq::OnExecute() {
             }
         } else {
             index.index_name_ = index_name_;
-            std::string index_type;
-            if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
-                index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
-            }
             index.index_type_ = index_type;
         }
 

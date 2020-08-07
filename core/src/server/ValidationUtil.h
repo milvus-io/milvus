@@ -36,7 +36,7 @@ extern Status
 ValidateDimension(int64_t dimension, bool is_binary);
 
 extern Status
-ValidateIndexType(const std::string& index_type);
+ValidateIndexType(std::string& index_type);
 
 extern Status
 ValidateVectorDimension(int64_t dimension, const std::string& metric_type);
