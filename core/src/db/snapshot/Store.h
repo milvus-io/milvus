@@ -195,7 +195,7 @@ class Store : public std::enable_shared_from_this<Store> {
         IDS_TYPE ids;
         IDS_TYPE selected_ids;
         std::vector<State> filter_states = {State::ACTIVE};
-        adapter_->SelectResourceIDs<Collection>(selected_ids, "", filter_states);
+        adapter_->SelectResourceIDs<Collection>(selected_ids, StateField::Name, filter_states);
 
         if (!reversed) {
             ids = selected_ids;

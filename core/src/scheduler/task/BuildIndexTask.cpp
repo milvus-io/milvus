@@ -55,8 +55,9 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
             stat = execution_engine_->Load(context);
             type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
-            stat = execution_engine_->CopyToGpu(device_id);
-            type_str = "CPU2GPU:" + std::to_string(device_id);
+            // no need to copy flat to gpu,
+            //            stat = execution_engine_->CopyToGpu(device_id);
+            //            type_str = "CPU2GPU:" + std::to_string(device_id);
         } else {
             error_msg = "Wrong load type";
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
