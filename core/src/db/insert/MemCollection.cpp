@@ -224,7 +224,7 @@ MemCollection::ApplyDeletes() {
 
         // Step 3: Mark previous deleted docs file and bloom filter file stale
         auto& field_visitors_map = seg_visitor->GetFieldVisitors();
-        auto uid_field_visitor = seg_visitor->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = seg_visitor->GetFieldVisitor(engine::FIELD_UID);
         auto del_doc_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_DELETED_DOCS);
         auto del_docs_element = del_doc_visitor->GetElement();
         auto blm_filter_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_BLOOM_FILTER);

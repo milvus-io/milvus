@@ -38,12 +38,12 @@ CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name,
     int64_t collection_id = 0;
     int64_t field_id = 0;
     /* field uid */
-    auto uid_field = std::make_shared<Field>(milvus::engine::DEFAULT_UID_NAME, 0,
+    auto uid_field = std::make_shared<Field>(milvus::engine::FIELD_UID, 0,
             milvus::engine::DataType::INT64, milvus::engine::snapshot::JEmpty, field_id);
     auto uid_field_element_blt = std::make_shared<FieldElement>(collection_id, field_id,
-            milvus::engine::DEFAULT_BLOOM_FILTER_NAME, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
+            milvus::engine::ELEMENT_BLOOM_FILTER, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
     auto uid_field_element_del = std::make_shared<FieldElement>(collection_id, field_id,
-            milvus::engine::DEFAULT_DELETED_DOCS_NAME, milvus::engine::FieldElementType::FET_DELETED_DOCS);
+            milvus::engine::ELEMENT_DELETED_DOCS, milvus::engine::FieldElementType::FET_DELETED_DOCS);
 
     field_id++;
     /* field vector */

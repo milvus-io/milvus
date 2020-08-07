@@ -190,7 +190,7 @@ ValidateIndexType(std::string& index_type) {
         knowhere::IndexEnum::INDEX_RHNSWSQ,
 
         // structured index names
-        engine::DEFAULT_STRUCTURED_INDEX_NAME,
+        engine::DEFAULT_STRUCTURED_INDEX,
     };
 
     if (s_valid_index_names.find(index_type) == s_valid_index_names.end()) {

@@ -65,7 +65,7 @@ MemSegment::CreateSegment() {
         sf_context.partition_id = partition_id_;
         sf_context.segment_id = segment_->GetID();
         sf_context.field_name = name;
-        sf_context.field_element_name = engine::DEFAULT_RAW_DATA_NAME;
+        sf_context.field_element_name = engine::ELEMENT_RAW_DATA;
 
         snapshot::SegmentFilePtr seg_file;
         status = operation_->CommitNewSegmentFile(sf_context, seg_file);
@@ -82,8 +82,8 @@ MemSegment::CreateSegment() {
         sf_context.collection_id = collection_id_;
         sf_context.partition_id = partition_id_;
         sf_context.segment_id = segment_->GetID();
-        sf_context.field_name = engine::DEFAULT_UID_NAME;
-        sf_context.field_element_name = engine::DEFAULT_DELETED_DOCS_NAME;
+        sf_context.field_name = engine::FIELD_UID;
+        sf_context.field_element_name = engine::ELEMENT_DELETED_DOCS;
 
         snapshot::SegmentFilePtr delete_doc_file, bloom_filter_file;
         status = operation_->CommitNewSegmentFile(sf_context, delete_doc_file);
@@ -93,7 +93,7 @@ MemSegment::CreateSegment() {
             return status;
         }
 
-        sf_context.field_element_name = engine::DEFAULT_BLOOM_FILTER_NAME;
+        sf_context.field_element_name = engine::ELEMENT_BLOOM_FILTER;
         status = operation_->CommitNewSegmentFile(sf_context, bloom_filter_file);
         if (!status.ok()) {
             std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();

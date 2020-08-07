@@ -495,7 +495,7 @@ TEST_F(DBTest, InsertTest) {
         auto field = std::make_shared<Field>(field_name, 0, milvus::engine::DataType::INT32);
         context.fields_schema[field] = {};
 
-        field = std::make_shared<Field>(milvus::engine::DEFAULT_UID_NAME, 0, milvus::engine::DataType::INT64);
+        field = std::make_shared<Field>(milvus::engine::FIELD_UID, 0, milvus::engine::DataType::INT64);
         context.fields_schema[field] = {};
 
         auto status = db_->CreateCollection(context);
@@ -509,7 +509,7 @@ TEST_F(DBTest, InsertTest) {
             for (auto i = 0; i < data_chunk->count_; ++i) {
                 p[i] = i;
             }
-            data_chunk->fixed_fields_[milvus::engine::DEFAULT_UID_NAME] = raw;
+            data_chunk->fixed_fields_[milvus::engine::FIELD_UID] = raw;
         }
         {
             milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
@@ -572,7 +572,7 @@ TEST_F(DBTest, MergeTest) {
         status = db_->Insert(collection_name, "", data_chunk);
         ASSERT_TRUE(status.ok());
 
-        data_chunk->fixed_fields_.erase(milvus::engine::DEFAULT_UID_NAME); // clear auto-generated id
+        data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
 
         status = db_->Flush();
         ASSERT_TRUE(status.ok());
@@ -764,7 +764,7 @@ TEST_F(DBTest, IndexTest) {
     {
         milvus::engine::CollectionIndex index;
         index.index_name_ = "my_index2";
-        index.index_type_ = milvus::engine::DEFAULT_STRUCTURED_INDEX_NAME;
+        index.index_type_ = milvus::engine::DEFAULT_STRUCTURED_INDEX;
         status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
         ASSERT_TRUE(status.ok());
         status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);
@@ -820,7 +820,7 @@ TEST_F(DBTest, StatsTest) {
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
-    data_chunk->fixed_fields_.erase(milvus::engine::DEFAULT_UID_NAME); // clear auto-generated id
+    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
 
     status = db_->Insert(collection_name, partition_name, data_chunk);
     ASSERT_TRUE(status.ok());
@@ -841,7 +841,7 @@ TEST_F(DBTest, StatsTest) {
     // create index for structured fields
     {
         milvus::engine::CollectionIndex index;
-        index.index_type_ = milvus::engine::DEFAULT_STRUCTURED_INDEX_NAME;
+        index.index_type_ = milvus::engine::DEFAULT_STRUCTURED_INDEX;
         status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
         ASSERT_TRUE(status.ok());
         status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);
@@ -913,7 +913,7 @@ TEST_F(DBTest, FetchTest) {
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
-    data_chunk->fixed_fields_.erase(milvus::engine::DEFAULT_UID_NAME); // clear auto-generated id
+    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
 
     status = db_->Insert(collection_name, partition_name, data_chunk);
     ASSERT_TRUE(status.ok());
@@ -937,7 +937,7 @@ TEST_F(DBTest, FetchTest) {
     ASSERT_TRUE(status.ok());
 
     // try fetch first 10 entities of parititon 'p1', since they were deleted, nothing returned
-    std::vector<std::string> field_names = {milvus::engine::DEFAULT_UID_NAME, VECTOR_FIELD_NAME, "field_0"};
+    std::vector<std::string> field_names = {milvus::engine::FIELD_UID, VECTOR_FIELD_NAME, "field_0"};
     std::vector<bool> valid_row;
     milvus::engine::DataChunkPtr fetch_chunk;
     status = db_->GetEntityByID(collection_name, delete_entity_ids, field_names, valid_row, fetch_chunk);
@@ -952,7 +952,7 @@ TEST_F(DBTest, FetchTest) {
     status = db_->GetEntityByID(collection_name, batch_entity_ids, field_names, valid_row, fetch_chunk);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(fetch_chunk->count_, batch_entity_ids.size() - delete_entity_ids.size());
-    auto& uid = fetch_chunk->fixed_fields_[milvus::engine::DEFAULT_UID_NAME];
+    auto& uid = fetch_chunk->fixed_fields_[milvus::engine::FIELD_UID];
     ASSERT_EQ(uid->Size() / sizeof(int64_t), fetch_chunk->count_);
     auto& vectors = fetch_chunk->fixed_fields_[VECTOR_FIELD_NAME];
     ASSERT_EQ(vectors->Size() / (COLLECTION_DIM * sizeof(float)), fetch_chunk->count_);
@@ -1088,7 +1088,7 @@ TEST_F(DBTest, DeleteStaleTest) {
         BuildEntities(count, batch_index, data_chunk);
         STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
         STATUS_CHECK(db_->Flush(collection));
-        auto iter = data_chunk->fixed_fields_.find(milvus::engine::DEFAULT_UID_NAME);
+        auto iter = data_chunk->fixed_fields_.find(milvus::engine::FIELD_UID);
         if (iter == data_chunk->fixed_fields_.end()) {
             return Status(1, "Cannot find uid field");
         }

@@ -179,7 +179,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     // check uid existence
     snapshot::FieldPtr uid_field;
     for (auto& pair : ctx.fields_schema) {
-        if (pair.first->GetName() == DEFAULT_UID_NAME) {
+        if (pair.first->GetName() == FIELD_UID) {
             uid_field = pair.first;
             break;
         }
@@ -188,14 +188,14 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     LOG_SERVER_DEBUG_ << "add uid field";
     // add uid field if not specified
     if (uid_field == nullptr) {
-        uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, DataType::INT64);
+        uid_field = std::make_shared<snapshot::Field>(FIELD_UID, 0, DataType::INT64);
     }
 
     // define uid elements
     auto bloom_filter_element = std::make_shared<snapshot::FieldElement>(
-        0, 0, DEFAULT_BLOOM_FILTER_NAME, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
+        0, 0, ELEMENT_BLOOM_FILTER, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
     auto delete_doc_element = std::make_shared<snapshot::FieldElement>(
-        0, 0, DEFAULT_DELETED_DOCS_NAME, milvus::engine::FieldElementType::FET_DELETED_DOCS);
+        0, 0, ELEMENT_DELETED_DOCS, milvus::engine::FieldElementType::FET_DELETED_DOCS);
     ctx.fields_schema[uid_field] = {bloom_filter_element, delete_doc_element};
 
     LOG_SERVER_DEBUG_ << "Create Collection Operation";
@@ -435,7 +435,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         return Status(DB_NOT_FOUND, "Fail to get partition " + partition_name);
     }
 
-    auto id_field = ss->GetField(DEFAULT_UID_NAME);
+    auto id_field = ss->GetField(FIELD_UID);
     if (id_field == nullptr) {
         return Status(DB_ERROR, "Field '_id' not found");
     }
@@ -447,7 +447,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     }
 
     FIXEDX_FIELD_MAP& fields = data_chunk->fixed_fields_;
-    auto pair = fields.find(engine::DEFAULT_UID_NAME);
+    auto pair = fields.find(engine::FIELD_UID);
     if (auto_increment) {
         // id is auto increment, but client provides id, return error
         if (pair != fields.end() && pair->second != nullptr) {
@@ -468,7 +468,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         BinaryDataPtr id_data = std::make_shared<BinaryData>();
         id_data->data_.resize(ids.size() * sizeof(int64_t));
         memcpy(id_data->data_.data(), ids.data(), ids.size() * sizeof(int64_t));
-        data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME] = id_data;
+        data_chunk->fixed_fields_[engine::FIELD_UID] = id_data;
     }
 
     // insert entities: collection_name is field id
