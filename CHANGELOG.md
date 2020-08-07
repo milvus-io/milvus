@@ -71,8 +71,6 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2858 Unify index name in db
 -   \#2884 Using BlockingQueue in JobMgr
 
-## Task
-
 # Milvus 0.10.0 (2020-6-15)
 
 ## Bug
