@@ -1569,6 +1569,7 @@ GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::Bool
         auto term_query = std::make_shared<query::TermQuery>();
         nlohmann::json json_obj = json["term"];
         JSON_NULL_CHECK(json_obj);
+        JSON_OBJECT_CHECK(json_obj);
         term_query->json_obj = json_obj;
         nlohmann::json::iterator json_it = json_obj.begin();
         field_name = json_it.key();
@@ -1580,6 +1581,7 @@ GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::Bool
         auto range_query = std::make_shared<query::RangeQuery>();
         nlohmann::json json_obj = json["range"];
         JSON_NULL_CHECK(json_obj);
+        JSON_OBJECT_CHECK(json_obj);
         range_query->json_obj = json_obj;
         nlohmann::json::iterator json_it = json_obj.begin();
         field_name = json_it.key();
