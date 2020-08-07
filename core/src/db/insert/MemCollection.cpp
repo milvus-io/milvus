@@ -189,7 +189,7 @@ MemCollection::ApplyDeletes() {
         {
             segment::IdBloomFilterPtr pre_bloom_filter;
             STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
-            for (auto &id : doc_ids_to_delete_) {
+            for (auto& id : doc_ids_to_delete_) {
                 if (pre_bloom_filter->Check(id)) {
                     delete_ids.push_back(id);
                 }
@@ -292,8 +292,7 @@ MemCollection::ApplyDeletes() {
             }
 
             STATUS_CHECK(
-                    segments_op->CommitRowCountDelta(segment->GetID(), delete_docs->GetCount() - pre_del_ids.size(),
-                                                     true));
+                segments_op->CommitRowCountDelta(segment->GetID(), delete_docs->GetCount() - pre_del_ids.size(), true));
 
             STATUS_CHECK(segment_writer->WriteDeletedDocs(del_docs_path, delete_docs));
             STATUS_CHECK(segment_writer->WriteBloomFilter(bloom_filter_file_path, bloom_filter));
