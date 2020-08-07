@@ -784,7 +784,7 @@ DBImpl::InternalFlush(const std::string& collection_name) {
 
 void
 DBImpl::TimingFlushThread() {
-    SetThreadName("flush_thread");
+    SetThreadName("timing_flush");
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!initialized_.load(std::memory_order_acquire)) {
@@ -834,7 +834,7 @@ DBImpl::StartMetricTask() {
 
 void
 DBImpl::TimingMetricThread() {
-    SetThreadName("metric_thread");
+    SetThreadName("timing_metric");
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!initialized_.load(std::memory_order_acquire)) {
@@ -872,6 +872,8 @@ DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names) {
 
 void
 DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
+    SetThreadName("build_index");
+
     std::unique_lock<std::mutex> lock(build_index_mutex_);
 
     for (auto collection_name : collection_names) {
@@ -904,7 +906,7 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
 
 void
 DBImpl::TimingIndexThread() {
-    SetThreadName("index_thread");
+    SetThreadName("timing_index");
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!initialized_.load(std::memory_order_acquire)) {
@@ -1050,17 +1052,14 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            if (record.length == 1) {
-                status = mem_mgr_->DeleteEntity(ss->GetCollectionId(), *record.ids, record.lsn);
-                if (!status.ok()) {
-                    return status;
-                }
-            } else {
-                status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), record.length, record.ids, record.lsn);
-                if (!status.ok()) {
-                    return status;
-                }
+            std::vector<id_t> delete_ids;
+            delete_ids.resize(record.length);
+            memcpy(delete_ids.data(), record.ids, record.length * sizeof(id_t));
+            status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), delete_ids, record.lsn);
+            if (!status.ok()) {
+                return status;
             }
+
             break;
         }
 
@@ -1074,11 +1073,13 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                     return status;
                 }
 
-                const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-                int64_t collection_id = ss->GetCollectionId();
-                status = mem_mgr_->Flush(collection_id);
-                if (!status.ok()) {
-                    return status;
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    int64_t collection_id = ss->GetCollectionId();
+                    status = mem_mgr_->Flush(collection_id);
+                    if (!status.ok()) {
+                        return status;
+                    }
                 }
 
                 std::set<std::string> flushed_collections;
@@ -1087,14 +1088,14 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 
             } else {
                 // flush all collections
-                std::set<int64_t> collection_names;
+                std::set<int64_t> collection_ids;
                 {
                     const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-                    status = mem_mgr_->Flush(collection_names);
+                    status = mem_mgr_->Flush(collection_ids);
                 }
 
                 std::set<std::string> flushed_collections;
-                for (auto id : collection_names) {
+                for (auto id : collection_ids) {
                     snapshot::ScopedSnapshotT ss;
                     status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, id);
                     if (!status.ok()) {
@@ -1146,7 +1147,7 @@ DBImpl::StartMergeTask(const std::set<std::string>& collection_names, bool force
 
 void
 DBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all) {
-    // LOG_ENGINE_TRACE_ << " Background merge thread start";
+    SetThreadName("merge");
 
     for (auto& collection_name : collection_names) {
         const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);

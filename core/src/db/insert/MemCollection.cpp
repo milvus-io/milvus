@@ -74,7 +74,7 @@ MemCollection::Add(int64_t partition_id, const milvus::engine::VectorSourcePtr& 
 }
 
 Status
-MemCollection::Delete(std::vector<id_t>& ids) {
+MemCollection::Delete(const std::vector<id_t>& ids) {
     // Locate which collection file the doc id lands in
     {
         std::lock_guard<std::mutex> lock(mutex_);

@@ -994,6 +994,20 @@ TEST_F(DBTest, DeleteEntitiesTest) {
     std::string collection_name = "test_collection_delete_";
     CreateCollection2(db_, collection_name, 0);
 
+    // insert 100 entities into default partition without flush
+    milvus::engine::IDNumbers entity_ids;
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities(100, 0, data_chunk);
+    auto status = db_->Insert(collection_name, "", data_chunk);
+    milvus::engine::utils::GetIDFromChunk(data_chunk, entity_ids);
+
+    // delete all the entities in memory
+    status = db_->DeleteEntityByID(collection_name, entity_ids);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    // flush empty segment
+    db_->Flush(collection_name);
+
     auto insert_entities = [&](const std::string& collection, const std::string& partition,
                                uint64_t count, uint64_t batch_index, milvus::engine::IDNumbers& ids) -> Status {
         milvus::engine::DataChunkPtr data_chunk;
@@ -1001,13 +1015,13 @@ TEST_F(DBTest, DeleteEntitiesTest) {
         STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
         STATUS_CHECK(db_->Flush(collection));
 
+        ids.clear();
         milvus::engine::utils::GetIDFromChunk(data_chunk, ids);
         return Status::OK();
     };
 
-    // insert 1000 entities into default partiiton
-    milvus::engine::IDNumbers entity_ids;
-    auto status = insert_entities(collection_name, "", 1000, 0, entity_ids);
+    // insert 1000 entities into default partition
+    status = insert_entities(collection_name, "", 1000, 0, entity_ids);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     // delete the first entity
@@ -1028,12 +1042,12 @@ TEST_F(DBTest, DeleteEntitiesTest) {
         status = db_->CreatePartition(collection_name, partition1);
         ASSERT_TRUE(status.ok()) << status.ToString();
 
-        // insert 1000 entities into partiiton_0
+        // insert 1000 entities into partition_0
         milvus::engine::IDNumbers partition0_ids;
         status = insert_entities(collection_name, partition0, 1000, 2 * i + 1, partition0_ids);
         ASSERT_TRUE(status.ok()) << status.ToString();
 
-        // insert 1000 entities into partiiton_1
+        // insert 1000 entities into partition_1
         milvus::engine::IDNumbers partition1_ids;
         status = insert_entities(collection_name, partition1, 1000, 2 * i + 2, partition1_ids);
         ASSERT_TRUE(status.ok()) << status.ToString();

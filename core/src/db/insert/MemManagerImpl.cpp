@@ -148,32 +148,13 @@ MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id
 }
 
 Status
-MemManagerImpl::DeleteEntity(int64_t collection_id, id_t entity_id, uint64_t lsn) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    MemCollectionPtr mem = GetMemByCollection(collection_id);
-
-    mem->SetLSN(lsn);
-    IDNumbers ids = {entity_id};
-    auto status = mem->Delete(ids);
-    if (status.ok()) {
-        return status;
-    }
-
-    return Status::OK();
-}
-
-Status
-MemManagerImpl::DeleteEntities(int64_t collection_id, int64_t length, const id_t* entity_ids, uint64_t lsn) {
+MemManagerImpl::DeleteEntities(int64_t collection_id, const std::vector<id_t>& entity_ids, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
     MemCollectionPtr mem = GetMemByCollection(collection_id);
 
     mem->SetLSN(lsn);
 
-    IDNumbers ids;
-    ids.resize(length);
-    memcpy(ids.data(), entity_ids, length * sizeof(id_t));
-
-    auto status = mem->Delete(ids);
+    auto status = mem->Delete(entity_ids);
     if (!status.ok()) {
         return status;
     }

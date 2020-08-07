@@ -196,7 +196,7 @@ MemSegment::Add(const VectorSourcePtr& source) {
 }
 
 Status
-MemSegment::Delete(std::vector<id_t>& ids) {
+MemSegment::Delete(const std::vector<id_t>& ids) {
     engine::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
 
@@ -244,6 +244,12 @@ Status
 MemSegment::Serialize(uint64_t wal_lsn) {
     int64_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
+
+    // delete action could delete all entities of the segment
+    // no need to serialize empty segment
+    if (segment_writer_ptr_->RowCount() == 0) {
+        return Status::OK();
+    }
 
     auto status = segment_writer_ptr_->Serialize();
     if (!status.ok()) {
