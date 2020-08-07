@@ -27,14 +27,15 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         self.max_workers = max_workers
 
     def _reduce(self, source_ids, ids, source_diss, diss, k, reverse):
-        if source_diss[k - 1] <= diss[0]:
+        sort_f = lambda x, y: x >= y if reverse else lambda x, y: x <= y
+        if sort_f(source_diss[k - 1], diss[0]):
             return source_ids, source_diss
-        if diss[k - 1] <= source_diss[0]:
+        if sort_f(diss[k - 1], source_diss[0]):
             return ids, diss
 
         source_diss.extend(diss)
         diss_t = enumerate(source_diss)
-        diss_m_rst = sorted(diss_t, key=lambda x: x[1])[:k]
+        diss_m_rst = sorted(diss_t, key=lambda x: x[1], reverse=reverse)[:k]
         diss_m_out = [id_ for _, id_ in diss_m_rst]
 
         source_ids.extend(ids)
@@ -149,9 +150,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                                                               params=search_params, _async=True)
                         futures.append(future)
 
-                    for f in futures:
-                        ret = f.result(raw=True)
-                        all_topk_results.append(ret)
+                for f in futures:
+                    ret = f.result(raw=True)
+                    all_topk_results.append(ret)
 
         reverse = collection_meta.metric_type == Types.MetricType.IP
         with self.tracer.start_span('do_merge', child_of=p_span):
