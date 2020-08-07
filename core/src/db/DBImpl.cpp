@@ -787,7 +787,7 @@ DBImpl::TimingFlushThread() {
             break;
         }
 
-        //        InternalFlush();
+        InternalFlush();
         if (options_.auto_flush_interval_ > 0) {
             swn_flush_.Wait_For(std::chrono::seconds(options_.auto_flush_interval_));
         } else {
@@ -1079,7 +1079,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 
                 std::set<std::string> flushed_collections;
                 flushed_collections.insert(record.collection_id);
-                //                StartMergeTask(flushed_collections);
+                StartMergeTask(flushed_collections);
 
             } else {
                 // flush all collections
@@ -1101,7 +1101,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                     flushed_collections.insert(ss->GetName());
                 }
 
-                //                StartMergeTask(flushed_collections);
+                StartMergeTask(flushed_collections);
             }
             break;
         }
