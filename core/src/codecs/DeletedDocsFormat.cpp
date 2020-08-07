@@ -90,7 +90,7 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
             throw Exception(SERVER_WRITE_ERROR, err_msg);
         }
         fs_ptr->reader_ptr_->read(&old_num_bytes, sizeof(size_t));
-        delete_ids.resize(old_num_bytes / sizeof(size_t));
+        delete_ids.resize(old_num_bytes / sizeof(engine::offset_t));
         fs_ptr->reader_ptr_->read(delete_ids.data(), old_num_bytes);
         fs_ptr->reader_ptr_->close();
     } else {

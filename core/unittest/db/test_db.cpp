@@ -199,7 +199,8 @@ BuildQueryPtr(const std::string& collection_name, int64_t n, int64_t topk, std::
         vector_record.float_data[COLLECTION_DIM * i] += i / 2000.;
     }
     vector_query->query_vector = vector_record;
-    vector_query->extra_params = {{"metric_type", "L2"}, {"nprobe", 1024}};
+    vector_query->metric_type = "L2";
+    vector_query->extra_params = {{"nprobe", 1024}};
 
     query_ptr->root = general_query;
     query_ptr->vectors.insert(std::make_pair(placeholder, vector_query));
@@ -1016,7 +1017,7 @@ TEST_F(DBTest, DeleteEntitiesTest) {
 
     milvus::engine::IDNumbers whole_delete_ids;
     fiu_init(0);
-    fiu_enable("MemCollection.ApplyDeletes.RandomSleep", 1, nullptr, 0);
+    fiu_enable_random("MemCollection.ApplyDeletes.RandomSleep", 1, nullptr, 0, 0.5);
     for (size_t i = 0; i < 5; i++) {
         std::string partition0 = collection_name + "p_" + std::to_string(i) + "_0";
         std::string partition1 = collection_name + "p_" + std::to_string(i) + "_1";
@@ -1066,6 +1067,7 @@ TEST_F(DBTest, DeleteEntitiesTest) {
 }
 
 TEST_F(DBTest, DeleteStaleTest) {
+    const int del_id_pair = 3;
     auto insert_entities = [&](const std::string& collection, const std::string& partition,
                                uint64_t count, uint64_t batch_index, milvus::engine::IDNumbers& ids) -> Status {
         milvus::engine::DataChunkPtr data_chunk;
@@ -1095,7 +1097,7 @@ TEST_F(DBTest, DeleteStaleTest) {
 
     auto delete_task = [&](const std::string& collection, const milvus::engine::IDNumbers& del_ids) {
         auto status = Status::OK();
-        for (size_t i = 0; i < 5; i++) {
+        for (size_t i = 0; i < del_id_pair; i++) {
             milvus::engine::IDNumbers ids = {del_ids[2 * i], del_ids[2 * i + 1]};
             status = db_->DeleteEntityByID(collection, ids);
             ASSERT_TRUE(status.ok()) << status.ToString();
@@ -1119,24 +1121,26 @@ TEST_F(DBTest, DeleteStaleTest) {
     status = db_->Flush(collection_name);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
-    for (size_t i = 0; i < 5; i++) {
+    for (size_t i = 0; i < del_id_pair; i ++) {
         del_ids.push_back(entity_ids[i]);
         del_ids.push_back(entity_ids2[i]);
     }
 
     fiu_init(0);
-    fiu_enable("MemCollection.ApplyDeletes.RandomSleep", 1, nullptr, 0);
+    fiu_enable_random("MemCollection.ApplyDeletes.RandomSleep", 1, nullptr, 0, 0.5);
     auto build_thread = std::thread(build_task, collection_name, VECTOR_FIELD_NAME);
     auto delete_thread = std::thread(delete_task, collection_name, del_ids);
-
-    build_thread.join();
     delete_thread.join();
-//    sleep(15);
+    build_thread.join();
     fiu_disable("MemCollection.ApplyDeletes.RandomSleep");
+    db_->Flush();
+//    int64_t row_count;
+//    status = db_->CountEntities(collection_name, row_count);
+//    ASSERT_TRUE(status.ok()) << status.ToString();
+//    ASSERT_EQ(row_count, 10000 * 2 - 2 * del_id_pair);
 //
 //    std::vector<bool> valid_row;
 //    milvus::engine::DataChunkPtr entity_data_chunk;
-//    std::cout << "Get Entity" << std::endl;
 //    for (size_t j = 0; j < del_ids.size(); j++) {
 //        status = db_->GetEntityByID(collection_name, {del_ids[j]}, {}, valid_row, entity_data_chunk);
 //        ASSERT_TRUE(status.ok()) << status.ToString();
