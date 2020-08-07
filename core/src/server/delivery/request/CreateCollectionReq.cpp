@@ -85,7 +85,7 @@ CreateCollectionReq::OnExecute() {
 
             LOG_SERVER_DEBUG_ << "checkout Default_UID_NAME";
             // validate id field
-            if (field_name == engine::DEFAULT_UID_NAME) {
+            if (field_name == engine::FIELD_UID) {
                 if (field_type != engine::DataType::INT64) {
                     return Status(DB_ERROR, "Field '_id' data type must be int64");
                 }

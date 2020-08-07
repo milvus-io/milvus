@@ -34,6 +34,7 @@ LogOut(const char* pattern, ...) {
 
 void
 SetThreadName(const std::string& name) {
+    // Note: the name cannot exceed 16 bytes
     pthread_setname_np(pthread_self(), name.c_str());
 }
 

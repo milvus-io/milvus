@@ -215,7 +215,7 @@ SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, c
 Status
 SegmentReader::LoadUids(std::vector<engine::id_t>& uids) {
     engine::BinaryDataPtr raw;
-    auto status = LoadField(engine::DEFAULT_UID_NAME, raw);
+    auto status = LoadField(engine::FIELD_UID, raw);
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << status.message();
         return status;
@@ -454,7 +454,7 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
             return Status::OK();  // already exist
         }
 
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
@@ -491,7 +491,7 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
             return Status::OK();  // already exist
         }
 
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
@@ -530,7 +530,7 @@ SegmentReader::ReadDeletedDocsSize(size_t& size) {
             return Status::OK();  // already exist
         }
 
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
