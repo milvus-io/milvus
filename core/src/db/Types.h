@@ -31,12 +31,9 @@ namespace engine {
 
 using id_t = int64_t;
 using offset_t = int32_t;
+using date_t = int32_t;
 
-using DateT = int;
-
-using IDNumber = int64_t;
-using IDNumberPtr = IDNumber*;
-using IDNumbers = std::vector<IDNumber>;
+using IDNumbers = std::vector<id_t>;
 
 using VectorDistance = faiss::Index::distance_t;
 using VectorDistances = std::vector<VectorDistance>;
