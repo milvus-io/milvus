@@ -149,30 +149,20 @@ Segment::DeleteEntity(std::vector<offset_t>& offsets) {
     // sort offset in descendant
     std::sort(offsets.begin(), offsets.end(), std::greater<offset_t>());
 
-    // delete entity data
+    // delete entity data from max offset to min offset
     for (auto& pair : fixed_fields_) {
         int64_t width = fixed_fields_width_[pair.first];
         if (width == 0 || pair.second == nullptr) {
             continue;
         }
 
-        auto& data = pair.second->data_;
-        std::vector<bool> marked(data.size(), false);
-        std::vector<uint8_t> temp;
-        temp.reserve(data.size() - offsets.size() * width);
-
-        for (auto pos = offsets.begin(); pos != offsets.end(); pos++) {
-            for (auto i = 0; i < width; ++i) {
-                marked[(*pos) * width + i] = true;
+        auto& data = pair.second;
+        for (auto offset : offsets) {
+            if (offset >= 0 && offset < row_count_) {
+                auto step = offset * width;
+                data->data_.erase(data->data_.begin() + step, data->data_.begin() + step + width);
             }
         }
-
-        for (size_t i = 0; i < data.size(); i++) {
-            if (!marked[i]) {
-                temp.push_back(data[i]);
-            }
-        }
-        data = std::move(temp);
     }
 
     // reset row count
