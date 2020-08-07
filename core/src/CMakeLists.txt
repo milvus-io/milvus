@@ -67,7 +67,6 @@ set(link_lib
         oatpp
         query
         utils
-        curl
         )
 
 if (MILVUS_WITH_PROMETHEUS)
@@ -78,8 +77,12 @@ if (MILVUS_WITH_PROMETHEUS)
             prometheus-cpp-pull
             prometheus-cpp-core
             )
-
 endif ()
+
+set(link_lib
+        ${link_lib}
+        curl
+        )
 
 target_link_libraries( server
                 PUBLIC ${link_lib}

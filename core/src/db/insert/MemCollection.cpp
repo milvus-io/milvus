@@ -177,7 +177,7 @@ MemCollection::ApplyDeletes() {
     auto segments_op = std::make_shared<snapshot::CompoundSegmentsOperation>(context, ss);
 
     int64_t segment_iterated = 0;
-//    std::vector<snapshot::SegmentPtr> modified_segments;
+    //    std::vector<snapshot::SegmentPtr> modified_segments;
     auto segment_executor = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* iterator) -> Status {
         segment_iterated++;
         auto seg_visitor = engine::SegmentVisitor::Build(ss, segment->GetID());
@@ -295,7 +295,7 @@ MemCollection::ApplyDeletes() {
         delete_file->SetSize(CommonUtil::GetFileSize(del_docs_path + codec::DeletedDocsFormat::FilePostfix()));
         bloom_filter_file->SetSize(
             CommonUtil::GetFileSize(bloom_filter_file_path + codec::IdBloomFilterFormat::FilePostfix()));
-//        modified_segments.push_back(segment);
+        //        modified_segments.push_back(segment);
 
         return Status::OK();
     };
