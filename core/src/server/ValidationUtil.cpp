@@ -382,61 +382,22 @@ ValidateSearchTopk(int64_t top_k) {
 }
 
 Status
-ValidatePartitionName(const std::string& partition_name) {
-    if (partition_name.empty()) {
-        std::string msg = "Partition name should not be empty.";
+ValidatePartitionTag(const std::string& partition_tag) {
+    // trim side-blank of tag, only compare valid characters
+    // for example: " ab cd " is treated as "ab cd"
+    std::string valid_tag = partition_tag;
+    StringHelpFunctions::TrimStringBlank(valid_tag);
+    if (valid_tag.empty()) {
+        std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag should not be empty.";
         LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_COLLECTION_NAME, msg);
+        return Status(SERVER_INVALID_PARTITION_TAG, msg);
     }
 
-    std::string invalid_msg = "Invalid partition name: " + partition_name + ". ";
-    // Collection name size shouldn't exceed 255.
-    if (partition_name.size() > engine::MAX_NAME_LENGTH) {
-        std::string msg = invalid_msg + "The length of a partition name must be less than 255 characters.";
+    // max length of partition tag
+    if (valid_tag.length() > 255) {
+        std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag exceed max length(255).";
         LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_COLLECTION_NAME, msg);
-    }
-
-    // Collection name first character should be underscore or character.
-    char first_char = partition_name[0];
-    if (first_char != '_' && std::isalpha(first_char) == 0) {
-        std::string msg = invalid_msg + "The first character of a partition name must be an underscore or letter.";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_COLLECTION_NAME, msg);
-    }
-
-    int64_t table_name_size = partition_name.size();
-    for (int64_t i = 1; i < table_name_size; ++i) {
-        char name_char = partition_name[i];
-        if (name_char != '_' && std::isalnum(name_char) == 0) {
-            std::string msg = invalid_msg + "Partition name can only contain numbers, letters, and underscores.";
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_INVALID_COLLECTION_NAME, msg);
-        }
-    }
-
-    return Status::OK();
-}
-
-Status
-ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
-    for (const std::string& tag : partition_tags) {
-        // trim side-blank of tag, only compare valid characters
-        // for example: " ab cd " is treated as "ab cd"
-        std::string valid_tag = tag;
-        StringHelpFunctions::TrimStringBlank(valid_tag);
-        if (valid_tag.empty()) {
-            std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag should not be empty.";
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_INVALID_PARTITION_TAG, msg);
-        }
-
-        // max length of partition tag
-        if (valid_tag.length() > 255) {
-            std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag exceed max length(255).";
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_INVALID_PARTITION_TAG, msg);
-        }
+        return Status(SERVER_INVALID_PARTITION_TAG, msg);
     }
 
     return Status::OK();

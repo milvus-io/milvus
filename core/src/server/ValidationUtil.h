@@ -30,16 +30,10 @@ extern Status
 ValidateFieldName(const std::string& field_name);
 
 extern Status
-ValidateIndexName(const std::string& index_name);
-
-extern Status
 ValidateDimension(int64_t dimension, bool is_binary);
 
 extern Status
 ValidateIndexType(std::string& index_type);
-
-extern Status
-ValidateVectorDimension(int64_t dimension, const std::string& metric_type);
 
 extern Status
 ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type);
@@ -54,9 +48,6 @@ extern Status
 ValidateSearchTopk(int64_t top_k);
 
 extern Status
-ValidatePartitionName(const std::string& partition_name);
-
-extern Status
-ValidatePartitionTags(const std::vector<std::string>& partition_tags);
+ValidatePartitionTag(const std::string& partition_tag);
 }  // namespace server
 }  // namespace milvus

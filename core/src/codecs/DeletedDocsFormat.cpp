@@ -47,10 +47,9 @@ DeletedDocsFormat::FilePostfix() {
 void
 DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                         segment::DeletedDocsPtr& deleted_docs) {
-    const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
 
-    if (!fs_ptr->reader_ptr_->open(full_file_path)) {
-        std::string err_msg = "Failed to open file: " + full_file_path;  // + ", error: " + std::strerror(errno);
+    if (!fs_ptr->reader_ptr_->open(file_path)) {
+        std::string err_msg = "Failed to open file: " + file_path;  // + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
@@ -71,13 +70,11 @@ DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& 
 void
 DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                          const segment::DeletedDocsPtr& deleted_docs) {
-    const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
-
     // Create a temporary file from the existing file
     const std::string temp_path = file_path + ".temp_del";
-    bool exists = boost::filesystem::exists(full_file_path);
+    bool exists = boost::filesystem::exists(file_path);
     if (exists) {
-        boost::filesystem::copy_file(full_file_path, temp_path, boost::filesystem::copy_option::fail_if_exists);
+        boost::filesystem::copy_file(file_path, temp_path, boost::filesystem::copy_option::fail_if_exists);
     }
 
     // Write to the temp file, in order to avoid possible race condition with search (concurrent read and write)
@@ -114,14 +111,13 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     fs_ptr->writer_ptr_->close();
 
     // Move temp file to delete file
-    boost::filesystem::rename(temp_path, full_file_path);
+    boost::filesystem::rename(temp_path, file_path);
 }
 
 void
 DeletedDocsFormat::ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, size_t& size) {
-    const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
-    if (!fs_ptr->writer_ptr_->open(full_file_path)) {
-        std::string err_msg = "Failed to open file: " + full_file_path;  // + ", error: " + std::strerror(errno);
+    if (!fs_ptr->writer_ptr_->open(file_path)) {
+        std::string err_msg = "Failed to open file: " + file_path;  // + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }

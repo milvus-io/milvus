@@ -84,14 +84,13 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
     milvus::TimeRecorder recorder("StructuredIndexFormat::Read");
     knowhere::BinarySet load_data_list;
 
-    std::string full_file_path = file_path + STRUCTURED_INDEX_POSTFIX;
-    if (!fs_ptr->reader_ptr_->open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open structured index: " << full_file_path;
+    if (!fs_ptr->reader_ptr_->open(file_path)) {
+        LOG_ENGINE_ERROR_ << "Fail to open structured index: " << file_path;
         return;
     }
     int64_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
-        LOG_ENGINE_ERROR_ << "Invalid structured index length: " << full_file_path;
+        LOG_ENGINE_ERROR_ << "Invalid structured index length: " << file_path;
         return;
     }
 
@@ -103,7 +102,7 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
     rp += sizeof(data_type);
     fs_ptr->reader_ptr_->seekg(rp);
 
-    LOG_ENGINE_DEBUG_ << "Start to read_index(" << full_file_path << ") length: " << length << " bytes";
+    LOG_ENGINE_DEBUG_ << "Start to read_index(" << file_path << ") length: " << length << " bytes";
     while (rp < length) {
         size_t meta_length;
         fs_ptr->reader_ptr_->read(&meta_length, sizeof(meta_length));
@@ -133,7 +132,7 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "StructuredIndexFormat::read(" << full_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "StructuredIndexFormat::read(" << file_path << ") rate " << rate << "MB/s";
 
     auto attr_type = static_cast<engine::DataType>(data_type);
     index = CreateStructuredIndex(attr_type);
@@ -145,11 +144,10 @@ StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const 
                              engine::DataType data_type, const knowhere::IndexPtr& index) {
     milvus::TimeRecorder recorder("StructuredIndexFormat::Write");
 
-    std::string full_file_path = file_path + STRUCTURED_INDEX_POSTFIX;
     auto binaryset = index->Serialize(knowhere::Config());
 
-    if (!fs_ptr->writer_ptr_->open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open structured index: " << full_file_path;
+    if (!fs_ptr->writer_ptr_->open(file_path)) {
+        LOG_ENGINE_ERROR_ << "Fail to open structured index: " << file_path;
         return;
     }
     fs_ptr->writer_ptr_->write(&data_type, sizeof(data_type));
@@ -170,7 +168,7 @@ StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const 
 
     double span = recorder.RecordSection("End");
     double rate = fs_ptr->writer_ptr_->length() * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "StructuredIndexFormat::write(" << full_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "StructuredIndexFormat::write(" << file_path << ") rate " << rate << "MB/s";
 }
 
 }  // namespace codec

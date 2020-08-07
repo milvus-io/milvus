@@ -15,7 +15,9 @@
 #include "db/Utils.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Resources.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Snapshots.h"
+#include "codecs/Codec.h"
 #include "segment/Segment.h"
 
 #include <algorithm>
@@ -258,5 +260,38 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
     return Status::OK();
 }
 
+Status
+GetSegmentFileRelatePath(const SegmentFieldElementVisitorPtr& element_visitor, std::string& path) {
+    if (element_visitor == nullptr) {
+        return Status(DB_ERROR, "Segment visitor is null pointer");
+    }
+
+    auto file = element_visitor->GetFile();
+    switch (element_visitor->GetElement()->GetFtype()) {
+        case engine::FieldElementType::FET_RAW:
+            path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", file);
+            break;
+        case engine::FieldElementType::FET_DELETED_DOCS:
+            path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", file);
+            path += codec::DeletedDocsFormat::FilePostfix();
+            break;
+        case engine::FieldElementType::FET_BLOOM_FILTER:
+            path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", file);
+            path += codec::IdBloomFilterFormat::FilePostfix();
+            break;
+        case engine::FieldElementType::FET_INDEX:
+            path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", file);
+            path += codec::VectorIndexFormat::FilePostfix();
+            break;
+        case engine::FieldElementType::FET_COMPRESS_SQ8:
+            path = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", file);
+            path += codec::VectorCompressFormat::FilePostfix();
+            break;
+        default:
+            return Status(DB_ERROR, "Unsupported element type");
+    }
+
+    return Status::OK();
+}
 }  // namespace engine
 }  // namespace milvus

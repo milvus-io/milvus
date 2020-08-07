@@ -40,15 +40,14 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
                            knowhere::BinaryPtr& compress) {
     milvus::TimeRecorder recorder("VectorCompressFormat::Read");
 
-    const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
-    if (!fs_ptr->reader_ptr_->open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
+    if (!fs_ptr->reader_ptr_->open(file_path)) {
+        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << file_path;
         return;
     }
 
     int64_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
-        LOG_ENGINE_ERROR_ << "Invalid vector compress length: " << full_file_path;
+        LOG_ENGINE_ERROR_ << "Invalid vector compress length: " << file_path;
         return;
     }
 
@@ -61,7 +60,7 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "VectorCompressFormat::Read(" << full_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "VectorCompressFormat::Read(" << file_path << ") rate " << rate << "MB/s";
 }
 
 void
@@ -69,9 +68,8 @@ VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::stri
                             const knowhere::BinaryPtr& compress) {
     milvus::TimeRecorder recorder("VectorCompressFormat::Write");
 
-    const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
-    if (!fs_ptr->writer_ptr_->open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
+    if (!fs_ptr->writer_ptr_->open(file_path)) {
+        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << file_path;
         return;
     }
 
@@ -80,7 +78,7 @@ VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::stri
 
     double span = recorder.RecordSection("End");
     double rate = compress->size * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "SVectorCompressFormat::Write(" << full_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "SVectorCompressFormat::Write(" << file_path << ") rate " << rate << "MB/s";
 }
 
 }  // namespace codec

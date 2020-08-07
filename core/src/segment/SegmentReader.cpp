@@ -46,9 +46,7 @@ SegmentReader::SegmentReader(const std::string& dir_root, const engine::SegmentV
 Status
 SegmentReader::Initialize() {
     dir_collections_ = dir_root_ + engine::COLLECTIONS_FOLDER;
-
-    std::string directory =
-        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
+    std::string directory = GetSegmentPath();
 
     storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
     storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
@@ -115,16 +113,17 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
         }
 
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
+        std::string relate_file_path;
+        STATUS_CHECK(engine::GetSegmentFileRelatePath(raw_visitor, relate_file_path));
+        std::string full_file_path = dir_collections_ + relate_file_path;
 
         // if the data is in cache, no need to read file
-        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(file_path);
+        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(relate_file_path);
         if (data_obj == nullptr) {
             auto& ss_codec = codec::Codec::instance();
-            ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, raw);
+            ss_codec.GetBlockFormat()->Read(fs_ptr_, full_file_path, raw);
 
-            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, raw);  // put into cache
+            cache::CpuCacheMgr::GetInstance().InsertItem(relate_file_path, raw);  // put into cache
         } else {
             raw = std::static_pointer_cast<engine::BinaryData>(data_obj);
         }
@@ -161,8 +160,6 @@ SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int
     try {
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
 
         int64_t field_width = 0;
         STATUS_CHECK(segment_ptr_->GetFixedFieldWidth(field_name, field_width));
@@ -174,8 +171,13 @@ SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int
         for (auto offset : offsets) {
             ranges.push_back(codec::ReadRange(offset * field_width, field_width));
         }
+
+        std::string relate_file_path;
+        STATUS_CHECK(engine::GetSegmentFileRelatePath(raw_visitor, relate_file_path));
+        std::string full_file_path = dir_collections_ + relate_file_path;
+
         auto& ss_codec = codec::Codec::instance();
-        ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, ranges, raw);
+        ss_codec.GetBlockFormat()->Read(fs_ptr_, full_file_path, ranges, raw);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -280,7 +282,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         // if index not specified, or index file not created, return a temp index(IDMAP type)
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (flat || index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
-            auto temp_index_path = engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment);
+            auto temp_index_path = GetSegmentPath();
             temp_index_path += "/";
             std::string temp_index_name = field_name + ".idmap";
             temp_index_path += temp_index_name;
@@ -322,10 +324,12 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         }
 
         // read index file
-        std::string index_file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, index_visitor->GetFile());
+        std::string relate_file_path;
+        STATUS_CHECK(engine::GetSegmentFileRelatePath(index_visitor, relate_file_path));
+        std::string full_file_path = dir_collections_ + relate_file_path;
+
         // if the data is in cache, no need to read file
-        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(index_file_path);
+        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(relate_file_path);
         if (data_obj != nullptr) {
             index_ptr = std::static_pointer_cast<knowhere::VecIndex>(data_obj);
             segment_ptr_->SetVectorIndex(field_name, index_ptr);
@@ -333,7 +337,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             return Status::OK();
         }
 
-        ss_codec.GetVectorIndexFormat()->ReadIndex(fs_ptr_, index_file_path, index_data);
+        ss_codec.GetVectorIndexFormat()->ReadIndex(fs_ptr_, full_file_path, index_data);
 
         // for some kinds index(IVF), read raw file
         auto index_type = index_visitor->GetElement()->GetTypeName();
@@ -344,18 +348,20 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             if (status.ok()) {
                 ss_codec.GetVectorIndexFormat()->ConvertRaw(fixed_data, raw_data);
             } else if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW)) {
-                auto file_path =
-                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-                ss_codec.GetVectorIndexFormat()->ReadRaw(fs_ptr_, file_path, raw_data);
+                std::string relate_file_path;
+                STATUS_CHECK(engine::GetSegmentFileRelatePath(visitor, relate_file_path));
+                std::string full_file_path = dir_collections_ + relate_file_path;
+                ss_codec.GetVectorIndexFormat()->ReadRaw(fs_ptr_, full_file_path, raw_data);
             }
         }
 
         // for some kinds index(SQ8), read compress file
         if (index_type == knowhere::IndexEnum::INDEX_RHNSWSQ) {
             if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8)) {
-                auto file_path =
-                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-                ss_codec.GetVectorIndexFormat()->ReadCompress(fs_ptr_, file_path, compress_data);
+                std::string relate_file_path;
+                STATUS_CHECK(engine::GetSegmentFileRelatePath(visitor, relate_file_path));
+                std::string full_file_path = dir_collections_ + relate_file_path;
+                ss_codec.GetVectorIndexFormat()->ReadCompress(fs_ptr_, full_file_path, compress_data);
             }
         }
 
@@ -365,7 +371,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         index_ptr->SetBlacklist(concurrent_bitset_ptr);
         segment_ptr_->SetVectorIndex(field_name, index_ptr);
 
-        cache::CpuCacheMgr::GetInstance().InsertItem(index_file_path, index_ptr);  // put into cache
+        cache::CpuCacheMgr::GetInstance().InsertItem(relate_file_path, index_ptr);  // put into cache
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -394,14 +400,15 @@ SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::Inde
         // read field index
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (index_visitor && index_visitor->GetFile() != nullptr) {
-            std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, index_visitor->GetFile());
+            std::string relate_file_path;
+            STATUS_CHECK(engine::GetSegmentFileRelatePath(index_visitor, relate_file_path));
+            std::string full_file_path = dir_collections_ + relate_file_path;
 
             // if the data is in cache, no need to read file
-            auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(file_path);
+            auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(relate_file_path);
             if (data_obj == nullptr) {
-                ss_codec.GetStructuredIndexFormat()->Read(fs_ptr_, file_path, index_ptr);
-                cache::CpuCacheMgr::GetInstance().InsertItem(file_path, index_ptr);  // put into cache
+                ss_codec.GetStructuredIndexFormat()->Read(fs_ptr_, full_file_path, index_ptr);
+                cache::CpuCacheMgr::GetInstance().InsertItem(relate_file_path, index_ptr);  // put into cache
             } else {
                 index_ptr = std::static_pointer_cast<knowhere::Index>(data_obj);
             }
@@ -424,13 +431,6 @@ SegmentReader::LoadVectorIndice() {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
 
-        auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (element_visitor == nullptr) {
-            continue;
-        }
-
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, element_visitor->GetFile());
         if (engine::IsVectorField(field)) {
             knowhere::VecIndexPtr index_ptr;
             STATUS_CHECK(LoadVectorIndex(name, index_ptr));
@@ -453,24 +453,26 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
 
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-        if (!boost::filesystem::exists(file_path + codec::IdBloomFilterFormat::FilePostfix())) {
+
+        std::string relate_file_path;
+        STATUS_CHECK(engine::GetSegmentFileRelatePath(visitor, relate_file_path));
+        std::string full_file_path = dir_collections_ + relate_file_path;
+        if (!boost::filesystem::exists(full_file_path)) {
             return Status::OK();  // file doesn't exist
         }
 
         // if the data is in cache, no need to read file
-        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(file_path);
+        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(relate_file_path);
         if (data_obj == nullptr) {
             auto& ss_codec = codec::Codec::instance();
-            ss_codec.GetIdBloomFilterFormat()->Read(fs_ptr_, file_path, id_bloom_filter_ptr);
+            ss_codec.GetIdBloomFilterFormat()->Read(fs_ptr_, full_file_path, id_bloom_filter_ptr);
         } else {
             id_bloom_filter_ptr = std::static_pointer_cast<segment::IdBloomFilter>(data_obj);
         }
 
         if (id_bloom_filter_ptr) {
             segment_ptr_->SetBloomFilter(id_bloom_filter_ptr);
-            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, id_bloom_filter_ptr);  // put into cache
+            cache::CpuCacheMgr::GetInstance().InsertItem(relate_file_path, id_bloom_filter_ptr);  // put into cache
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
@@ -490,24 +492,26 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
 
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-        if (!boost::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
+
+        std::string relate_file_path;
+        STATUS_CHECK(engine::GetSegmentFileRelatePath(visitor, relate_file_path));
+        std::string full_file_path = dir_collections_ + relate_file_path;
+        if (!boost::filesystem::exists(full_file_path)) {
             return Status::OK();  // file doesn't exist
         }
 
         // if the data is in cache, no need to read file
-        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(file_path);
+        auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(relate_file_path);
         if (data_obj == nullptr) {
             auto& ss_codec = codec::Codec::instance();
-            ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, file_path, deleted_docs_ptr);
+            ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, full_file_path, deleted_docs_ptr);
         } else {
             deleted_docs_ptr = std::static_pointer_cast<segment::DeletedDocs>(data_obj);
         }
 
         if (deleted_docs_ptr) {
             segment_ptr_->SetDeletedDocs(deleted_docs_ptr);
-            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, deleted_docs_ptr);  // put into cache
+            cache::CpuCacheMgr::GetInstance().InsertItem(relate_file_path, deleted_docs_ptr);  // put into cache
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load deleted docs: " + std::string(e.what());
@@ -529,14 +533,17 @@ SegmentReader::ReadDeletedDocsSize(size_t& size) {
 
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-        if (!boost::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
+
+        std::string relate_file_path;
+        STATUS_CHECK(engine::GetSegmentFileRelatePath(visitor, relate_file_path));
+        std::string full_file_path = dir_collections_ + relate_file_path;
+
+        if (!boost::filesystem::exists(full_file_path)) {
             return Status::OK();  // file doesn't exist
         }
 
         auto& ss_codec = codec::Codec::instance();
-        ss_codec.GetDeletedDocsFormat()->ReadSize(fs_ptr_, file_path, size);
+        ss_codec.GetDeletedDocsFormat()->ReadSize(fs_ptr_, full_file_path, size);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to read deleted docs size: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;

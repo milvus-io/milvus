@@ -67,9 +67,11 @@ CreateCollectionReq::OnExecute() {
         }
 
         LOG_SERVER_DEBUG_ << "create_collection_context";
+        std::set<std::string> unique_field_names;
         create_collection_context.collection = collection_schema;
         for (auto& field_kv : fields_) {
             auto& field_name = field_kv.first;
+            unique_field_names.insert(field_name);
             auto& field_schema = field_kv.second;
 
             auto& field_type = field_schema.field_type_;
@@ -107,6 +109,11 @@ CreateCollectionReq::OnExecute() {
 
             auto field = std::make_shared<engine::snapshot::Field>(field_name, 0, field_type, field_params);
             create_collection_context.fields_schema[field] = {};
+        }
+
+        // not allow duplicate field name
+        if (unique_field_names.size() != fields_.size()) {
+            return Status(DB_ERROR, "Duplicate field name");
         }
 
         // step 3: create collection

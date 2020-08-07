@@ -13,6 +13,7 @@
 
 #include "db/Types.h"
 #include "db/snapshot/Resources.h"
+#include "db/SnapshotVisitor.h"
 #include "utils/Json.h"
 
 #include <string>
@@ -49,5 +50,7 @@ IsVectorField(const engine::snapshot::FieldPtr& field);
 Status
 GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info);
 
+Status
+GetSegmentFileRelatePath(const SegmentFieldElementVisitorPtr& element_visitor, std::string& path);
 }  // namespace engine
 }  // namespace milvus

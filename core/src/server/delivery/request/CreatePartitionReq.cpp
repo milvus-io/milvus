@@ -46,7 +46,7 @@ CreatePartitionReq::OnExecute() {
             return Status(SERVER_INVALID_PARTITION_TAG, "'_default' is built-in partition tag");
         }
 
-        auto status = ValidatePartitionTags({tag_});
+        auto status = ValidatePartitionTag(tag_);
         fiu_do_on("CreatePartitionReq.OnExecute.invalid_partition_tags",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {

@@ -71,23 +71,22 @@ VectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::str
                              knowhere::BinarySet& data) {
     milvus::TimeRecorder recorder("VectorIndexFormat::ReadIndex");
 
-    std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
-    if (!fs_ptr->reader_ptr_->open(full_file_path)) {
-        std::string err_msg = "Failed to open vector index: " + full_file_path + ", error: " + std::strerror(errno);
+    if (!fs_ptr->reader_ptr_->open(file_path)) {
+        std::string err_msg = "Failed to open vector index: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
     int64_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
-        LOG_ENGINE_ERROR_ << "Invalid vector index length: " << full_file_path;
+        LOG_ENGINE_ERROR_ << "Invalid vector index length: " << file_path;
         return;
     }
 
     int64_t rp = 0;
     fs_ptr->reader_ptr_->seekg(0);
 
-    LOG_ENGINE_DEBUG_ << "Start to ReadIndex(" << full_file_path << ") length: " << length << " bytes";
+    LOG_ENGINE_DEBUG_ << "Start to ReadIndex(" << file_path << ") length: " << length << " bytes";
     while (rp < length) {
         size_t meta_length;
         fs_ptr->reader_ptr_->read(&meta_length, sizeof(meta_length));
@@ -117,7 +116,7 @@ VectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::str
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "VectorIndexFormat::ReadIndex(" << full_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "VectorIndexFormat::ReadIndex(" << file_path << ") rate " << rate << "MB/s";
 }
 
 void
@@ -178,11 +177,10 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
                               const knowhere::VecIndexPtr& index) {
     milvus::TimeRecorder recorder("SVectorIndexFormat::WriteIndex");
 
-    std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
     auto binaryset = index->Serialize(knowhere::Config());
 
-    if (!fs_ptr->writer_ptr_->open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector index: " << full_file_path;
+    if (!fs_ptr->writer_ptr_->open(file_path)) {
+        LOG_ENGINE_ERROR_ << "Fail to open vector index: " << file_path;
         return;
     }
 
@@ -201,7 +199,7 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
 
     double span = recorder.RecordSection("End");
     double rate = fs_ptr->writer_ptr_->length() * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "VectorIndexFormat::WriteIndex(" << full_file_path << ") rate " << rate << "MB/s";
+    LOG_ENGINE_DEBUG_ << "VectorIndexFormat::WriteIndex(" << file_path << ") rate " << rate << "MB/s";
 }
 
 void

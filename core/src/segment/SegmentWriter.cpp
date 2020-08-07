@@ -46,9 +46,7 @@ SegmentWriter::SegmentWriter(const std::string& dir_root, const engine::SegmentV
 Status
 SegmentWriter::Initialize() {
     dir_collections_ = dir_root_ + engine::COLLECTIONS_FOLDER;
-
-    std::string directory =
-        engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
+    std::string directory = GetSegmentPath();
 
     storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
     storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
@@ -139,12 +137,14 @@ SegmentWriter::WriteFields() {
 
         auto element_visitor = iter.second->GetElementVisitor(engine::FieldElementType::FET_RAW);
         if (element_visitor && element_visitor->GetFile()) {
-            auto segment_file = element_visitor->GetFile();
-            std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
-            STATUS_CHECK(WriteField(file_path, raw_data));
+            std::string relate_file_path;
+            STATUS_CHECK(engine::GetSegmentFileRelatePath(element_visitor, relate_file_path));
+            std::string full_file_path = dir_collections_ + relate_file_path;
 
-            auto file_size = milvus::CommonUtil::GetFileSize(file_path);
+            STATUS_CHECK(WriteField(full_file_path, raw_data));
+
+            auto file_size = milvus::CommonUtil::GetFileSize(full_file_path);
+            auto segment_file = element_visitor->GetFile();
             segment_file->SetSize(file_size);
 
             recorder.RecordSection("Serialize field raw file");
@@ -171,13 +171,13 @@ SegmentWriter::WriteBloomFilter() {
         auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
         if (uid_blf_visitor && uid_blf_visitor->GetFile()) {
-            auto segment_file = uid_blf_visitor->GetFile();
-            std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
+            std::string relate_file_path;
+            STATUS_CHECK(engine::GetSegmentFileRelatePath(uid_blf_visitor, relate_file_path));
+            std::string full_file_path = dir_collections_ + relate_file_path;
 
             auto& ss_codec = codec::Codec::instance();
             segment::IdBloomFilterPtr bloom_filter_ptr;
-            ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
+            ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, full_file_path, bloom_filter_ptr);
 
             int64_t* uids = (int64_t*)(uid_data->data_.data());
             int64_t row_count = segment_ptr_->GetRowCount();
@@ -188,9 +188,10 @@ SegmentWriter::WriteBloomFilter() {
 
             recorder.RecordSection("Initialize bloom filter");
 
-            STATUS_CHECK(WriteBloomFilter(file_path, segment_ptr_->GetBloomFilter()));
+            STATUS_CHECK(WriteBloomFilter(full_file_path, segment_ptr_->GetBloomFilter()));
 
-            auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::IdBloomFilterFormat::FilePostfix());
+            auto file_size = milvus::CommonUtil::GetFileSize(full_file_path);
+            auto segment_file = uid_blf_visitor->GetFile();
             segment_file->SetSize(file_size);
         } else {
             return Status(DB_ERROR, "Bloom filter element missed in snapshot");
@@ -246,13 +247,14 @@ SegmentWriter::WriteDeletedDocs() {
     auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
     auto del_doc_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
     if (del_doc_visitor && del_doc_visitor->GetFile()) {
+        std::string relate_file_path;
+        STATUS_CHECK(engine::GetSegmentFileRelatePath(del_doc_visitor, relate_file_path));
+        std::string full_file_path = dir_collections_ + relate_file_path;
+
+        STATUS_CHECK(WriteDeletedDocs(full_file_path, segment_ptr_->GetDeletedDocs()));
+
+        auto file_size = milvus::CommonUtil::GetFileSize(full_file_path);
         auto segment_file = del_doc_visitor->GetFile();
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
-
-        STATUS_CHECK(WriteDeletedDocs(file_path, segment_ptr_->GetDeletedDocs()));
-
-        auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::DeletedDocsFormat::FilePostfix());
         segment_file->SetSize(file_size);
     } else {
         return Status(DB_ERROR, "Deleted-doc element missed in snapshot");
@@ -410,12 +412,14 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
         {
             auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_INDEX);
             if (element_visitor && element_visitor->GetFile()) {
-                auto segment_file = element_visitor->GetFile();
-                std::string file_path =
-                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
-                ss_codec.GetVectorIndexFormat()->WriteIndex(fs_ptr_, file_path, index);
+                std::string relate_file_path;
+                STATUS_CHECK(engine::GetSegmentFileRelatePath(element_visitor, relate_file_path));
+                std::string full_file_path = dir_collections_ + relate_file_path;
 
-                auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::VectorIndexFormat::FilePostfix());
+                ss_codec.GetVectorIndexFormat()->WriteIndex(fs_ptr_, full_file_path, index);
+
+                auto file_size = milvus::CommonUtil::GetFileSize(full_file_path);
+                auto segment_file = element_visitor->GetFile();
                 segment_file->SetSize(file_size);
             }
         }
@@ -424,13 +428,14 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
         {
             auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
             if (element_visitor && element_visitor->GetFile()) {
-                auto segment_file = element_visitor->GetFile();
-                std::string file_path =
-                    engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
-                ss_codec.GetVectorIndexFormat()->WriteCompress(fs_ptr_, file_path, index);
+                std::string relate_file_path;
+                STATUS_CHECK(engine::GetSegmentFileRelatePath(element_visitor, relate_file_path));
+                std::string full_file_path = dir_collections_ + relate_file_path;
 
-                auto file_size =
-                    milvus::CommonUtil::GetFileSize(file_path + codec::VectorCompressFormat::FilePostfix());
+                ss_codec.GetVectorIndexFormat()->WriteCompress(fs_ptr_, full_file_path, index);
+
+                auto file_size = milvus::CommonUtil::GetFileSize(full_file_path);
+                auto segment_file = element_visitor->GetFile();
                 segment_file->SetSize(file_size);
             }
         }
@@ -472,12 +477,15 @@ SegmentWriter::WriteStructuredIndex(const std::string& field_name) {
         if (element_visitor && element_visitor->GetFile()) {
             engine::DataType field_type;
             segment_ptr_->GetFieldType(field_name, field_type);
-            auto segment_file = element_visitor->GetFile();
-            std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
-            ss_codec.GetStructuredIndexFormat()->Write(fs_ptr_, file_path, field_type, index);
 
-            auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::StructuredIndexFormat::FilePostfix());
+            std::string relate_file_path;
+            STATUS_CHECK(engine::GetSegmentFileRelatePath(element_visitor, relate_file_path));
+            std::string full_file_path = dir_collections_ + relate_file_path;
+
+            ss_codec.GetStructuredIndexFormat()->Write(fs_ptr_, full_file_path, field_type, index);
+
+            auto file_size = milvus::CommonUtil::GetFileSize(full_file_path);
+            auto segment_file = element_visitor->GetFile();
             segment_file->SetSize(file_size);
         }
     } catch (std::exception& e) {
