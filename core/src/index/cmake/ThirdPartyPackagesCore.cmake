@@ -513,8 +513,24 @@ macro(build_faiss)
     set(FAISS_STATIC_LIB
             "${FAISS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}faiss${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
+    if (CCACHE_FOUND)
+        set(FAISS_C_COMPILER "${CCACHE_FOUND} ${CMAKE_C_COMPILER}")
+        if (MILVUS_GPU_VERSION)
+            set(FAISS_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
+            set(FAISS_CUDA_COMPILER "${CCACHE_FOUND} ${CMAKE_CUDA_COMPILER}")
+        else ()
+            set(FAISS_CXX_COMPILER "${CCACHE_FOUND} ${CMAKE_CXX_COMPILER}")
+        endif()
+    else ()
+        set(FAISS_C_COMPILER "${CMAKE_C_COMPILER}")
+        set(FAISS_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
+    endif()
+
     set(FAISS_CONFIGURE_ARGS
             "--prefix=${FAISS_PREFIX}"
+            "CC=${FAISS_C_COMPILER}"
+            "CXX=${FAISS_CXX_COMPILER}"
+            "NVCC=${FAISS_CUDA_COMPILER}"
             "CFLAGS=${EP_C_FLAGS}"
             "CXXFLAGS=${EP_CXX_FLAGS} -mf16c -O3"
             --without-python)
