@@ -390,6 +390,7 @@ class TestGetBase:
         assert res[0] is None
 
     # TODO
+    @pytest.mark.level(2)
     def test_get_entities_after_delete(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
