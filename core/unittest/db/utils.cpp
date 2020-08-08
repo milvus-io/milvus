@@ -13,6 +13,7 @@
 
 #include <opentracing/mocktracer/tracer.h>
 
+#include <experimental/filesystem>
 #include <boost/filesystem.hpp>
 #include <iostream>
 #include <memory>
@@ -265,7 +266,8 @@ DBTest::TearDown() {
 
     BaseTest::SnapshotStop();
     auto options = GetOptions();
-    boost::filesystem::remove_all(options.meta_.path_);
+    /* boost::filesystem::remove_all(options.meta_.path_); */
+    std::experimental::filesystem::remove_all(options.meta_.path_);
 
     BaseTest::TearDown();
 }
