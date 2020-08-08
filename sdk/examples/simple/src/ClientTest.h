@@ -55,7 +55,7 @@ class ClientTest {
     GetEntityByID(const std::string&, const std::vector<int64_t>&);
 
     void
-    SearchEntities(const std::string&, int64_t, int64_t);
+    SearchEntities(const std::string&, int64_t, int64_t, const std::string metric_type);
 
     void
     SearchEntitiesByID(const std::string&, int64_t, int64_t);
