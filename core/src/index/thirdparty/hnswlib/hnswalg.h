@@ -7,7 +7,8 @@
 #include <unordered_set>
 #include <list>
 
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
+//#include "knowhere/index/vector_index/helpers/FaissIO.h"
+#include "/home/zilliz/workspace/dev/milvus/milvus/core/src/index/knowhere/knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace hnswlib {
 
@@ -28,9 +29,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             link_list_locks_(max_elements), element_levels_(max_elements) {
         // linxj
         space = s;
-        if (auto x = dynamic_cast<hnswlib::L2Space*>(s)) {
+        if (auto x = dynamic_cast<L2Space*>(s)) {
             metric_type_ = 0;
-        } else if (auto x = dynamic_cast<hnswlib::InnerProductSpace*>(s)) {
+        } else if (auto x = dynamic_cast<InnerProductSpace*>(s)) {
             metric_type_ = 1;
         } else {
             metric_type_ = 100;
@@ -62,7 +63,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         cur_element_count = 0;
 
-        visited_list_pool_ = new hnswlib::VisitedListPool(1, max_elements);
+        visited_list_pool_ = new VisitedListPool(1, max_elements);
 
 
 
@@ -75,6 +76,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             throw std::runtime_error("Not enough memory: HierarchicalNSW failed to allocate linklists");
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
         mult_ = 1 / log(1.0 * M_);
+        revSize_ = 1.0 / mult_;
     }
 
     struct CompareByFirst {
@@ -112,11 +114,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     size_t maxM0_;
     size_t ef_construction_;
 
-    double mult_;
+    double mult_, revSize_;
     int maxlevel_;
 
 
-    hnswlib::VisitedListPool *visited_list_pool_;
+    VisitedListPool *visited_list_pool_;
     std::mutex cur_element_count_guard_;
 
     std::vector<std::mutex> link_list_locks_;
@@ -169,9 +171,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
     searchBaseLayer(tableint ep_id, const void *data_point, int layer) {
-        hnswlib::VisitedList *vl = visited_list_pool_->getFreeVisitedList();
-        hnswlib::vl_type *visited_array = vl->mass;
-        hnswlib::vl_type visited_array_tag = vl->curV;
+        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        vl_type *visited_array = vl->mass;
+        vl_type visited_array_tag = vl->curV;
 
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates;
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> candidateSet;
@@ -252,9 +254,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     template <bool has_deletions>
     std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
     searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, faiss::ConcurrentBitsetPtr bitset) const {
-        hnswlib::VisitedList *vl = visited_list_pool_->getFreeVisitedList();
-        hnswlib::vl_type *visited_array = vl->mass;
-        hnswlib::vl_type visited_array_tag = vl->curV;
+        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        vl_type *visited_array = vl->mass;
+        vl_type visited_array_tag = vl->curV;
 
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates;
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> candidate_set;
@@ -555,7 +557,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
 
         delete visited_list_pool_;
-        visited_list_pool_ = new hnswlib::VisitedListPool(1, new_max_elements);
+        visited_list_pool_ = new VisitedListPool(1, new_max_elements);
 
 
 
@@ -701,13 +703,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         std::vector<std::mutex>(max_elements).swap(link_list_locks_);
 
 
-        visited_list_pool_ = new hnswlib::VisitedListPool(1, max_elements);
+        visited_list_pool_ = new VisitedListPool(1, max_elements);
 
 
         linkLists_ = (char **) malloc(sizeof(void *) * max_elements);
         if (linkLists_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
         element_levels_ = std::vector<int>(max_elements);
+        revSize_ = 1.0 / mult_;
         ef_ = 10;
         for (size_t i = 0; i < cur_element_count; i++) {
             label_lookup_[getExternalLabel(i)]=i;
@@ -838,12 +841,13 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
         std::vector<std::mutex>(max_elements).swap(link_list_locks_);
 
-        visited_list_pool_ = new hnswlib::VisitedListPool(1, max_elements);
+        visited_list_pool_ = new VisitedListPool(1, max_elements);
 
         linkLists_ = (char **) malloc(sizeof(void *) * max_elements);
         if (linkLists_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
         element_levels_ = std::vector<int>(max_elements);
+        revSize_ = 1.0 / mult_;
         ef_ = 10;
         for (size_t i = 0; i < cur_element_count; i++) {
             label_lookup_[getExternalLabel(i)]=i;
@@ -1128,15 +1132,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         return result;
     }
 
-    void addPoint(void *datapoint, labeltype label, size_t base, size_t offset) {
-        return;
-    }
-
-    std::priority_queue<std::pair<dist_t, labeltype >> searchKnn_NM(const void* query_data, size_t k, faiss::ConcurrentBitsetPtr bitset, dist_t *pdata) const {
-        std::priority_queue<std::pair<dist_t, labeltype >> ret;
-        return ret;
-    }
-
     int64_t cal_size() {
         int64_t ret = 0;
         ret += sizeof(*this);
@@ -1150,7 +1145,13 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             ret += linkLists_[i] ? size_links_per_element_ * element_levels_[i] : 0;
         }
         return ret;
-    }
-};
+     }
+
+    };
 
 }
+
+
+
+
+
