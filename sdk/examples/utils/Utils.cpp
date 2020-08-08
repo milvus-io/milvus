@@ -261,6 +261,7 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
                 const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
                 std::vector<std::pair<int64_t, milvus::VectorData>> entity_array,
                 milvus::TopKQueryResult& topk_query_result) {
+/*
     topk_query_result.clear();
 
     nlohmann::json dsl_json, vector_param_json;
@@ -279,6 +280,7 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
 
     PrintTopKQueryResult(topk_query_result);
     //    PrintSearchResult(entity_array, topk_query_result);
+*/
 }
 
 void
@@ -361,7 +363,7 @@ Utils::GenLeafQuery() {
 }
 
 void
-Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json) {
+Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type) {
     uint64_t row_num = 10000;
     std::vector<int64_t> term_value;
     term_value.resize(row_num);
@@ -390,6 +392,7 @@ Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json) {
     nlohmann::json query_vector_json, vector_extra_params;
     int64_t topk = 10;
     query_vector_json["topk"] = topk;
+    query_vector_json["metric_type"] = metric_type;
     vector_extra_params["nprobe"] = 64;
     query_vector_json["params"] = vector_extra_params;
     vector_param_json[placeholder]["field_vec"] = query_vector_json;
