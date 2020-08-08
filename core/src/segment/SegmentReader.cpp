@@ -392,6 +392,9 @@ SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::Inde
         // check field type
         auto& ss_codec = codec::Codec::instance();
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        if (!field_visitor) {
+            return Status(DB_ERROR, "Field: " + field_name + " is not exist");
+        }
         const engine::snapshot::FieldPtr& field = field_visitor->GetField();
         if (engine::IsVectorField(field)) {
             return Status(DB_ERROR, "Field is not structured type");
@@ -472,7 +475,9 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
 
         if (id_bloom_filter_ptr) {
             segment_ptr_->SetBloomFilter(id_bloom_filter_ptr);
-            cache::CpuCacheMgr::GetInstance().InsertItem(relate_file_path, id_bloom_filter_ptr);  // put into cache
+
+            // TODO: disable cache for solving bloom filter ptr problem
+            // cache::CpuCacheMgr::GetInstance().InsertItem(relate_file_path, id_bloom_filter_ptr);  // put into cache
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
