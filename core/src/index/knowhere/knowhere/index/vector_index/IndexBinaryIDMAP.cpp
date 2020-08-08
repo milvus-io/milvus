@@ -144,7 +144,7 @@ void
 BinaryIDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     // users will assign the metric type when querying
     // so we let Tanimoto be the default type
-    faiss::MetricType metric_type = faiss::METRIC_Tanimoto;
+    constexpr faiss::MetricType metric_type = faiss::METRIC_Tanimoto;
 
     const char* desc = "BFlat";
     int64_t dim = config[meta::DIM].get<int64_t>();
@@ -217,7 +217,8 @@ void
 BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
                        const Config& config) {
     // assign the metric type
-    index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    auto bin_flat_index = dynamic_cast<faiss::IndexBinaryIDMap*>(index_.get())->index;
+    bin_flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
 
     int32_t* pdistances = (int32_t*)distances;
     index_->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
