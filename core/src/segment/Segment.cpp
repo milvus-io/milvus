@@ -18,6 +18,8 @@
 #include "segment/Segment.h"
 #include "utils/Log.h"
 
+#include <algorithm>
+#include <functional>
 #include <utility>
 
 namespace milvus {
@@ -140,24 +142,35 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
 }
 
 Status
-Segment::DeleteEntity(int64_t offset) {
-    if (offset > row_count_) {
-        return Status(DB_ERROR, "Invalid input");
+Segment::DeleteEntity(std::vector<offset_t>& offsets) {
+    if (offsets.size() == 0) {
+        return Status::OK();
     }
+    // sort offset in descendant
+    std::sort(offsets.begin(), offsets.end(), std::greater<offset_t>());
 
+    // delete entity data from max offset to min offset
     for (auto& pair : fixed_fields_) {
         int64_t width = fixed_fields_width_[pair.first];
-        if (width != 0) {
-            auto step = offset * width;
-            BinaryDataPtr& data = pair.second;
-            if (data == nullptr) {
-                continue;
-            }
+        if (width == 0 || pair.second == nullptr) {
+            continue;
+        }
 
-            data->data_.erase(data->data_.begin() + step, data->data_.begin() + step + width);
+        auto& data = pair.second;
+        for (auto offset : offsets) {
+            if (offset >= 0 && offset < row_count_) {
+                auto step = offset * width;
+                data->data_.erase(data->data_.begin() + step, data->data_.begin() + step + width);
+            }
         }
     }
-    row_count_--;
+
+    // reset row count
+    for (auto offset : offsets) {
+        if (offset >= 0 && offset < row_count_) {
+            row_count_--;
+        }
+    }
 
     return Status::OK();
 }

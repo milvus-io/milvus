@@ -226,8 +226,8 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 }
 
 void
-MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::segment::doc_id_t>& uids, int64_t nq,
-                 int64_t k, float* distances, int64_t* labels) {
+MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<id_t>& uids, int64_t nq, int64_t k,
+                 float* distances, int64_t* labels) {
     int64_t* res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
     float* res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
 
@@ -269,6 +269,7 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
 
     milvus::json conf = vector_param->extra_params;
     conf[knowhere::meta::TOPK] = topk;
+    conf[knowhere::Metric::TYPE] = vector_param->metric_type;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(vec_index->index_type());
     if (!adapter->CheckSearch(conf, vec_index->index_type(), vec_index->index_mode())) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
@@ -314,6 +315,9 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         auto field_visitors = segment_visitor->GetFieldVisitors();
         for (const auto& name : context.query_ptr_->index_fields) {
             auto field_visitor = segment_visitor->GetFieldVisitor(name);
+            if (!field_visitor) {
+                return Status(SERVER_INVALID_DSL_PARAMETER, "Field: " + name + " is not existed");
+            }
             auto field = field_visitor->GetField();
             if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
                 field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
@@ -412,16 +416,10 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
         bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_);
         if (general_query->leaf->term_query != nullptr) {
             // process attrs_data
-            status = ProcessTermQuery(bitset, general_query->leaf->term_query, attr_type);
-            if (!status.ok()) {
-                return status;
-            }
+            STATUS_CHECK(ProcessTermQuery(bitset, general_query->leaf->term_query, attr_type));
         }
         if (general_query->leaf->range_query != nullptr) {
-            status = ProcessRangeQuery(attr_type, bitset, general_query->leaf->range_query);
-            if (!status.ok()) {
-                return status;
-            }
+            STATUS_CHECK(ProcessRangeQuery(attr_type, bitset, general_query->leaf->range_query));
         }
         if (!general_query->leaf->vector_placeholder.empty()) {
             // skip vector query
@@ -496,19 +494,23 @@ ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const 
 Status
 ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, const query::TermQueryPtr& term_query,
                                       std::unordered_map<std::string, DataType>& attr_type) {
-    auto status = Status::OK();
-    auto term_query_json = term_query->json_obj;
-    auto term_it = term_query_json.begin();
-    if (term_it != term_query_json.end()) {
-        const std::string& field_name = term_it.key();
-        if (term_it.value().is_object()) {
-            milvus::json term_values_json = term_it.value()["values"];
-            status = IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_values_json);
-        } else {
-            status = IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_it.value());
+    try {
+        auto term_query_json = term_query->json_obj;
+        JSON_NULL_CHECK(term_query_json);
+        auto term_it = term_query_json.begin();
+        if (term_it != term_query_json.end()) {
+            const std::string& field_name = term_it.key();
+            if (term_it.value().is_object()) {
+                milvus::json term_values_json = term_it.value()["values"];
+                STATUS_CHECK(IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_values_json));
+            } else {
+                STATUS_CHECK(IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_it.value()));
+            }
         }
+    } catch (std::exception& ex) {
+        return Status{SERVER_INVALID_DSL_PARAMETER, ex.what()};
     }
-    return status;
+    return Status::OK();
 }
 
 template <typename T>
@@ -578,6 +580,7 @@ ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, Dat
 
     auto status = Status::OK();
     auto range_query_json = range_query->json_obj;
+    JSON_NULL_CHECK(range_query_json);
     auto range_it = range_query_json.begin();
     if (range_it != range_query_json.end()) {
         const std::string& field_name = range_it.key();
@@ -712,8 +715,7 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
 
     // create snapshot compress file
     std::string index_name = index_element->GetName();
-    if (index_name == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
-        index_name == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+    if (index_name == knowhere::IndexEnum::INDEX_RHNSWSQ) {
         auto compress_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
         if (compress_visitor == nullptr) {
             return Status(DB_ERROR,
@@ -787,7 +789,7 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
 
-    std::vector<segment::doc_id_t> uids;
+    std::vector<id_t> uids;
     faiss::ConcurrentBitsetPtr blacklist;
     if (from_index) {
         auto dataset =

@@ -10,7 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-#include <knowhere/index/vector_offset_index/IndexHNSW_NM.h>
+#include <src/index/knowhere/knowhere/common/Config.h>
+#include <src/index/knowhere/knowhere/index/vector_index/IndexHNSW.h>
 #include <src/index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h>
 #include <iostream>
 #include <random>
@@ -28,7 +29,7 @@ class HNSWTest : public DataGen, public TestWithParam<std::string> {
         IndexType = GetParam();
         std::cout << "IndexType from GetParam() is: " << IndexType << std::endl;
         Generate(64, 10000, 10);  // dim = 64, nb = 10000, nq = 10
-        index_ = std::make_shared<milvus::knowhere::IndexHNSW_NM>();
+        index_ = std::make_shared<milvus::knowhere::IndexHNSW>();
         conf = milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, 64},        {milvus::knowhere::meta::TOPK, 10},
             {milvus::knowhere::IndexParams::M, 16},   {milvus::knowhere::IndexParams::efConstruction, 200},
@@ -38,7 +39,7 @@ class HNSWTest : public DataGen, public TestWithParam<std::string> {
 
  protected:
     milvus::knowhere::Config conf;
-    std::shared_ptr<milvus::knowhere::IndexHNSW_NM> index_ = nullptr;
+    std::shared_ptr<milvus::knowhere::IndexHNSW> index_ = nullptr;
     std::string IndexType;
 };
 

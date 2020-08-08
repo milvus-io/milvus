@@ -23,20 +23,20 @@ set( CONFIG_SRCS    ConfigMgr.h
 add_library( config ${CONFIG_SRCS} )
 add_dependencies( config yaml-cpp )
 
-# unitests
-if (BUILD_UNIT_TEST STREQUAL "ON")
 
-    # config_test
-    add_test(
-            TARGET
-                    ConfigTypeTest
-            SOURCES
-                    ConfigTypeTest1.cpp
-                    ConfigTypeTest2.cpp
-            LIBS 
-                    config
-                    ${gtest_libraries}
-                    yaml-cpp
-            )
+if ( BUILD_UNIT_TEST )
+    add_executable( ConfigTypeTest )
+    target_sources( ConfigTypeTest PRIVATE ConfigTypeTest1
+                                           ConfigTypeTest2 )
+    target_link_libraries( ConfigTypeTest
+                PRIVATE    config
+                           gtest
+                           gtest_main
+                           gmock
+                           gmock_main
+                           yaml-cpp )
 
+    add_test ( NAME     ConfigTypeTest
+               COMMAND  $<TARGET_FILE:ConfigTypeTest>
+               )
 endif()

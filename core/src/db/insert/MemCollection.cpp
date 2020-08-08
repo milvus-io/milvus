@@ -27,6 +27,7 @@
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/Snapshots.h"
+#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -73,19 +74,19 @@ MemCollection::Add(int64_t partition_id, const milvus::engine::VectorSourcePtr& 
 }
 
 Status
-MemCollection::Delete(const std::vector<segment::doc_id_t>& doc_ids) {
+MemCollection::Delete(const std::vector<id_t>& ids) {
     // Locate which collection file the doc id lands in
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto& partition_segments : mem_segments_) {
             MemSegmentList& segments = partition_segments.second;
             for (auto& segment : segments) {
-                segment->Delete(doc_ids);
+                segment->Delete(ids);
             }
         }
     }
     // Add the id to delete list so it can be applied to other segments on disk during the next flush
-    for (auto& id : doc_ids) {
+    for (auto& id : ids) {
         doc_ids_to_delete_.insert(id);
     }
 
@@ -113,9 +114,14 @@ MemCollection::Serialize(uint64_t wal_lsn) {
             if (status.ok()) {
                 break;
             } else if (status.code() == SS_STALE_ERROR) {
-                LOG_ENGINE_WARNING_ << "ApplyDeletes is stale, try again";
+                std::string err = "ApplyDeletes is stale, try again";
+                LOG_ENGINE_WARNING_ << err;
+                std::cout << err << std::endl;
                 continue;
             } else {
+                std::string err = "ApplyDeletes failed: " + status.ToString();
+                LOG_ENGINE_ERROR_ << err;
+                std::cout << err << std::endl;
                 return status;
             }
         }
@@ -170,33 +176,45 @@ MemCollection::ApplyDeletes() {
     context.lsn = lsn_;
     auto segments_op = std::make_shared<snapshot::CompoundSegmentsOperation>(context, ss);
 
+    int64_t segment_iterated = 0;
+    //    std::vector<snapshot::SegmentPtr> modified_segments;
     auto segment_executor = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* iterator) -> Status {
+        segment_iterated++;
         auto seg_visitor = engine::SegmentVisitor::Build(ss, segment->GetID());
         segment::SegmentReaderPtr segment_reader =
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
-        segment::IdBloomFilterPtr pre_bloom_filter;
-        STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
 
         // Step 1: Check delete_id in mem
-        std::vector<segment::doc_id_t> delete_ids;
-        for (auto& id : doc_ids_to_delete_) {
-            if (pre_bloom_filter->Check(id)) {
-                delete_ids.push_back(id);
+        std::vector<id_t> delete_ids;
+        {
+            segment::IdBloomFilterPtr pre_bloom_filter;
+            STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
+            for (auto& id : doc_ids_to_delete_) {
+                if (pre_bloom_filter->Check(id)) {
+                    delete_ids.push_back(id);
+                }
+            }
+
+            if (delete_ids.empty()) {
+                return Status::OK();
             }
         }
 
-        if (delete_ids.empty()) {
-            return Status::OK();
-        }
+        std::vector<engine::id_t> uids;
+        STATUS_CHECK(segment_reader->LoadUids(uids));
 
         // Step 2: Load previous delete_id and merge into 'delete_ids'
         segment::DeletedDocsPtr prev_del_docs;
         STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
-        std::vector<segment::offset_t> pre_del_ids;
+        std::vector<engine::offset_t> pre_del_ids;
         if (prev_del_docs) {
-            pre_del_ids = prev_del_docs->GetDeletedDocs();
-            if (!pre_del_ids.empty())
+            auto pre_doc_ids = prev_del_docs->GetDeletedDocs();
+            if (!pre_doc_ids.empty()) {
+                for (auto& id : pre_doc_ids) {
+                    pre_del_ids.push_back(uids[id]);
+                }
                 delete_ids.insert(delete_ids.end(), pre_del_ids.begin(), pre_del_ids.end());
+            }
         }
 
         // TODO(yhz): Update blacklist in cache
@@ -205,11 +223,11 @@ MemCollection::ApplyDeletes() {
         std::string collection_root_path = options_.meta_.path_ + COLLECTIONS_FOLDER;
 
         std::sort(delete_ids.begin(), delete_ids.end());
-        std::set<segment::doc_id_t> ids_to_check(delete_ids.begin(), delete_ids.end());
+        std::set<id_t> ids_to_check(delete_ids.begin(), delete_ids.end());
 
         // Step 3: Mark previous deleted docs file and bloom filter file stale
         auto& field_visitors_map = seg_visitor->GetFieldVisitors();
-        auto uid_field_visitor = seg_visitor->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = seg_visitor->GetFieldVisitor(engine::FIELD_UID);
         auto del_doc_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_DELETED_DOCS);
         auto del_docs_element = del_doc_visitor->GetElement();
         auto blm_filter_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_BLOOM_FILTER);
@@ -259,24 +277,31 @@ MemCollection::ApplyDeletes() {
             snapshot::GetResPath<snapshot::SegmentFile>(collection_root_path, bloom_filter_file);
 
         // Step 5: Write to file
-        segment::IdBloomFilterPtr bloom_filter;
-        STATUS_CHECK(segment_writer->CreateBloomFilter(bloom_filter_file_path, bloom_filter));
-        auto delete_docs = std::make_shared<segment::DeletedDocs>();
-        std::vector<segment::doc_id_t> uids;
-        STATUS_CHECK(segment_reader->LoadUids(uids));
-        for (size_t i = 0; i < uids.size(); i++) {
-            if (std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i])) {
-                delete_docs->AddDeletedDoc(i);
-            } else {
-                bloom_filter->Add(uids[i]);
+        {
+            segment::IdBloomFilterPtr bloom_filter;
+            STATUS_CHECK(segment_writer->CreateBloomFilter(bloom_filter_file_path, bloom_filter));
+            auto delete_docs = std::make_shared<segment::DeletedDocs>();
+            std::vector<id_t> uids;
+            STATUS_CHECK(segment_reader->LoadUids(uids));
+            for (size_t i = 0; i < uids.size(); i++) {
+                if (std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i])) {
+                    delete_docs->AddDeletedDoc(i);
+                } else {
+                    bloom_filter->Add(uids[i]);
+                }
             }
+
+            STATUS_CHECK(
+                segments_op->CommitRowCountDelta(segment->GetID(), delete_docs->GetCount() - pre_del_ids.size(), true));
+
+            STATUS_CHECK(segment_writer->WriteDeletedDocs(del_docs_path, delete_docs));
+            STATUS_CHECK(segment_writer->WriteBloomFilter(bloom_filter_file_path, bloom_filter));
         }
 
-        STATUS_CHECK(
-            segments_op->CommitRowCountDelta(segment->GetID(), delete_docs->GetCount() - pre_del_ids.size(), true));
-
-        STATUS_CHECK(segment_writer->WriteDeletedDocs(del_docs_path, delete_docs));
-        STATUS_CHECK(segment_writer->WriteBloomFilter(bloom_filter_file_path, bloom_filter));
+        delete_file->SetSize(CommonUtil::GetFileSize(del_docs_path + codec::DeletedDocsFormat::FilePostfix()));
+        bloom_filter_file->SetSize(
+            CommonUtil::GetFileSize(bloom_filter_file_path + codec::IdBloomFilterFormat::FilePostfix()));
+        //        modified_segments.push_back(segment);
 
         return Status::OK();
     };
@@ -285,10 +310,27 @@ MemCollection::ApplyDeletes() {
     segment_iterator->Iterate();
     STATUS_CHECK(segment_iterator->GetStatus());
 
-    fiu_do_on("MemCollection.ApplyDeletes.RandomSleep", {
-        std::srand(std::time(nullptr));
-        sleep(std::rand() % 3);
-    });
+    if (segment_iterated == 0) {
+        return Status::OK();  // no segment, nothing to do
+    }
+
+    fiu_do_on("MemCollection.ApplyDeletes.RandomSleep", sleep(1));
+
+    //    snapshot::ScopedSnapshotT new_ss;
+    //    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(new_ss, collection_id_));
+    //    if (new_ss->GetID() != ss->GetID()) {
+    //        for (auto& seg : modified_segments) {
+    //            auto pre_seg_commit = ss->GetSegmentCommitBySegmentId(seg->GetID());
+    //            auto new_seg_commit = new_ss->GetSegmentCommitBySegmentId(seg->GetID());
+    //            if (new_seg_commit->GetID() != pre_seg_commit->GetID()) {
+    //                // TODO: Rollback CompoundSegmentsOp
+    //                std::string err = "[CSOE] Segment " + std::to_string(seg->GetID()) + " is stale.";
+    //                LOG_ENGINE_ERROR_ << err;
+    //                return Status(SS_STALE_ERROR, err);
+    //            }
+    //        }
+    //    }
+
     return segments_op->Push();
 }
 

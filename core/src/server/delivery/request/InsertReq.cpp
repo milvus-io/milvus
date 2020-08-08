@@ -77,7 +77,7 @@ InsertReq::OnExecute() {
             LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "Insert", 0, status.message().c_str());
             return status;
         }
-        chunk_data_[engine::DEFAULT_UID_NAME] = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME]->data_;
+        chunk_data_[engine::FIELD_UID] = data_chunk->fixed_fields_[engine::FIELD_UID]->data_;
 
         rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {

@@ -60,7 +60,7 @@ IsBinaryMetricType(const std::string& metric_type) {
            (metric_type == knowhere::Metric::TANIMOTO);
 }
 
-engine::DateT
+engine::date_t
 GetDate(const std::time_t& t, int day_delta) {
     struct tm ltm;
     localtime_r(&t, &ltm);
@@ -80,12 +80,12 @@ GetDate(const std::time_t& t, int day_delta) {
     return ltm.tm_year * 10000 + ltm.tm_mon * 100 + ltm.tm_mday;
 }
 
-engine::DateT
+engine::date_t
 GetDateWithDelta(int day_delta) {
     return GetDate(std::time(nullptr), day_delta);
 }
 
-engine::DateT
+engine::date_t
 GetDate() {
     return GetDate(std::time(nullptr), 0);
 }
@@ -135,13 +135,13 @@ GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids) {
         return;
     }
 
-    auto pair = chunk->fixed_fields_.find(engine::DEFAULT_UID_NAME);
+    auto pair = chunk->fixed_fields_.find(engine::FIELD_UID);
     if (pair == chunk->fixed_fields_.end() || pair->second == nullptr) {
         return;
     }
 
     if (!pair->second->data_.empty()) {
-        ids.resize(pair->second->data_.size() / sizeof(engine::IDNumber));
+        ids.resize(pair->second->data_.size() / sizeof(engine::id_t));
         memcpy((void*)(ids.data()), pair->second->data_.data(), pair->second->data_.size());
     }
 }

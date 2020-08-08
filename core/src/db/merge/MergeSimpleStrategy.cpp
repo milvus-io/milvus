@@ -28,6 +28,10 @@ MergeSimpleStrategy::RegroupSegments(const snapshot::ScopedSnapshotT& ss, const 
     }
 
     for (auto& kv : part2segment) {
+        if (kv.second.size() <= 1) {
+            continue;  // no segment or only one segment, no need to merge
+        }
+
         snapshot::IDS_TYPE ids;
         int64_t row_count_sum = 0;
         for (auto& id : kv.second) {
@@ -36,8 +40,13 @@ MergeSimpleStrategy::RegroupSegments(const snapshot::ScopedSnapshotT& ss, const 
                 continue;  // maybe stale
             }
 
+            auto segment_row = segment_commit->GetRowCount();
+            if (segment_row <= 0) {
+                continue;  // empty segment?
+            }
+
             ids.push_back(id);
-            row_count_sum += segment_commit->GetRowCount();
+            row_count_sum += segment_row;
             if (row_count_sum >= row_count_per_segment) {
                 if (ids.size() >= 2) {
                     groups.push_back(ids);
@@ -48,7 +57,7 @@ MergeSimpleStrategy::RegroupSegments(const snapshot::ScopedSnapshotT& ss, const 
             }
         }
 
-        if (!ids.empty()) {
+        if (ids.size() >= 2) {
             groups.push_back(ids);
         }
     }
