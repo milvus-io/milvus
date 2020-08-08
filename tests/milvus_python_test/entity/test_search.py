@@ -1026,6 +1026,7 @@ class TestSearchDSL(object):
         return request.param
 
     # TODO
+    @pytest.mark.level(2)
     def test_query_term_wrong_format(self, connect, collection, get_invalid_term):
         '''
         method: build query with wrong format term
@@ -1089,6 +1090,7 @@ class TestSearchDSL(object):
         return request.param
 
     # TODO
+    @pytest.mark.level(2)
     def test_query_range_wrong_format(self, connect, collection, get_invalid_range):
         '''
         method: build query with wrong format range
