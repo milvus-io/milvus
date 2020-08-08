@@ -47,7 +47,6 @@ DeletedDocsFormat::FilePostfix() {
 void
 DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                         segment::DeletedDocsPtr& deleted_docs) {
-
     if (!fs_ptr->reader_ptr_->open(file_path)) {
         std::string err_msg = "Failed to open file: " + file_path;  // + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;

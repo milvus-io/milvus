@@ -17,6 +17,7 @@
 #include "utils/TimeRecorder.h"
 
 #include <fiu-local.h>
+#include <set>
 
 namespace milvus {
 namespace server {

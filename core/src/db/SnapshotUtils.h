@@ -11,9 +11,9 @@
 
 #pragma once
 
+#include "db/SnapshotVisitor.h"
 #include "db/Types.h"
 #include "db/snapshot/Resources.h"
-#include "db/SnapshotVisitor.h"
 #include "utils/Json.h"
 
 #include <string>

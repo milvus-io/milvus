@@ -10,14 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/SnapshotUtils.h"
+#include "codecs/Codec.h"
 #include "db/SnapshotHandlers.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Utils.h"
 #include "db/snapshot/CompoundOperations.h"
-#include "db/snapshot/Resources.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshots.h"
-#include "codecs/Codec.h"
 #include "segment/Segment.h"
 
 #include <algorithm>
