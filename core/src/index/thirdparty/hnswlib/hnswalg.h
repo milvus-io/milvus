@@ -7,8 +7,7 @@
 #include <unordered_set>
 #include <list>
 
-//#include "knowhere/index/vector_index/helpers/FaissIO.h"
-#include "/home/zilliz/workspace/dev/milvus/milvus/core/src/index/knowhere/knowhere/index/vector_index/helpers/FaissIO.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace hnswlib {
 
