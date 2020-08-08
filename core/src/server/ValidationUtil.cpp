@@ -382,22 +382,24 @@ ValidateSearchTopk(int64_t top_k) {
 }
 
 Status
-ValidatePartitionTag(const std::string& partition_tag) {
-    // trim side-blank of tag, only compare valid characters
-    // for example: " ab cd " is treated as "ab cd"
-    std::string valid_tag = partition_tag;
-    StringHelpFunctions::TrimStringBlank(valid_tag);
-    if (valid_tag.empty()) {
-        std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag should not be empty.";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_PARTITION_TAG, msg);
-    }
+ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
+    for (auto& tag : partition_tags) {
+        // trim side-blank of tag, only compare valid characters
+        // for example: " ab cd " is treated as "ab cd"
+        std::string valid_tag = tag;
+        StringHelpFunctions::TrimStringBlank(valid_tag);
+        if (valid_tag.empty()) {
+            std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag should not be empty.";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_PARTITION_TAG, msg);
+        }
 
-    // max length of partition tag
-    if (valid_tag.length() > 255) {
-        std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag exceed max length(255).";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_PARTITION_TAG, msg);
+        // max length of partition tag
+        if (valid_tag.length() > 255) {
+            std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag exceed max length(255).";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_PARTITION_TAG, msg);
+        }
     }
 
     return Status::OK();

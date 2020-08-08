@@ -48,6 +48,6 @@ extern Status
 ValidateSearchTopk(int64_t top_k);
 
 extern Status
-ValidatePartitionTag(const std::string& partition_tag);
+ValidatePartitionTags(const std::vector<std::string>& partition_tags);
 }  // namespace server
 }  // namespace milvus
