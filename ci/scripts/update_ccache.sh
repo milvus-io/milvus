@@ -76,15 +76,15 @@ function check_ccache() {
     return $?
 }
 
+echo -e "===\n=== ccache statistics after build\n==="
+ccache --show-stats
+
 if [[ -n "${CHANGE_TARGET}" && "${BRANCH_NAME}" =~ "PR-" ]]; then
     check_ccache ${CHANGE_TARGET}
     if [[ $? == 0 ]];then
         echo "Skip Update ccache package ..." && exit 0
     fi
 fi
-
-echo -e "===\n=== ccache statistics after build\n==="
-ccache --show-stats
 
 if [[ "${BRANCH_NAME}" != "HEAD" ]];then
     REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
