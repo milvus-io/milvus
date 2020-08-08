@@ -5,20 +5,9 @@ Please mark all changes in change log and use the issue from GitHub
 # Milvus 0.11.0 (TBD)
 
 ## Bug
--   \#2487 Remove timeout when creating collection in dev test
 -   \#2532 Fix Milvus docker image report illegal instruction
 -   \#2551 Fix test_hybrid_db and test_rpc error
--   \#2557 Fix random crash of INSERT_DUPLICATE_ID case
--   \#2578 Result count doesn't match target vectors count
 -   \#2582 CreateHybridIndex.cpp compile error
--   \#2585 Support IVF_PQ IP on GPU
--   \#2598 Fix Milvus docker image report illegal instruction
--   \#2617 Fix HNSW and RNSG index files size
--   \#2637 Suit the range of HNSW parameters
--   \#2642 Create index failed and server crashed
--   \#2649 Search parameter of annoy has conflict with document
--   \#2690 Remove body parser in show-partitions endpoints
--   \#2692 Milvus hangs during multi-thread concurrent search
 -   \#2693 Collection create success if no dimension value provided
 -   \#2694 Collection create success if an invalid field name provided
 -   \#2695 The number of fields should be limited
@@ -29,24 +18,16 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2731 No entity returned with `get_entity_by_id`
 -   \#2732 Server destroyed after `delete by id`
 -   \#2733 The max value of top-k should be limited
--   \#2739 Fix mishards start failed
--   \#2752 Milvus formats vectors data to double-precision and return to http client
 -   \#2763 Unexpected error when insert binary entities
 -   \#2765 Server crashed when calling `get_entity_by_id`
--   \#2767 Fix a bug of getting wrong nprobe limitation in knowhere on GPU version
--   \#2768 After building the index, the number of vectors increases
--   \#2776 Fix too many data copies during creating IVF index
 -   \#2783 Wrong result returned if searching with tags
 -   \#2790 Distances returned by calling `search` is inaccurate
--   \#2813 To implemente RNSG IP
 -   \#2818 Wrong result returned by `get_entity_by_id`
 -   \#2823 Server crashed during inserting, and can not restart
 -   \#2845 Server crashed after calling `delete_entity_by_id`
 -   \#2852 Fix Prometheus rebuild problem.
 -   \#2869 Create index failed with binary vectors
--   \#2890 Fix wrong index size
 -   \#2893 Insert binary data failed
--   \#2952 Fix the result merging of IVF_PQ IP
 -   \#2957 There is no exisitence check of annoy search parameter
 
 ## Feature
@@ -63,13 +44,57 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2544 Optimize unittest build
 -   \#2561 Clean util dependencies with other modules
 -   \#2612 Move all APIs in utils into namespace milvus 
--   \#2653 Improve IVF search performance when NQ and nProbe are both large
 -   \#2675 Print out system memory size when report invalid cpu cache size 
 -   \#2686 Remove dependency on sqlite_orm
--   \#2828 Let Faiss not compile half float by default
 -   \#2841 Replace IndexType/EngineType/MetricType
 -   \#2858 Unify index name in db
 -   \#2884 Using BlockingQueue in JobMgr
+
+## Task
+
+# Milvus 0.10.2 (TBD)
+
+## Bug
+-   \#2890 Fix the index size caculation in cache
+-   \#2952 Fix the result merging of IVF_PQ IP
+-   \#2975 Fix config UT failed
+-   \#3012 If the cache is too small, queries using multiple GPUs will cause to crash
+
+## Feature
+
+## Improvement
+-   \#2653 Improve IVF search performance when NQ and nProbe are both large
+-   \#2828 Let Faiss not to compile half float by default
+
+## Task
+
+# Milvus 0.10.1 (2020-07-20)
+
+## Bug
+-   \#2487 Enlarge timeout value for creating collection
+-   \#2487 HotFix release lock failed on NAS
+-   \#2557 Fix random crash of INSERT_DUPLICATE_ID case
+-   \#2578 Result count doesn't match target vectors count
+-   \#2585 Support IVF_PQ IP on GPU
+-   \#2598 Fix Milvus docker image report illegal instruction
+-   \#2617 Fix HNSW and RNSG index files size
+-   \#2637 Suit the range of HNSW parameters
+-   \#2642 Create index failed and server crashed
+-   \#2649 Search parameter of annoy has conflict with document
+-   \#2690 Remove body parser in show-partitions endpoints
+-   \#2692 Milvus hangs during multi-thread concurrent search
+-   \#2739 Fix mishards start failed
+-   \#2752 Milvus formats vectors data to double-precision and return to http client
+-   \#2767 Fix a bug of getting wrong nprobe limitation in knowhere on GPU version
+-   \#2768 After building the index, the number of vectors increases
+-   \#2774 Server down during loading data
+-   \#2776 Fix too many data copies during creating IVF index
+-   \#2813 To implemente RNSG IP
+
+## Feature
+
+## Improvement
+-   \#2932 Upgrade mishards for milvus 0.10.1
 
 ## Task
 
