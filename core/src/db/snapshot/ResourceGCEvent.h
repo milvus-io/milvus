@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include <boost/filesystem.hpp>
+#include <experimental/filesystem>
 #include <memory>
 #include <set>
 #include <string>
@@ -45,11 +45,11 @@ class ResourceGCEvent : public GCEvent {
         std::string res_path = GetResPath<ResourceT>(res_prefix, res_);
         if (res_path.empty()) {
             /* std::cout << "[GC] No remove action for " << res_->ToString() << std::endl; */
-        } else if (boost::filesystem::is_directory(res_path)) {
-            auto ok = boost::filesystem::remove_all(res_path);
+        } else if (std::experimental::filesystem::is_directory(res_path)) {
+            auto ok = std::experimental::filesystem::remove_all(res_path);
             std::cout << "[GC] Remove DIR " << res_->ToString() << " " << res_path << " " << ok << std::endl;
-        } else if (boost::filesystem::is_regular_file(res_path)) {
-            auto ok = boost::filesystem::remove(res_path);
+        } else if (std::experimental::filesystem::is_regular_file(res_path)) {
+            auto ok = std::experimental::filesystem::remove(res_path);
             std::cout << "[GC] Remove FILE " << res_->ToString() << " " << res_path << " " << ok << std::endl;
         } else {
             RemoveWithSuffix<ResourceT>(res_, res_path, store->GetSuffixSet());
