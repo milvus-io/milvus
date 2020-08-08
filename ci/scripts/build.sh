@@ -175,7 +175,4 @@ if [[ ${COMPILE_BUILD} == "ON" ]];then
     fi
 fi
 
-echo -e "===\n=== ccache statistics after build\n==="
-ccache --show-stats
-
 popd
