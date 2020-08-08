@@ -857,12 +857,25 @@ class TestSearchDSL(object):
 
     def test_query_no_vector_term_only(self, connect, collection):
         '''
-        method: build query without must expr
+        method: build query without vector only term
         expected: error raised
         '''
         # entities, ids = init_data(connect, collection)
         expr = {
             "must": [gen_default_term_expr]
+        }
+        query = update_query_expr(default_query, keep_old=False, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    def test_query_no_vector_range_only(self, connect, collection):
+        '''
+        method: build query without vector only range
+        expected: error raised
+        '''
+        # entities, ids = init_data(connect, collection)
+        expr = {
+            "must": [gen_default_range_expr]
         }
         query = update_query_expr(default_query, keep_old=False, expr=expr)
         with pytest.raises(Exception) as e:
@@ -1064,13 +1077,27 @@ class TestSearchDSL(object):
         assert len(res[0]) == top_k
         connect.drop_collection(collection_term)
 
+    # TODO
+    @pytest.mark.level(2)
+    def test_query_term_one_field_not_existed(self, connect, collection):
+        '''
+        method: build query with two fields term, one of it not existed
+        expected: exception raised
+        '''
+        entities, ids = init_data(connect, collection)
+        term = gen_default_term_expr()
+        term["term"].update({"a": [0]})
+        expr = {"must": [gen_default_vector_expr(default_query), term]}
+        query = update_query_expr(default_query, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
     """
     ******************************************************************
     #  The following cases are used to build valid range query expr
     ******************************************************************
     """
 
-    # TODO
     def test_query_range_key_error(self, connect, collection):
         '''
         method: build query with range key error
@@ -1105,6 +1132,27 @@ class TestSearchDSL(object):
 
     @pytest.fixture(
         scope="function",
+        params=gen_invalid_ranges()
+    )
+    def get_invalid_ranges(self, request):
+        return request.param
+
+    @pytest.mark.level(2)
+    def test_query_range_invalid_ranges(self, connect, collection, get_invalid_ranges):
+        '''
+        method: build query with invalid ranges
+        expected: pass
+        '''
+        entities, ids = init_data(connect, collection)
+        ranges = get_invalid_ranges
+        range = gen_default_range_expr(ranges=ranges)
+        expr = {"must": [gen_default_vector_expr(default_query), range]}
+        query = update_query_expr(default_query, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    @pytest.fixture(
+        scope="function",
         params=gen_valid_ranges()
     )
     def get_valid_ranges(self, request):
@@ -1125,6 +1173,174 @@ class TestSearchDSL(object):
         assert len(res) == nq
         assert len(res[0]) == top_k
 
+    # TODO
+    @pytest.mark.level(2)
+    def test_query_range_one_field_not_existed(self, connect, collection):
+        '''
+        method: build query with two fields ranges, one of fields not existed
+        expected: exception raised
+        '''
+        entities, ids = init_data(connect, collection)
+        range = gen_default_range_expr()
+        range["range"].update({"a": {"ranges": {"GT": 1, "LT": nb // 2}}})
+        expr = {"must": [gen_default_vector_expr(default_query), range]}
+        query = update_query_expr(default_query, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
+    """
+    ************************************************************************
+    #  The following cases are used to build query expr multi range and term
+    ************************************************************************
+    """
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_query_multi_term_has_common(self, connect, collection):
+        '''
+        method: build query with multi term with same field, and values has common
+        expected: pass
+        '''
+        entities, ids = init_data(connect, collection)
+        term_first = gen_default_term_expr(values=[i for i in range(10)])
+        term_second = gen_default_term_expr(values=[i for i in range(11)])
+        expr = {"must": [gen_default_vector_expr(default_query), term_first]}
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == top_k
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_query_multi_term_no_common(self, connect, collection):
+        '''
+         method: build query with multi range with same field, and ranges no common
+        expected: pass
+        '''
+        entities, ids = init_data(connect, collection)
+        range_one = {"int64": {"ranges": {"GT": 0, "LT": nb // 2}}}
+        range_two = {"int64": {"ranges": {"GT": nb // 2, "LT": nb}}}
+        range = update_range_expr({"range": {}}, [range_one, range_two])
+        expr = {"must": [gen_default_vector_expr(default_query), range]}
+        query = update_query_expr(default_query, expr=expr)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == 0
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_query_multi_term_different_fields(self, connect, collection):
+        '''
+        method: build query with multi range, different field each range
+        expected: pass
+        '''
+        entities, ids = init_data(connect, collection)
+        range_first = {"int64": {"ranges": {"GT": 0, "LT": nb // 2}}}
+        range_second = {"float": {"ranges": {"GT": nb / 2, "LT": float(nb)}}}
+        range = update_range_expr({"range": {}}, [range_first, range_second])
+        expr = {"must": [gen_default_vector_expr(default_query), range]}
+        query = update_query_expr(default_query, expr=expr)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == 0
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_query_multi_range_has_common(self, connect, collection):
+        '''
+        method: build query with multi range with same field, and ranges has common
+        expected: pass
+        '''
+        entities, ids = init_data(connect, collection)
+        range_one = {"int64": {"ranges": {"GT": 0, "LT": nb//2}}}
+        range_two = {"int64": {"ranges": {"GT": nb//3, "LT": nb}}}
+        range = update_range_expr({"range": {}}, [range_one, range_two])
+        expr = {"must": [gen_default_vector_expr(default_query), range]}
+        query = update_query_expr(default_query, expr=expr)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        if (nb // 2 - nb // 3) > top_k:
+            assert len(res[0]) == top_k
+        else:
+            assert len(res[0]) == nb//2 - nb //3
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_query_multi_range_no_common(self, connect, collection):
+        '''
+         method: build query with multi range with same field, and ranges no common
+        expected: pass
+        '''
+        entities, ids = init_data(connect, collection)
+        range_one = {"int64": {"ranges": {"GT": 0, "LT": nb // 2}}}
+        range_two = {"int64": {"ranges": {"GT": nb // 2, "LT": nb}}}
+        range = update_range_expr({"range": {}}, [range_one, range_two])
+        expr = {"must": [gen_default_vector_expr(default_query), range]}
+        query = update_query_expr(default_query, expr=expr)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == 0
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_query_multi_range_different_fields(self, connect, collection):
+        '''
+        method: build query with multi range, different field each range
+        expected: pass
+        '''
+        entities, ids = init_data(connect, collection)
+        range_first = {"int64": {"ranges": {"GT": 0, "LT": nb // 2}}}
+        range_second = {"float": {"ranges": {"GT": nb / 2, "LT": float(nb)}}}
+        range = update_range_expr({"range": {}}, [range_first, range_second])
+        expr = {"must": [gen_default_vector_expr(default_query), range]}
+        query = update_query_expr(default_query, expr=expr)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == 0
+
+    """
+    ******************************************************************
+    #  The following cases are used to build query expr both term and range
+    ******************************************************************
+    """
+
+    @pytest.mark.level(2)
+    def test_query_single_term_single_range(self, connect, collection):
+        '''
+        method: build query with single term single range
+        expected: exception raised
+        '''
+        term = gen_default_term_expr()
+        range = gen_default_range_expr(ranges={"GT": -1, "LT": nb // 2})
+        expr = {"must": [gen_default_vector_expr(default_query), term, range]}
+        query = update_query_expr(default_query, expr=expr)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == nb // 2
+
+    """
+    ******************************************************************
+    #  The following cases are used to build multi vectors query expr
+    ******************************************************************
+    """
+
+    # TODO
+    def test_query_multi_vectors_same_field(self, connect, collection):
+        '''
+        method: build query with two vectors same field
+        expected: error raised
+        '''
+        entities, ids = init_data(connect, collection)
+        vector1 = default_query
+        vector2 = gen_query_vectors(field_name, entities, top_k, nq=2)
+        expr = {
+            "must": [vector1, vector2]
+        }
+        query = update_query_expr(default_query, expr=expr)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
+
 
 class TestSearchDSLBools(object):
     """
@@ -1133,12 +1349,14 @@ class TestSearchDSLBools(object):
     ******************************************************************
     """
 
+    @pytest.mark.level(2)
     def test_query_no_bool(self, connect, collection):
         '''
         method: build query without bool expr
         expected: error raised
         '''
         expr = {"bool1": {}}
+        query = expr
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
