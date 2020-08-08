@@ -94,7 +94,7 @@ class ANNOYConfAdapter : public ConfAdapter {
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
 
-class HNSWSQ8NRConfAdapter : public ConfAdapter {
+class RHNSWFlatConfAdapter : public ConfAdapter {
  public:
     bool
     CheckTrain(Config& oricfg, const IndexMode mode) override;
@@ -103,11 +103,22 @@ class HNSWSQ8NRConfAdapter : public ConfAdapter {
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
 
-class IVFSQ8NRConfAdapter : public IVFConfAdapter {
+class RHNSWPQConfAdapter : public ConfAdapter {
  public:
     bool
     CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
 
+class RHNSWSQConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
 }  // namespace knowhere
 }  // namespace milvus

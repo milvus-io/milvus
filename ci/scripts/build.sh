@@ -115,8 +115,8 @@ if [[ ! -d ${CORE_BUILD_DIR} ]]; then
     mkdir ${CORE_BUILD_DIR}
 fi
 
-echo -e "===\n=== ccache statistics before build\n==="
-ccache --show-stats
+# Zero the cache statistics (but not the configuration options)
+ccache -z
 
 pushd ${CORE_BUILD_DIR}
 

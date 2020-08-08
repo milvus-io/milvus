@@ -109,7 +109,6 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     index_param_4["name"] = "index_vec";
     field_ptr4->index_params = index_param_4.dump();
     JSON extra_params_4;
-    extra_params_4[METRICTYPE] = "L2";
     extra_params_4[DIMENSION] = COLLECTION_DIMENSION;
     field_ptr4->extra_params = extra_params_4.dump();
 
@@ -203,9 +202,9 @@ ClientTest::GetEntityByID(const std::string& collection_name, const std::vector<
 }
 
 void
-ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int64_t nprobe) {
+ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int64_t nprobe, const std::string metric_type) {
     nlohmann::json dsl_json, vector_param_json;
-    milvus_sdk::Utils::GenDSLJson(dsl_json, vector_param_json);
+    milvus_sdk::Utils::GenDSLJson(dsl_json, vector_param_json, metric_type);
 
     std::vector<int64_t> record_ids;
     std::vector<milvus::VectorData> temp_entity_array;
@@ -219,9 +218,9 @@ ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int
     milvus::TopKQueryResult topk_query_result;
     auto status = conn_->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
 
-    std::cout << "Search function call result: " << std::endl;
+    std::cout << metric_type << " Search function call result: " << std::endl;
     milvus_sdk::Utils::PrintTopKQueryResult(topk_query_result);
-    std::cout << "Search function call status: " << status.message() << std::endl;
+    std::cout << metric_type << " Search function call status: " << status.message() << std::endl;
 }
 
 void
@@ -339,7 +338,8 @@ ClientTest::Test() {
     //
     BuildVectors(NQ, COLLECTION_DIMENSION);
     //    GetEntityByID(collection_name, search_id_array_);
-    SearchEntities(collection_name, TOP_K, NPROBE);
+    SearchEntities(collection_name, TOP_K, NPROBE, "L2");
+    SearchEntities(collection_name, TOP_K, NPROBE, "IP");
     //    GetCollectionStats(collection_name);
     //
     //    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};

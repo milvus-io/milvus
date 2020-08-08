@@ -16,8 +16,9 @@ epsilon = 0.000001
 default_flush_interval = 1
 big_flush_interval = 1000
 dimension = 128
+nb = 6000
+top_k = 10
 segment_row_count = 5000
-nb = 1000
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
 
@@ -277,15 +278,14 @@ def assert_equal_entity(a, b):
 
 
 def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
-                      metric_type=None):
+                      metric_type="L2"):
     if rand_vector is True:
         dimension = len(entities[-1]["values"][0])
         query_vectors = gen_vectors(nq, dimension)
     else:
         query_vectors = entities[-1]["values"][:nq]
     must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
-    if metric_type is not None:
-        must_param["vector"][field_name]["metric_type"] = metric_type
+    must_param["vector"][field_name]["metric_type"] = metric_type
     query = {
         "bool": {
             "must": [must_param]
@@ -314,11 +314,51 @@ def gen_default_term_expr(keyword="term", values=None):
     return expr
 
 
-def gen_default_range_expr(ranges=None):
+def gen_default_range_expr(keyword="range", ranges=None):
     if ranges is None:
         ranges = {"GT": 1, "LT": nb // 2}
-    expr = {"range": {"int64": {"ranges": ranges}}}
+    expr = {keyword: {"int64": {"ranges": ranges}}}
     return expr
+
+
+def gen_invalid_range():
+    range = [
+        # {"range": 1},
+        # {"range": {}},
+        # {"range": []},
+        {"range": {"range": {"int64": {"ranges": {"GT": 0, "LT": nb//2}}}}}
+    ]
+    return range
+
+
+def gen_invalid_ranges():
+    ranges = [
+        {"GT": nb, "LT": 0},
+        {"GT": nb},
+        {"LT": 0},
+        {"GT": 0.0, "LT": float(nb)}
+    ]
+    return ranges
+
+
+def gen_valid_ranges():
+    ranges = [
+        {"GT": 0, "LT": nb//2},
+        {"GT": nb, "LT": nb*2},
+        {"GT": 0},
+        {"LT": nb},
+        {"GT": -1, "LT": top_k},
+    ]
+    return ranges
+
+
+def gen_invalid_term():
+    terms = [
+        {"term": 1},
+        {"term": []},
+        {"term": {"term": {"int64": {"values": [i for i in range(nb//2)]}}}}
+    ]
+    return terms
 
 
 def add_field_default(default_fields, type=DataType.INT64, field_name=None):

@@ -13,20 +13,25 @@
 
 #include <memory>
 #include <mutex>
+#include <utility>
 
-#include "hnswlib/hnswalg_nm.h"
-
+#include "IndexRHNSW.h"
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/VecIndex.h"
 
 namespace milvus {
 namespace knowhere {
 
-class IndexHNSW_SQ8NM : public VecIndex {
+class IndexRHNSWSQ : public IndexRHNSW {
  public:
-    IndexHNSW_SQ8NM() {
-        index_type_ = IndexEnum::INDEX_HNSW_SQ8NM;
+    IndexRHNSWSQ() : IndexRHNSW() {
+        index_type_ = IndexEnum::INDEX_RHNSWSQ;
     }
+
+    explicit IndexRHNSWSQ(std::shared_ptr<faiss::Index> index) : IndexRHNSW(std::move(index)) {
+        index_type_ = IndexEnum::INDEX_RHNSWSQ;
+    }
+
+    IndexRHNSWSQ(int d, faiss::QuantizerType qtype, int M, MetricType metric = Metric::L2);
 
     BinarySet
     Serialize(const Config& config = Config()) override;
@@ -38,30 +43,9 @@ class IndexHNSW_SQ8NM : public VecIndex {
     Train(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    Add(const DatasetPtr& dataset_ptr, const Config& config) override;
-
-    void
-    AddWithoutIds(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("Incremental index is not supported");
-    }
-
-    DatasetPtr
-    Query(const DatasetPtr& dataset_ptr, const Config& config) override;
-
-    int64_t
-    Count() override;
-
-    int64_t
-    Dim() override;
-
-    void
     UpdateIndexSize() override;
 
  private:
-    bool normalize = false;
-    std::mutex mutex_;
-    std::shared_ptr<hnswlib_nm::HierarchicalNSW_NM<float>> index_ = nullptr;
-    std::shared_ptr<uint8_t[]> data_ = nullptr;
 };
 
 }  // namespace knowhere

@@ -60,7 +60,7 @@ MergeTask::Execute() {
         sf_context.partition_id = new_seg->GetPartitionId();
         sf_context.segment_id = new_seg->GetID();
         sf_context.field_name = name;
-        sf_context.field_element_name = engine::DEFAULT_RAW_DATA_NAME;
+        sf_context.field_element_name = engine::ELEMENT_RAW_DATA;
 
         snapshot::SegmentFilePtr seg_file;
         status = op->CommitNewSegmentFile(sf_context, seg_file);
@@ -77,8 +77,8 @@ MergeTask::Execute() {
         sf_context.collection_id = new_seg->GetCollectionId();
         sf_context.partition_id = new_seg->GetPartitionId();
         sf_context.segment_id = new_seg->GetID();
-        sf_context.field_name = engine::DEFAULT_UID_NAME;
-        sf_context.field_element_name = engine::DEFAULT_DELETED_DOCS_NAME;
+        sf_context.field_name = engine::FIELD_UID;
+        sf_context.field_element_name = engine::ELEMENT_DELETED_DOCS;
 
         snapshot::SegmentFilePtr delete_doc_file, bloom_filter_file;
         status = op->CommitNewSegmentFile(sf_context, delete_doc_file);
@@ -88,7 +88,7 @@ MergeTask::Execute() {
             return status;
         }
 
-        sf_context.field_element_name = engine::DEFAULT_BLOOM_FILTER_NAME;
+        sf_context.field_element_name = engine::ELEMENT_BLOOM_FILTER;
         status = op->CommitNewSegmentFile(sf_context, bloom_filter_file);
         if (!status.ok()) {
             std::string err_msg = "MergeTask create deleted-doc segment file failed: " + status.ToString();

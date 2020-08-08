@@ -29,11 +29,11 @@
 namespace milvus {
 namespace engine {
 
-using DateT = int;
+using id_t = int64_t;
+using offset_t = int32_t;
+using date_t = int32_t;
 
-using IDNumber = int64_t;
-using IDNumberPtr = IDNumber*;
-using IDNumbers = std::vector<IDNumber>;
+using IDNumbers = std::vector<id_t>;
 
 using VectorDistance = faiss::Index::distance_t;
 using VectorDistances = std::vector<VectorDistance>;
@@ -74,7 +74,7 @@ class VaribleData : public cache::DataObj {
  public:
     int64_t
     Size() {
-        return data_.size();
+        return data_.size() + offset_.size() * sizeof(int64_t);
     }
 
  public:
@@ -137,20 +137,21 @@ using QueryResultPtr = std::shared_ptr<QueryResult>;
 using File2ErrArray = std::map<std::string, std::vector<std::string>>;
 using Table2FileErr = std::map<std::string, File2ErrArray>;
 
-extern const char* DEFAULT_UID_NAME;
+extern const char* FIELD_UID;
+
+extern const char* ELEMENT_RAW_DATA;
+extern const char* ELEMENT_BLOOM_FILTER;
+extern const char* ELEMENT_DELETED_DOCS;
+extern const char* ELEMENT_INDEX_COMPRESS;
+
 extern const char* PARAM_UID_AUTOGEN;
-
-extern const char* DEFAULT_RAW_DATA_NAME;
-extern const char* DEFAULT_BLOOM_FILTER_NAME;
-extern const char* DEFAULT_DELETED_DOCS_NAME;
-extern const char* DEFAULT_INDEX_COMPRESS_NAME;
-extern const char* DEFAULT_STRUCTURED_INDEX_NAME;
-
 extern const char* PARAM_DIMENSION;
 extern const char* PARAM_INDEX_TYPE;
 extern const char* PARAM_INDEX_METRIC_TYPE;
 extern const char* PARAM_INDEX_EXTRA_PARAMS;
 extern const char* PARAM_SEGMENT_ROW_COUNT;
+
+extern const char* DEFAULT_STRUCTURED_INDEX;
 
 constexpr int64_t BUILD_INDEX_THRESHOLD = 4096;  // row count threshold when building index
 constexpr int64_t MAX_NAME_LENGTH = 255;

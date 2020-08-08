@@ -83,9 +83,9 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
         hnswlib::SpaceInterface<float>* space;
         if (config[Metric::TYPE] == Metric::L2) {
-            space = new hnswlib_nm::L2Space(dim);
+            space = new hnswlib::L2Space(dim);
         } else if (config[Metric::TYPE] == Metric::IP) {
-            space = new hnswlib_nm::InnerProductSpace(dim);
+            space = new hnswlib::InnerProductSpace(dim);
             normalize = true;
         }
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),

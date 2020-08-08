@@ -19,3 +19,4 @@ set( STORAGE_FILES  ${STORAGE_MAIN_FILES}
                     )
 add_library( storage STATIC )
 target_sources( storage PRIVATE ${STORAGE_FILES} )
+add_dependencies( storage fiu )

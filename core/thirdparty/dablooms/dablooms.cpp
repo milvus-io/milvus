@@ -13,6 +13,8 @@
 #include <unistd.h>
 #include <errno.h>
 
+#include <iostream>
+
 #include "murmur.h"
 #include "dablooms.h"
 
@@ -312,6 +314,10 @@ int counting_bloom_check(counting_bloom_t *bloom, const char *s, size_t len)
 
 int free_scaling_bloom(scaling_bloom_t *bloom)
 {
+    if(close(bloom->fd) == -1) {
+        std::cerr << " Close fd " << bloom->fd << "Failed: " << strerror(errno) << std::endl;
+    }
+
     int i;
     for (i = bloom->num_blooms - 1; i >= 0; i--) {
         free(bloom->blooms[i]->hashes);

@@ -177,7 +177,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     // check uid existence
     snapshot::FieldPtr uid_field;
     for (auto& pair : ctx.fields_schema) {
-        if (pair.first->GetName() == DEFAULT_UID_NAME) {
+        if (pair.first->GetName() == FIELD_UID) {
             uid_field = pair.first;
             break;
         }
@@ -185,14 +185,14 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 
     // add uid field if not specified
     if (uid_field == nullptr) {
-        uid_field = std::make_shared<snapshot::Field>(DEFAULT_UID_NAME, 0, DataType::INT64);
+        uid_field = std::make_shared<snapshot::Field>(FIELD_UID, 0, DataType::INT64);
     }
 
     // define uid elements
     auto bloom_filter_element = std::make_shared<snapshot::FieldElement>(
-        0, 0, DEFAULT_BLOOM_FILTER_NAME, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
+        0, 0, ELEMENT_BLOOM_FILTER, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
     auto delete_doc_element = std::make_shared<snapshot::FieldElement>(
-        0, 0, DEFAULT_DELETED_DOCS_NAME, milvus::engine::FieldElementType::FET_DELETED_DOCS);
+        0, 0, ELEMENT_DELETED_DOCS, milvus::engine::FieldElementType::FET_DELETED_DOCS);
     ctx.fields_schema[uid_field] = {bloom_filter_element, delete_doc_element};
 
     auto op = std::make_shared<snapshot::CreateCollectionOperation>(ctx);
@@ -430,7 +430,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         return Status(DB_NOT_FOUND, "Fail to get partition " + partition_name);
     }
 
-    auto id_field = ss->GetField(DEFAULT_UID_NAME);
+    auto id_field = ss->GetField(FIELD_UID);
     if (id_field == nullptr) {
         return Status(DB_ERROR, "Field '_id' not found");
     }
@@ -442,7 +442,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     }
 
     FIXEDX_FIELD_MAP& fields = data_chunk->fixed_fields_;
-    auto pair = fields.find(engine::DEFAULT_UID_NAME);
+    auto pair = fields.find(engine::FIELD_UID);
     if (auto_increment) {
         // id is auto increment, but client provides id, return error
         if (pair != fields.end() && pair->second != nullptr) {
@@ -463,7 +463,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         BinaryDataPtr id_data = std::make_shared<BinaryData>();
         id_data->data_.resize(ids.size() * sizeof(int64_t));
         memcpy(id_data->data_.data(), ids.data(), ids.size() * sizeof(int64_t));
-        data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME] = id_data;
+        data_chunk->fixed_fields_[engine::FIELD_UID] = id_data;
     }
 
     // insert entities: collection_name is field id
@@ -632,6 +632,16 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
 
     STATUS_CHECK(segment_reader->LoadUids(entity_ids));
 
+    // remove delete id from the id list
+    segment::DeletedDocsPtr deleted_docs_ptr;
+    STATUS_CHECK(segment_reader->LoadDeletedDocs(deleted_docs_ptr));
+    if (deleted_docs_ptr) {
+        const std::vector<offset_t>& delete_ids = deleted_docs_ptr->GetDeletedDocs();
+        for (auto offset : delete_ids) {
+            entity_ids.erase(entity_ids.begin() + offset, entity_ids.begin() + offset + 1);
+        }
+    }
+
     return Status::OK();
 }
 
@@ -769,7 +779,7 @@ DBImpl::InternalFlush(const std::string& collection_name) {
 
 void
 DBImpl::TimingFlushThread() {
-    SetThreadName("flush_thread");
+    SetThreadName("timing_flush");
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!initialized_.load(std::memory_order_acquire)) {
@@ -819,7 +829,7 @@ DBImpl::StartMetricTask() {
 
 void
 DBImpl::TimingMetricThread() {
-    SetThreadName("metric_thread");
+    SetThreadName("timing_metric");
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!initialized_.load(std::memory_order_acquire)) {
@@ -857,6 +867,8 @@ DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names) {
 
 void
 DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
+    SetThreadName("build_index");
+
     std::unique_lock<std::mutex> lock(build_index_mutex_);
 
     for (auto collection_name : collection_names) {
@@ -889,7 +901,7 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
 
 void
 DBImpl::TimingIndexThread() {
-    SetThreadName("index_thread");
+    SetThreadName("timing_index");
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!initialized_.load(std::memory_order_acquire)) {
@@ -1035,17 +1047,14 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 return status;
             }
 
-            if (record.length == 1) {
-                status = mem_mgr_->DeleteEntity(ss->GetCollectionId(), *record.ids, record.lsn);
-                if (!status.ok()) {
-                    return status;
-                }
-            } else {
-                status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), record.length, record.ids, record.lsn);
-                if (!status.ok()) {
-                    return status;
-                }
+            std::vector<id_t> delete_ids;
+            delete_ids.resize(record.length);
+            memcpy(delete_ids.data(), record.ids, record.length * sizeof(id_t));
+            status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), delete_ids, record.lsn);
+            if (!status.ok()) {
+                return status;
             }
+
             break;
         }
 
@@ -1059,11 +1068,13 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                     return status;
                 }
 
-                const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-                int64_t collection_id = ss->GetCollectionId();
-                status = mem_mgr_->Flush(collection_id);
-                if (!status.ok()) {
-                    return status;
+                {
+                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+                    int64_t collection_id = ss->GetCollectionId();
+                    status = mem_mgr_->Flush(collection_id);
+                    if (!status.ok()) {
+                        return status;
+                    }
                 }
 
                 std::set<std::string> flushed_collections;
@@ -1072,14 +1083,14 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
 
             } else {
                 // flush all collections
-                std::set<int64_t> collection_names;
+                std::set<int64_t> collection_ids;
                 {
                     const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-                    status = mem_mgr_->Flush(collection_names);
+                    status = mem_mgr_->Flush(collection_ids);
                 }
 
                 std::set<std::string> flushed_collections;
-                for (auto id : collection_names) {
+                for (auto id : collection_ids) {
                     snapshot::ScopedSnapshotT ss;
                     status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, id);
                     if (!status.ok()) {
@@ -1131,7 +1142,7 @@ DBImpl::StartMergeTask(const std::set<std::string>& collection_names, bool force
 
 void
 DBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all) {
-    // LOG_ENGINE_TRACE_ << " Background merge thread start";
+    SetThreadName("merge");
 
     for (auto& collection_name : collection_names) {
         const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);

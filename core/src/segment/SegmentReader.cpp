@@ -216,22 +216,26 @@ SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, c
 }
 
 Status
-SegmentReader::LoadUids(std::vector<int64_t>& uids) {
+SegmentReader::LoadUids(std::vector<engine::id_t>& uids) {
     engine::BinaryDataPtr raw;
-    auto status = LoadField(engine::DEFAULT_UID_NAME, raw);
+    auto status = LoadField(engine::FIELD_UID, raw);
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << status.message();
         return status;
     }
 
-    if (raw->data_.size() % sizeof(int64_t) != 0) {
+    if (raw == nullptr) {
+        return Status(DB_ERROR, "Failed to load id field");
+    }
+
+    if (raw->data_.size() % sizeof(engine::id_t) != 0) {
         std::string err_msg = "Failed to load uids: illegal file size";
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
     uids.clear();
-    uids.resize(raw->data_.size() / sizeof(int64_t));
+    uids.resize(raw->data_.size() / sizeof(engine::id_t));
     memcpy(uids.data(), raw->data_.data(), raw->data_.size());
 
     return Status::OK();
@@ -302,10 +306,14 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
 
                 // construct IDMAP index
                 knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
-                index_ptr = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP,
-                                                             knowhere::IndexMode::MODE_CPU);
+                if (field->GetFtype() == engine::DataType::VECTOR_FLOAT) {
+                    index_ptr = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+                                                                 knowhere::IndexMode::MODE_CPU);
+                } else {
+                    index_ptr = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+                                                                 knowhere::IndexMode::MODE_CPU);
+                }
                 milvus::json conf{{knowhere::meta::DIM, dimension}};
-                conf[engine::PARAM_INDEX_METRIC_TYPE] = knowhere::Metric::L2;
                 index_ptr->Train(knowhere::DatasetPtr(), conf);
                 index_ptr->AddWithoutIds(dataset, conf);
                 index_ptr->SetUids(uids);
@@ -346,8 +354,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         }
 
         // for some kinds index(SQ8), read compress file
-        if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8NR ||
-            index_type == knowhere::IndexEnum::INDEX_HNSW_SQ8NM) {
+        if (index_type == knowhere::IndexEnum::INDEX_RHNSWSQ) {
             if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8)) {
                 auto file_path =
                     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
@@ -382,6 +389,9 @@ SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::Inde
         // check field type
         auto& ss_codec = codec::Codec::instance();
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        if (!field_visitor) {
+            return Status(DB_ERROR, "Field: " + field_name + " is not exist");
+        }
         const engine::snapshot::FieldPtr& field = field_visitor->GetField();
         if (engine::IsVectorField(field)) {
             return Status(DB_ERROR, "Field is not structured type");
@@ -447,7 +457,7 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
             return Status::OK();  // already exist
         }
 
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
@@ -466,6 +476,7 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
 
         if (id_bloom_filter_ptr) {
             segment_ptr_->SetBloomFilter(id_bloom_filter_ptr);
+            // TODO: disable cache for solving bloom filter ptr problem
             cache::CpuCacheMgr::GetInstance().InsertItem(file_path, id_bloom_filter_ptr);  // put into cache
         }
     } catch (std::exception& e) {
@@ -484,7 +495,7 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
             return Status::OK();  // already exist
         }
 
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
@@ -523,7 +534,7 @@ SegmentReader::ReadDeletedDocsSize(size_t& size) {
             return Status::OK();  // already exist
         }
 
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
