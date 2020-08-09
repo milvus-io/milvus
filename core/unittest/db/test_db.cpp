@@ -644,7 +644,7 @@ TEST_F(DBTest, GetEntityTest) {
         BuildEntities(count, batch_index, data_chunk);
         STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
         STATUS_CHECK(db_->Flush(collection));
-        auto iter = data_chunk->fixed_fields_.find(milvus::engine::DEFAULT_UID_NAME);
+        auto iter = data_chunk->fixed_fields_.find(milvus::engine::FIELD_UID);
         if (iter == data_chunk->fixed_fields_.end()) {
             return Status(1, "Cannot find uid field");
         }
