@@ -7,6 +7,6 @@ export CCACHE_COMPRESSLEVEL=5
 export CCACHE_COMPILERCHECK=content
 export CCACHE_BASEDIR=${WORKSPACE:=""}
 export PATH=/usr/lib/ccache/:$PATH
-export CCACHE_UMASK=002
+export CORE_BUILD_DIR="$HOME/milvus_build"
 
 set +ex
