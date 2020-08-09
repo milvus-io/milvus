@@ -33,7 +33,7 @@ namespace engine {
 MemSegment::MemSegment(int64_t collection_id, int64_t partition_id, const DBOptions& options)
     : collection_id_(collection_id), partition_id_(partition_id), options_(options) {
     current_mem_ = 0;
-    CreateSegment();
+    //    CreateSegment();
 }
 
 Status
