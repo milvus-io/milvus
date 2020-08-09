@@ -17,7 +17,7 @@
 
 #include "segment/SegmentReader.h"
 
-#include <boost/filesystem.hpp>
+#include <experimental/filesystem>
 #include <memory>
 #include <utility>
 
@@ -461,7 +461,7 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-        if (!boost::filesystem::exists(file_path + codec::IdBloomFilterFormat::FilePostfix())) {
+        if (!std::experimental::filesystem::exists(file_path + codec::IdBloomFilterFormat::FilePostfix())) {
             return Status::OK();  // file doesn't exist
         }
 
@@ -477,7 +477,7 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
         if (id_bloom_filter_ptr) {
             segment_ptr_->SetBloomFilter(id_bloom_filter_ptr);
             // TODO: disable cache for solving bloom filter ptr problem
-            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, id_bloom_filter_ptr);  // put into cache
+            // cache::CpuCacheMgr::GetInstance().InsertItem(file_path, id_bloom_filter_ptr);  // put into cache
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
@@ -499,7 +499,7 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-        if (!boost::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
+        if (!std::experimental::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
             return Status::OK();  // file doesn't exist
         }
 
@@ -538,7 +538,7 @@ SegmentReader::ReadDeletedDocsSize(size_t& size) {
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-        if (!boost::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
+        if (!std::experimental::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
             return Status::OK();  // file doesn't exist
         }
 

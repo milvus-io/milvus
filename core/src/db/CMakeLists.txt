@@ -63,6 +63,7 @@ target_include_directories( milvus_engine
 
 # **************************** Libraries to be linked with target Engine ****************************
 set( ENGINE_LIBS    pthread
+                    libstdc++fs.a
                     libgomp.a
                     libgfortran.a
                     )

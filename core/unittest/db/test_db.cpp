@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <set>
 #include <string>
+#include <experimental/filesystem>
 
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
@@ -599,7 +600,7 @@ TEST_F(DBTest, MergeTest) {
     auto seg_executor = [&](const SegmentPtr& segment, SegmentIterator* handler) -> Status {
         std::string res_path = milvus::engine::snapshot::GetResPath<Segment>(root_path, segment);
         std::cout << res_path << std::endl;
-        if (!boost::filesystem::is_directory(res_path)) {
+        if (!std::experimental::filesystem::is_directory(res_path)) {
             return Status(milvus::SS_ERROR, res_path + " not exist");
         }
         segment_paths.push_back(res_path);
@@ -613,9 +614,11 @@ TEST_F(DBTest, MergeTest) {
     std::set<std::string> segment_file_paths;
     auto sf_executor = [&](const SegmentFilePtr& segment_file, SegmentFileIterator* handler) -> Status {
         std::string res_path = milvus::engine::snapshot::GetResPath<SegmentFile>(root_path, segment_file);
-        if (boost::filesystem::is_regular_file(res_path) ||
-            boost::filesystem::is_regular_file(res_path + milvus::codec::IdBloomFilterFormat::FilePostfix()) ||
-            boost::filesystem::is_regular_file(res_path + milvus::codec::DeletedDocsFormat::FilePostfix())) {
+        if (std::experimental::filesystem::is_regular_file(res_path) ||
+            std::experimental::filesystem::is_regular_file(res_path +
+                milvus::codec::IdBloomFilterFormat::FilePostfix()) ||
+            std::experimental::filesystem::is_regular_file(res_path +
+                milvus::codec::DeletedDocsFormat::FilePostfix())) {
             segment_file_paths.insert(res_path);
             std::cout << res_path << std::endl;
         }
@@ -625,10 +628,10 @@ TEST_F(DBTest, MergeTest) {
     sf_iterator->Iterate();
 
     std::set<std::string> expect_file_paths;
-    boost::filesystem::recursive_directory_iterator iter(root_path);
-    boost::filesystem::recursive_directory_iterator end;
+    std::experimental::filesystem::recursive_directory_iterator iter(root_path);
+    std::experimental::filesystem::recursive_directory_iterator end;
     for (; iter != end; ++iter) {
-        if (boost::filesystem::is_regular_file((*iter).path())) {
+        if (std::experimental::filesystem::is_regular_file((*iter).path())) {
             expect_file_paths.insert((*iter).path().filename().string());
         }
     }
