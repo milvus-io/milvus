@@ -54,6 +54,7 @@ MemCollection::Add(int64_t partition_id, const milvus::engine::VectorSourcePtr& 
         Status status;
         if (current_mem_segment == nullptr || current_mem_segment->IsFull()) {
             MemSegmentPtr new_mem_segment = std::make_shared<MemSegment>(collection_id_, partition_id, options_);
+            STATUS_CHECK(new_mem_segment->CreateSegment());
             status = new_mem_segment->Add(source);
             if (status.ok()) {
                 mem_segments_[partition_id].emplace_back(new_mem_segment);
