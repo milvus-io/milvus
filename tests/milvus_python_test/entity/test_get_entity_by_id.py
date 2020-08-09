@@ -342,6 +342,8 @@ class TestGetBase:
         with pytest.raises(Exception) as e:
             res = connect.get_entity_by_id(collection, get_ids, fields = fields)
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_entity_id_not_exised(self, connect, collection):
         '''
         target: test get entity, params entity_id not existed
@@ -370,6 +372,8 @@ class TestGetBase:
       The following cases are used to test `get_entity_by_id` function, after deleted
     ******************************************************************
     """
+    # TODO
+    @pytest.mark.level(2)
     def test_get_entity_after_delete(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -386,6 +390,7 @@ class TestGetBase:
         assert res[0] is None
 
     # TODO
+    @pytest.mark.level(2)
     def test_get_entities_after_delete(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -453,6 +458,8 @@ class TestGetBase:
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entity[-1]["values"][0])
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_entities_after_delete_disable_autoflush(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -490,6 +497,8 @@ class TestGetBase:
         res = connect.get_entity_by_id(id_collection, get_ids)
         assert res[0] is None
 
+    # TODO
+    @pytest.mark.level(2)
     def test_get_entity_after_delete_with_partition(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id

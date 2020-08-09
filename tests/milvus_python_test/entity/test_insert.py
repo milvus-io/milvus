@@ -141,6 +141,8 @@ class TestInsertBase:
         ids = connect.insert(collection, entities)
         assert len(ids) == nb
 
+    # TODO
+    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_search(self, connect, collection):
         '''

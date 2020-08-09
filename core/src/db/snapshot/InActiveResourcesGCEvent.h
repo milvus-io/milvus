@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include <boost/filesystem.hpp>
+#include <experimental/filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -70,11 +70,11 @@ class InActiveResourcesGCEvent : public GCEvent, public Operations {
             std::string res_path = GetResPath<ResourceT>(dir_root_, res);
             if (res_path.empty()) {
                 /* std::cout << "[GC] No remove action for " << res_->ToString() << std::endl; */
-            } else if (boost::filesystem::is_directory(res_path)) {
-                auto ok = boost::filesystem::remove_all(res_path);
+            } else if (std::experimental::filesystem::is_directory(res_path)) {
+                auto ok = std::experimental::filesystem::remove_all(res_path);
                 /* std::cout << "[GC] Remove dir " << res_->ToString() << " " << res_path << " " << ok << std::endl; */
-            } else if (boost::filesystem::is_regular_file(res_path)) {
-                auto ok = boost::filesystem::remove(res_path);
+            } else if (std::experimental::filesystem::is_regular_file(res_path)) {
+                auto ok = std::experimental::filesystem::remove(res_path);
                 /* std::cout << "[GC] Remove file " << res_->ToString() << " " << res_path << " " << ok << std::endl; */
             } else {
                 RemoveWithSuffix<ResourceT>(res, res_path, store->GetSuffixSet());

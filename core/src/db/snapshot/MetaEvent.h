@@ -14,7 +14,7 @@
 #include <set>
 #include <string>
 
-#include <boost/filesystem.hpp>
+#include <experimental/filesystem>
 
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
@@ -38,8 +38,8 @@ class GCEvent : virtual public MetaEvent {
                 continue;
             }
             auto adjusted = path + suffix;
-            if (boost::filesystem::is_regular_file(adjusted)) {
-                auto ok = boost::filesystem::remove(adjusted);
+            if (std::experimental::filesystem::is_regular_file(adjusted)) {
+                auto ok = std::experimental::filesystem::remove(adjusted);
                 std::cout << "[GC] Remove FILE " << res->ToString() << " " << adjusted << " " << ok << std::endl;
                 return;
             }
