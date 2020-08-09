@@ -1,6 +1,6 @@
 timeout(time: 30, unit: 'MINUTES') {
     dir ("ci/scripts") {
-        sh "./coverage.sh"
+        sh ". ./before-install.sh && ./coverage.sh"
         boolean isNightlyTest = currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0 ? true : false
         String formatFlag = "${BINARY_VERSION}-version-${OS_NAME}-unittest".replaceAll("\\.", "_").replaceAll("-", "_")
         if (isNightlyTest) {
