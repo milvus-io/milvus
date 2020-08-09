@@ -406,7 +406,7 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
                     break;
                 }
                 default: {
-                    std::string msg = "Invalid QueryRelation in RangeQuery";
+                    std::string msg = "Invalid QueryRelation in BinaryQuery";
                     return Status{SERVER_INVALID_ARGUMENT, msg};
                 }
             }
