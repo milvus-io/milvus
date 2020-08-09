@@ -11,7 +11,7 @@ done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
 MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../core"
-CORE_BUILD_DIR="${MILVUS_CORE_DIR}/cmake_build"
+CORE_BUILD_DIR=${CORE_BUILD_DIR:="${MILVUS_CORE_DIR}/cmake_build"}
 
 HELP="
 Usage:
