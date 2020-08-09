@@ -27,8 +27,8 @@ endif ()
 # and the invocation of make/ninja is in distinct subshell without the same
 # environment (CC/CXX).
 if ( CCACHE_FOUND )
-    set( EP_C_COMPILER ${CCACHE_FOUND} ${CMAKE_C_COMPILER} )
-    set( EP_CXX_COMPILER ${CCACHE_FOUND} ${CMAKE_CXX_COMPILER} )
+    set( EP_C_COMPILER "${CCACHE_FOUND} ${CMAKE_C_COMPILER}" )
+    set( EP_CXX_COMPILER "${CCACHE_FOUND} ${CMAKE_CXX_COMPILER}" )
 else()
     set( EP_C_COMPILER ${CMAKE_C_COMPILER} )
     set( EP_CXX_COMPILER ${CMAKE_CXX_COMPILER} )

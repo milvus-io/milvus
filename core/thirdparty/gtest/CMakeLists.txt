@@ -83,4 +83,4 @@ add_subdirectory("${CMAKE_CURRENT_BINARY_DIR}/googletest-src"
 
 # get_property(var DIRECTORY PROPERTY COMPILE_OPTIONS )
 get_property(var DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/googletest-src" PROPERTY COMPILE_OPTIONS )
-message(FATAL_ERROR "gtest compile options: ${var}")
+message(STATUS "gtest compile options: ${var}")
