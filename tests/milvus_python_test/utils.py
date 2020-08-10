@@ -216,7 +216,11 @@ def gen_default_fields(auto_id=True):
             {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}},
         ],
         "segment_row_count": segment_row_count,
+<<<<<<< HEAD
         "auto_id" : auto_id 
+=======
+        "auto_id": True
+>>>>>>> 0069847ea411a6a4390c2749f6000177930435fc
     }
     return default_fields
 
