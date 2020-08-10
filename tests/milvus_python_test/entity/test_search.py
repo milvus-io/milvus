@@ -1224,6 +1224,22 @@ class TestSearchDSL(object):
     @pytest.mark.level(2)
     def test_query_multi_term_different_fields(self, connect, collection):
         '''
+         method: build query with multi range with same field, and ranges no common
+         expected: pass
+        '''
+        entities, ids = init_data(connect, collection)
+        term_first = gen_default_term_expr()
+        term_second = gen_default_term_expr(field="float", values=[float(i) for i in range(nb//2, nb)])
+        expr = {"must": [gen_default_vector_expr(default_query), term_first, term_second]}
+        query = update_query_expr(default_query, expr=expr)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == 0
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_query_single_term_multi_fields(self, connect, collection):
+        '''
         method: build query with multi term, different field each term
         expected: pass
         '''
@@ -1277,6 +1293,22 @@ class TestSearchDSL(object):
         expected: pass
         '''
         entities, ids = init_data(connect, collection)
+        range_first = gen_default_range_expr()
+        range_second = gen_default_range_expr(field="float", ranges={"GT": nb // 2, "LT": nb})
+        expr = {"must": [gen_default_vector_expr(default_query), range_first, range_second]}
+        query = update_query_expr(default_query, expr=expr)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == 0
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_query_single_range_multi_fields(self, connect, collection):
+        '''
+        method: build query with multi range, different field each range
+        expected: pass
+        '''
+        entities, ids = init_data(connect, collection)
         range_first = {"int64": {"ranges": {"GT": 0, "LT": nb // 2}}}
         range_second = {"float": {"ranges": {"GT": nb / 2, "LT": float(nb)}}}
         range = update_range_expr({"range": {}}, [range_first, range_second])
@@ -1308,19 +1340,36 @@ class TestSearchDSL(object):
         assert len(res[0]) == top_k
 
     # TODO
-    @pytest.mark.level(2)
     def test_query_single_term_range_no_common(self, connect, collection):
         '''
         method: build query with single term single range
         expected: pass
         '''
         term = gen_default_term_expr()
-        range = gen_default_range_expr(ranges={"GT": nb// 2, "LT": nb})
+        range = gen_default_range_expr(ranges={"GT": nb // 2, "LT": nb})
         expr = {"must": [gen_default_vector_expr(default_query), term, range]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         assert len(res) == nq
         assert len(res[0]) == 0
+
+    # TODO
+    @pytest.mark.level(2)
+    def test_query_multi_term_different_fields(self, connect, collection):
+        '''
+        method: build query with multi term, different field each range
+        expected: pass
+        '''
+        entities, ids = init_data(connect, collection)
+        term_first = {"int64": {"ranges": {"GT": 0, "LT": nb // 2}}}
+        term_second = {"float": {"ranges": {"GT": nb / 2, "LT": float(nb)}}}
+        term = update_term_expr({"term": {}}, [term_first, term_second])
+        expr = {"must": [gen_default_vector_expr(default_query), term]}
+        query = update_query_expr(default_query, expr=expr)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == 0
+
 
     """
     ******************************************************************

@@ -307,10 +307,10 @@ def gen_default_vector_expr(default_query):
     return default_query["bool"]["must"][0]
 
 
-def gen_default_term_expr(keyword="term", values=None):
+def gen_default_term_expr(keyword="term", field="int64", values=None):
     if values is None:
         values = [i for i in range(nb // 2)]
-    expr = {keyword: {"int64": {"values": values}}}
+    expr = {keyword: {field: {"values": values}}}
     return expr
 
 
@@ -321,10 +321,10 @@ def update_term_expr(src_term, terms):
     return tmp_term
 
 
-def gen_default_range_expr(keyword="range", ranges=None):
+def gen_default_range_expr(keyword="range", field="int64", ranges=None):
     if ranges is None:
         ranges = {"GT": 1, "LT": nb // 2}
-    expr = {keyword: {"int64": {"ranges": ranges}}}
+    expr = {keyword: {field: {"ranges": ranges}}}
     return expr
 
 
