@@ -17,9 +17,6 @@
 #include <vector>
 
 #include "db/meta/MetaSession.h"
-#include "db/meta/backend/MockEngine.h"
-#include "db/meta/backend/MySqlEngine.h"
-#include "db/meta/backend/SqliteEngine.h"
 #include "db/snapshot/Resources.h"
 #include "utils/Exception.h"
 
@@ -77,20 +74,14 @@ class MetaAdapter {
     template <typename ResourceT>
     Status
     Apply(snapshot::ResourceContextPtr<ResourceT> resp, int64_t& result_id) {
-        result_id = 0;
-
         auto session = CreateSession();
-        session->Apply<ResourceT>(resp);
+        STATUS_CHECK(session->Apply<ResourceT>(resp));
 
         std::vector<int64_t> result_ids;
-        auto status = session->Commit(result_ids);
-
-        if (!status.ok()) {
-            throw Exception(status.code(), status.message());
-        }
+        STATUS_CHECK(session->Commit(result_ids));
 
         if (result_ids.size() != 1) {
-            throw Exception(1, "Result id is not equal one ... ");
+            return Status(DB_ERROR, "Result id is wrong");
         }
 
         result_id = result_ids.at(0);

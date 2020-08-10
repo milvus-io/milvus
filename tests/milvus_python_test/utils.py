@@ -320,9 +320,9 @@ def gen_default_range_expr(keyword="range", ranges=None):
 
 def gen_invalid_range():
     range = [
-        # {"range": 1},
-        # {"range": {}},
-        # {"range": []},
+        {"range": 1},
+        {"range": {}},
+        {"range": []},
         {"range": {"range": {"int64": {"ranges": {"GT": 0, "LT": nb//2}}}}}
     ]
     return range
