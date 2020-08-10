@@ -132,6 +132,7 @@ def collection(request, connect):
     return collection_name
 
 
+# customised id
 @pytest.fixture(scope="function")
 def id_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
@@ -168,6 +169,7 @@ def binary_collection(request, connect):
     return collection_name
 
 
+# customised id
 @pytest.fixture(scope="function")
 def binary_id_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
