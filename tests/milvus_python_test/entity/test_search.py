@@ -443,7 +443,7 @@ class TestSearchBase:
             assert len(res) == nq
 
     @pytest.mark.level(2)
-    def test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
+    def _test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
         method: search collection with the given vectors and tags, check the result
@@ -930,8 +930,9 @@ class TestSearchDSL(object):
         assert len(res[0]) == 0
         # TODO:
 
+    # TODO:
     @pytest.mark.level(2)
-    def test_query_term_value_all_in(self, connect, collection):
+    def _test_query_term_value_all_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with all term can be filtered
         expected: filter pass
@@ -944,8 +945,9 @@ class TestSearchDSL(object):
         assert len(res[0]) == 1
         # TODO:
 
+    # TODO:
     @pytest.mark.level(2)
-    def test_query_term_values_not_in(self, connect, collection):
+    def _test_query_term_values_not_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with no term can be filtered
         expected: filter pass
@@ -986,8 +988,9 @@ class TestSearchDSL(object):
         assert len(res[0]) == top_k
         # TODO:
 
+    # TODO:
     @pytest.mark.level(2)
-    def test_query_term_values_repeat(self, connect, collection):
+    def _test_query_term_values_repeat(self, connect, collection):
         '''
         method: build query with vector and term expr, with the same values
         expected: filter pass

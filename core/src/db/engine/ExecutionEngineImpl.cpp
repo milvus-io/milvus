@@ -337,8 +337,8 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
 
         // Do And
         for (int64_t i = 0; i < entity_count_; i++) {
-            if (list->test(i) && !bitset->test(i)) {
-                list->clear(i);
+            if (!list->test(i) && !bitset->test(i)) {
+                list->set(i);
             }
         }
         vec_index->SetBlacklist(list);
@@ -406,25 +406,26 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
                     break;
                 }
                 default: {
-                    std::string msg = "Invalid QueryRelation in RangeQuery";
+                    std::string msg = "Invalid QueryRelation in BinaryQuery";
                     return Status{SERVER_INVALID_ARGUMENT, msg};
                 }
             }
         }
         return status;
     } else {
-        bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_);
         if (general_query->leaf->term_query != nullptr) {
             // process attrs_data
+            bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_);
             STATUS_CHECK(ProcessTermQuery(bitset, general_query->leaf->term_query, attr_type));
         }
         if (general_query->leaf->range_query != nullptr) {
+            bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_);
             STATUS_CHECK(ProcessRangeQuery(attr_type, bitset, general_query->leaf->range_query));
         }
         if (!general_query->leaf->vector_placeholder.empty()) {
             // skip vector query
+            bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_, 255);
             vector_placeholder = general_query->leaf->vector_placeholder;
-            bitset = nullptr;
         }
     }
     return status;
