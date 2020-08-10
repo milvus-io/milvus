@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include <boost/filesystem.hpp>
+#include <experimental/filesystem>
 #include <memory>
 #include <set>
 #include <string>
@@ -43,21 +43,50 @@ class ResourceGCEvent : public GCEvent {
         /* TODO: physically clean resource */
         auto res_prefix = store->GetRootPath();
         std::string res_path = GetResPath<ResourceT>(res_prefix, res_);
-        if (res_path.empty()) {
-            /* std::cout << "[GC] No remove action for " << res_->ToString() << std::endl; */
-        } else if (boost::filesystem::is_directory(res_path)) {
-            auto ok = boost::filesystem::remove_all(res_path);
-            std::cout << "[GC] Remove DIR " << res_->ToString() << " " << res_path << " " << ok << std::endl;
-        } else if (boost::filesystem::is_regular_file(res_path)) {
-            auto ok = boost::filesystem::remove(res_path);
-            std::cout << "[GC] Remove FILE " << res_->ToString() << " " << res_path << " " << ok << std::endl;
-        } else {
-            RemoveWithSuffix<ResourceT>(res_, res_path, store->GetSuffixSet());
+        auto do_remove = [&](bool do_throw) -> Status {
+            try {
+                if (res_path.empty()) {
+                    /* std::cout << "[GC] No remove action for " << res_->ToString() << std::endl; */
+                } else if (std::experimental::filesystem::is_directory(res_path)) {
+                    std::cout << "[GC] Remove DIR " << res_->ToString() << " " << res_path << std::endl;
+                    auto ok = std::experimental::filesystem::remove_all(res_path);
+                } else if (std::experimental::filesystem::is_regular_file(res_path)) {
+                    std::cout << "[GC] Remove FILE " << res_->ToString() << " " << res_path << std::endl;
+                    auto ok = std::experimental::filesystem::remove(res_path);
+                } else {
+                    RemoveWithSuffix<ResourceT>(res_, res_path, store->GetSuffixSet());
+                }
+            } catch (const std::experimental::filesystem::filesystem_error& er) {
+                std::cout << "[GC] " << er.what() << std::endl;
+                if (do_throw) {
+                    throw;
+                }
+                return Status(DB_ERROR, er.what());
+            }
+            return Status::OK();
+        };
+        auto retry = 3;
+        Status status;
+        while (--retry >= 0) {
+            status = do_remove(false);
+            if (status.ok()) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            std::cout << "[GC] Retry remove: " << res_path << std::endl;
         }
 
-        /* remove resource from meta */
-        auto hd_op = std::make_shared<HardDeleteOperation<ResourceT>>(res_->GetID());
-        STATUS_CHECK((*hd_op)(store));
+        auto hard_delete_meta = [](ID_TYPE id, StorePtr store) -> Status {
+            auto hd_op = std::make_shared<HardDeleteOperation<ResourceT>>(id);
+            return ((*hd_op)(store));
+        };
+
+        if (!status.ok()) {
+            std::cout << "[GC] Stale Resource: " << res_path << " need to be cleanup later" << std::endl;
+            return status;
+        }
+
+        STATUS_CHECK(hard_delete_meta(res_->GetID(), store));
 
         return Status::OK();
     }

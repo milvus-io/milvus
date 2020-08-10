@@ -33,6 +33,9 @@ class MemSegment {
 
  public:
     Status
+    CreateSegment();
+
+    Status
     Add(const VectorSourcePtr& source);
 
     Status
@@ -54,9 +57,6 @@ class MemSegment {
     GetSegmentId() const;
 
  private:
-    Status
-    CreateSegment();
-
     Status
     GetSingleEntitySize(int64_t& single_size);
 

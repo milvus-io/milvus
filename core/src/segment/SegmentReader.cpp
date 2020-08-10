@@ -17,7 +17,7 @@
 
 #include "segment/SegmentReader.h"
 
-#include <boost/filesystem.hpp>
+#include <experimental/filesystem>
 #include <memory>
 #include <utility>
 
@@ -460,7 +460,7 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
         std::string relate_file_path;
         STATUS_CHECK(engine::GetSegmentFileRelatePath(visitor, relate_file_path));
         std::string full_file_path = dir_collections_ + relate_file_path;
-        if (!boost::filesystem::exists(full_file_path)) {
+        if (!std::experimental::filesystem::exists(full_file_path)) {
             return Status::OK();  // file doesn't exist
         }
 
@@ -501,7 +501,7 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         std::string relate_file_path;
         STATUS_CHECK(engine::GetSegmentFileRelatePath(visitor, relate_file_path));
         std::string full_file_path = dir_collections_ + relate_file_path;
-        if (!boost::filesystem::exists(full_file_path)) {
+        if (!std::experimental::filesystem::exists(full_file_path)) {
             return Status::OK();  // file doesn't exist
         }
 
@@ -542,8 +542,7 @@ SegmentReader::ReadDeletedDocsSize(size_t& size) {
         std::string relate_file_path;
         STATUS_CHECK(engine::GetSegmentFileRelatePath(visitor, relate_file_path));
         std::string full_file_path = dir_collections_ + relate_file_path;
-
-        if (!boost::filesystem::exists(full_file_path)) {
+        if (!std::experimental::filesystem::exists(full_file_path)) {
             return Status::OK();  // file doesn't exist
         }
 
