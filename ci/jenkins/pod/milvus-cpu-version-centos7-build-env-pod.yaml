@@ -9,10 +9,7 @@ spec:
   containers:
   - name: milvus-cpu-build-env
     image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.10.1-centos7
-    workingDir: /home/jenkins/agent
     env:
-    - name: HOME
-      value: /home/jenkins
     - name: POD_IP
       valueFrom:
         fieldRef:
