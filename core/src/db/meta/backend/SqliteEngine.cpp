@@ -225,8 +225,12 @@ SqliteEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contex
     }
 
     std::lock_guard<std::mutex> lock(meta_mutex_);
-    int rc = SQLITE_OK;
-    sqlite3_exec(db_, "BEGIN", NULL, NULL, NULL);
+    int rc = sqlite3_exec(db_, "BEGIN", NULL, NULL, NULL);
+    if (rc != SQLITE_OK) {
+        std::string sql_err =
+            std::string("(code:") + std::to_string(sqlite3_errcode(db_)) + ", msg:" + sqlite3_errmsg(db_) + ")";
+        return Status(DB_ERROR, sql_err);
+    }
 
     for (size_t i = 0; i < sql_contexts.size(); i++) {
         rc = sqlite3_exec(db_, sqls[i].c_str(), NULL, NULL, NULL);
@@ -252,7 +256,6 @@ SqliteEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contex
     if (SQLITE_OK != rc) {
         std::string err = "Execute Fail:";
         err += sqlite3_errmsg(db_);
-        std::cerr << err << std::endl;
         sqlite3_exec(db_, "ROLLBACK", NULL, NULL, NULL);
         return Status(SERVER_UNEXPECTED_ERROR, err);
     }
