@@ -325,13 +325,6 @@ def gen_default_range_expr(keyword="range", field="int64", ranges=None):
     return expr
 
 
-def update_range_expr(src_range, ranges):
-    tmp_range = copy.deepcopy(src_range)
-    for range in ranges:
-        tmp_range["range"].update(range)
-    return tmp_range
-
-
 def gen_invalid_range():
     range = [
         {"range": 1},
