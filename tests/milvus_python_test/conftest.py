@@ -137,7 +137,7 @@ def id_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     try:
-        fields = gen_default_fields(auto_id=True)
+        fields = gen_default_fields(auto_id=False)
         connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
@@ -173,7 +173,7 @@ def binary_id_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     try:
-        fields = gen_binary_default_fields(auto_id=True)
+        fields = gen_binary_default_fields(auto_id=False)
         connect.create_collection(collection_name, fields)
     except Exception as e:
         pytest.exit(str(e))
