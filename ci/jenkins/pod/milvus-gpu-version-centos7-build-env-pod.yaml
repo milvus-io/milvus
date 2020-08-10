@@ -9,7 +9,10 @@ spec:
   containers:
   - name: milvus-gpu-build-env
     image: registry.zilliz.com/milvus/milvus-gpu-build-env:v0.10.1-centos7
+    workingDir: /home/jenkins/agent
     env:
+    - name: HOME
+      value: /home/jenkins
     - name: POD_IP
       valueFrom:
         fieldRef:
@@ -30,10 +33,6 @@ spec:
       requests:
         memory: "8Gi"
         cpu: "4.0"
-    workingDir: /home/jenkins/agent
-    env:
-    - name: HOME
-      value: /home/jenkins
   - name: milvus-mysql
     image: mysql:5.6
     env:
