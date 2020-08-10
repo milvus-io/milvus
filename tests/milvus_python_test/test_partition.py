@@ -113,15 +113,15 @@ class TestCreateBase:
  
     # TODO
     @pytest.mark.level(2)
-    def test_create_partition_insert_with_tag(self, connect, collection):
+    def test_create_partition_insert_with_tag(self, connect, id_collection):
         '''
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition
         expected: status ok
         '''
-        connect.create_partition(collection, tag)
+        connect.create_partition(id_collection, tag)
         ids = [i for i in range(nb)]
-        insert_ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        insert_ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
         assert len(insert_ids) == len(ids)
 
     def test_create_partition_insert_with_tag_not_existed(self, connect, collection):
@@ -138,19 +138,19 @@ class TestCreateBase:
 
     # TODO
     @pytest.mark.level(2)
-    def test_create_partition_insert_same_tags(self, connect, collection):
+    def test_create_partition_insert_same_tags(self, connect, id_collection):
         '''
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition
         expected: status ok
         '''
-        connect.create_partition(collection, tag)
+        connect.create_partition(id_collection, tag)
         ids = [i for i in range(nb)]
-        insert_ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        insert_ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
         ids = [(i+nb) for i in range(nb)]
-        new_insert_ids = connect.insert(collection, entities, ids, partition_tag=tag)
-        connect.flush([collection])
-        res = connect.count_entities(collection)
+        new_insert_ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
+        connect.flush([id_collection])
+        res = connect.count_entities(id_collection)
         assert res == nb * 2
 
     def _test_create_partition_insert_same_tags_two_collections(self, connect, collection):

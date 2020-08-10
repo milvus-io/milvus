@@ -226,6 +226,9 @@ class TestCompactBase:
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
+
+    # TODO
+    @pytest.mark.skip('not implemented')
     def test_compact_after_index_created(self, connect, collection, get_simple_index):
         '''
         target: test compact collection after index created
@@ -523,6 +526,7 @@ class TestCompactBinary:
         assert(size_before >= size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
+    @pytest.mark.skip('not implemented')
     def test_insert_delete_all_and_compact(self, connect, binary_collection):
         '''
         target: test add entities, delete them and compact 
@@ -617,7 +621,7 @@ class TestCompactBinary:
         for i in range(num_collections):
             collection_name = gen_unique_str("test_compact_multi_collection_%d" % i)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, default_binary_fields)
         for i in range(num_collections):
             ids = connect.insert(collection_list[i], entities)
             assert len(ids) == nq
