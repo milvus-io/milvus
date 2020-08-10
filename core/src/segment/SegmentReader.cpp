@@ -160,6 +160,9 @@ SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int
                             engine::BinaryDataPtr& raw) {
     try {
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        if (field_visitor == nullptr) {
+            return Status(DB_ERROR, "Invalid field_name");
+        }
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());

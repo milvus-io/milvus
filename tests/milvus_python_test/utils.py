@@ -208,7 +208,7 @@ def gen_single_vector_fields():
     return fields
 
 
-def gen_default_fields(auto_id=False):
+def gen_default_fields(auto_id=True):
     default_fields = {
         "fields": [
             {"field": "int64", "type": DataType.INT64},
@@ -216,24 +216,21 @@ def gen_default_fields(auto_id=False):
             {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}},
         ],
         "segment_row_count": segment_row_count,
-        "auto_id" : True
+        "auto_id" : auto_id 
     }
-    if auto_id is True:
-        default_fields["auto_id"] = True
     return default_fields
 
 
-def gen_binary_default_fields(auto_id=False):
+def gen_binary_default_fields(auto_id=True):
     default_fields = {
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
             {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": dimension}}
         ],
-        "segment_row_count": segment_row_count
+        "segment_row_count": segment_row_count,
+        "auto_id" : auto_id 
     }
-    if auto_id is True:
-        default_fields["auto_id"] = True
     return default_fields
 
 
@@ -323,9 +320,9 @@ def gen_default_range_expr(keyword="range", ranges=None):
 
 def gen_invalid_range():
     range = [
-        # {"range": 1},
-        # {"range": {}},
-        # {"range": []},
+        {"range": 1},
+        {"range": {}},
+        {"range": []},
         {"range": {"range": {"int64": {"ranges": {"GT": 0, "LT": nb//2}}}}}
     ]
     return range

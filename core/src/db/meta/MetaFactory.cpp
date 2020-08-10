@@ -11,14 +11,17 @@
 
 #include "db/meta/MetaFactory.h"
 
-#include "db/Utils.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
-
 #include <cstdlib>
 #include <memory>
 #include <sstream>
 #include <string>
+
+#include "db/Utils.h"
+#include "db/meta/backend/MockEngine.h"
+#include "db/meta/backend/MySqlEngine.h"
+#include "db/meta/backend/SqliteEngine.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
 
 namespace milvus::engine {
 
@@ -61,7 +64,6 @@ MetaFactory::Build(const DBMetaOptions& meta_options) {
         return std::make_shared<meta::MetaAdapter>(engine);
     } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
         LOG_ENGINE_INFO_ << "Using Sqlite";
-        /* options.backend_uri_ = "mock://:@:/"; */
         auto engine = std::make_shared<meta::SqliteEngine>(meta_options);
         return std::make_shared<meta::MetaAdapter>(engine);
     } else {
