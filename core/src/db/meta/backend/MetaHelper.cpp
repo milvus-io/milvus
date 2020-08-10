@@ -13,7 +13,6 @@
 
 #include <vector>
 
-#include "db/meta/backend/MetaContext.h"
 #include "utils/StringHelpFunctions.h"
 
 namespace milvus::engine::meta {

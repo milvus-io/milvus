@@ -11,6 +11,8 @@
 
 #include "db/meta/backend/MetaSchema.h"
 
+#include "utils/StringHelpFunctions.h"
+
 namespace milvus::engine::meta {
 
 bool

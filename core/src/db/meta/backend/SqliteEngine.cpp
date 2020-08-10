@@ -11,7 +11,6 @@
 
 #include "db/meta/backend/SqliteEngine.h"
 
-#include <functional>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -123,10 +122,6 @@ static const MetaSchema FIELDELEMENT_SCHEMA(TABLE_FIELD_ELEMENT,
 
 /////////////////////////////////////////////////////
 static AttrsMapList* QueryData = nullptr;
-static AttrsMapList* InsertData = nullptr;
-static std::vector<int64_t>* InsertedIDs;
-static AttrsMapList* UpdateData = nullptr;
-static AttrsMapList* DeleteData = nullptr;
 
 static int
 QueryCallback(void* data, int argc, char** argv, char** azColName) {
@@ -146,16 +141,30 @@ QueryCallback(void* data, int argc, char** argv, char** azColName) {
     return 0;
 }
 
+std::string
+ErrorMsg(sqlite3* db) {
+    std::stringstream ss;
+    ss << "(code:" << sqlite3_errcode(db) << ", extend code: " << sqlite3_extended_errcode(db)
+       << ", sys errno:" << sqlite3_system_errno(db) << ", sys err msg:" << strerror(errno)
+       << ", msg:" << sqlite3_errmsg(db) << ")";
+    return ss.str();
+}
+
 }  // namespace
 
 SqliteEngine::SqliteEngine(const DBMetaOptions& options) : options_(options) {
     std::string meta_path = options_.path_ + "/meta.sqlite";
-    int rc = sqlite3_open(meta_path.c_str(), &db_);
-    if (rc) {
-        std::string err = "Cannot open Sqlite database: ";
-        err += sqlite3_errmsg(db_);
+    if (sqlite3_open(meta_path.c_str(), &db_) != SQLITE_OK) {
+        std::string err = "Cannot open Sqlite database: " + ErrorMsg(db_);
         std::cerr << err << std::endl;
         throw std::runtime_error(err);
+    }
+
+    sqlite3_extended_result_codes(db_, 1);  // allow extend error code
+    if (SQLITE_OK != sqlite3_exec(db_, "pragma journal_mode = WAL", nullptr, nullptr, nullptr)) {
+        std::string errs = "Sqlite configure wal journal mode to WAL failed: " + ErrorMsg(db_);
+        std::cerr << errs << std::endl;
+        throw std::runtime_error(errs);
     }
 
     Initialize();
@@ -200,12 +209,8 @@ SqliteEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
     std::lock_guard<std::mutex> lock(meta_mutex_);
 
     QueryData = &attrs;
-    auto rc = sqlite3_exec(db_, sql.c_str(), QueryCallback, NULL, NULL);
-
-    if (rc != SQLITE_OK) {
-        std::string err = "Query fail:";
-        err += sqlite3_errmsg(db_);
-        std::cerr << err << std::endl;
+    if (SQLITE_OK != sqlite3_exec(db_, sql.c_str(), QueryCallback, nullptr, nullptr)) {
+        std::string err = "Query fail:" + ErrorMsg(db_);
         return Status(DB_META_QUERY_FAILED, err);
     }
 
@@ -225,15 +230,14 @@ SqliteEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contex
     }
 
     std::lock_guard<std::mutex> lock(meta_mutex_);
-    int rc = sqlite3_exec(db_, "BEGIN", NULL, NULL, NULL);
-    if (rc != SQLITE_OK) {
-        std::string sql_err =
-            std::string("(code:") + std::to_string(sqlite3_errcode(db_)) + ", msg:" + sqlite3_errmsg(db_) + ")";
+    if (SQLITE_OK != sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr)) {
+        std::string sql_err = "Sqlite begin transaction failed: " + ErrorMsg(db_);
         return Status(DB_ERROR, sql_err);
     }
 
+    int rc = SQLITE_OK;
     for (size_t i = 0; i < sql_contexts.size(); i++) {
-        rc = sqlite3_exec(db_, sqls[i].c_str(), NULL, NULL, NULL);
+        rc = sqlite3_exec(db_, sqls[i].c_str(), nullptr, nullptr, nullptr);
         if (rc != SQLITE_OK) {
             break;
         }
@@ -249,18 +253,16 @@ SqliteEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contex
         } else if (sql_contexts[i].op_ == oUpdate || sql_contexts[i].op_ == oDelete) {
             result_ids.push_back(sql_contexts[i].id_);
         } else {
-            sqlite3_exec(db_, "ROLLBACK", NULL, NULL, NULL);
-            return Status(SERVER_UNEXPECTED_ERROR, "Unknown Op");
+            sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+            return Status(DB_ERROR, "Unknown Op");
         }
     }
-    if (SQLITE_OK != rc) {
-        std::string err = "Execute Fail:";
-        err += sqlite3_errmsg(db_);
-        sqlite3_exec(db_, "ROLLBACK", NULL, NULL, NULL);
-        return Status(SERVER_UNEXPECTED_ERROR, err);
+    if (SQLITE_OK != rc || SQLITE_OK != sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr)) {
+        std::string err = "Execute Fail:" + ErrorMsg(db_);
+        sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+        return Status(DB_ERROR, err);
     }
 
-    sqlite3_exec(db_, "COMMIT", NULL, NULL, NULL);
     return Status();
 }
 
