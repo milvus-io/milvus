@@ -12,6 +12,15 @@ or test connect function only
 pytest test_connect.py --level=1
 ```
 
+collect cases
+```shell
+pytest --day-run -qq
+```
+collect cases with docstring
+```shell
+pytest --collect-only -qq
+```
+
 with allure test report
 
  ```shell
