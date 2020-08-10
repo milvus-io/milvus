@@ -14,7 +14,6 @@
 #include "codecs/Codec.h"
 #include "db/Utils.h"
 #include "db/meta/MetaFactory.h"
-#include "db/meta/MetaSession.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
@@ -211,7 +210,7 @@ class Store : public std::enable_shared_from_this<Store> {
     IDS_TYPE
     AllActiveCollectionCommitIds(ID_TYPE collection_id, bool reversed = true) const {
         IDS_TYPE ids, selected_ids;
-        adapter_->SelectResourceIDs<CollectionCommit, int64_t>(selected_ids, meta::F_COLLECTON_ID, {collection_id});
+        adapter_->SelectResourceIDs<CollectionCommit, int64_t>(selected_ids, CollectionIdField::Name, {collection_id});
 
         if (!reversed) {
             ids = selected_ids;
