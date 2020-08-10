@@ -162,13 +162,13 @@ SegmentWriter::WriteBloomFilter() {
         TimeRecorder recorder("SegmentWriter::WriteBloomFilter");
 
         engine::BinaryDataPtr uid_data;
-        auto status = segment_ptr_->GetFixedFieldData(engine::DEFAULT_UID_NAME, uid_data);
+        auto status = segment_ptr_->GetFixedFieldData(engine::FIELD_UID, uid_data);
         if (!status.ok()) {
             return status;
         }
 
         auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
         if (uid_blf_visitor && uid_blf_visitor->GetFile()) {
             auto segment_file = uid_blf_visitor->GetFile();
@@ -243,7 +243,7 @@ SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilte
 Status
 SegmentWriter::WriteDeletedDocs() {
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
-    auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+    auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
     auto del_doc_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
     if (del_doc_visitor && del_doc_visitor->GetFile()) {
         auto segment_file = del_doc_visitor->GetFile();
@@ -341,7 +341,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
         chunk->fixed_fields_[name] = raw_data;
     }
 
-    auto& uid_data = chunk->fixed_fields_[engine::DEFAULT_UID_NAME];
+    auto& uid_data = chunk->fixed_fields_[engine::FIELD_UID];
     chunk->count_ = uid_data->data_.size() / sizeof(int64_t);
     status = AddChunk(chunk);
     if (!status.ok()) {
@@ -361,7 +361,7 @@ SegmentWriter::RowCount() {
 Status
 SegmentWriter::LoadUids(std::vector<engine::id_t>& uids) {
     engine::BinaryDataPtr raw;
-    auto status = segment_ptr_->GetFixedFieldData(engine::DEFAULT_UID_NAME, raw);
+    auto status = segment_ptr_->GetFixedFieldData(engine::FIELD_UID, raw);
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << status.message();
         return status;

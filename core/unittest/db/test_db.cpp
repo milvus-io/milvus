@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <set>
 #include <string>
+#include <experimental/filesystem>
 
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
@@ -205,6 +206,7 @@ BuildQueryPtr(const std::string& collection_name, int64_t n, int64_t topk, std::
     query_ptr->root = general_query;
     query_ptr->vectors.insert(std::make_pair(placeholder, vector_query));
     query_ptr->metric_types.insert({"float_vector", "L2"});
+    general_query->bin->relation = milvus::query::QueryRelation::AND;
 }
 
 void
@@ -495,7 +497,7 @@ TEST_F(DBTest, InsertTest) {
         auto field = std::make_shared<Field>(field_name, 0, milvus::engine::DataType::INT32);
         context.fields_schema[field] = {};
 
-        field = std::make_shared<Field>(milvus::engine::DEFAULT_UID_NAME, 0, milvus::engine::DataType::INT64);
+        field = std::make_shared<Field>(milvus::engine::FIELD_UID, 0, milvus::engine::DataType::INT64);
         context.fields_schema[field] = {};
 
         auto status = db_->CreateCollection(context);
@@ -509,7 +511,7 @@ TEST_F(DBTest, InsertTest) {
             for (auto i = 0; i < data_chunk->count_; ++i) {
                 p[i] = i;
             }
-            data_chunk->fixed_fields_[milvus::engine::DEFAULT_UID_NAME] = raw;
+            data_chunk->fixed_fields_[milvus::engine::FIELD_UID] = raw;
         }
         {
             milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
@@ -572,7 +574,7 @@ TEST_F(DBTest, MergeTest) {
         status = db_->Insert(collection_name, "", data_chunk);
         ASSERT_TRUE(status.ok());
 
-        data_chunk->fixed_fields_.erase(milvus::engine::DEFAULT_UID_NAME); // clear auto-generated id
+        data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
 
         status = db_->Flush();
         ASSERT_TRUE(status.ok());
@@ -599,7 +601,7 @@ TEST_F(DBTest, MergeTest) {
     auto seg_executor = [&](const SegmentPtr& segment, SegmentIterator* handler) -> Status {
         std::string res_path = milvus::engine::snapshot::GetResPath<Segment>(root_path, segment);
         std::cout << res_path << std::endl;
-        if (!boost::filesystem::is_directory(res_path)) {
+        if (!std::experimental::filesystem::is_directory(res_path)) {
             return Status(milvus::SS_ERROR, res_path + " not exist");
         }
         segment_paths.push_back(res_path);
@@ -613,9 +615,11 @@ TEST_F(DBTest, MergeTest) {
     std::set<std::string> segment_file_paths;
     auto sf_executor = [&](const SegmentFilePtr& segment_file, SegmentFileIterator* handler) -> Status {
         std::string res_path = milvus::engine::snapshot::GetResPath<SegmentFile>(root_path, segment_file);
-        if (boost::filesystem::is_regular_file(res_path) ||
-            boost::filesystem::is_regular_file(res_path + milvus::codec::IdBloomFilterFormat::FilePostfix()) ||
-            boost::filesystem::is_regular_file(res_path + milvus::codec::DeletedDocsFormat::FilePostfix())) {
+        if (std::experimental::filesystem::is_regular_file(res_path) ||
+            std::experimental::filesystem::is_regular_file(res_path +
+                milvus::codec::IdBloomFilterFormat::FilePostfix()) ||
+            std::experimental::filesystem::is_regular_file(res_path +
+                milvus::codec::DeletedDocsFormat::FilePostfix())) {
             segment_file_paths.insert(res_path);
             std::cout << res_path << std::endl;
         }
@@ -625,16 +629,132 @@ TEST_F(DBTest, MergeTest) {
     sf_iterator->Iterate();
 
     std::set<std::string> expect_file_paths;
-    boost::filesystem::recursive_directory_iterator iter(root_path);
-    boost::filesystem::recursive_directory_iterator end;
+    std::experimental::filesystem::recursive_directory_iterator iter(root_path);
+    std::experimental::filesystem::recursive_directory_iterator end;
     for (; iter != end; ++iter) {
-        if (boost::filesystem::is_regular_file((*iter).path())) {
+        if (std::experimental::filesystem::is_regular_file((*iter).path())) {
             expect_file_paths.insert((*iter).path().filename().string());
         }
     }
 
     // TODO: Fix segment file suffix issue.
     ASSERT_EQ(expect_file_paths.size(), segment_file_paths.size());
+}
+
+TEST_F(DBTest, GetEntityTest) {
+    auto insert_entities = [&](const std::string& collection, const std::string& partition,
+                               uint64_t count, uint64_t batch_index, milvus::engine::IDNumbers& ids,
+                               milvus::engine::DataChunkPtr& data_chunk) -> Status {
+        BuildEntities(count, batch_index, data_chunk);
+        STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
+        STATUS_CHECK(db_->Flush(collection));
+        auto iter = data_chunk->fixed_fields_.find(milvus::engine::FIELD_UID);
+        if (iter == data_chunk->fixed_fields_.end()) {
+            return Status(1, "Cannot find uid field");
+        }
+        auto& ids_buffer = iter->second;
+        ids.resize(data_chunk->count_);
+        memcpy(ids.data(), ids_buffer->data_.data(), ids_buffer->Size());
+
+        return Status::OK();
+    };
+
+    auto fill_field_names = [&](const milvus::engine::snapshot::FieldElementMappings& field_mappings,
+            std::vector<std::string>& field_names) -> void {
+        if (field_names.empty()) {
+            for (const auto& schema : field_mappings) {
+                field_names.emplace_back(schema.first->GetName());
+            }
+        } else {
+            for (const auto& name : field_names) {
+                bool find_field_name = false;
+                for (const auto& kv : field_mappings) {
+                    if (name == kv.first->GetName()) {
+                        find_field_name = true;
+                        break;
+                    }
+                }
+                if (not find_field_name) {
+                    return;
+                }
+            }
+        }
+    };
+
+    auto get_row_size = [&](const std::vector<bool>& valid_row) -> int {
+        int valid_row_size = 0;
+        for (auto valid : valid_row) {
+            if (valid)
+                valid_row_size++;
+        }
+        return valid_row_size;
+    };
+
+    std::string collection_name = "GET_ENTITY_TEST";
+    auto status = CreateCollection2(db_, collection_name, 0);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    milvus::engine::IDNumbers entity_ids;
+    milvus::engine::DataChunkPtr dataChunkPtr;
+    insert_entities(collection_name, "", 10000, 0, entity_ids, dataChunkPtr);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    milvus::engine::snapshot::CollectionPtr collection;
+    milvus::engine::snapshot::FieldElementMappings field_mappings;
+    status = db_->GetCollectionInfo(collection_name, collection, field_mappings);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+
+
+
+    {
+        std::vector<std::string> field_names;
+        fill_field_names(field_mappings, field_names);
+        milvus::engine::DataChunkPtr get_data_chunk;
+        std::vector<bool> valid_row;
+
+        status = db_->GetEntityByID(collection_name, entity_ids, field_names, valid_row, get_data_chunk);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_TRUE(get_data_chunk->count_ == get_row_size(valid_row));
+
+        for (const auto &name : field_names) {
+            ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->Size() == dataChunkPtr->fixed_fields_[name]->Size());
+            ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->data_ == dataChunkPtr->fixed_fields_[name]->data_);
+        }
+    }
+
+
+    {
+        std::vector<std::string> field_names;
+        fill_field_names(field_mappings, field_names);
+        milvus::engine::DataChunkPtr get_data_chunk;
+        std::vector<bool> valid_row;
+        field_names.emplace_back("Hello World");
+        field_names.emplace_back("GoodBye World");
+
+        status = db_->GetEntityByID(collection_name, entity_ids, field_names, valid_row, get_data_chunk);
+        ASSERT_TRUE(!status.ok());
+    }
+
+    {
+        std::vector<std::string> field_names;
+        fill_field_names(field_mappings, field_names);
+        milvus::engine::DataChunkPtr get_data_chunk;
+        std::vector<bool> valid_row;
+        std::reverse(entity_ids.begin(), entity_ids.end());
+        entity_ids.push_back(-1);
+        entity_ids.push_back(-2);
+        std::reverse(entity_ids.begin(), entity_ids.end());
+
+        status = db_->GetEntityByID(collection_name, entity_ids, field_names, valid_row, get_data_chunk);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_TRUE(get_data_chunk->count_ == get_row_size(valid_row));
+
+        for (const auto &name : field_names) {
+            ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->Size() == dataChunkPtr->fixed_fields_[name]->Size());
+            ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->data_ == dataChunkPtr->fixed_fields_[name]->data_);
+        }
+    }
 }
 
 TEST_F(DBTest, CompactTest) {
@@ -764,7 +884,7 @@ TEST_F(DBTest, IndexTest) {
     {
         milvus::engine::CollectionIndex index;
         index.index_name_ = "my_index2";
-        index.index_type_ = milvus::engine::DEFAULT_STRUCTURED_INDEX_NAME;
+        index.index_type_ = milvus::engine::DEFAULT_STRUCTURED_INDEX;
         status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
         ASSERT_TRUE(status.ok());
         status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);
@@ -820,7 +940,7 @@ TEST_F(DBTest, StatsTest) {
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
-    data_chunk->fixed_fields_.erase(milvus::engine::DEFAULT_UID_NAME); // clear auto-generated id
+    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
 
     status = db_->Insert(collection_name, partition_name, data_chunk);
     ASSERT_TRUE(status.ok());
@@ -841,7 +961,7 @@ TEST_F(DBTest, StatsTest) {
     // create index for structured fields
     {
         milvus::engine::CollectionIndex index;
-        index.index_type_ = milvus::engine::DEFAULT_STRUCTURED_INDEX_NAME;
+        index.index_type_ = milvus::engine::DEFAULT_STRUCTURED_INDEX;
         status = db_->CreateIndex(dummy_context_, collection_name, "field_0", index);
         ASSERT_TRUE(status.ok());
         status = db_->CreateIndex(dummy_context_, collection_name, "field_1", index);
@@ -913,7 +1033,7 @@ TEST_F(DBTest, FetchTest) {
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
-    data_chunk->fixed_fields_.erase(milvus::engine::DEFAULT_UID_NAME); // clear auto-generated id
+    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
 
     status = db_->Insert(collection_name, partition_name, data_chunk);
     ASSERT_TRUE(status.ok());
@@ -937,7 +1057,7 @@ TEST_F(DBTest, FetchTest) {
     ASSERT_TRUE(status.ok());
 
     // try fetch first 10 entities of parititon 'p1', since they were deleted, nothing returned
-    std::vector<std::string> field_names = {milvus::engine::DEFAULT_UID_NAME, VECTOR_FIELD_NAME, "field_0"};
+    std::vector<std::string> field_names = {milvus::engine::FIELD_UID, VECTOR_FIELD_NAME, "field_0"};
     std::vector<bool> valid_row;
     milvus::engine::DataChunkPtr fetch_chunk;
     status = db_->GetEntityByID(collection_name, delete_entity_ids, field_names, valid_row, fetch_chunk);
@@ -952,7 +1072,7 @@ TEST_F(DBTest, FetchTest) {
     status = db_->GetEntityByID(collection_name, batch_entity_ids, field_names, valid_row, fetch_chunk);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(fetch_chunk->count_, batch_entity_ids.size() - delete_entity_ids.size());
-    auto& uid = fetch_chunk->fixed_fields_[milvus::engine::DEFAULT_UID_NAME];
+    auto& uid = fetch_chunk->fixed_fields_[milvus::engine::FIELD_UID];
     ASSERT_EQ(uid->Size() / sizeof(int64_t), fetch_chunk->count_);
     auto& vectors = fetch_chunk->fixed_fields_[VECTOR_FIELD_NAME];
     ASSERT_EQ(vectors->Size() / (COLLECTION_DIM * sizeof(float)), fetch_chunk->count_);
@@ -994,6 +1114,20 @@ TEST_F(DBTest, DeleteEntitiesTest) {
     std::string collection_name = "test_collection_delete_";
     CreateCollection2(db_, collection_name, 0);
 
+    // insert 100 entities into default partition without flush
+    milvus::engine::IDNumbers entity_ids;
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities(100, 0, data_chunk);
+    auto status = db_->Insert(collection_name, "", data_chunk);
+    milvus::engine::utils::GetIDFromChunk(data_chunk, entity_ids);
+
+    // delete all the entities in memory
+    status = db_->DeleteEntityByID(collection_name, entity_ids);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    // flush empty segment
+    db_->Flush(collection_name);
+
     auto insert_entities = [&](const std::string& collection, const std::string& partition,
                                uint64_t count, uint64_t batch_index, milvus::engine::IDNumbers& ids) -> Status {
         milvus::engine::DataChunkPtr data_chunk;
@@ -1001,13 +1135,13 @@ TEST_F(DBTest, DeleteEntitiesTest) {
         STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
         STATUS_CHECK(db_->Flush(collection));
 
+        ids.clear();
         milvus::engine::utils::GetIDFromChunk(data_chunk, ids);
         return Status::OK();
     };
 
-    // insert 1000 entities into default partiiton
-    milvus::engine::IDNumbers entity_ids;
-    auto status = insert_entities(collection_name, "", 1000, 0, entity_ids);
+    // insert 1000 entities into default partition
+    status = insert_entities(collection_name, "", 1000, 0, entity_ids);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     // delete the first entity
@@ -1028,12 +1162,12 @@ TEST_F(DBTest, DeleteEntitiesTest) {
         status = db_->CreatePartition(collection_name, partition1);
         ASSERT_TRUE(status.ok()) << status.ToString();
 
-        // insert 1000 entities into partiiton_0
+        // insert 1000 entities into partition_0
         milvus::engine::IDNumbers partition0_ids;
         status = insert_entities(collection_name, partition0, 1000, 2 * i + 1, partition0_ids);
         ASSERT_TRUE(status.ok()) << status.ToString();
 
-        // insert 1000 entities into partiiton_1
+        // insert 1000 entities into partition_1
         milvus::engine::IDNumbers partition1_ids;
         status = insert_entities(collection_name, partition1, 1000, 2 * i + 2, partition1_ids);
         ASSERT_TRUE(status.ok()) << status.ToString();
@@ -1074,7 +1208,7 @@ TEST_F(DBTest, DeleteStaleTest) {
         BuildEntities(count, batch_index, data_chunk);
         STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
         STATUS_CHECK(db_->Flush(collection));
-        auto iter = data_chunk->fixed_fields_.find(milvus::engine::DEFAULT_UID_NAME);
+        auto iter = data_chunk->fixed_fields_.find(milvus::engine::FIELD_UID);
         if (iter == data_chunk->fixed_fields_.end()) {
             return Status(1, "Cannot find uid field");
         }

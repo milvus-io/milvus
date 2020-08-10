@@ -82,15 +82,10 @@ namespace hnswlib {
     class AlgorithmInterface {
     public:
         virtual void addPoint(const void *datapoint, labeltype label)=0;
-//        virtual void addPoint(void *datapoint, labeltype label, size_t base, size_t offset)=0;
         virtual std::priority_queue<std::pair<dist_t, labeltype >> searchKnn(const void *, size_t, faiss::ConcurrentBitsetPtr bitset) const = 0;
         template <typename Comp>
         std::vector<std::pair<dist_t, labeltype>> searchKnn(const void*, size_t, Comp, faiss::ConcurrentBitsetPtr bitset) {
         }
-//        virtual std::priority_queue<std::pair<dist_t, labeltype >> searchKnn_NM(const void *, size_t, faiss::ConcurrentBitsetPtr bitset, dist_t *pdata) const = 0;
-//        template <typename Comp>
-//        std::vector<std::pair<dist_t, labeltype>> searchKnn_NM(const void*, size_t, Comp, faiss::ConcurrentBitsetPtr bitset, dist_t *pdata) {
-//        }
         virtual void saveIndex(const std::string &location)=0;
         virtual ~AlgorithmInterface(){
         }
@@ -101,3 +96,4 @@ namespace hnswlib {
 #include "space_ip.h"
 #include "bruteforce.h"
 #include "hnswalg.h"
+

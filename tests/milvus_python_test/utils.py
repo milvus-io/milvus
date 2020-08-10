@@ -208,7 +208,7 @@ def gen_single_vector_fields():
     return fields
 
 
-def gen_default_fields(auto_id=False):
+def gen_default_fields(auto_id=True):
     default_fields = {
         "fields": [
             {"field": "int64", "type": DataType.INT64},
@@ -216,24 +216,21 @@ def gen_default_fields(auto_id=False):
             {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}},
         ],
         "segment_row_count": segment_row_count,
-        "auto_id" : True
+        "auto_id" : auto_id 
     }
-    if auto_id is True:
-        default_fields["auto_id"] = True
     return default_fields
 
 
-def gen_binary_default_fields(auto_id=False):
+def gen_binary_default_fields(auto_id=True):
     default_fields = {
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
             {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": dimension}}
         ],
-        "segment_row_count": segment_row_count
+        "segment_row_count": segment_row_count,
+        "auto_id" : auto_id 
     }
-    if auto_id is True:
-        default_fields["auto_id"] = True
     return default_fields
 
 
@@ -278,15 +275,14 @@ def assert_equal_entity(a, b):
 
 
 def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
-                      metric_type=None):
+                      metric_type="L2"):
     if rand_vector is True:
         dimension = len(entities[-1]["values"][0])
         query_vectors = gen_vectors(nq, dimension)
     else:
         query_vectors = entities[-1]["values"][:nq]
     must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
-    if metric_type is not None:
-        must_param["vector"][field_name]["metric_type"] = metric_type
+    must_param["vector"][field_name]["metric_type"] = metric_type
     query = {
         "bool": {
             "must": [must_param]

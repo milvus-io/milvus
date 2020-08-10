@@ -17,6 +17,7 @@
 #include "utils/StringHelpFunctions.h"
 
 #include <fiu-local.h>
+#include <algorithm>
 #include <limits>
 #include <set>
 #include <string>
@@ -162,13 +163,15 @@ ValidateFieldName(const std::string& field_name) {
 }
 
 Status
-ValidateIndexType(const std::string& index_type) {
+ValidateIndexType(std::string& index_type) {
     // Index name shouldn't be empty.
     if (index_type.empty()) {
         std::string msg = "Index type should not be empty.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_FIELD_NAME, msg);
     }
+
+    std::transform(index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
 
     static std::set<std::string> s_valid_index_names = {
         knowhere::IndexEnum::INVALID,
@@ -185,6 +188,9 @@ ValidateIndexType(const std::string& index_type) {
         knowhere::IndexEnum::INDEX_RHNSWFlat,
         knowhere::IndexEnum::INDEX_RHNSWPQ,
         knowhere::IndexEnum::INDEX_RHNSWSQ,
+
+        // structured index names
+        engine::DEFAULT_STRUCTURED_INDEX,
     };
 
     if (s_valid_index_names.find(index_type) == s_valid_index_names.end()) {
@@ -370,43 +376,6 @@ ValidateSearchTopk(int64_t top_k) {
             "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 2048.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_TOPK, msg);
-    }
-
-    return Status::OK();
-}
-
-Status
-ValidatePartitionName(const std::string& partition_name) {
-    if (partition_name.empty()) {
-        std::string msg = "Partition name should not be empty.";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_COLLECTION_NAME, msg);
-    }
-
-    std::string invalid_msg = "Invalid partition name: " + partition_name + ". ";
-    // Collection name size shouldn't exceed 255.
-    if (partition_name.size() > engine::MAX_NAME_LENGTH) {
-        std::string msg = invalid_msg + "The length of a partition name must be less than 255 characters.";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_COLLECTION_NAME, msg);
-    }
-
-    // Collection name first character should be underscore or character.
-    char first_char = partition_name[0];
-    if (first_char != '_' && std::isalpha(first_char) == 0) {
-        std::string msg = invalid_msg + "The first character of a partition name must be an underscore or letter.";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_COLLECTION_NAME, msg);
-    }
-
-    int64_t table_name_size = partition_name.size();
-    for (int64_t i = 1; i < table_name_size; ++i) {
-        char name_char = partition_name[i];
-        if (name_char != '_' && std::isalnum(name_char) == 0) {
-            std::string msg = invalid_msg + "Partition name can only contain numbers, letters, and underscores.";
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_INVALID_COLLECTION_NAME, msg);
-        }
     }
 
     return Status::OK();

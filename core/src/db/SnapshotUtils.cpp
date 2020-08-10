@@ -62,9 +62,9 @@ SetSnapshotIndex(const std::string& collection_name, const std::string& field_na
         index_element->SetParams(json);
 
         if (index_info.index_name_ == knowhere::IndexEnum::INDEX_RHNSWSQ) {
-            auto compress_element = std::make_shared<snapshot::FieldElement>(
-                ss->GetCollectionId(), field->GetID(), DEFAULT_INDEX_COMPRESS_NAME,
-                milvus::engine::FieldElementType::FET_COMPRESS_SQ8);
+            auto compress_element =
+                std::make_shared<snapshot::FieldElement>(ss->GetCollectionId(), field->GetID(), ELEMENT_INDEX_COMPRESS,
+                                                         milvus::engine::FieldElementType::FET_COMPRESS_SQ8);
             ss_context.new_field_elements.push_back(compress_element);
         }
     }

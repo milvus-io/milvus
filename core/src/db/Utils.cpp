@@ -135,7 +135,7 @@ GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids) {
         return;
     }
 
-    auto pair = chunk->fixed_fields_.find(engine::DEFAULT_UID_NAME);
+    auto pair = chunk->fixed_fields_.find(engine::FIELD_UID);
     if (pair == chunk->fixed_fields_.end() || pair->second == nullptr) {
         return;
     }

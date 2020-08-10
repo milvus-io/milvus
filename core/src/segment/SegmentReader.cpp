@@ -17,7 +17,7 @@
 
 #include "segment/SegmentReader.h"
 
-#include <boost/filesystem.hpp>
+#include <experimental/filesystem>
 #include <memory>
 #include <utility>
 
@@ -160,6 +160,9 @@ SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int
                             engine::BinaryDataPtr& raw) {
     try {
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        if (field_visitor == nullptr) {
+            return Status(DB_ERROR, "Invalid field_name");
+        }
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
@@ -215,7 +218,7 @@ SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, c
 Status
 SegmentReader::LoadUids(std::vector<engine::id_t>& uids) {
     engine::BinaryDataPtr raw;
-    auto status = LoadField(engine::DEFAULT_UID_NAME, raw);
+    auto status = LoadField(engine::FIELD_UID, raw);
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << status.message();
         return status;
@@ -386,6 +389,9 @@ SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::Inde
         // check field type
         auto& ss_codec = codec::Codec::instance();
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        if (!field_visitor) {
+            return Status(DB_ERROR, "Field: " + field_name + " is not exist");
+        }
         const engine::snapshot::FieldPtr& field = field_visitor->GetField();
         if (engine::IsVectorField(field)) {
             return Status(DB_ERROR, "Field is not structured type");
@@ -451,11 +457,11 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
             return Status::OK();  // already exist
         }
 
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-        if (!boost::filesystem::exists(file_path + codec::IdBloomFilterFormat::FilePostfix())) {
+        if (!std::experimental::filesystem::exists(file_path + codec::IdBloomFilterFormat::FilePostfix())) {
             return Status::OK();  // file doesn't exist
         }
 
@@ -470,7 +476,8 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
 
         if (id_bloom_filter_ptr) {
             segment_ptr_->SetBloomFilter(id_bloom_filter_ptr);
-            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, id_bloom_filter_ptr);  // put into cache
+            // TODO: disable cache for solving bloom filter ptr problem
+            // cache::CpuCacheMgr::GetInstance().InsertItem(file_path, id_bloom_filter_ptr);  // put into cache
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
@@ -488,11 +495,11 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
             return Status::OK();  // already exist
         }
 
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-        if (!boost::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
+        if (!std::experimental::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
             return Status::OK();  // file doesn't exist
         }
 
@@ -527,11 +534,11 @@ SegmentReader::ReadDeletedDocsSize(size_t& size) {
             return Status::OK();  // already exist
         }
 
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::DEFAULT_UID_NAME);
+        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-        if (!boost::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
+        if (!std::experimental::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
             return Status::OK();  // file doesn't exist
         }
 

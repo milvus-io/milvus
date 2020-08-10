@@ -20,11 +20,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#define BOOST_NO_CXX11_SCOPED_ENUMS
-
-#include <boost/filesystem.hpp>
-
-#undef BOOST_NO_CXX11_SCOPED_ENUMS
+#include <experimental/filesystem>
 
 #include <memory>
 #include <string>
@@ -75,9 +71,10 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
 
     // Create a temporary file from the existing file
     const std::string temp_path = file_path + ".temp_del";
-    bool exists = boost::filesystem::exists(full_file_path);
+    bool exists = std::experimental::filesystem::exists(full_file_path);
     if (exists) {
-        boost::filesystem::copy_file(full_file_path, temp_path, boost::filesystem::copy_option::fail_if_exists);
+        std::experimental::filesystem::copy_file(full_file_path, temp_path,
+                                                 std::experimental::filesystem::copy_options::none);
     }
 
     // Write to the temp file, in order to avoid possible race condition with search (concurrent read and write)
@@ -114,7 +111,7 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     fs_ptr->writer_ptr_->close();
 
     // Move temp file to delete file
-    boost::filesystem::rename(temp_path, full_file_path);
+    std::experimental::filesystem::rename(temp_path, full_file_path);
 }
 
 void

@@ -315,6 +315,9 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         auto field_visitors = segment_visitor->GetFieldVisitors();
         for (const auto& name : context.query_ptr_->index_fields) {
             auto field_visitor = segment_visitor->GetFieldVisitor(name);
+            if (!field_visitor) {
+                return Status(SERVER_INVALID_DSL_PARAMETER, "Field: " + name + " is not existed");
+            }
             auto field = field_visitor->GetField();
             if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
                 field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
@@ -334,8 +337,8 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
 
         // Do And
         for (int64_t i = 0; i < entity_count_; i++) {
-            if (list->test(i) && !bitset->test(i)) {
-                list->clear(i);
+            if (!list->test(i) && !bitset->test(i)) {
+                list->set(i);
             }
         }
         vec_index->SetBlacklist(list);
@@ -403,31 +406,26 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
                     break;
                 }
                 default: {
-                    std::string msg = "Invalid QueryRelation in RangeQuery";
+                    std::string msg = "Invalid QueryRelation in BinaryQuery";
                     return Status{SERVER_INVALID_ARGUMENT, msg};
                 }
             }
         }
         return status;
     } else {
-        bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_);
         if (general_query->leaf->term_query != nullptr) {
             // process attrs_data
-            status = ProcessTermQuery(bitset, general_query->leaf->term_query, attr_type);
-            if (!status.ok()) {
-                return status;
-            }
+            bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_);
+            STATUS_CHECK(ProcessTermQuery(bitset, general_query->leaf->term_query, attr_type));
         }
         if (general_query->leaf->range_query != nullptr) {
-            status = ProcessRangeQuery(attr_type, bitset, general_query->leaf->range_query);
-            if (!status.ok()) {
-                return status;
-            }
+            bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_);
+            STATUS_CHECK(ProcessRangeQuery(attr_type, bitset, general_query->leaf->range_query));
         }
         if (!general_query->leaf->vector_placeholder.empty()) {
             // skip vector query
+            bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_, 255);
             vector_placeholder = general_query->leaf->vector_placeholder;
-            bitset = nullptr;
         }
     }
     return status;
@@ -497,20 +495,23 @@ ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const 
 Status
 ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, const query::TermQueryPtr& term_query,
                                       std::unordered_map<std::string, DataType>& attr_type) {
-    auto status = Status::OK();
-    auto term_query_json = term_query->json_obj;
-    JSON_NULL_CHECK(term_query_json);
-    auto term_it = term_query_json.begin();
-    if (term_it != term_query_json.end()) {
-        const std::string& field_name = term_it.key();
-        if (term_it.value().is_object()) {
-            milvus::json term_values_json = term_it.value()["values"];
-            status = IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_values_json);
-        } else {
-            status = IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_it.value());
+    try {
+        auto term_query_json = term_query->json_obj;
+        JSON_NULL_CHECK(term_query_json);
+        auto term_it = term_query_json.begin();
+        if (term_it != term_query_json.end()) {
+            const std::string& field_name = term_it.key();
+            if (term_it.value().is_object()) {
+                milvus::json term_values_json = term_it.value()["values"];
+                STATUS_CHECK(IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_values_json));
+            } else {
+                STATUS_CHECK(IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_it.value()));
+            }
         }
+    } catch (std::exception& ex) {
+        return Status{SERVER_INVALID_DSL_PARAMETER, ex.what()};
     }
-    return status;
+    return Status::OK();
 }
 
 template <typename T>

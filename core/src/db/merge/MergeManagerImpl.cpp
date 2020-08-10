@@ -55,26 +55,14 @@ MergeManagerImpl::MergeFiles(const std::string& collection_name, MergeStrategyTy
         snapshot::ScopedSnapshotT latest_ss;
         STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
 
+        // collect all segments
         Partition2SegmentsMap part2seg;
         auto& segments = latest_ss->GetResources<snapshot::Segment>();
         for (auto& kv : segments) {
-            auto segment_commit = latest_ss->GetSegmentCommitBySegmentId(kv.second->GetID());
             part2seg[kv.second->GetPartitionId()].push_back(kv.second->GetID());
         }
 
-        Partition2SegmentsMap::iterator it;
-        for (it = part2seg.begin(); it != part2seg.end();) {
-            if (it->second.size() <= 1) {
-                part2seg.erase(it++);
-            } else {
-                ++it;
-            }
-        }
-
-        if (part2seg.empty()) {
-            break;
-        }
-
+        // distribute segments to groups by some strategy
         SegmentGroups segment_groups;
         auto status = strategy->RegroupSegments(latest_ss, part2seg, segment_groups);
         if (!status.ok()) {
@@ -83,6 +71,12 @@ MergeManagerImpl::MergeFiles(const std::string& collection_name, MergeStrategyTy
             return status;
         }
 
+        // no segment to merge, exit
+        if (segment_groups.empty()) {
+            break;
+        }
+
+        // do merge
         for (auto& segments : segment_groups) {
             MergeTask task(options_, latest_ss, segments);
             task.Execute();

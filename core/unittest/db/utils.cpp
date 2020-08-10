@@ -13,6 +13,7 @@
 
 #include <opentracing/mocktracer/tracer.h>
 
+#include <experimental/filesystem>
 #include <boost/filesystem.hpp>
 #include <iostream>
 #include <memory>
@@ -35,6 +36,9 @@
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
+#include "db/meta/backend/MockEngine.h"
+#include "db/meta/backend/MySqlEngine.h"
+#include "db/meta/backend/SqliteEngine.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
 #include "utils/CommonUtil.h"
@@ -265,7 +269,8 @@ DBTest::TearDown() {
 
     BaseTest::SnapshotStop();
     auto options = GetOptions();
-    boost::filesystem::remove_all(options.meta_.path_);
+    /* boost::filesystem::remove_all(options.meta_.path_); */
+    std::experimental::filesystem::remove_all(options.meta_.path_);
 
     BaseTest::TearDown();
 }
