@@ -24,8 +24,7 @@ endif ()
 # CC/CXX environment variables are captured on the first invocation of the
 # builder (e.g make or ninja) instead of when CMake is invoked into to build
 # directory. This leads to issues if the variables are exported in a subshell
-# and the invocation of make/ninja is in distinct subshell without the same
-# environment (CC/CXX).
+# and the invocation of make/ninja is in distinct subshell without the same # environment (CC/CXX).
 if ( CCACHE_FOUND )
     set( EP_C_COMPILER "${CCACHE_FOUND} ${CMAKE_C_COMPILER}" )
     set( EP_CXX_COMPILER "${CCACHE_FOUND} ${CMAKE_CXX_COMPILER}" )
@@ -66,6 +65,13 @@ endif ()
 
 set( MAKE_BUILD_ARGS "-j6" )
 
+set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
+# ----------------------------------------------------------------------
+# Find pthreads
+
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 # ****************************** Thirdparty googletest ***************************************
 if (MILVUS_BUILD_TESTS)
     if ( DEFINED ENV{MILVUS_GTEST_URL} )
@@ -77,8 +83,14 @@ if (MILVUS_BUILD_TESTS)
     add_subdirectory( gtest )
 endif()
 
-# ****************************** Thirdpart Common Config **************************************
-# INCLUDE DIRS need to be set at parent coupe.
-set( THIRDPARTY_INCLUDE_DIRS
-        ${GTEST_INCLUDE_DIR} 
-        PARENT_SCOPE )
+# ****************************** Thirdparty grpc ***************************************
+if (MILVUS_WITH_GRPC)
+    if (DEFINED ENV{MILVUS_GRPC_URL})
+        set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
+    else ()
+        set(GRPC_SOURCE_URL
+                "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip"
+                )
+    endif ()
+    add_subdirectory( grpc )
+endif ()

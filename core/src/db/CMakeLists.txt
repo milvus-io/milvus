@@ -67,11 +67,9 @@ set( ENGINE_LIBS    pthread
                     libgfortran.a
                     )
 
-set( GRPC_LIB   grpcpp_channelz
+set( GRPC_LIB   libprotobuf
+                grpc++_reflection
                 grpc++
-                grpc
-                grpc_protobuf
-                grpc_protoc
                 )
 
 set( BOOST_LIB  libboost_system.a
