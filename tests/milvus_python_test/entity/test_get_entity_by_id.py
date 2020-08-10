@@ -129,17 +129,17 @@ class TestGetBase:
 
     # TODO
     @pytest.mark.level(2)
-    def test_get_entity_params_same_ids(self, connect, collection):
+    def test_get_entity_params_same_ids(self, connect, id_collection):
         '''
         target: test.get_entity_by_id, with the same ids
         method: add entity, and get entity with the same ids
         expected: entity returned equals insert
         '''
         ids = [1]
-        res_ids = connect.insert(collection, entity, ids)
-        connect.flush([collection])
+        res_ids = connect.insert(id_collection, entity, ids)
+        connect.flush([id_collection])
         get_ids = [1, 1]
-        res = connect.get_entity_by_id(collection, get_ids)
+        res = connect.get_entity_by_id(id_collection, get_ids)
         assert len(res) == len(get_ids)
         for i in range(len(get_ids)):
             logging.getLogger().info(i)
@@ -244,6 +244,7 @@ class TestGetBase:
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
+    @pytest.mark.skip
     def test_get_entities_tags_B(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -344,6 +345,7 @@ class TestGetBase:
 
     # TODO
     @pytest.mark.level(2)
+    @pytest.mark.skip
     def test_get_entity_id_not_exised(self, connect, collection):
         '''
         target: test get entity, params entity_id not existed

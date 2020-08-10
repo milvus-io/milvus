@@ -277,17 +277,6 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
 
         auto single_size = data->data_.size() / id_size;
 
-        if (name == engine::FIELD_UID) {
-            int64_t int64_value;
-            auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
-            for (int i = 0; i < id_size; i++) {
-                auto offset = i * single_size;
-                memcpy(&int64_value, data->data_.data() + offset, single_size);
-                response->add_ids(int64_value);
-            }
-            continue;
-        }
-
         auto field_value = response->add_fields();
         auto vector_record = field_value->mutable_vector_record();
 
@@ -889,6 +878,10 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     Status status = req_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, field_names,
                                                valid_row, field_mappings, data_chunk);
 
+    for (auto it : vector_ids) {
+        response->add_ids(it);
+    }
+
     int valid_size = 0;
     for (auto it : valid_row) {
         response->add_valid_row(it);
@@ -897,9 +890,7 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
         }
     }
 
-    if (valid_size > 0) {
-        CopyDataChunkToEntity(data_chunk, field_mappings, valid_size, response);
-    }
+    CopyDataChunkToEntity(data_chunk, field_mappings, valid_size, response);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -1269,7 +1260,7 @@ GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::
 }
 
 ::grpc::Status
-GrpcRequestHandler::Compact(::grpc::ServerContext* context, ::milvus::grpc::CompactParam* request,
+GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc::CompactParam* request,
                             ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
