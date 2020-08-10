@@ -75,6 +75,7 @@ pipeline {
                             kubernetes {
                                 label "${OS_NAME}-${BINARY_VERSION}-build-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
                                 defaultContainer 'jnlp'
+                                customWorkspace '/home/jenkins/agent/workspace'
                                 yamlFile "ci/jenkins/pod/milvus-${BINARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
                             }
                         }
