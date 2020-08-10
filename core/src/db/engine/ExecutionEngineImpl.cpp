@@ -424,7 +424,7 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
         }
         if (!general_query->leaf->vector_placeholder.empty()) {
             // skip vector query
-            bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_, 1);
+            bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_, 255);
             vector_placeholder = general_query->leaf->vector_placeholder;
         }
     }
