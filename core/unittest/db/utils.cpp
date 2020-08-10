@@ -36,6 +36,9 @@
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
+#include "db/meta/backend/MockEngine.h"
+#include "db/meta/backend/MySqlEngine.h"
+#include "db/meta/backend/SqliteEngine.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
 #include "utils/CommonUtil.h"
