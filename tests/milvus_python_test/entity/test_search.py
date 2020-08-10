@@ -1111,7 +1111,6 @@ class TestSearchDSL(object):
         return request.param
 
     # TODO
-    @pytest.mark.level(2)
     def test_query_range_wrong_format(self, connect, collection, get_invalid_range):
         '''
         method: build query with wrong format range
@@ -1153,7 +1152,7 @@ class TestSearchDSL(object):
         return request.param
 
     # TODO:
-    def _test_query_range_valid_ranges(self, connect, collection, get_valid_ranges):
+    def test_query_range_valid_ranges(self, connect, collection, get_valid_ranges):
         '''
         method: build query with valid ranges
         expected: pass
@@ -1168,7 +1167,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == top_k
 
     # TODO
-    @pytest.mark.level(2)
     def test_query_range_one_field_not_existed(self, connect, collection):
         '''
         method: build query with two fields ranges, one of fields not existed

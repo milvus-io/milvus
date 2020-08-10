@@ -370,6 +370,7 @@ def gen_invalid_term():
     terms = [
         {"term": 1},
         {"term": []},
+        {"term": {}},
         {"term": {"term": {"int64": {"values": [i for i in range(nb // 2)]}}}}
     ]
     return terms
