@@ -206,6 +206,7 @@ BuildQueryPtr(const std::string& collection_name, int64_t n, int64_t topk, std::
     query_ptr->root = general_query;
     query_ptr->vectors.insert(std::make_pair(placeholder, vector_query));
     query_ptr->metric_types.insert({"float_vector", "L2"});
+    general_query->bin->relation = milvus::query::QueryRelation::AND;
 }
 
 void

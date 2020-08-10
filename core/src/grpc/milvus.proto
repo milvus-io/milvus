@@ -159,6 +159,64 @@ message VectorParam {
 
 /**
  * @brief Parameters for search action
+ * @dsl example:
+ *    {
+ *   "query": {
+ *       "bool": {
+ *           "must": [
+ *               {
+ *                   "must":[
+ *                       {
+ *                           "should": [
+ *                               {
+ *                                   "term": {
+ *                                       "gender": ["male"]
+ *                                   }
+ *                               },
+ *                               {
+ *                                   "range": {
+ *                                       "height": {"gte": "170.0", "lte": "180.0"}
+ *                                   }
+ *                               }
+ *                           ]
+ *                       },
+ *                       {
+ *                           "must_not": [
+ *                               {
+ *                                   "term": {
+ *                                       "age": [20, 21, 22, 23, 24, 25]
+ *                                   }
+ *                               },
+ *                               {
+ *                                   "Range": {
+ *                                       "weight": {"lte": "100"}
+ *                                   }
+ *                               }
+ *                           ]
+ *                       }
+ *                   ]
+ *               },
+ *               {
+ *                   "must": [
+ *                       {
+ *                           "vector": {
+ *                               "face_img": {
+ *                                   "topk": 10,
+ *                                   "query": [],
+ *                                   "params": {
+ *                                       "metric_type": "L2",
+ *                                       "nprobe": 10
+ *                                   }
+ *                               }
+ *                           }
+ *                       }
+ *                   ]
+ *               }
+ *           ]
+ *       }
+ *   },
+ *   "fields": ["age", "face_img"]
+ *   }
  */
 message SearchParam {
     string collection_name = 1;
