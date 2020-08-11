@@ -8,7 +8,7 @@ metadata:
 spec:
   containers:
   - name: milvus-gpu-build-env
-    image: registry.zilliz.com/milvus/milvus-gpu-build-env:v0.10.1-centos7
+    image: registry.zilliz.com/milvus/milvus-gpu-build-env:v0.10.2-centos7
     env:
     - name: POD_IP
       valueFrom:
@@ -17,7 +17,7 @@ spec:
     - name: OS_NAME
       value: "centos7"
     - name: BUILD_ENV_IMAGE_ID
-      value: "3d9e1ec0a8f768cb62c9a08a0117a4a63534dcffe4d7c80fece50266781e413f"
+      value: "a7e90e5fbb9506129fd0c991d7044c3c22962955f319980148902e4b6fc982cd"
     command:
     - cat
     tty: true
