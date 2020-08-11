@@ -16,8 +16,6 @@
 #include <string>
 #include <vector>
 
-#include "utils/StringHelpFunctions.h"
-
 namespace milvus::engine::meta {
 
 class MetaField {
@@ -26,7 +24,7 @@ class MetaField {
         : name_(name), type_(type), setting_(setting) {
     }
 
-    std::string
+    const std::string&
     name() const {
         return name_;
     }
