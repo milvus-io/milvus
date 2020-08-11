@@ -307,8 +307,6 @@ class TestIndexBase:
         for t in threads:
             t.join()
 
-    # TODO
-    @pytest.mark.level(2)
     def test_create_index_collection_not_existed_ip(self, connect, collection):
         '''
         target: test create index interface when collection name not existed
@@ -319,7 +317,7 @@ class TestIndexBase:
         collection_name = gen_unique_str(collection_id)
         default_index["metric_type"] = "IP"
         with pytest.raises(Exception) as e:
-            connect.create_index(collection, field_name, default_index)
+            connect.create_index(collection_name, field_name, default_index)
 
     # TODO
     @pytest.mark.level(2)
