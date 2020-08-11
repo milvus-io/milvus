@@ -154,8 +154,7 @@ Utils::PrintIndexParam(const milvus::IndexParam& index_param) {
     BLOCK_SPLITER
     std::cout << "Index collection name: " << index_param.collection_name << std::endl;
     std::cout << "Index field name: " << index_param.field_name << std::endl;
-    std::cout << "Index name: " << index_param.index_name << std::endl;
-    std::cout << "Index extra_params: " << index_param.extra_params << std::endl;
+    std::cout << "Index extra_params: " << index_param.index_params << std::endl;
     BLOCK_SPLITER
 }
 
@@ -261,26 +260,26 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
                 const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
                 std::vector<std::pair<int64_t, milvus::VectorData>> entity_array,
                 milvus::TopKQueryResult& topk_query_result) {
-/*
-    topk_query_result.clear();
+    /*
+        topk_query_result.clear();
 
-    nlohmann::json dsl_json, vector_param_json;
-    GenDSLJson(dsl_json, vector_param_json);
+        nlohmann::json dsl_json, vector_param_json;
+        GenDSLJson(dsl_json, vector_param_json);
 
-    std::vector<milvus::VectorData> temp_entity_array;
-    for (auto& pair : entity_array) {
-        temp_entity_array.push_back(pair.second);
-    }
-    milvus::VectorParam vector_param = {vector_param_json.dump(), temp_entity_array};
+        std::vector<milvus::VectorData> temp_entity_array;
+        for (auto& pair : entity_array) {
+            temp_entity_array.push_back(pair.second);
+        }
+        milvus::VectorParam vector_param = {vector_param_json.dump(), temp_entity_array};
 
-    JSON json_params = {{"nprobe", nprobe}};
-    milvus_sdk::TimeRecorder rc("Search");
+        JSON json_params = {{"nprobe", nprobe}};
+        milvus_sdk::TimeRecorder rc("Search");
 
-    auto status = conn->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
+        auto status = conn->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
 
-    PrintTopKQueryResult(topk_query_result);
-    //    PrintSearchResult(entity_array, topk_query_result);
-*/
+        PrintTopKQueryResult(topk_query_result);
+        //    PrintSearchResult(entity_array, topk_query_result);
+    */
 }
 
 void
@@ -378,8 +377,8 @@ Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, c
     bool_json["must"].push_back(term_json);
 
     nlohmann::json comp_json;
-    comp_json["GTE"] = "0";
-    comp_json["LTE"] = "100000";
+    comp_json["GT"] = 0;
+    comp_json["LT"] = 100000;
     range_json["range"]["field_1"] = comp_json;
     bool_json["must"].push_back(range_json);
 
@@ -438,4 +437,3 @@ Utils::PrintTopKQueryResult(milvus::TopKQueryResult& topk_query_result) {
 }
 
 }  // namespace milvus_sdk
-
