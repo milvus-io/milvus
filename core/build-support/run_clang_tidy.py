@@ -57,7 +57,7 @@ def _check_all(cmd, filenames):
             if problem_files:
                 msg = "clang-tidy suggested fixes for {}"
                 print("\n".join(map(msg.format, problem_files)))
-                print(stdout)
+                print(stdout.decode("utf-8"))
                 error = True
     except Exception:
         error = True
@@ -123,4 +123,3 @@ if __name__ == "__main__":
 
     else:
         _check_all(cmd, linted_filenames)
-
