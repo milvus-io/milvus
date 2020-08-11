@@ -177,7 +177,7 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
             }
         } else {
             knowhere::IndexPtr index_ptr;
-            segment_reader_->LoadStructuredIndex(name, index_ptr);
+            STATUS_CHECK(segment_reader_->LoadStructuredIndex(name, index_ptr));
             index_exist = (index_ptr != nullptr);
             if (!index_exist) {
                 // for structured field, create a simple sorted index for it
