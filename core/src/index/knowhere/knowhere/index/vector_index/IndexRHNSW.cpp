@@ -85,9 +85,9 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
     GET_TENSOR_DATA(dataset_ptr)
 
-    size_t k = config[meta::TOPK].get<int64_t>();
-    size_t id_size = sizeof(int64_t) * k;
-    size_t dist_size = sizeof(float) * k;
+    int64_t k = config[meta::TOPK].get<int64_t>();
+    int64_t id_size = sizeof(int64_t) * k;
+    int64_t dist_size = sizeof(float) * k;
     auto p_id = (int64_t*)malloc(id_size * rows);
     auto p_dist = (float*)malloc(dist_size * rows);
     for (auto i = 0; i < k * rows; ++i) {

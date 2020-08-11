@@ -1,6 +1,5 @@
 /* Copyright @2012 by Justin Hines at Bitly under a very liberal license. See LICENSE in the source distribution. */
 
-#define _GNU_SOURCE
 #include <sys/stat.h>
 #include <stdint.h>
 #include <stdio.h>
