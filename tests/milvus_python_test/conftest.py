@@ -18,6 +18,7 @@ def pytest_addoption(parser):
     parser.addoption("--http-port", action="store", default=19121)
     parser.addoption("--handler", action="store", default="GRPC")
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
+    parser.addoption('--dry-run', action='store_true', default=False)
 
 
 def pytest_configure(config):
@@ -36,6 +37,13 @@ def pytest_runtest_setup(item):
         cmd_tag = item.config.getoption("--tag")
         if cmd_tag != "all" and cmd_tag not in tags:
             pytest.skip("test requires tag in {!r}".format(tags))
+
+
+def pytest_runtestloop(session):
+    if session.config.getoption('--dry-run'):
+        for item in session.items:
+            print(item.nodeid)
+        return True
 
 
 def check_server_connection(request):
@@ -132,6 +140,7 @@ def collection(request, connect):
     return collection_name
 
 
+# customised id
 @pytest.fixture(scope="function")
 def id_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
@@ -168,6 +177,7 @@ def binary_collection(request, connect):
     return collection_name
 
 
+# customised id
 @pytest.fixture(scope="function")
 def binary_id_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
