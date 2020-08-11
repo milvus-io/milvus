@@ -190,7 +190,6 @@ TEST_F(MetaTest, TruncateTest) {
 }
 
 TEST_F(MetaTest, MultiThreadRequestTest) {
-    unsigned int thread_hint = std::thread::hardware_concurrency();
     auto request_worker = [&](size_t i) {
         std::string collection_name_prefix = "meta_test_collection_" + std::to_string(i) + "_";
         int64_t result_id;
@@ -222,9 +221,13 @@ TEST_F(MetaTest, MultiThreadRequestTest) {
                 .SetOp(Op::oUpdate)
                 .AddAttr(milvus::engine::meta::F_STATE)
                 .CreatePtr();
-            meta_->Apply<Collection>(c_ctx3, result_id);
+            status = meta_->Apply<Collection>(c_ctx3, result_id);
+            ASSERT_TRUE(status.ok()) << status.ToString();
 
-            auto c_ctx4 = ResourceContextBuilder<Collection>().SetID(result_id).SetOp(Op::oDelete).SetTable(Collection::Name).CreatePtr();
+            auto c_ctx4 = ResourceContextBuilder<Collection>().SetID(result_id)
+                .SetOp(Op::oDelete)
+                .SetTable(Collection::Name)
+                .CreatePtr();
             status = meta_->Apply<Collection>(c_ctx4, result_id);
             ASSERT_TRUE(status.ok()) << status.ToString();
             CollectionPtr collection3;
@@ -233,4 +236,15 @@ TEST_F(MetaTest, MultiThreadRequestTest) {
             ASSERT_EQ(collection3, nullptr);
         }
     };
+
+    unsigned int thread_hint = std::thread::hardware_concurrency();
+    std::vector<std::thread> threads;
+
+    for (size_t i = 0; i < 2 * thread_hint; i++) {
+        threads.emplace_back(request_worker, i);
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
 }
