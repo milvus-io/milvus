@@ -934,7 +934,6 @@ class TestSearchDSL(object):
     ******************************************************************
     """
 
-    @pytest.mark.level(2)
     def test_query_term_value_not_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with no term can be filtered
@@ -950,8 +949,7 @@ class TestSearchDSL(object):
         # TODO:
 
     # TODO:
-    @pytest.mark.level(2)
-    def _test_query_term_value_all_in(self, connect, collection):
+    def test_query_term_value_all_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with all term can be filtered
         expected: filter pass
@@ -965,8 +963,7 @@ class TestSearchDSL(object):
         # TODO:
 
     # TODO:
-    @pytest.mark.level(2)
-    def _test_query_term_values_not_in(self, connect, collection):
+    def test_query_term_values_not_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with no term can be filtered
         expected: filter pass
@@ -1008,8 +1005,7 @@ class TestSearchDSL(object):
         # TODO:
 
     # TODO:
-    @pytest.mark.level(2)
-    def _test_query_term_values_repeat(self, connect, collection):
+    def test_query_term_values_repeat(self, connect, collection):
         '''
         method: build query with vector and term expr, with the same values
         expected: filter pass
@@ -1095,6 +1091,7 @@ class TestSearchDSL(object):
         assert len(res[0]) == top_k
         connect.drop_collection(collection_term)
 
+    @pytest.mark.level(2)
     def test_query_term_one_field_not_existed(self, connect, collection):
         '''
         method: build query with two fields term, one of it not existed
@@ -1105,6 +1102,7 @@ class TestSearchDSL(object):
         term["term"].update({"a": [0]})
         expr = {"must": [gen_default_vector_expr(default_query), term]}
         query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
@@ -1132,7 +1130,6 @@ class TestSearchDSL(object):
     def get_invalid_range(self, request):
         return request.param
 
-    # TODO
     def test_query_range_wrong_format(self, connect, collection, get_invalid_range):
         '''
         method: build query with wrong format range
@@ -1156,13 +1153,14 @@ class TestSearchDSL(object):
     def test_query_range_invalid_ranges(self, connect, collection, get_invalid_ranges):
         '''
         method: build query with invalid ranges
-        expected: pass
+        expected: raise Exception
         '''
         entities, ids = init_data(connect, collection)
         ranges = get_invalid_ranges
         range = gen_default_range_expr(ranges=ranges)
         expr = {"must": [gen_default_vector_expr(default_query), range]}
         query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
@@ -1174,6 +1172,7 @@ class TestSearchDSL(object):
         return request.param
 
     # TODO:
+    @pytest.mark.level(2)
     def test_query_range_valid_ranges(self, connect, collection, get_valid_ranges):
         '''
         method: build query with valid ranges
@@ -1184,11 +1183,11 @@ class TestSearchDSL(object):
         range = gen_default_range_expr(ranges=ranges)
         expr = {"must": [gen_default_vector_expr(default_query), range]}
         query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
         res = connect.search(collection, query)
         assert len(res) == nq
         assert len(res[0]) == top_k
 
-    # TODO
     def test_query_range_one_field_not_existed(self, connect, collection):
         '''
         method: build query with two fields ranges, one of fields not existed
@@ -1196,7 +1195,7 @@ class TestSearchDSL(object):
         '''
         entities, ids = init_data(connect, collection)
         range = gen_default_range_expr()
-        range["range"].update({"a": {"ranges": {"GT": 1, "LT": nb // 2}}})
+        range["range"].update({"a": {"GT": 1, "LT": nb // 2}})
         expr = {"must": [gen_default_vector_expr(default_query), range]}
         query = update_query_expr(default_query, expr=expr)
         with pytest.raises(Exception) as e:
@@ -1241,7 +1240,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == 0
 
     # TODO
-    @pytest.mark.level(2)
     def test_query_multi_term_different_fields(self, connect, collection):
         '''
          method: build query with multi range with same field, and ranges no common
@@ -1264,11 +1262,12 @@ class TestSearchDSL(object):
         expected: pass
         '''
         entities, ids = init_data(connect, collection)
-        term_first = {"int64": {"ranges": {"GT": 0, "LT": nb // 2}}}
-        term_second = {"float": {"ranges": {"GT": nb / 2, "LT": float(nb)}}}
+        term_first = {"int64": {"values": [i for i in range(nb//2)]}}
+        term_second = {"float": {"values": [float(i) for i in range(nb//2, nb)]}}
         term = update_term_expr({"term": {}}, [term_first, term_second])
         expr = {"must": [gen_default_vector_expr(default_query), term]}
         query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
         res = connect.search(collection, query)
         assert len(res) == nq
         assert len(res[0]) == 0
@@ -1317,6 +1316,7 @@ class TestSearchDSL(object):
         range_second = gen_default_range_expr(field="float", ranges={"GT": nb // 2, "LT": nb})
         expr = {"must": [gen_default_vector_expr(default_query), range_first, range_second]}
         query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
         res = connect.search(collection, query)
         assert len(res) == nq
         assert len(res[0]) == 0
@@ -1329,11 +1329,12 @@ class TestSearchDSL(object):
         expected: pass
         '''
         entities, ids = init_data(connect, collection)
-        range_first = {"int64": {"ranges": {"GT": 0, "LT": nb // 2}}}
-        range_second = {"float": {"ranges": {"GT": nb / 2, "LT": float(nb)}}}
+        range_first = {"int64": {"GT": 0, "LT": nb // 2}}
+        range_second = {"float": {"GT": nb / 2, "LT": float(nb)}}
         range = update_range_expr({"range": {}}, [range_first, range_second])
         expr = {"must": [gen_default_vector_expr(default_query), range]}
         query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
         res = connect.search(collection, query)
         assert len(res) == nq
         assert len(res[0]) == 0
@@ -1368,23 +1369,6 @@ class TestSearchDSL(object):
         term = gen_default_term_expr()
         range = gen_default_range_expr(ranges={"GT": nb // 2, "LT": nb})
         expr = {"must": [gen_default_vector_expr(default_query), term, range]}
-        query = update_query_expr(default_query, expr=expr)
-        res = connect.search(collection, query)
-        assert len(res) == nq
-        assert len(res[0]) == 0
-
-    # TODO
-    @pytest.mark.level(2)
-    def test_query_multi_term_different_fields(self, connect, collection):
-        '''
-        method: build query with multi term, different field each range
-        expected: pass
-        '''
-        entities, ids = init_data(connect, collection)
-        term_first = {"int64": {"ranges": {"GT": 0, "LT": nb // 2}}}
-        term_second = {"float": {"ranges": {"GT": nb / 2, "LT": float(nb)}}}
-        term = update_term_expr({"term": {}}, [term_first, term_second])
-        expr = {"must": [gen_default_vector_expr(default_query), term]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
         assert len(res) == nq
