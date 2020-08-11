@@ -21,10 +21,19 @@ raw_vectors, binary_entities = gen_binary_entities(nb)
 default_fields = gen_default_fields()
 default_binary_fields = gen_binary_default_fields()
 field_name = default_float_vec_field_name
+binary_field_name = default_binary_vec_field_name
 default_single_query = {
     "bool": {
         "must": [
             {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),
+                                     "params": {"nprobe": 10}}}}
+        ]
+    }
+}
+default_binary_single_query = {
+    "bool": {
+        "must": [
+            {"vector": {field_name: {"topk": 10, "query": gen_binary_vectors(1, dim),
                                      "params": {"nprobe": 10}}}}
         ]
     }
@@ -695,8 +704,8 @@ class TestCompactBinary:
         assert status.OK()
         query_vecs = [raw_vectors[0]]
         distance = jaccard(query_vecs[0], raw_vectors[0])
-        query = copy.deepcopy(default_single_query)
-        query["bool"]["must"][0]["vector"][field_name]["query"] = [binary_entities[-1]["values"][0],
+        query = copy.deepcopy(default_binary_single_query)
+        query["bool"]["must"][0]["vector"][binary_field_name]["query"] = [binary_entities[-1]["values"][0],
                                                                    binary_entities[-1]["values"][-1]]
         res = connect.search(binary_collection, query)
         assert abs(res[0]._distances[0]-distance) <= epsilon
