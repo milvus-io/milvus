@@ -116,7 +116,7 @@ TEST(STRUCTUREDINDEXSORT_TEST, test_in) {
     gen_rand_data(range, n, p);
     milvus::knowhere::StructuredIndexSort<int> structuredIndexSort((size_t)n, p);  // Build default
 
-    size_t test_times = 10;
+    int test_times = 10;
     std::vector<int> test_vals, test_off;
     test_vals.reserve(test_times);
     test_off.reserve(test_times);
@@ -141,7 +141,8 @@ TEST(STRUCTUREDINDEXSORT_TEST, test_not_in) {
     gen_rand_data(range, n, p);
     milvus::knowhere::StructuredIndexSort<int> structuredIndexSort((size_t)n, p);  // Build default
 
-    size_t test_times = 10;
+    int test_times = 10;
+
     std::vector<int> test_vals, test_off;
     test_vals.reserve(test_times);
     test_off.reserve(test_times);

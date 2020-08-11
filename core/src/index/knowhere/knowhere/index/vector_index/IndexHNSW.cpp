@@ -82,11 +82,14 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS);
 
         hnswlib::SpaceInterface<float>* space;
-        if (config[Metric::TYPE] == Metric::L2) {
+        std::string metric_type = config[Metric::TYPE];
+        if (metric_type == Metric::L2) {
             space = new hnswlib::L2Space(dim);
-        } else if (config[Metric::TYPE] == Metric::IP) {
+        } else if (metric_type == Metric::IP) {
             space = new hnswlib::InnerProductSpace(dim);
             normalize = true;
+        } else {
+            KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
         }
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
                                                                    config[IndexParams::efConstruction].get<int64_t>());
