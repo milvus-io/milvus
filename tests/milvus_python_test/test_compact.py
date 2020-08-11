@@ -13,6 +13,7 @@ nprobe = 1
 top_k = 1
 tag = "1970-01-01"
 nb = 6000
+nq = 2
 segment_row_count = 5000
 entity = gen_entities(1)
 entities = gen_entities(nb)
@@ -25,7 +26,7 @@ binary_field_name = default_binary_vec_field_name
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),
+            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim), "metric_type":"L2",
                                      "params": {"nprobe": 10}}}}
         ]
     }
@@ -38,6 +39,8 @@ default_binary_single_query = {
         ]
     }
 }
+default_query, default_query_vecs = gen_query_vectors(binary_field_name, binary_entities, top_k, nq)
+
 
 def ip_query():
     query = copy.deepcopy(default_single_query)
@@ -140,7 +143,6 @@ class TestCompactBase:
         assert(size_before == size_after)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip(reason="delete not support yet")
     def test_insert_delete_part_and_compact(self, connect, collection):
         '''
         target: test add entities, delete part of them and compact
@@ -169,7 +171,7 @@ class TestCompactBase:
         assert(size_before >= size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip(reason="delete not support yet")
+    @pytest.mark.skip("not implemented")
     def test_insert_delete_all_and_compact(self, connect, collection):
         '''
         target: test add entities, delete them and compact 
@@ -192,7 +194,7 @@ class TestCompactBase:
         assert not info["partitions"][0]["segments"]
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip(reason="delete not support yet")
+    @pytest.mark.skip("not implemented")
     def test_insert_partition_delete_half_and_compact(self, connect, collection):
         '''
         target: test add entities into partition, delete them and compact 
@@ -233,7 +235,9 @@ class TestCompactBase:
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
-    @pytest.mark.skip(reason="create_index not support yet")
+
+    # TODO
+    @pytest.mark.skip('not implemented')
     def test_compact_after_index_created(self, connect, collection, get_simple_index):
         '''
         target: test compact collection after index created
@@ -290,7 +294,6 @@ class TestCompactBase:
         assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip(reason="delete not support yet")
     def test_insert_delete_part_and_compact_twice(self, connect, collection):
         '''
         target: test add entities, delete part of them and compact twice
@@ -367,7 +370,6 @@ class TestCompactBase:
         res = connect.count_entities(collection)
         assert res == nb+1
 
-    @pytest.mark.skip(reason="delete not support yet")
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_index_creation_after_compact(self, connect, collection, get_simple_index):
         '''
@@ -387,7 +389,6 @@ class TestCompactBase:
         # status, result = connect.get_index_info(collection)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip(reason="delete not support yet")
     def test_delete_entities_after_compact(self, connect, collection):
         '''
         target: test delete entities after compact
@@ -405,7 +406,6 @@ class TestCompactBase:
         connect.flush([collection])
         assert connect.count_entities(collection) == 0
 
-    @pytest.mark.skip(reason="search not support yet")
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_search_after_compact(self, connect, collection):
         '''
@@ -429,7 +429,6 @@ class TestCompactBase:
         assert res[2]._distances[0] < epsilon
 
     # TODO: enable
-    @pytest.mark.skip(reason="delete not support yet")
     def _test_compact_server_crashed_recovery(self, connect, collection):
         '''
         target: test compact when server crashed unexpectedly and restarted
@@ -508,7 +507,6 @@ class TestCompactBinary:
         assert(size_before == size_after)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip(reason="delete not support yet")
     def test_insert_delete_part_and_compact(self, connect, binary_collection):
         '''
         target: test add entities, delete part of them and compact 
@@ -537,7 +535,7 @@ class TestCompactBinary:
         assert(size_before >= size_after)
     
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip(reason="delete not support yet")
+    @pytest.mark.skip('not implemented')
     def test_insert_delete_all_and_compact(self, connect, binary_collection):
         '''
         target: test add entities, delete them and compact 
@@ -589,7 +587,6 @@ class TestCompactBinary:
         assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip(reason="delete not support yet")
     def test_insert_delete_part_and_compact_twice(self, connect, binary_collection):
         '''
         target: test add entities, delete part of them and compact twice
@@ -620,7 +617,6 @@ class TestCompactBinary:
         assert(size_after == size_after_twice)
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip(reason="delete not support yet")
     def test_compact_multi_collections(self, connect):
         '''
         target: test compact works or not with multiple collections
@@ -634,7 +630,7 @@ class TestCompactBinary:
         for i in range(num_collections):
             collection_name = gen_unique_str("test_compact_multi_collection_%d" % i)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, default_binary_fields)
         for i in range(num_collections):
             ids = connect.insert(collection_list[i], entities)
             assert len(ids) == nq
@@ -671,7 +667,6 @@ class TestCompactBinary:
         assert res == nb + 1
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip(reason="delete not support yet")
     def test_delete_entities_after_compact(self, connect, binary_collection):
         '''
         target: test delete entities after compact
@@ -689,7 +684,6 @@ class TestCompactBinary:
         res = connect.count_entities(binary_collection)
         assert res == 0
 
-    @pytest.mark.skip(reason="search not support yet")
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_search_after_compact(self, connect, binary_collection):
         '''
@@ -707,11 +701,11 @@ class TestCompactBinary:
         query = copy.deepcopy(default_binary_single_query)
         query["bool"]["must"][0]["vector"][binary_field_name]["query"] = [binary_entities[-1]["values"][0],
                                                                    binary_entities[-1]["values"][-1]]
+
         res = connect.search(binary_collection, query)
         assert abs(res[0]._distances[0]-distance) <= epsilon
 
     # TODO:
-    @pytest.mark.skip(reason="search not support yet")
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_search_after_compact_ip(self, connect, collection):
         '''
