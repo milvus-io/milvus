@@ -24,7 +24,7 @@ default_fields = gen_default_fields()
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),
+            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),"metric_type":"L2",
                                      "params": {"nprobe": 10}}}}
         ]
     }
@@ -169,7 +169,7 @@ class TestInsertBase:
     # TODO
     @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_insert_ids(self, connect, collection, insert_count):
+    def test_insert_ids(self, connect, id_collection, insert_count):
         '''
         target: test insert vectors in collection, use customize ids
         method: create collection and insert vectors in it, check the ids returned and the collection length after vectors inserted
@@ -177,17 +177,17 @@ class TestInsertBase:
         '''
         nb = insert_count
         ids = [i for i in range(nb)]
-        res_ids = connect.insert(collection, gen_entities(nb), ids)
-        connect.flush([collection])
+        res_ids = connect.insert(id_collection, gen_entities(nb), ids)
+        connect.flush([id_collection])
         assert len(res_ids) == nb
         assert res_ids == ids
-        res_count = connect.count_entities(collection)
+        res_count = connect.count_entities(id_collection)
         assert res_count == nb
 
     # TODO
     @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_insert_the_same_ids(self, connect, collection, insert_count):
+    def test_insert_the_same_ids(self, connect, id_collection, insert_count):
         '''
         target: test insert vectors in collection, use customize the same ids
         method: create collection and insert vectors in it, check the ids returned and the collection length after vectors inserted
@@ -195,11 +195,11 @@ class TestInsertBase:
         '''
         nb = insert_count
         ids = [1 for i in range(nb)]
-        res_ids = connect.insert(collection, gen_entities(nb), ids)
-        connect.flush([collection])
+        res_ids = connect.insert(id_collection, gen_entities(nb), ids)
+        connect.flush([id_collection])
         assert len(res_ids) == nb
         assert res_ids == ids
-        res_count = connect.count_entities(collection)
+        res_count = connect.count_entities(id_collection)
         assert res_count == nb
 
     # TODO
