@@ -224,8 +224,6 @@ class TestCompactBase:
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
-    # TODO
-    @pytest.mark.skip("not implement")
     @pytest.mark.level(2)
     def test_compact_after_index_created(self, connect, collection, get_simple_index):
         '''
@@ -242,7 +240,7 @@ class TestCompactBase:
         info = connect.get_collection_stats(collection)
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         logging.getLogger().info(info["partitions"])
-        delete_ids = [ids[0], ids[-1]]
+        delete_ids = ids[:1500]
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         connect.flush([collection])
