@@ -34,7 +34,7 @@ default_single_query = {
 default_binary_single_query = {
     "bool": {
         "must": [
-            {"vector": {binary_field_name: {"topk": 10, "query": gen_binary_vectors(1, dim),
+            {"vector": {binary_field_name: {"topk": 10, "query": gen_binary_vectors(1, dim), "metric_type":"JACCARD",
                                      "params": {"nprobe": 10}}}}
         ]
     }
