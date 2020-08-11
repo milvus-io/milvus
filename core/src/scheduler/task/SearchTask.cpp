@@ -134,6 +134,9 @@ SearchTask::OnExecute() {
                 search_job->query_result() = std::make_shared<engine::QueryResult>();
                 search_job->query_result()->row_num_ = nq;
             }
+            if (vector_param->metric_type == "IP") {
+                ascending_reduce_ = false;
+            }
             SearchTask::MergeTopkToResultSet(context.query_result_->result_ids_,
                                              context.query_result_->result_distances_, spec_k, nq, topk,
                                              ascending_reduce_, search_job->query_result());

@@ -443,7 +443,7 @@ class TestSearchBase:
             assert len(res) == nq
 
     @pytest.mark.level(2)
-    def _test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
+    def test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
         method: search collection with the given vectors and tags, check the result
