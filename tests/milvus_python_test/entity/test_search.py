@@ -186,6 +186,7 @@ class TestSearchBase:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
 
+    # TODO:
     @pytest.mark.level(2)
     def test_search_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
@@ -222,8 +223,8 @@ class TestSearchBase:
         '''
         search_metric_type = "IP"
         index_type = get_simple_index["index_type"]
-        if index_type == "IVF_PQ":
-            pytest.skip("Skip PQ")
+        if index_type != "FLAT":
+            pytest.skip("skip flat")
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
