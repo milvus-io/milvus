@@ -31,7 +31,16 @@ default_single_query = {
         ]
     }
 }
+default_binary_single_query = {
+    "bool": {
+        "must": [
+            {"vector": {binary_field_name: {"topk": 10, "query": gen_binary_vectors(1, dim), "metric_type":"JACCARD",
+                                     "params": {"nprobe": 10}}}}
+        ]
+    }
+}
 default_query, default_query_vecs = gen_query_vectors(binary_field_name, binary_entities, top_k, nq)
+
 
 def ip_query():
     query = copy.deepcopy(default_single_query)
@@ -662,6 +671,7 @@ class TestCompactBinary:
         res = connect.count_entities(binary_collection)
         assert res == 0
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_search_after_compact(self, connect, binary_collection):
         '''
@@ -676,7 +686,10 @@ class TestCompactBinary:
         assert status.OK()
         query_vecs = [raw_vectors[0]]
         distance = jaccard(query_vecs[0], raw_vectors[0])
-        query = copy.deepcopy(default_query)
+        query = copy.deepcopy(default_binary_single_query)
+        query["bool"]["must"][0]["vector"][binary_field_name]["query"] = [binary_entities[-1]["values"][0],
+                                                                   binary_entities[-1]["values"][-1]]
+
         res = connect.search(binary_collection, query)
         assert abs(res[0]._distances[0]-distance) <= epsilon
 

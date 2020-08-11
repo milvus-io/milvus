@@ -186,6 +186,7 @@ class TestIndexBase:
         connect.create_index(collection, field_name, get_simple_index)
         connect.create_index(collection, field_name, get_simple_index)
 
+    # TODO:
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly(self, connect, collection):
@@ -199,7 +200,6 @@ class TestIndexBase:
         for index in indexs:
             connect.create_index(collection, field_name, index)
             stats = connect.get_collection_stats(collection)
-            # TODO
             # assert stats["partitions"][0]["segments"][0]["index_name"] == index["index_type"]
             assert stats["row_count"] == nb
 
@@ -332,6 +332,7 @@ class TestIndexBase:
         connect.create_index(collection, field_name, get_simple_index)
         connect.create_index(collection, field_name, get_simple_index)
 
+    # TODO:
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_ip(self, connect, collection):
@@ -345,7 +346,6 @@ class TestIndexBase:
         for index in indexs:
             connect.create_index(collection, field_name, index)
             stats = connect.get_collection_stats(collection)
-            # TODO
             # assert stats["partitions"][0]["segments"][0]["index_name"] == index["index_type"]
             assert stats["row_count"] == nb
 
