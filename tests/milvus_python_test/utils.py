@@ -321,7 +321,7 @@ def update_term_expr(src_term, terms):
 def gen_default_range_expr(keyword="range", field="int64", ranges=None):
     if ranges is None:
         ranges = {"GT": 1, "LT": nb // 2}
-    expr = {keyword: {field: {"ranges": ranges}}}
+    expr = {keyword: {field: ranges}}
     return expr
 
 
@@ -337,7 +337,7 @@ def gen_invalid_range():
         {"range": 1},
         {"range": {}},
         {"range": []},
-        {"range": {"range": {"int64": {"ranges": {"GT": 0, "LT": nb // 2}}}}}
+        {"range": {"range": {"int64": {"GT": 0, "LT": nb // 2}}}}
     ]
     return range
 
@@ -345,8 +345,6 @@ def gen_invalid_range():
 def gen_invalid_ranges():
     ranges = [
         {"GT": nb, "LT": 0},
-        {"GT": nb},
-        {"LT": 0},
         {"GT": "0", "LT": "1000"}
     ]
     return ranges
