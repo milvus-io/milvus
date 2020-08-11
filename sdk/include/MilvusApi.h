@@ -124,8 +124,7 @@ using TopKQueryResult = std::vector<QueryResult>;  ///< Topk hybrid query result
 struct IndexParam {
     std::string collection_name;  ///< Collection name for create index
     std::string field_name;       ///< Field name
-    std::string index_name;       ///< Index name
-    std::string extra_params;     ///< Extra parameters according to different index type, must be json format
+    std::string index_params;     ///< Extra parameters according to different index type, must be json format
 };
 
 /**

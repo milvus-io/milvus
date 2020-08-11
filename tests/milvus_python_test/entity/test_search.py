@@ -462,7 +462,7 @@ class TestSearchBase:
             assert len(res) == nq
 
     @pytest.mark.level(2)
-    def _test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
+    def test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
         method: search collection with the given vectors and tags, check the result
@@ -938,7 +938,7 @@ class TestSearchDSL(object):
 
     # TODO:
     @pytest.mark.level(2)
-    def _test_query_term_value_all_in(self, connect, collection):
+    def test_query_term_value_all_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with all term can be filtered
         expected: filter pass
@@ -953,7 +953,7 @@ class TestSearchDSL(object):
 
     # TODO:
     @pytest.mark.level(2)
-    def _test_query_term_values_not_in(self, connect, collection):
+    def test_query_term_values_not_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with no term can be filtered
         expected: filter pass
@@ -996,7 +996,7 @@ class TestSearchDSL(object):
 
     # TODO:
     @pytest.mark.level(2)
-    def _test_query_term_values_repeat(self, connect, collection):
+    def test_query_term_values_repeat(self, connect, collection):
         '''
         method: build query with vector and term expr, with the same values
         expected: filter pass
@@ -1049,7 +1049,7 @@ class TestSearchDSL(object):
 
     # TODO
     @pytest.mark.level(2)
-    def test_query_term_wrong_format(self, connect, collection, get_invalid_term):
+    def _test_query_term_wrong_format(self, connect, collection, get_invalid_term):
         '''
         method: build query with wrong format term
         expected: Exception raised
