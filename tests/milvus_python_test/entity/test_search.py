@@ -324,8 +324,6 @@ class TestSearchBase:
             assert res[0]._distances[0] > epsilon
             assert res[1]._distances[0] > epsilon
 
-    # TODO:
-    @pytest.mark.level(2)
     def _test_search_index_partitions_B(self, connect, collection, get_simple_index, get_top_k):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
@@ -536,8 +534,6 @@ class TestSearchBase:
         res = connect.search(collection, query)
         assert abs(np.sqrt(res[0]._distances[0]) - min_distance) <= gen_inaccuracy(res[0]._distances[0])
 
-    # TODO
-    @pytest.mark.level(2)
     def test_search_distance_ip(self, connect, collection):
         '''
         target: search collection, and check the result: distance
@@ -917,8 +913,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == 0
         # TODO:
 
-    # TODO:
-    @pytest.mark.level(2)
     def _test_query_term_value_all_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with all term can be filtered
@@ -932,8 +926,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == 1
         # TODO:
 
-    # TODO:
-    @pytest.mark.level(2)
     def _test_query_term_values_not_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with no term can be filtered
@@ -975,8 +967,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == top_k
         # TODO:
 
-    # TODO:
-    @pytest.mark.level(2)
     def _test_query_term_values_repeat(self, connect, collection):
         '''
         method: build query with vector and term expr, with the same values
@@ -1008,8 +998,6 @@ class TestSearchDSL(object):
     ******************************************************************
     """
 
-    # TODO
-    @pytest.mark.level(2)
     def test_query_term_key_error(self, connect, collection):
         '''
         method: build query with term key error
@@ -1028,8 +1016,6 @@ class TestSearchDSL(object):
     def get_invalid_term(self, request):
         return request.param
 
-    # TODO
-    @pytest.mark.level(2)
     def test_query_term_wrong_format(self, connect, collection, get_invalid_term):
         '''
         method: build query with wrong format term
@@ -1042,8 +1028,6 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    # TODO
-    @pytest.mark.level(2)
     def test_query_term_field_named_term(self, connect, collection):
         '''
         method: build query with field named "term"
@@ -1092,8 +1076,6 @@ class TestSearchDSL(object):
     def get_invalid_range(self, request):
         return request.param
 
-    # TODO
-    @pytest.mark.level(2)
     def test_query_range_wrong_format(self, connect, collection, get_invalid_range):
         '''
         method: build query with wrong format range

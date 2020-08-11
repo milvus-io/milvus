@@ -58,7 +58,6 @@ class TestIndexBase:
     ******************************************************************
     """
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, collection, get_simple_index):
         '''
@@ -69,7 +68,6 @@ class TestIndexBase:
         ids = connect.insert(collection, entities)
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors(self, connect, collection, get_simple_index):
         '''
@@ -79,7 +77,6 @@ class TestIndexBase:
         '''
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition(self, connect, collection, get_simple_index):
         '''
@@ -92,7 +89,6 @@ class TestIndexBase:
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_flush(self, connect, collection, get_simple_index):
         '''
@@ -105,8 +101,6 @@ class TestIndexBase:
         connect.flush()
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
-    @pytest.mark.level(2)
     def test_create_index_without_connect(self, dis_connect, collection):
         '''
         target: test create index without connection
@@ -116,7 +110,6 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             dis_connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, collection, get_simple_index, get_nq):
         '''
@@ -158,7 +151,6 @@ class TestIndexBase:
         for t in threads:
             t.join()
 
-    @pytest.mark.level(2)
     def test_create_index_collection_not_existed(self, connect):
         '''
         target: test create index interface when collection name not existed
@@ -168,9 +160,8 @@ class TestIndexBase:
         '''
         collection_name = gen_unique_str(collection_id)
         with pytest.raises(Exception) as e:
-            connect.create_index(collection, field_name, default_index)
+            connect.create_index(collection_name, field_name, default_index)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_insert(self, connect, collection, get_simple_index):
         '''
@@ -204,14 +195,14 @@ class TestIndexBase:
         expected: return code 0, and describe index result equals with the second index params
         '''
         ids = connect.insert(collection, entities)
-        indexs = [default_index, {"index_type": "FLAT", "nlist": 1024}]
+        indexs = [default_index, {"metric_type":"L2", "index_type": "FLAT", "params":{"nlist": 1024}}]
         for index in indexs:
             connect.create_index(collection, field_name, index)
             stats = connect.get_collection_stats(collection)
-            assert stats["partitions"][0]["segments"][0]["index_name"] == index["index_type"]
+            # TODO
+            # assert stats["partitions"][0]["segments"][0]["index_name"] == index["index_type"]
             assert stats["row_count"] == nb
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_ip(self, connect, collection, get_simple_index):
         '''
@@ -223,7 +214,6 @@ class TestIndexBase:
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_ip(self, connect, collection, get_simple_index):
         '''
@@ -234,7 +224,6 @@ class TestIndexBase:
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_ip(self, connect, collection, get_simple_index):
         '''
@@ -248,7 +237,6 @@ class TestIndexBase:
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_flush_ip(self, connect, collection, get_simple_index):
         '''
@@ -262,7 +250,6 @@ class TestIndexBase:
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors_ip(self, connect, collection, get_simple_index, get_nq):
         '''
@@ -307,8 +294,6 @@ class TestIndexBase:
         for t in threads:
             t.join()
 
-    # TODO
-    @pytest.mark.level(2)
     def test_create_index_collection_not_existed_ip(self, connect, collection):
         '''
         target: test create index interface when collection name not existed
@@ -319,10 +304,8 @@ class TestIndexBase:
         collection_name = gen_unique_str(collection_id)
         default_index["metric_type"] = "IP"
         with pytest.raises(Exception) as e:
-            connect.create_index(collection, field_name, default_index)
+            connect.create_index(collection_name, field_name, default_index)
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_insert_ip(self, connect, collection, get_simple_index):
         '''
@@ -362,7 +345,8 @@ class TestIndexBase:
         for index in indexs:
             connect.create_index(collection, field_name, index)
             stats = connect.get_collection_stats(collection)
-            assert stats["partitions"][0]["segments"][0]["index_name"] == index["index_type"]
+            # TODO
+            # assert stats["partitions"][0]["segments"][0]["index_name"] == index["index_type"]
             assert stats["row_count"] == nb
 
     """
@@ -371,7 +355,6 @@ class TestIndexBase:
     ******************************************************************
     """
 
-    @pytest.mark.level(2)
     def test_drop_index(self, connect, collection, get_simple_index):
         '''
         target: test drop index interface
@@ -411,7 +394,6 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             dis_connect.drop_index(collection, field_name)
 
-    @pytest.mark.level(2)
     def test_drop_index_collection_not_existed(self, connect):
         '''
         target: test drop index interface when collection name not existed
@@ -423,7 +405,6 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.drop_index(collection_name, field_name)
 
-    @pytest.mark.level(2)
     def test_drop_index_collection_not_create(self, connect, collection):
         '''
         target: test drop index interface when index not created
@@ -445,7 +426,6 @@ class TestIndexBase:
             connect.create_index(collection, field_name, get_simple_index)
             connect.drop_index(collection, field_name)
 
-    @pytest.mark.level(2)
     def test_drop_index_ip(self, connect, collection, get_simple_index):
         '''
         target: test drop index interface
@@ -487,7 +467,6 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             dis_connect.drop_index(collection, field_name)
 
-    @pytest.mark.level(2)
     def test_drop_index_collection_not_create_ip(self, connect, collection):
         '''
         target: test drop index interface when index not created
@@ -787,7 +766,6 @@ class TestIndexAsync:
     ******************************************************************
     """
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, collection, get_simple_index):
         '''
@@ -809,7 +787,6 @@ class TestIndexAsync:
         with pytest.raises(Exception) as e:
             res = future.result()
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_callback(self, connect, collection, get_simple_index):
         '''

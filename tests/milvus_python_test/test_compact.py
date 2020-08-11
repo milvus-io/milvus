@@ -109,8 +109,6 @@ class TestCompactBase:
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_insert_and_compact(self, connect, collection):
         '''
@@ -161,8 +159,9 @@ class TestCompactBase:
         logging.getLogger().info(size_after)
         assert(size_before >= size_after)
     
+    # TODO
+    @pytest.mark.skip("not implement")
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip("not implemented")
     def test_insert_delete_all_and_compact(self, connect, collection):
         '''
         target: test add entities, delete them and compact 
@@ -185,7 +184,6 @@ class TestCompactBase:
         assert not info["partitions"][0]["segments"]
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip("not implemented")
     def test_insert_partition_delete_half_and_compact(self, connect, collection):
         '''
         target: test add entities into partition, delete them and compact 
@@ -226,9 +224,9 @@ class TestCompactBase:
                 pytest.skip("CPU not support index_type: ivf_sq8h")
         return request.param
 
-
     # TODO
-    @pytest.mark.skip('not implemented')
+    @pytest.mark.skip("not implement")
+    @pytest.mark.level(2)
     def test_compact_after_index_created(self, connect, collection, get_simple_index):
         '''
         target: test compact collection after index created
@@ -256,8 +254,6 @@ class TestCompactBase:
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before >= size_after)
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_entity_and_compact_twice(self, connect, collection):
         '''
@@ -313,8 +309,6 @@ class TestCompactBase:
         size_after_twice = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_after == size_after_twice)
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_compact_multi_collections(self, connect):
         '''
@@ -336,7 +330,6 @@ class TestCompactBase:
             status = connect.compact(collection_list[i])
             assert status.OK()
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_entity_after_compact(self, connect, collection):
         '''
@@ -454,8 +447,6 @@ class TestCompactBinary:
     ******************************************************************
     """
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    # TODO
-    @pytest.mark.level(2)
     def test_add_entity_and_compact(self, connect, binary_collection):
         '''
         target: test add binary vector and compact
@@ -475,8 +466,6 @@ class TestCompactBinary:
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_insert_and_compact(self, connect, binary_collection):
         '''
@@ -525,8 +514,10 @@ class TestCompactBinary:
         logging.getLogger().info(size_after)
         assert(size_before >= size_after)
     
+    # TODO
+    @pytest.mark.skip("not implement")
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
-    @pytest.mark.skip('not implemented')
     def test_insert_delete_all_and_compact(self, connect, binary_collection):
         '''
         target: test add entities, delete them and compact 
@@ -549,8 +540,6 @@ class TestCompactBinary:
         logging.getLogger().info(info["partitions"])
         assert not info["partitions"][0]["segments"]
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_entity_and_compact_twice(self, connect, binary_collection):
         '''
@@ -691,7 +680,6 @@ class TestCompactBinary:
         distance = jaccard(query_vecs[0], raw_vectors[0])
         query = copy.deepcopy(default_query)
         res = connect.search(binary_collection, query)
-
         assert abs(res[0]._distances[0]-distance) <= epsilon
 
     # TODO:
