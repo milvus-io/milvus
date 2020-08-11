@@ -377,8 +377,8 @@ Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, c
     bool_json["must"].push_back(term_json);
 
     nlohmann::json comp_json;
-    comp_json["GTE"] = 0;
-    comp_json["LTE"] = 100000;
+    comp_json["GT"] = 0;
+    comp_json["LT"] = 100000;
     range_json["range"]["field_1"] = comp_json;
     bool_json["must"].push_back(range_json);
 

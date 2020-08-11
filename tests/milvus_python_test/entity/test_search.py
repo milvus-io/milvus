@@ -919,7 +919,7 @@ class TestSearchDSL(object):
 
     # TODO:
     @pytest.mark.level(2)
-    def _test_query_term_value_all_in(self, connect, collection):
+    def test_query_term_value_all_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with all term can be filtered
         expected: filter pass
@@ -934,7 +934,7 @@ class TestSearchDSL(object):
 
     # TODO:
     @pytest.mark.level(2)
-    def _test_query_term_values_not_in(self, connect, collection):
+    def test_query_term_values_not_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with no term can be filtered
         expected: filter pass
@@ -977,7 +977,7 @@ class TestSearchDSL(object):
 
     # TODO:
     @pytest.mark.level(2)
-    def _test_query_term_values_repeat(self, connect, collection):
+    def test_query_term_values_repeat(self, connect, collection):
         '''
         method: build query with vector and term expr, with the same values
         expected: filter pass
