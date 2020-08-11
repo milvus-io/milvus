@@ -684,6 +684,7 @@ class TestCompactBinary:
         res = connect.count_entities(binary_collection)
         assert res == 0
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_search_after_compact(self, connect, binary_collection):
         '''
