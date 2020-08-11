@@ -18,7 +18,7 @@
 Checks:          'clang-diagnostic-*,clang-analyzer-*,-clang-analyzer-alpha*,google-*,modernize-*,readability-*'
 # produce HeaderFilterRegex from cpp/build-support/lint_exclusions.txt with:
 # echo -n '^('; sed -e 's/*/\.*/g' cpp/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
-HeaderFilterRegex: '^(.*cmake-build-debug.*|.*cmake-build-release.*|.*cmake_build.*|.*src/core/thirdparty.*|.*thirdparty.*|.*easylogging++.*|.*SqliteMetaImpl.cpp|.*src/grpc.*|.*src/core.*|.*src/wrapper.*)$'
+HeaderFilterRegex: '^(.*core/cmake-build-debug.*|.*core/cmake-build-release.*|.*core/cmake_build.*)$'
 AnalyzeTemporaryDtors: true
 ChainedConditionalReturn: 1
 ChainedConditionalAssignment: 1
