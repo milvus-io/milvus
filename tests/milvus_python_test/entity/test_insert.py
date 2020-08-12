@@ -24,7 +24,7 @@ default_fields = gen_default_fields()
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),
+            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),"metric_type":"L2",
                                      "params": {"nprobe": 10}}}}
         ]
     }
@@ -116,7 +116,6 @@ class TestInsertBase:
         connect.flush([collection])
         connect.drop_collection(collection)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_create_index(self, connect, collection, get_simple_index):
         '''
@@ -129,7 +128,6 @@ class TestInsertBase:
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
         '''
@@ -141,8 +139,6 @@ class TestInsertBase:
         ids = connect.insert(collection, entities)
         assert len(ids) == nb
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_search(self, connect, collection):
         '''
@@ -166,10 +162,8 @@ class TestInsertBase:
     def insert_count(self, request):
         yield request.param
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_insert_ids(self, connect, collection, insert_count):
+    def test_insert_ids(self, connect, id_collection, insert_count):
         '''
         target: test insert vectors in collection, use customize ids
         method: create collection and insert vectors in it, check the ids returned and the collection length after vectors inserted
@@ -177,17 +171,15 @@ class TestInsertBase:
         '''
         nb = insert_count
         ids = [i for i in range(nb)]
-        res_ids = connect.insert(collection, gen_entities(nb), ids)
-        connect.flush([collection])
+        res_ids = connect.insert(id_collection, gen_entities(nb), ids)
+        connect.flush([id_collection])
         assert len(res_ids) == nb
         assert res_ids == ids
-        res_count = connect.count_entities(collection)
+        res_count = connect.count_entities(id_collection)
         assert res_count == nb
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def test_insert_the_same_ids(self, connect, collection, insert_count):
+    def test_insert_the_same_ids(self, connect, id_collection, insert_count):
         '''
         target: test insert vectors in collection, use customize the same ids
         method: create collection and insert vectors in it, check the ids returned and the collection length after vectors inserted
@@ -195,11 +187,11 @@ class TestInsertBase:
         '''
         nb = insert_count
         ids = [1 for i in range(nb)]
-        res_ids = connect.insert(collection, gen_entities(nb), ids)
-        connect.flush([collection])
+        res_ids = connect.insert(id_collection, gen_entities(nb), ids)
+        connect.flush([id_collection])
         assert len(res_ids) == nb
         assert res_ids == ids
-        res_count = connect.count_entities(collection)
+        res_count = connect.count_entities(id_collection)
         assert res_count == nb
 
     # TODO
@@ -310,8 +302,6 @@ class TestInsertBase:
         ids = connect.insert(collection, entities, partition_tag=tag)
         assert len(ids) == nb
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_tag_with_ids(self, connect, id_collection):
         '''
@@ -588,8 +578,6 @@ class TestAddAsync:
         future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_status)
         future.done()
 
-    # TODO:
-    @pytest.mark.level(2)
     def _test_insert_async_long(self, connect, collection):
         '''
         target: test insert vectors with different length of vectors
@@ -692,7 +680,6 @@ class TestInsertMultiCollections:
         connect.flush([collection_name])
         assert len(ids) == 1
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_create_index_insert_vector_another(self, connect, collection, get_simple_index):
         '''
@@ -706,7 +693,6 @@ class TestInsertMultiCollections:
         ids = connect.insert(collection, entity)
         connect.drop_collection(collection_name)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_vector_create_index_another(self, connect, collection, get_simple_index):
         '''
@@ -721,7 +707,6 @@ class TestInsertMultiCollections:
         count = connect.count_entities(collection_name)
         assert count == 0
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_vector_sleep_create_index_another(self, connect, collection, get_simple_index):
         '''

@@ -87,8 +87,6 @@ class TestFlushBase:
         # with pytest.raises(Exception) as e:
         #     connect.flush([collection])
 
-    # TODO
-    @pytest.mark.level(2)
     def test_add_partition_flush(self, connect, id_collection):
         '''
         method: add entities into partition in collection, flush serveral times
@@ -108,50 +106,45 @@ class TestFlushBase:
         res_count = connect.count_entities(id_collection)
         assert res_count == nb * 2
 
-    # TODO
-    @pytest.mark.level(2)
-    def test_add_partitions_flush(self, connect, collection):
+    def test_add_partitions_flush(self, connect, id_collection):
         '''
         method: add entities into partitions in collection, flush one
         expected: the length of ids and the collection row count
         '''
         # vectors = gen_vectors(nb, dim)
         tag_new = gen_unique_str()
-        connect.create_partition(collection, tag)
-        connect.create_partition(collection, tag_new)
+        connect.create_partition(id_collection, tag)
+        connect.create_partition(id_collection, tag_new)
         ids = [i for i in range(nb)]
-        ids = connect.insert(collection, entities, ids, partition_tag=tag)
-        connect.flush([collection])
-        ids = connect.insert(collection, entities, ids, partition_tag=tag_new)
-        connect.flush([collection])
-        res = connect.count_entities(collection)
+        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
+        connect.flush([id_collection])
+        ids = connect.insert(id_collection, entities, ids, partition_tag=tag_new)
+        connect.flush([id_collection])
+        res = connect.count_entities(id_collection)
         assert res == 2 * nb
 
-    # TODO
-    @pytest.mark.level(2)
-    def test_add_collections_flush(self, connect, collection):
+    def test_add_collections_flush(self, connect, id_collection):
         '''
         method: add entities into collections, flush one
         expected: the length of ids and the collection row count
         '''
         collection_new = gen_unique_str()
+        default_fields = gen_default_fields(False)
         connect.create_collection(collection_new, default_fields)
-        connect.create_partition(collection, tag)
+        connect.create_partition(id_collection, tag)
         connect.create_partition(collection_new, tag)
         # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
         ids = connect.insert(collection_new, entities, ids, partition_tag=tag)
-        connect.flush([collection])
+        connect.flush([id_collection])
         connect.flush([collection_new])
-        res = connect.count_entities(collection)
+        res = connect.count_entities(id_collection)
         assert res == nb
         res = connect.count_entities(collection_new)
         assert res == nb
 
-    # TODO
-    @pytest.mark.level(2)
-    def test_add_collections_fields_flush(self, connect, collection, get_filter_field, get_vector_field):
+    def test_add_collections_fields_flush(self, connect, id_collection, get_filter_field, get_vector_field):
         '''
         method: create collection with different fields, and add entities into collections, flush one
         expected: the length of ids and the collection row count
@@ -162,20 +155,21 @@ class TestFlushBase:
         collection_new = gen_unique_str("test_flush")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_row_count": segment_row_count
+            "segment_row_count": segment_row_count,
+            "auto_id": False
         }
         connect.create_collection(collection_new, fields)
-        connect.create_partition(collection, tag)
+        connect.create_partition(id_collection, tag)
         connect.create_partition(collection_new, tag)
         # vectors = gen_vectors(nb, dim)
         entities_new = gen_entities_by_fields(fields["fields"], nb_new, dim)
         ids = [i for i in range(nb)]
         ids_new = [i for i in range(nb_new)]
-        ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
         ids = connect.insert(collection_new, entities_new, ids_new, partition_tag=tag)
-        connect.flush([collection])
+        connect.flush([id_collection])
         connect.flush([collection_new])
-        res = connect.count_entities(collection)
+        res = connect.count_entities(id_collection)
         assert res == nb
         res = connect.count_entities(collection_new)
         assert res == nb_new
@@ -197,8 +191,6 @@ class TestFlushBase:
         logging.getLogger().debug(res)
         assert res
 
-    # TODO
-    @pytest.mark.level(2)
     # TODO: stable case
     def test_add_flush_auto(self, connect, id_collection):
         '''
@@ -228,8 +220,6 @@ class TestFlushBase:
     def same_ids(self, request):
         yield request.param
 
-    # TODO
-    @pytest.mark.level(2)
     def test_add_flush_same_ids(self, connect, id_collection, same_ids):
         '''
         method: add entities, with same ids, count(same ids) < 15, > 15

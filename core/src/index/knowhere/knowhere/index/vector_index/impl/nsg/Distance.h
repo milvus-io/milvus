@@ -16,6 +16,7 @@ namespace knowhere {
 namespace impl {
 
 struct Distance {
+    virtual ~Distance() = default;
     virtual float
     Compare(const float* a, const float* b, unsigned size) const = 0;
 };

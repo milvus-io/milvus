@@ -749,7 +749,7 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
         }
 
         auto deleted_count = deleted_docs->GetCount();
-        if (deleted_count / (row_count + deleted_count) < threshold) {
+        if (double(deleted_count) / (row_count + deleted_count) < threshold) {
             continue;  // no need to compact
         }
 

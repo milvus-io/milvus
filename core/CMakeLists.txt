@@ -100,7 +100,7 @@ append_flags( CMAKE_CXX_FLAGS
                     "-fPIC"
                     "-DELPP_THREAD_SAFE"
                     "-fopenmp"
-                    "-Werror=return-type"
+                    "-Werror"
                     )
 
 # **************************** Source files ****************************
@@ -159,6 +159,13 @@ install(FILES
 find_package( Python COMPONENTS Interpreter Development )
 find_package( ClangTools )
 set( BUILD_SUPPORT_DIR "${CMAKE_SOURCE_DIR}/build-support" )
+
+if("$ENV{CMAKE_EXPORT_COMPILE_COMMANDS}" STREQUAL "1" OR CLANG_TIDY_FOUND)
+  # Generate a Clang compile_commands.json "compilation database" file for use
+  # with various development tools, such as Vim's YouCompleteMe plugin.
+  # See http://clang.llvm.org/docs/JSONCompilationDatabase.html
+  set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
+endif()
 
 #
 # "make lint" target

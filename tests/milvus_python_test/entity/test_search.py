@@ -186,6 +186,7 @@ class TestSearchBase:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
 
+    # TODO:
     @pytest.mark.level(2)
     def test_search_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
@@ -212,6 +213,24 @@ class TestSearchBase:
             assert len(res[0]) >= top_k
             assert res[0]._distances[0] < epsilon
             assert check_id_result(res[0], ids[0])
+
+    @pytest.mark.level(2)
+    def test_search_after_index_different_metric_type(self, connect, collection, get_simple_index):
+        '''
+        target: test search with different metric_type
+        method: build index with L2, and search using IP
+        expected: exception raised
+        '''
+        search_metric_type = "IP"
+        index_type = get_simple_index["index_type"]
+        if index_type != "FLAT":
+            pytest.skip("skip flat")
+        entities, ids = init_data(connect, collection)
+        connect.create_index(collection, field_name, get_simple_index)
+        search_param = get_search_param(index_type)
+        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, metric_type=search_metric_type, search_params=search_param)
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
 
     @pytest.mark.level(2)
     def test_search_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
@@ -443,7 +462,7 @@ class TestSearchBase:
             assert len(res) == nq
 
     @pytest.mark.level(2)
-    def _test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
+    def test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
         method: search collection with the given vectors and tags, check the result
@@ -919,7 +938,7 @@ class TestSearchDSL(object):
 
     # TODO:
     @pytest.mark.level(2)
-    def _test_query_term_value_all_in(self, connect, collection):
+    def test_query_term_value_all_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with all term can be filtered
         expected: filter pass
@@ -934,7 +953,7 @@ class TestSearchDSL(object):
 
     # TODO:
     @pytest.mark.level(2)
-    def _test_query_term_values_not_in(self, connect, collection):
+    def test_query_term_values_not_in(self, connect, collection):
         '''
         method: build query with vector and term expr, with no term can be filtered
         expected: filter pass
@@ -977,7 +996,7 @@ class TestSearchDSL(object):
 
     # TODO:
     @pytest.mark.level(2)
-    def _test_query_term_values_repeat(self, connect, collection):
+    def test_query_term_values_repeat(self, connect, collection):
         '''
         method: build query with vector and term expr, with the same values
         expected: filter pass
@@ -1030,7 +1049,7 @@ class TestSearchDSL(object):
 
     # TODO
     @pytest.mark.level(2)
-    def test_query_term_wrong_format(self, connect, collection, get_invalid_term):
+    def _test_query_term_wrong_format(self, connect, collection, get_invalid_term):
         '''
         method: build query with wrong format term
         expected: Exception raised

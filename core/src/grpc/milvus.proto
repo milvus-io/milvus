@@ -202,9 +202,9 @@ message VectorParam {
  *                           "vector": {
  *                               "face_img": {
  *                                   "topk": 10,
+ *                                   "metric_type": "L2",
  *                                   "query": [],
  *                                   "params": {
- *                                       "metric_type": "L2",
  *                                       "nprobe": 10
  *                                   }
  *                               }

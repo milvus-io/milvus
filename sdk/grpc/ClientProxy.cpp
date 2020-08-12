@@ -626,10 +626,16 @@ ClientProxy::CreateIndex(const IndexParam& index_param) {
         ::milvus::grpc::IndexParam grpc_index_param;
         grpc_index_param.set_collection_name(index_param.collection_name);
         grpc_index_param.set_field_name(index_param.field_name);
-        milvus::grpc::KeyValuePair* kv = grpc_index_param.add_extra_params();
-        grpc_index_param.set_index_name(index_param.index_name);
-        kv->set_key(EXTRA_PARAM_KEY);
-        kv->set_value(index_param.extra_params);
+        JSON json_param = JSON::parse(index_param.index_params);
+        for (auto& item : json_param.items()) {
+            milvus::grpc::KeyValuePair* kv = grpc_index_param.add_extra_params();
+            kv->set_key(item.key());
+            if (item.value().is_object()) {
+                kv->set_value(item.value().dump());
+            } else {
+                kv->set_value(item.value());
+            }
+        }
         return client_ptr_->CreateIndex(grpc_index_param);
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to build index: " + std::string(ex.what()));

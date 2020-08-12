@@ -88,7 +88,8 @@ SearchTask::OnLoad(LoadType type, uint8_t device_id) {
             s = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
 
-        return s;
+        job_->status() = s;
+        return Status::OK();
     }
 
     std::string info = "Search task load segment id: " + std::to_string(segment_id_) + " " + type_str + " totally cost";
@@ -132,6 +133,9 @@ SearchTask::OnExecute() {
             if (!search_job->query_result()) {
                 search_job->query_result() = std::make_shared<engine::QueryResult>();
                 search_job->query_result()->row_num_ = nq;
+            }
+            if (vector_param->metric_type == "IP") {
+                ascending_reduce_ = false;
             }
             SearchTask::MergeTopkToResultSet(context.query_result_->result_ids_,
                                              context.query_result_->result_distances_, spec_k, nq, topk,
