@@ -118,7 +118,7 @@ class TestPingDisconnect:
             res = dis_connect.server_status()
 
     @pytest.mark.level(2)
-    def test_server_version_with_timeout(self, connect):
+    def test_server_version_with_timeout(self, dis_connect):
         '''
         target: test get the server status with timeout settings after disconnect
         method: call the server_status method after connected
