@@ -27,6 +27,7 @@ add_compile_options(    ${EP_COMMON_TOOLCHAIN}
 set(gRPC_SSL_PROVIDER "package" CACHE STRING "OPENSSL" FORCE)
 # zlib build by grpc
 set( gRPC_ZLIB_PROVIDER "module" )
+FetchContent_GetProperties( grpc )
 if ( NOT grpc_POPULATED )
 
     FetchContent_Populate( grpc
@@ -37,7 +38,6 @@ if ( NOT grpc_POPULATED )
     # grpc++_reflection
     # protoc (excutable)
     # grpc++
-    FetchContent_GetProperties( grpc )
     add_subdirectory( ${grpc_SOURCE_DIR}
                       ${grpc_BINARY_DIR}
                       EXCLUDE_FROM_ALL
