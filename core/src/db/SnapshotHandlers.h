@@ -69,6 +69,20 @@ struct GetEntityByIdSegmentHandler : public snapshot::SegmentIterator {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+struct LoadCollectionHandler : public snapshot::SegmentIterator {
+    using ResourceT = snapshot::Segment;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
+    LoadCollectionHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss, const std::string& dir_root,
+                          const std::vector<std::string>& field_names, bool force);
+
+    Status
+    Handle(const typename ResourceT::Ptr&) override;
+
+    const server::ContextPtr context_;
+    const std::string dir_root_;
+    std::vector<std::string> field_names_;
+    bool force_;
+};
 
 }  // namespace engine
 }  // namespace milvus

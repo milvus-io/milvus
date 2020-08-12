@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/SnapshotHandlers.h"
+#include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
 #include "db/snapshot/ResourceHelper.h"
@@ -134,6 +135,48 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+LoadCollectionHandler::LoadCollectionHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
+                                             const std::string& dir_root, const std::vector<std::string>& field_names,
+                                             bool force)
+    : BaseT(ss), context_(context), dir_root_(dir_root), field_names_(field_names), force_(force) {
+}
+
+Status
+LoadCollectionHandler::Handle(const snapshot::SegmentPtr& segment) {
+    auto seg_visitor = engine::SegmentVisitor::Build(ss_, segment->GetID());
+    segment::SegmentReaderPtr segment_reader = std::make_shared<segment::SegmentReader>(dir_root_, seg_visitor);
+
+    SegmentPtr segment_ptr;
+    segment_reader->GetSegment(segment_ptr);
+
+    // if the input field_names is empty, will load all fields of this collection
+    if (field_names_.empty()) {
+        field_names_ = ss_->GetFieldNames();
+    }
+
+    // SegmentReader will load data into cache
+    for (auto& field_name : field_names_) {
+        DataType ftype = DataType::NONE;
+        segment_ptr->GetFieldType(field_name, ftype);
+
+        knowhere::IndexPtr index_ptr;
+        if (IsVectorField(ftype)) {
+            knowhere::VecIndexPtr vec_index_ptr;
+            segment_reader->LoadVectorIndex(field_name, vec_index_ptr);
+            index_ptr = vec_index_ptr;
+        } else {
+            segment_reader->LoadStructuredIndex(field_name, index_ptr);
+        }
+
+        // if index doesn't exist, load the raw file
+        if (index_ptr == nullptr) {
+            engine::BinaryDataPtr raw;
+            segment_reader->LoadField(field_name, raw);
+        }
+    }
+
+    return Status::OK();
+}
 
 }  // namespace engine
 }  // namespace milvus

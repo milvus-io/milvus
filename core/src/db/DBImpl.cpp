@@ -653,47 +653,9 @@ DBImpl::LoadCollection(const server::ContextPtr& context, const std::string& col
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    auto segment_handler = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* iterator) -> Status {
-        auto seg_visitor = engine::SegmentVisitor::Build(ss, segment->GetID());
-        segment::SegmentReaderPtr segment_reader =
-            std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
-
-        SegmentPtr segment_ptr;
-        segment_reader->GetSegment(segment_ptr);
-
-        // if the input field_names is empty, will load all fields of this collection
-        std::vector<std::string> load_fields = field_names;
-        if (load_fields.empty()) {
-            load_fields = ss->GetFieldNames();
-        }
-
-        // SegmentReader will load data into cache
-        for (auto& field_name : load_fields) {
-            DataType ftype = DataType::NONE;
-            segment_ptr->GetFieldType(field_name, ftype);
-
-            knowhere::IndexPtr index_ptr;
-            if (IsVectorField(ftype)) {
-                knowhere::VecIndexPtr vec_index_ptr;
-                segment_reader->LoadVectorIndex(field_name, vec_index_ptr);
-                index_ptr = vec_index_ptr;
-            } else {
-                segment_reader->LoadStructuredIndex(field_name, index_ptr);
-            }
-
-            // if index doesn't exist, load the raw file
-            if (index_ptr == nullptr) {
-                engine::BinaryDataPtr raw;
-                segment_reader->LoadField(field_name, raw);
-            }
-        }
-
-        return Status::OK();
-    };
-
-    auto segment_iterator = std::make_shared<snapshot::SegmentIterator>(ss, segment_handler);
-    segment_iterator->Iterate();
-    STATUS_CHECK(segment_iterator->GetStatus());
+    auto handler = std::make_shared<LoadCollectionHandler>(nullptr, ss, options_.meta_.path_, field_names, force);
+    handler->Iterate();
+    STATUS_CHECK(handler->GetStatus());
 
     return Status::OK();
 }
