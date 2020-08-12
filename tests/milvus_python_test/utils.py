@@ -353,7 +353,7 @@ def gen_invalid_ranges():
 def gen_valid_ranges():
     ranges = [
         {"GT": 0, "LT": nb // 2},
-        {"GT": nb, "LT": nb * 2},
+        {"GT": nb//2, "LT": nb * 2},
         {"GT": 0},
         {"LT": nb},
         {"GT": -1, "LT": top_k},
