@@ -31,7 +31,19 @@ MySQLConnectionPool::grab() {
         full_.wait(lock, [this] { return conns_in_use_ < max_pool_size_; });
         ++conns_in_use_;
     }
+    full_.notify_one();
     return mysqlpp::ConnectionPool::grab();
+}
+
+mysqlpp::Connection*
+MySQLConnectionPool::safe_grab() {
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        full_.wait(lock, [this] { return conns_in_use_ < max_pool_size_; });
+        ++conns_in_use_;
+    }
+    full_.notify_one();
+    return mysqlpp::ConnectionPool::safe_grab();
 }
 
 // Other half of in-use conn count limit
