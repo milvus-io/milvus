@@ -74,23 +74,28 @@ pipeline {
                         yamlFile "ci/jenkins/pod/milvus-${BINARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
                     }
                 }
-                steps {
-                    container("milvus-${BINARY_VERSION}-build-env") {
-                        script {
-                            try{
-                                boolean isNightlyTest = isTimeTriggeredBuild()
-                                if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                    load "${env.WORKSPACE}/ci/jenkins/step/nightlyBuild.groovy"
-                                } else {
-                                    load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
+
+                stages {
+                    stage('Build') {
+                        steps {
+                            container("milvus-${BINARY_VERSION}-build-env") {
+                                script {
+                                    try{
+                                        boolean isNightlyTest = isTimeTriggeredBuild()
+                                        if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
+                                            load "${env.WORKSPACE}/ci/jenkins/step/nightlyBuild.groovy"
+                                        } else {
+                                            load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
+                                        }
+                                    } catch (Exception e) {
+                                        containerLog "milvus-${BINARY_VERSION}-build-env"
+                                        throw e
+                                    }
+                                    load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
+                                    load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
+                                    load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
                                 }
-                            } catch (Exception e) {
-                                containerLog "milvus-${BINARY_VERSION}-build-env"
-                                throw e
                             }
-                            load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
-                            load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
-                            load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
                         }
                     }
                 }
@@ -133,10 +138,14 @@ pipeline {
                         yamlFile 'ci/jenkins/pod/docker-pod.yaml'
                     }
                 }
-                steps {
-                    container('publish-images') {
-                        script {
-                            load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
+                stages {
+                    stage('Publish') {
+                        steps {
+                            container('publish-images') {
+                                script {
+                                    load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
+                                }
+                            }
                         }
                     }
                 }
@@ -180,17 +189,21 @@ pipeline {
                         yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
                     }
                 }
-                steps {
-                    container('milvus-test-env') {
-                        script {
-                            sh "mkdir -p ${env.DEV_TEST_ARTIFACTS}"
+                stages {
+                    stage('Test') {
+                        steps {
+                            container('milvus-test-env') {
+                                script {
+                                    sh "mkdir -p ${env.DEV_TEST_ARTIFACTS}"
 
-                            boolean isNightlyTest = isTimeTriggeredBuild()
-                            if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
-                                load "${env.WORKSPACE}/ci/jenkins/step/shardsDevNightlyTest.groovy"
-                            } else {
-                                load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
+                                    boolean isNightlyTest = isTimeTriggeredBuild()
+                                    if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
+                                        load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkins/step/shardsDevNightlyTest.groovy"
+                                    } else {
+                                        load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
+                                    }
+                                }
                             }
                         }
                     }
