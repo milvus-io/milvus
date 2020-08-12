@@ -44,6 +44,9 @@ class MySQLConnectionPool : public mysqlpp::ConnectionPool {
     mysqlpp::Connection*
     grab() override;
 
+    mysqlpp::Connection*
+    safe_grab() override;
+
     // Other half of in-use conn count limit
     void
     release(const mysqlpp::Connection* pc) override;

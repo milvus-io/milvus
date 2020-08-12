@@ -12,6 +12,7 @@
 #include "db/meta/backend/MySqlEngine.h"
 
 #include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -208,25 +209,33 @@ MySqlEngine::Initialize() {
 
 Status
 MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
+    auto status = Status::OK();
+    mysqlpp::Connection::thread_start();
+
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
         if (connectionPtr == nullptr || !connectionPtr->connected()) {
+            mysqlpp::Connection::thread_end();
             return Status(SS_TIMEOUT, "Mysql server is not accessed");
         }
 
         std::string sql;
-        auto status = MetaHelper::MetaQueryContextToSql(context, sql);
+        status = MetaHelper::MetaQueryContextToSql(context, sql);
         if (!status.ok()) {
+            mysqlpp::Connection::thread_end();
             return status;
         }
 
-        std::lock_guard<std::mutex> lock(meta_mutex_);
-
+        // std::lock_guard<std::mutex> lock(meta_mutex_);
         mysqlpp::Query query = connectionPtr->query(sql);
         auto res = query.store();
         if (!res) {
-            // TODO: change error behavior
-            throw Exception(1, "Query res is false");
+            mysqlpp::Connection::thread_end();
+            std::stringstream ss;
+            ss << "Mysql query fail: (" << query.errnum() << ": " << query.error() << ")";
+            std::string err_msg = ss.str();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return Status(DB_ERROR, err_msg);
         }
 
         auto names = res.field_names();
@@ -238,48 +247,61 @@ MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
             attrs.push_back(attrs_map);
         }
     } catch (const mysqlpp::ConnectionFailed& er) {
-        return Status(SS_TIMEOUT, er.what());
+        status = Status(SS_TIMEOUT, er.what());
     } catch (const mysqlpp::BadQuery& er) {
         LOG_ENGINE_ERROR_ << "Query error: " << er.what();
         if (er.errnum() == 2006) {
-            return Status(SS_TIMEOUT, er.what());
+            status = Status(SS_TIMEOUT, er.what());
+        } else {
+            status = Status(DB_ERROR, er.what());
         }
-        return Status(1, er.what());
     } catch (const mysqlpp::BadConversion& er) {
         // Handle bad conversions
         //        cerr << "Conversion error: " << er.what() << endl <<
         //             "\tretrieved data size: " << er.retrieved <<
         //             ", actual size: " << er.actual_size << endl;
-        return Status(1, er.what());
+        status = Status(DB_ERROR, er.what());
     } catch (const mysqlpp::Exception& er) {
         // Catch-all for any other MySQL++ exceptions
         //        cerr << "Error: " << er.what() << endl;
-        return Status(1, er.what());
+        status = Status(DB_ERROR, er.what());
     }
 
-    return Status::OK();
+    mysqlpp::Connection::thread_end();
+    return status;
 }
 
 Status
 MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
+    Status status;
+    mysqlpp::Connection::thread_start();
+
     try {
         mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
         if (connectionPtr == nullptr || !connectionPtr->connected()) {
+            mysqlpp::Connection::thread_end();
             return Status(SS_TIMEOUT, "Mysql server is not accessed");
         }
 
         mysqlpp::Transaction trans(*connectionPtr, mysqlpp::Transaction::serializable, mysqlpp::Transaction::session);
 
-        std::lock_guard<std::mutex> lock(meta_mutex_);
+        // std::lock_guard<std::mutex> lock(meta_mutex_);
         for (auto& context : sql_contexts) {
             std::string sql;
-            auto status = MetaHelper::MetaApplyContextToSql(context, sql);
+            status = MetaHelper::MetaApplyContextToSql(context, sql);
             if (!status.ok()) {
-                return status;
+                break;
             }
 
             auto query = connectionPtr->query(sql);
             auto res = query.execute();
+            if (!res) {
+                std::stringstream ss;
+                ss << "Mysql execute fail: (" << query.errnum() << ": " << query.error() << ")";
+                status = Status(DB_ERROR, ss.str());
+                break;
+            }
+
             if (context.op_ == oAdd) {
                 auto id = res.insert_id();
                 result_ids.push_back(id);
@@ -288,15 +310,20 @@ MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_context
             }
         }
 
-        trans.commit();
+        if (status.ok()) {
+            trans.commit();
+        } else {
+            trans.rollback();
+        }
     } catch (const mysqlpp::ConnectionFailed& er) {
-        return Status(SS_TIMEOUT, er.what());
+        status = Status(SS_TIMEOUT, er.what());
     } catch (const mysqlpp::BadQuery& er) {
         LOG_ENGINE_ERROR_ << "MySql Error Code: " << er.errnum() << ": " << er.what();
         if (er.errnum() == 2006) {
-            return Status(SS_TIMEOUT, er.what());
+            status = Status(SS_TIMEOUT, er.what());
+        } else {
+            status = Status(DB_ERROR, er.what());
         }
-        return Status(SERVER_UNSUPPORTED_ERROR, er.what());
     } catch (const mysqlpp::BadConversion& er) {
         // Handle bad conversions
         //        cerr << "Conversion error: " << er.what() << endl <<
@@ -304,16 +331,17 @@ MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_context
         //             ", actual size: " << er.actual_size << endl;
         //        return -1;
         //        std::cout << "[DB] Error: " << er.what() << std::endl;
-        return Status(SERVER_UNSUPPORTED_ERROR, er.what());
+        status = Status(DB_ERROR, er.what());
     } catch (const mysqlpp::Exception& er) {
         // Catch-all for any other MySQL++ exceptions
         //        cerr << "Error: " << er.what() << endl;
         //        return -1;
         //        std::cout << "[DB] Error: " << er.what() << std::endl;
-        return Status(SERVER_UNSUPPORTED_ERROR, er.what());
+        status = Status(DB_ERROR, er.what());
     }
 
-    return Status::OK();
+    mysqlpp::Connection::thread_end();
+    return status;
 }
 
 Status
