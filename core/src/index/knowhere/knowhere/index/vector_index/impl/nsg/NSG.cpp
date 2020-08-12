@@ -880,10 +880,10 @@ NsgIndex::GetSize() {
     ret += ntotal * dimension * sizeof(float);
     ret += ntotal * sizeof(int64_t);
     ret += sizeof(*distance_);
-    for (auto i = 0; i < nsg.size(); ++i) {
+    for (size_t i = 0; i < nsg.size(); ++i) {
         ret += nsg[i].size() * sizeof(node_t);
     }
-    for (auto i = 0; i < knng.size(); ++i) {
+    for (size_t i = 0; i < knng.size(); ++i) {
         ret += knng[i].size() * sizeof(node_t);
     }
     return ret;
