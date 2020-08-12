@@ -102,7 +102,6 @@ class ResourceContextBuilder {
     SetResource(typename T::Ptr res) {
         table_ = T::Name;
         id_ = res->GetID();
-        //        resource_ = std::shared_ptr<T>(std::move(res));
         resource_ = std::move(res);
         return *this;
     }

@@ -553,7 +553,7 @@ class TestSearchBase:
             if min_distance > tmp_dis:
                 min_distance = tmp_dis
         res = connect.search(collection, query)
-        assert abs(np.sqrt(res[0]._distances[0]) - min_distance) <= gen_inaccuracy(res[0]._distances[0])
+        assert abs(np.sqrt(res[0]._distances[0]) - min_distance) <= epsilon
 
     # TODO
     @pytest.mark.level(2)
@@ -1133,7 +1133,7 @@ class TestSearchDSL(object):
         return request.param
 
     # TODO:
-    def _test_query_range_valid_ranges(self, connect, collection, get_valid_ranges):
+    def test_query_range_valid_ranges(self, connect, collection, get_valid_ranges):
         '''
         method: build query with valid ranges
         expected: pass
