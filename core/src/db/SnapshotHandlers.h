@@ -25,30 +25,6 @@
 namespace milvus {
 namespace engine {
 
-struct LoadVectorFieldElementHandler : public snapshot::FieldElementIterator {
-    using ResourceT = snapshot::FieldElement;
-    using BaseT = snapshot::IterateHandler<ResourceT>;
-    LoadVectorFieldElementHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
-                                  const snapshot::FieldPtr& field);
-
-    Status
-    Handle(const typename ResourceT::Ptr&) override;
-
-    const server::ContextPtr context_;
-    const snapshot::FieldPtr field_;
-};
-
-struct LoadVectorFieldHandler : public snapshot::FieldIterator {
-    using ResourceT = snapshot::Field;
-    using BaseT = snapshot::IterateHandler<ResourceT>;
-    LoadVectorFieldHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss);
-
-    Status
-    Handle(const typename ResourceT::Ptr&) override;
-
-    const server::ContextPtr context_;
-};
-
 struct SegmentsToSearchCollector : public snapshot::SegmentCommitIterator {
     using ResourceT = snapshot::SegmentCommit;
     using BaseT = snapshot::IterateHandler<ResourceT>;
@@ -93,6 +69,20 @@ struct GetEntityByIdSegmentHandler : public snapshot::SegmentIterator {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+struct LoadCollectionHandler : public snapshot::SegmentIterator {
+    using ResourceT = snapshot::Segment;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
+    LoadCollectionHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss, const std::string& dir_root,
+                          const std::vector<std::string>& field_names, bool force);
+
+    Status
+    Handle(const typename ResourceT::Ptr&) override;
+
+    const server::ContextPtr context_;
+    const std::string dir_root_;
+    std::vector<std::string> field_names_;
+    bool force_;
+};
 
 }  // namespace engine
 }  // namespace milvus
