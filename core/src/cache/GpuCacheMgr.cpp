@@ -24,10 +24,6 @@ namespace cache {
 std::mutex GpuCacheMgr::global_mutex_;
 std::unordered_map<int64_t, GpuCacheMgrPtr> GpuCacheMgr::instance_;
 
-namespace {
-constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
-}
-
 GpuCacheMgr::GpuCacheMgr(int64_t gpu_id) : gpu_id_(gpu_id) {
     std::string header = "[CACHE GPU" + std::to_string(gpu_id) + "]";
     cache_ = std::make_shared<Cache<DataObjPtr>>(config.gpu.cache_size(), 1UL << 32, header);
@@ -49,11 +45,6 @@ GpuCacheMgr::GetInstance(int64_t gpu_id) {
         }
     }
     return instance_[gpu_id];
-}
-
-bool
-GpuCacheMgr::Reserve(const int64_t size) {
-    return CacheMgr<DataObjPtr>::Reserve(size);
 }
 
 void

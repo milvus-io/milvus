@@ -24,53 +24,6 @@
 namespace milvus {
 namespace engine {
 
-LoadVectorFieldElementHandler::LoadVectorFieldElementHandler(const std::shared_ptr<server::Context>& context,
-                                                             snapshot::ScopedSnapshotT ss,
-                                                             const snapshot::FieldPtr& field)
-    : BaseT(ss), context_(context), field_(field) {
-}
-
-Status
-LoadVectorFieldElementHandler::Handle(const snapshot::FieldElementPtr& field_element) {
-    if (field_->GetFtype() != engine::DataType::VECTOR_FLOAT && field_->GetFtype() != engine::DataType::VECTOR_BINARY) {
-        return Status(DB_ERROR, "Should be VECTOR field");
-    }
-    if (field_->GetID() != field_element->GetFieldId()) {
-        return Status::OK();
-    }
-    // SS TODO
-    return Status::OK();
-}
-
-LoadVectorFieldHandler::LoadVectorFieldHandler(const std::shared_ptr<server::Context>& context,
-                                               snapshot::ScopedSnapshotT ss)
-    : BaseT(ss), context_(context) {
-}
-
-Status
-LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
-    if (field->GetFtype() != engine::DataType::VECTOR_FLOAT && field->GetFtype() != engine::DataType::VECTOR_BINARY) {
-        return Status::OK();
-    }
-    if (context_ && context_->IsConnectionBroken()) {
-        LOG_ENGINE_DEBUG_ << "Client connection broken, stop load collection";
-        return Status(DB_ERROR, "Connection broken");
-    }
-
-    // SS TODO
-    auto element_handler = std::make_shared<LoadVectorFieldElementHandler>(context_, ss_, field);
-    element_handler->Iterate();
-
-    auto status = element_handler->GetStatus();
-    if (!status.ok()) {
-        return status;
-    }
-
-    // SS TODO: Do Load
-
-    return status;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids)
     : BaseT(ss), segment_ids_(segment_ids) {
