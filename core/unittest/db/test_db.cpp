@@ -1096,7 +1096,6 @@ TEST_F(DBTest, FetchTest) {
 
         milvus::engine::IDNumbers segment_entity_ids;
         status = db_->ListIDInSegment(collection_name, id, segment_entity_ids);
-        std::cout << status.message() << std::endl;
         ASSERT_TRUE(status.ok());
 
         if (tag == partition_name) {
