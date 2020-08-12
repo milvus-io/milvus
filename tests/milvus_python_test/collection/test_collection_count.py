@@ -158,7 +158,6 @@ class TestCollectionCount:
         res = connect.count_entities(collection)
         assert res == insert_count
 
-    @pytest.mark.level(2)
     def test_count_without_connection(self, collection, dis_connect):
         '''
         target: test count_entities, without connection
