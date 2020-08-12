@@ -17,7 +17,6 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         yaml-cpp
         libunwind
         gperftools
-        GRPC
         ZLIB
         Opentracing
         fiu
@@ -46,8 +45,6 @@ macro(build_dependency DEPENDENCY_NAME)
         build_libunwind()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "gperftools")
         build_gperftools()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "GRPC")
-        build_grpc()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "ZLIB")
         build_zlib()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "Opentracing")
@@ -267,16 +264,6 @@ if (DEFINED ENV{MILVUS_GPERFTOOLS_URL})
 else ()
     set(GPERFTOOLS_SOURCE_URL
             "https://github.com/gperftools/gperftools/releases/download/gperftools-${GPERFTOOLS_VERSION}/gperftools-${GPERFTOOLS_VERSION}.tar.gz")
-endif ()
-
-if (DEFINED ENV{MILVUS_GRPC_URL})
-    set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
-else ()
-    set(GRPC_SOURCE_URL
-            "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip"
-            #"https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip"
-            #"https://gitee.com/quicksilver/grpc-milvus/repository/archive/${GRPC_VERSION}.zip"
-            )
 endif ()
 
 if (DEFINED ENV{MILVUS_ZLIB_URL})
@@ -643,92 +630,6 @@ if (MILVUS_WITH_GPERFTOOLS)
 endif ()
 
 # ----------------------------------------------------------------------
-# GRPC
-
-macro(build_grpc)
-    message(STATUS "Building GRPC-${GRPC_VERSION} from source")
-    set(GRPC_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix/src/grpc_ep/install")
-    set(GRPC_INCLUDE_DIR "${GRPC_PREFIX}/include")
-    set(GRPC_STATIC_LIB "${GRPC_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}grpc${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(GRPC++_STATIC_LIB "${GRPC_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}grpc++${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(GRPCPP_CHANNELZ_STATIC_LIB "${GRPC_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}grpcpp_channelz${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(GRPC_PROTOBUF_LIB_DIR "${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix/src/grpc_ep/libs/opt/protobuf")
-    set(GRPC_PROTOBUF_STATIC_LIB "${GRPC_PROTOBUF_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}protobuf${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(GRPC_PROTOC_STATIC_LIB "${GRPC_PROTOBUF_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}protoc${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
-    ExternalProject_Add(grpc_ep
-            URL
-            ${GRPC_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            URL_MD5
-            "478215c151a144c2d8625b49ff1b70aa"
-            CONFIGURE_COMMAND
-            ""
-            BUILD_IN_SOURCE
-            1
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS} prefix=${GRPC_PREFIX}
-            INSTALL_COMMAND
-            ${MAKE} install prefix=${GRPC_PREFIX}
-            BUILD_BYPRODUCTS
-            ${GRPC_STATIC_LIB}
-            ${GRPC++_STATIC_LIB}
-            ${GRPCPP_CHANNELZ_STATIC_LIB}
-            ${GRPC_PROTOBUF_STATIC_LIB}
-            ${GRPC_PROTOC_STATIC_LIB})
-
-    ExternalProject_Add_StepDependencies(grpc_ep build zlib_ep)
-
-    file(MAKE_DIRECTORY "${GRPC_INCLUDE_DIR}")
-
-    add_library(grpc STATIC IMPORTED)
-    set_target_properties(grpc
-            PROPERTIES IMPORTED_LOCATION "${GRPC_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES "zlib")
-
-    add_library(grpc++ STATIC IMPORTED)
-    set_target_properties(grpc++
-            PROPERTIES IMPORTED_LOCATION "${GRPC++_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES "zlib")
-
-    add_library(grpcpp_channelz STATIC IMPORTED)
-    set_target_properties(grpcpp_channelz
-            PROPERTIES IMPORTED_LOCATION "${GRPCPP_CHANNELZ_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES "zlib")
-
-    add_library(grpc_protobuf STATIC IMPORTED)
-    set_target_properties(grpc_protobuf
-            PROPERTIES IMPORTED_LOCATION "${GRPC_PROTOBUF_STATIC_LIB}"
-            INTERFACE_LINK_LIBRARIES "zlib")
-
-    add_library(grpc_protoc STATIC IMPORTED)
-    set_target_properties(grpc_protoc
-            PROPERTIES IMPORTED_LOCATION "${GRPC_PROTOC_STATIC_LIB}"
-            INTERFACE_LINK_LIBRARIES "zlib")
-
-    add_dependencies(grpc grpc_ep)
-    add_dependencies(grpc++ grpc_ep)
-    add_dependencies(grpcpp_channelz grpc_ep)
-    add_dependencies(grpc_protobuf grpc_ep)
-    add_dependencies(grpc_protoc grpc_ep)
-endmacro()
-
-if (MILVUS_WITH_GRPC)
-    resolve_dependency(GRPC)
-
-    get_target_property(GRPC_INCLUDE_DIR grpc INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${GRPC_INCLUDE_DIR})
-    link_directories(SYSTEM ${GRPC_PREFIX}/lib)
-
-    set(GRPC_THIRD_PARTY_DIR ${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix/src/grpc_ep/third_party)
-    include_directories(SYSTEM ${GRPC_THIRD_PARTY_DIR}/protobuf/src)
-    link_directories(SYSTEM ${GRPC_PROTOBUF_LIB_DIR})
-endif ()
-
-# ----------------------------------------------------------------------
 # zlib
 
 macro(build_zlib)
@@ -764,10 +665,10 @@ macro(build_zlib)
 endmacro()
 
 if (MILVUS_WITH_ZLIB)
-    resolve_dependency(ZLIB)
-
-    get_target_property(ZLIB_INCLUDE_DIR zlib INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${ZLIB_INCLUDE_DIR})
+    # resolve_dependency(ZLIB)
+    #
+    # get_target_property(ZLIB_INCLUDE_DIR zlib INTERFACE_INCLUDE_DIRECTORIES)
+    # include_directories(SYSTEM ${ZLIB_INCLUDE_DIR})
 endif ()
 
 # ----------------------------------------------------------------------
