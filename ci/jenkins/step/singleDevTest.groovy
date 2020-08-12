@@ -22,18 +22,16 @@ timeout(time: 120, unit: 'MINUTES') {
         }
     }
 
-    def isNightlyTest = isTimeTriggeredBuild()
-
     dir ("tests/milvus_python_test") {
         sh 'python3 -m pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com'
-        def testLEVEL = 1
-        if (isNightlyTest) {
-            testLEVEL = 2
+        if (isTimeTriggeredBuild()) {
+            sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=2 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME} >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_dev_test.log"
+        } else {
+            sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=1 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME} >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_dev_test.log"
         }
-        sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=${testLEVEL} --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME} >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_dev_test.log"
     }
 
-    if (isNightlyTest) {
+    if (isTimeTriggeredBuild()) {
         // sqlite database backend test
         load "ci/jenkins/step/cleanupSingleDev.groovy"
 

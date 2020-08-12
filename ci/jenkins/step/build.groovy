@@ -2,7 +2,7 @@ timeout(time: 120, unit: 'MINUTES') {
     dir ("ci/scripts") {
         withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
             if (!isTimeTriggeredBuild()) {
-                def checkResult = sh(script: "./check_ccache.sh -l ${params.JFROG_ARTFACTORY_URL}/ccache", returnStatus: true)
+                sh "./check_ccache.sh -l ${params.JFROG_ARTFACTORY_URL}/ccache || echo \"ccache files not found!\""
             }
     
             if ("${BINARY_VERSION}" == "gpu") {
