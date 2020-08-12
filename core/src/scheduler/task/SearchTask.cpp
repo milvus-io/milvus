@@ -88,8 +88,7 @@ SearchTask::OnLoad(LoadType type, uint8_t device_id) {
             s = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
 
-        job_->status() = s;
-        return Status::OK();
+        return s;
     }
 
     std::string info = "Search task load segment id: " + std::to_string(segment_id_) + " " + type_str + " totally cost";

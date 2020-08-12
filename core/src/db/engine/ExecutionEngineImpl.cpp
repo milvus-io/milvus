@@ -462,32 +462,35 @@ ExecutionEngineImpl::IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const 
     segment_reader_->GetSegment(segment_ptr);
     knowhere::IndexPtr index_ptr = nullptr;
     auto attr_index = segment_ptr->GetStructuredIndex(field_name, index_ptr);
+    if (!index_ptr) {
+        return Status(DB_ERROR, "Get field: " + field_name + " structured index failed");
+    }
     switch (data_type) {
         case DataType::INT8: {
-            ProcessIndexedTermQuery<int8_t>(bitset, index_ptr, term_values_json);
+            STATUS_CHECK(ProcessIndexedTermQuery<int8_t>(bitset, index_ptr, term_values_json));
             break;
         }
         case DataType::INT16: {
-            ProcessIndexedTermQuery<int16_t>(bitset, index_ptr, term_values_json);
+            STATUS_CHECK(ProcessIndexedTermQuery<int16_t>(bitset, index_ptr, term_values_json));
             break;
         }
         case DataType::INT32: {
-            ProcessIndexedTermQuery<int32_t>(bitset, index_ptr, term_values_json);
+            STATUS_CHECK(ProcessIndexedTermQuery<int32_t>(bitset, index_ptr, term_values_json));
             break;
         }
         case DataType::INT64: {
-            ProcessIndexedTermQuery<int64_t>(bitset, index_ptr, term_values_json);
+            STATUS_CHECK(ProcessIndexedTermQuery<int64_t>(bitset, index_ptr, term_values_json));
             break;
         }
         case DataType::FLOAT: {
-            ProcessIndexedTermQuery<float>(bitset, index_ptr, term_values_json);
+            STATUS_CHECK(ProcessIndexedTermQuery<float>(bitset, index_ptr, term_values_json));
             break;
         }
         case DataType::DOUBLE: {
-            ProcessIndexedTermQuery<double>(bitset, index_ptr, term_values_json);
+            STATUS_CHECK(ProcessIndexedTermQuery<double>(bitset, index_ptr, term_values_json));
             break;
         }
-        default: { return Status{SERVER_INVALID_ARGUMENT, "Attribute:" + field_name + " type is wrong"}; }
+        default: { return Status(SERVER_INVALID_ARGUMENT, "Attribute:" + field_name + " type is wrong"); }
     }
     return Status::OK();
 }
@@ -544,27 +547,27 @@ ExecutionEngineImpl::IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const
     auto status = Status::OK();
     switch (data_type) {
         case DataType::INT8: {
-            ProcessIndexedRangeQuery<int8_t>(bitset, index_ptr, range_values_json);
+            STATUS_CHECK(ProcessIndexedRangeQuery<int8_t>(bitset, index_ptr, range_values_json));
             break;
         }
         case DataType::INT16: {
-            ProcessIndexedRangeQuery<int16_t>(bitset, index_ptr, range_values_json);
+            STATUS_CHECK(ProcessIndexedRangeQuery<int16_t>(bitset, index_ptr, range_values_json));
             break;
         }
         case DataType::INT32: {
-            ProcessIndexedRangeQuery<int32_t>(bitset, index_ptr, range_values_json);
+            STATUS_CHECK(ProcessIndexedRangeQuery<int32_t>(bitset, index_ptr, range_values_json));
             break;
         }
         case DataType::INT64: {
-            ProcessIndexedRangeQuery<int64_t>(bitset, index_ptr, range_values_json);
+            STATUS_CHECK(ProcessIndexedRangeQuery<int64_t>(bitset, index_ptr, range_values_json));
             break;
         }
         case DataType::FLOAT: {
-            ProcessIndexedRangeQuery<float>(bitset, index_ptr, range_values_json);
+            STATUS_CHECK(ProcessIndexedRangeQuery<float>(bitset, index_ptr, range_values_json));
             break;
         }
         case DataType::DOUBLE: {
-            ProcessIndexedRangeQuery<double>(bitset, index_ptr, range_values_json);
+            STATUS_CHECK(ProcessIndexedRangeQuery<double>(bitset, index_ptr, range_values_json));
             break;
         }
         default:
