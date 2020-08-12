@@ -783,7 +783,7 @@ struct Euclidean : Minkowski {
   }
   template<typename T>
   static inline T normalized_distance(T distance) {
-    return sqrt(std::max(distance, T(0)));
+    return distance;
   }
   template<typename S, typename T>
   static inline void init_node(Node<S, T>* n, int f) {
