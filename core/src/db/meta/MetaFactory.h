@@ -16,8 +16,7 @@
 #include "db/Options.h"
 #include "db/meta/MetaAdapter.h"
 
-namespace milvus {
-namespace engine {
+namespace milvus::engine {
 
 class MetaFactory {
  public:
@@ -28,5 +27,4 @@ class MetaFactory {
     Build(const DBMetaOptions& meta_options);
 };
 
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine
