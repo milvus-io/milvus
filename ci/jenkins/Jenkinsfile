@@ -72,7 +72,7 @@ pipeline {
                     }
                 }
                 stages {
-                    stage('Build') {
+                    stage('Build and Unittest') {
                         steps {
                             container("milvus-${BINARY_VERSION}-build-env") {
                                 script {
@@ -87,32 +87,8 @@ pipeline {
                                         containerLog "milvus-${BINARY_VERSION}-build-env"
                                         throw e
                                     }
-                                }
-                            }
-                        }
-                    }
-                    stage('Unittest') {
-                        steps {
-                            container("milvus-${BINARY_VERSION}-build-env") {
-                                script {
                                     load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
-                                }
-                            }
-                        }
-                    }
-                    stage('Code Coverage') {
-                        steps {
-                            container("milvus-${BINARY_VERSION}-build-env") {
-                                script {
                                     load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
-                                }
-                            }
-                        }
-                    }
-                    stage('Upload Package') {
-                        steps {
-                            container("milvus-${BINARY_VERSION}-build-env") {
-                                script {
                                     load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
                                 }
                             }
