@@ -73,7 +73,7 @@ class MetaAdapter {
 
     template <typename ResourceT>
     Status
-    Apply(snapshot::ResourceContextPtr<ResourceT> resp, int64_t& result_id) {
+    Execute(snapshot::ResourceContextPtr<ResourceT> resp, int64_t& result_id) {
         auto session = CreateSession();
         STATUS_CHECK(session->Apply<ResourceT>(resp));
 
@@ -81,7 +81,7 @@ class MetaAdapter {
         STATUS_CHECK(session->Commit(result_ids));
 
         if (result_ids.size() != 1) {
-            return Status(DB_ERROR, "Result id is wrong");
+            return Status(DB_ERROR, "Result id size is wrong");
         }
 
         result_id = result_ids.at(0);
