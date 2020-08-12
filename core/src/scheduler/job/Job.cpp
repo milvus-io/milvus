@@ -51,6 +51,10 @@ Job::TaskDone(Task* task) {
         return;
     }
 
+    auto json = task->Dump();
+    std::string task_desc = json.dump();
+    LOG_SERVER_DEBUG_ << LogOut("scheduler job [%ld] task %s finish", id(), task_desc.c_str());
+
     std::unique_lock<std::mutex> lock(mutex_);
     for (JobTasks::iterator iter = tasks_.begin(); iter != tasks_.end(); ++iter) {
         if (task == (*iter).get()) {
@@ -61,10 +65,6 @@ Job::TaskDone(Task* task) {
     if (tasks_.empty()) {
         cv_.notify_all();
     }
-
-    auto json = task->Dump();
-    std::string task_desc = json.dump();
-    LOG_SERVER_DEBUG_ << LogOut("scheduler job [%ld] task %s finish", id(), task_desc.c_str());
 }
 
 void
