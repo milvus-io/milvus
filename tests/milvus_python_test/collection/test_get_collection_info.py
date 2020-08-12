@@ -98,8 +98,6 @@ class TestInfoBase:
         with pytest.raises(Exception) as e:
             res = connect.get_collection_info(connect, collection_name)
 
-    # TODO
-    @pytest.mark.level(2)
     def test_get_collection_info_multithread(self, connect):
         '''
         target: test create collection with multithread
