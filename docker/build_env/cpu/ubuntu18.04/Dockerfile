@@ -46,6 +46,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ccache && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
+ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/lib"
+
 # use login shell to activate environment un the RUN commands
 SHELL [ "/bin/bash", "-c", "-l" ]
 
