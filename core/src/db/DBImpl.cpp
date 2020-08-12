@@ -653,10 +653,11 @@ DBImpl::LoadCollection(const server::ContextPtr& context, const std::string& col
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    auto handler = std::make_shared<LoadVectorFieldHandler>(context, ss);
+    auto handler = std::make_shared<LoadCollectionHandler>(nullptr, ss, options_.meta_.path_, field_names, force);
     handler->Iterate();
+    STATUS_CHECK(handler->GetStatus());
 
-    return handler->GetStatus();
+    return Status::OK();
 }
 
 Status
