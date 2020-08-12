@@ -193,7 +193,7 @@ TEST_F(MetaTest, MultiThreadRequestTest) {
     auto request_worker = [&](size_t i) {
         std::string collection_name_prefix = "meta_test_collection_" + std::to_string(i) + "_";
         int64_t result_id;
-        for (size_t ii = 0; ii < 20; ii++) {
+        for (size_t ii = 0; ii < 30; ii++) {
             std::string collection_name = collection_name_prefix + std::to_string(ii);
             auto collection = std::make_shared<Collection>(collection_name);
             auto c_ctx = ResourceContextBuilder<Collection>().SetResource(collection).CreatePtr();
@@ -217,12 +217,14 @@ TEST_F(MetaTest, MultiThreadRequestTest) {
             ASSERT_EQ(collection2->GetState(), State::ACTIVE);
             ASSERT_EQ(collection2->GetName(), collection_name);
 
+            collection->Deactivate();
             auto c_ctx3 = ResourceContextBuilder<Collection>().SetResource(collection)
                 .SetOp(Op::oUpdate)
                 .AddAttr(milvus::engine::meta::F_STATE)
                 .CreatePtr();
             status = meta_->Apply<Collection>(c_ctx3, result_id);
             ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_EQ(result_id, collection->GetID());
 
             auto c_ctx4 = ResourceContextBuilder<Collection>().SetID(result_id)
                 .SetOp(Op::oDelete)
@@ -240,7 +242,7 @@ TEST_F(MetaTest, MultiThreadRequestTest) {
     unsigned int thread_hint = std::thread::hardware_concurrency();
     std::vector<std::thread> threads;
 
-    for (size_t i = 0; i < 2 * thread_hint; i++) {
+    for (size_t i = 0; i < 3 * thread_hint; i++) {
         threads.emplace_back(request_worker, i);
     }
 
