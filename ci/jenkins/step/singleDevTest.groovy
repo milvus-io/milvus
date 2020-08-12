@@ -64,8 +64,5 @@ timeout(time: 120, unit: 'MINUTES') {
 }
 
 boolean isTimeTriggeredBuild() {
-    if (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) {
-        return true
-    }
-    return false
+    return (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) ? true : false;
 }
