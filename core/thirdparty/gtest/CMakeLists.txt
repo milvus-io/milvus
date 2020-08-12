@@ -67,9 +67,20 @@ execute_process(COMMAND             "${CMAKE_COMMAND}" --build .
                 WORKING_DIRECTORY   ${gtest_DOWNLOAD_DIR}
 )
 
+add_compile_options(    ${EP_COMMON_TOOLCHAIN}
+                        "-D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+                        "-D CMAKE_C_FLAGS=${EP_C_FLAGS}"
+                        "-D CMAKE_C_FLAGS_${UPPERCASE_BUILD_TYPE}=${EP_C_FLAGS}"
+                        "-D CMAKE_CXX_FLAGS=${EP_CXX_FLAGS}"
+                        "-D CMAKE_CXX_FLAGS_${UPPERCASE_BUILD_TYPE}=${EP_CXX_FLAGS}"
+)
 # Add googletest directly to our build. This adds the following targets:
 # gtest, gtest_main, gmock and gmock_main
 add_subdirectory("${CMAKE_CURRENT_BINARY_DIR}/googletest-src"
                  "${CMAKE_CURRENT_BINARY_DIR}/googletest-build"
                  EXCLUDE_FROM_ALL
 )
+
+# get_property(var DIRECTORY PROPERTY COMPILE_OPTIONS )
+get_property(var DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/googletest-src" PROPERTY COMPILE_OPTIONS )
+message(STATUS "gtest compile options: ${var}")
