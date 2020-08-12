@@ -1038,7 +1038,11 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
             for (auto& item : field_schema.index_params_.items()) {
                 auto grpc_index_param = field->add_index_params();
                 grpc_index_param->set_key(item.key());
-                grpc_index_param->set_value(item.value());
+                if (item.value().is_object()) {
+                    grpc_index_param->set_value(item.value().dump());
+                } else {
+                    grpc_index_param->set_value(item.value());
+                }
             }
         }
 

@@ -24,7 +24,7 @@ Task::Load(LoadType type, uint8_t device_id) {
     if (job_) {
         if (!status.ok()) {
             job_->status() = status;
-            job_->TaskDone(this);
+            //            job_->TaskDone(this);
         }
     } else {
         LOG_ENGINE_ERROR_ << "Scheduler task's parent job not specified!";
