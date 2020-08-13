@@ -1,10 +1,10 @@
 timeout(time: 120, unit: 'MINUTES') {
     dir ('milvus-helm') {
-        sh 'helm version'
-        sh 'helm repo add stable https://kubernetes.oss-cn-hangzhou.aliyuncs.com/charts'
-        sh 'helm repo update'
+        sh "helm version && \
+        helm repo add stable https://kubernetes.oss-cn-hangzhou.aliyuncs.com/charts && \
+        helm repo update"
+
         checkout([$class: 'GitSCM', branches: [[name: "${env.HELM_BRANCH}"]], userRemoteConfigs: [[url: "https://github.com/milvus-io/milvus-helm.git", name: 'origin', refspec: "+refs/heads/${env.HELM_BRANCH}:refs/remotes/origin/${env.HELM_BRANCH}"]]])
-        // sh 'helm dep update'
 
         retry(3) {
             try {
