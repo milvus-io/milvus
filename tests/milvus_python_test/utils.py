@@ -555,26 +555,19 @@ def gen_invalid_metric_types():
 
 # TODO:
 def gen_invalid_ints():
-    top_ks = [
+    int_values = [
         # 1.0,
         None,
-        "stringg",
         [1, 2, 3],
-        (1, 2),
-        {"a": 1},
         " ",
         "",
+        -1,
         "String",
-        "12-s",
-        "BB。A",
-        " siede ",
-        "(mn)",
-        "pip+",
         "=c",
         "中文",
         "a".join("a" for i in range(256))
     ]
-    return top_ks
+    return int_values
 
 
 def gen_invalid_params():
