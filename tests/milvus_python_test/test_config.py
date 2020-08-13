@@ -221,7 +221,6 @@ class TestCacheConfig:
                 relpy = connect.set_config(config, "insert_buffer_size", '1073741824')
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    @pytest.mark.skip("insert_buffer_size can not be changed")
     def test_set_insert_buffer_size_valid(self, connect, collection):
         '''
         target: set insert_buffer_size
@@ -229,12 +228,10 @@ class TestCacheConfig:
         expected: status ok, set successfully
         '''
         self.reset_configs(connect)
-        relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
-        config_value = connect.get_config("cache", "insert_buffer_size")
-        assert config_value == '2147483648'
+        with pytest.raises(Exception) as e:
+            relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
 
     @pytest.mark.level(2)
-    @pytest.mark.skip("insert_buffer_size can not be changed")
     def test_set_insert_buffer_size_valid_multiple_times(self, connect, collection):
         '''
         target: set insert_buffer_size
@@ -243,13 +240,11 @@ class TestCacheConfig:
         '''
         self.reset_configs(connect)
         for i in range(20):
-            relpy = connect.set_config("cache", "insert_buffer_size", '1073741824')
-            config_value = connect.get_config("cache", "insert_buffer_size")
-            assert config_value == '1073741824'
+            with pytest.raises(Exception) as e:
+                relpy = connect.set_config("cache", "insert_buffer_size", '1GB')
         for i in range(20):
-            relpy = connect.set_config("cache", "insert_buffer_size", '2147483648')
-            config_value = connect.get_config("cache", "insert_buffer_size")
-            assert config_value == '2147483648'
+            with pytest.raises(Exception) as e:
+                relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cache_out_of_memory_value_A(self, connect, collection):
@@ -263,19 +258,7 @@ class TestCacheConfig:
         logging.getLogger().info(mem_total)
         with pytest.raises(Exception) as e:
             relpy = connect.set_config("cache", "cache_size", str(int(mem_total + 1)+''))
-        #with pytest.raises(Exception) as e:
-        #    relpy = connect.set_config("cache", "insert_buffer_size", str(int(mem_total + 1)*1024*1024*1024))
 
-    @pytest.mark.skip("not implemented")
-    def test_set_preload_collection_valid(self, connect, collection):
-        '''
-        target: set preload_collection
-        method: call set_config correctly
-        expected: status ok, set successfully
-        '''
-        relpy = connect.set_config("cache", "preload_collection", "")
-        config_value = connect.get_config("cache", "preload_collection")
-        assert config_value == ""
 
 
 class TestGPUConfig:
@@ -312,7 +295,7 @@ class TestGPUConfig:
         '''
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
-        invalid_configs = ["Gpu_search_threshold", "gpusearchthreshold"]
+        invalid_configs = ["Gpu_search threshold", "gpusearchthreshold"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
                 config_value = connect.get_config("gpu", config)
@@ -392,18 +375,20 @@ class TestGPUConfig:
         '''
         reset configs so the tests are stable
         '''
-        relpy = connect.set_config("gpu", "enable", "true")
-        config_value = connect.get_config("gpu", "enable")
-        assert config_value == "true"
         relpy = connect.set_config("gpu", "cache_size", 1)
         config_value = connect.get_config("gpu", "cache_size")
         assert config_value == '1'
-        relpy = connect.set_config("gpu", "search_devices", "gpu0")
-        config_value = connect.get_config("gpu", "search_devices")
-        assert config_value == 'gpu0'
-        relpy = connect.set_config("gpu", "build_index_devices", "gpu0")
-        config_value = connect.get_config("gpu", "build_index_devices")
-        assert config_value == 'gpu0'
+        
+        #follows can not be changed
+        #relpy = connect.set_config("gpu", "enable", "true")
+        #config_value = connect.get_config("gpu", "enable")
+        #assert config_value == "true"
+        #relpy = connect.set_config("gpu", "search_devices", "gpu0")
+        #config_value = connect.get_config("gpu", "search_devices")
+        #assert config_value == 'gpu0'
+        #relpy = connect.set_config("gpu", "build_index_devices", "gpu0")
+        #config_value = connect.get_config("gpu", "build_index_devices")
+        #assert config_value == 'gpu0'
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_gpu_enable_invalid_parent_key(self, connect, collection):
@@ -429,7 +414,7 @@ class TestGPUConfig:
         '''
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
-        invalid_configs = ["Enable", "enable ", "disable", "true"]
+        invalid_configs = ["Enab_le", "enab_le ", "disable", "true"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
                 config_value = connect.get_config("gpu", config)
@@ -628,9 +613,8 @@ class TestGPUConfig:
             pytest.skip("Only support GPU mode")
         valid_configs = ["off", "False", "0", "nO", "on", "True", 1, "yES"]
         for config in valid_configs:
-            relpy = connect.set_config("gpu", "enable", config)
-            config_value = connect.get_config("gpu", "enable")
-            assert config_value == str(config)
+            with pytest.raises(Exception) as e:
+                relpy = connect.set_config("gpu", "enable", config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cache_size_invalid_parent_key(self, connect, collection):
@@ -697,9 +681,8 @@ class TestGPUConfig:
         '''
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
-        relpy = connect.set_config("gpu", "search_devices", "gpu0")
-        config_value = connect.get_config("gpu", "search_devices")
-        assert config_value == "gpu0"
+        with pytest.raises(Exception) as e:
+            relpy = connect.set_config("gpu", "search_devices", "gpu0")
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_search_devices_invalid_values(self, connect, collection):
@@ -738,9 +721,8 @@ class TestGPUConfig:
         '''
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
-        relpy = connect.set_config("gpu", "build_index_devices", "gpu0")
-        config_value = connect.get_config("gpu", "build_index_devices")
-        assert config_value == "gpu0"
+        with pytest.raises(Exception) as e:
+            relpy = connect.set_config("gpu", "build_index_devices", "gpu0")
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_build_index_devices_invalid_values(self, connect, collection):
@@ -863,11 +845,9 @@ class TestNetworkConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        relpy = connect.set_config("network", "bind.address", '0.0.0.0')
-        config_value = connect.get_config("network", "bind.address")
-        assert config_value == '0.0.0.0'
+        with pytest.raises(Exception) as e:
+            relpy = connect.set_config("network", "bind.address", '0.0.0.0')
 
-    @pytest.mark.skip("http port can't be changed")
     def test_set_port_valid(self, connect, collection):
         '''
         target: set port
@@ -875,11 +855,9 @@ class TestNetworkConfig:
         expected: status ok, set successfully
         '''
         for valid_port in [1025, 65534, 12345, "19530"]:
-            relpy = connect.set_config("network", "http.port", valid_port)
-            config_value = connect.get_config("network", "http.port")
-            assert config_value == str(valid_port)
+            with pytest.raises(Exception) as e:
+                relpy = connect.set_config("network", "http.port", valid_port)
 
-    @pytest.mark.skip("http port can't be changed")
     def test_set_port_invalid(self, connect, collection):
         '''
         target: set port
@@ -891,7 +869,6 @@ class TestNetworkConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("network", "http.port", invalid_port)
 
-    @pytest.mark.skip("http port can't be changed")
     def test_set_http_port_valid(self, connect, collection):
         '''
         target: set http.port
@@ -899,11 +876,9 @@ class TestNetworkConfig:
         expected: status ok, set successfully
         '''
         for valid_http_port in [1025, 65534, "12345", 19121]:
-            relpy = connect.set_config("network", "http.port", valid_http_port)
-            config_value = connect.get_config("network", "http.port")
-            assert config_value == str(valid_http_port)
+            with pytest.raises(Exception) as e:
+                relpy = connect.set_config("network", "http.port", valid_http_port)
 
-    @pytest.mark.skip("http port can't be changed")
     def test_set_http_port_invalid(self, connect, collection):
         '''
         target: set http.port
@@ -975,7 +950,6 @@ class TestGeneralConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
-    @pytest.mark.skip('timezone can not be changed')
     def test_set_timezone_invalid(self, connect, collection):
         '''
         target: set timezone
@@ -997,7 +971,6 @@ class TestGeneralConfig:
         with pytest.raises(Exception) as e:
             relpy = connect.set_config("general", "child_key", 1)
 
-    @pytest.mark.skip('meta_uri can not be changed')
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_meta_uri_valid(self, connect, collection):
         '''
@@ -1005,9 +978,8 @@ class TestGeneralConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        relpy = connect.set_config("general", "meta_uri", 'sqlite://:@:/')
-        config_value = connect.get_config("general", "meta_uri")
-        assert config_value == 'sqlite://:@:/'
+        with pytest.raises(Exception) as e:
+            relpy = connect.set_config("general", "meta_uri", 'sqlite://:@:/')
 
 
 class TestStorageConfig:
@@ -1080,16 +1052,14 @@ class TestStorageConfig:
             relpy = connect.set_config("storage", "child_key", "")
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    @pytest.mark.skip("path can't be changed")
     def test_set_path_valid(self, connect, collection):
         '''
         target: set path
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        relpy = connect.set_config("storage", "path", '/var/lib/milvus')
-        config_value = connect.get_config("storage", "path")
-        assert config_value == '/var/lib/milvus'
+        with pytest.raises(Exception) as e:
+            relpy = connect.set_config("storage", "path", '/var/lib/milvus')
 
     def test_set_auto_flush_interval_valid(self, connect, collection):
         '''
@@ -1206,7 +1176,6 @@ class TestMetricConfig:
         with pytest.raises(Exception) as e:
             relpy = connect.set_config("metric", "child_key", 19530)
 
-    @pytest.mark.skip("metric enable can't be changed")
     def test_set_enable_valid(self, connect, collection):
         '''
         target: set enable
@@ -1214,9 +1183,8 @@ class TestMetricConfig:
         expected: status ok, set successfully
         '''
         for valid_enable in ["Off", "false", 0, "yes", "On", "true", "1", "NO"]:
-            relpy = connect.set_config("metric", "enable", valid_enable)
-            config_value = connect.get_config("metric", "enable")
-            assert config_value == str(valid_enable)
+            with pytest.raises(Exception) as e:
+                relpy = connect.set_config("metric", "enable", valid_enable)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_address_valid(self, connect, collection):
@@ -1225,11 +1193,9 @@ class TestMetricConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        relpy = connect.set_config("metric", "address", '127.0.0.1')
-        config_value = connect.get_config("metric", "address")
-        assert config_value == '127.0.0.1'
+        with pytest.raises(Exception) as e:
+            relpy = connect.set_config("metric", "address", '127.0.0.1')
 
-    @pytest.mark.skip("metric port can't be changed")
     def test_set_port_valid(self, connect, collection):
         '''
         target: set port
@@ -1237,11 +1203,9 @@ class TestMetricConfig:
         expected: status ok, set successfully
         '''
         for valid_port in [1025, 65534, "19530", "9091"]:
-            relpy = connect.set_config("metric", "port", valid_port)
-            config_value = connect.get_config("metric", "port")
-            assert config_value == str(valid_port)
+            with pytest.raises(Exception) as e:
+                relpy = connect.set_config("metric", "port", valid_port)
 
-    @pytest.mark.skip("metric port can't be changed")
     def test_set_port_invalid(self, connect, collection):
         '''
         target: set port
@@ -1265,14 +1229,13 @@ class TestWALConfig:
             pytest.skip("skip in http mode")
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
-    @pytest.mark.skip("metric port can't be changed")
     def test_get_enable_invalid_child_key(self, connect, collection):
         '''
         target: get invalid child key
         method: call get_config without child_key: enable
         expected: status not ok
         '''
-        invalid_configs = ["enabled", "Enable", "enable "]
+        invalid_configs = ["enabled", "Enab_le", "enable_"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
                 config_value = connect.get_config("wal", config)
@@ -1368,7 +1331,6 @@ class TestWALConfig:
         with pytest.raises(Exception) as e:
             relpy = connect.set_config("wal", "child_key", 256)
 
-    @pytest.mark.skip("wal enable can't be changed")
     def test_set_enable_valid(self, connect, collection):
         '''
         target: set enable
@@ -1376,11 +1338,9 @@ class TestWALConfig:
         expected: status ok, set successfully
         '''
         for valid_enable in ["Off", "false", 0, "no", "On", "true", "1", "YES"]:
-            relpy = connect.set_config("wal", "enable", valid_enable)
-            config_value = connect.get_config("wal", "enable")
-            assert config_value == str(valid_enable)
+            with pytest.raises(Exception) as e:
+                relpy = connect.set_config("wal", "enable", valid_enable)
 
-    @pytest.mark.skip("recoverty error ignore can't be changed")
     def test_set_recovery_error_ignore_valid(self, connect, collection):
         '''
         target: set recovery_error_ignore
@@ -1388,11 +1348,9 @@ class TestWALConfig:
         expected: status ok, set successfully
         '''
         for valid_recovery_error_ignore in ["Off", "false", "0", "no", "On", "true", "1", "YES"]:
-            relpy = connect.set_config("wal", "recovery_error_ignore", valid_recovery_error_ignore)
-            config_value = connect.get_config("wal", "recovery_error_ignore")
-            assert config_value == valid_recovery_error_ignore
+            with pytest.raises(Exception) as e:
+                relpy = connect.set_config("wal", "recovery_error_ignore", valid_recovery_error_ignore)
 
-    @pytest.mark.skip("buffer size can't be changed")
     def test_set_buffer_size_valid_A(self, connect, collection):
         '''
         target: set buffer_size
@@ -1400,11 +1358,9 @@ class TestWALConfig:
         expected: status ok, set successfully
         '''
         for valid_buffer_size in ["64MB", "128MB", "4096MB", "1000MB", "256MB"]:
-            relpy = connect.set_config("wal", "buffer_size", valid_buffer_size)
-            config_value = connect.get_config("wal", "buffer_size")
-            assert config_value == str(valid_buffer_size)
+            with pytest.raises(Exception) as e:
+                relpy = connect.set_config("wal", "buffer_size", valid_buffer_size)
 
-    @pytest.mark.skip("wal path  ignore can't be changed")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_wal_path_valid(self, connect, collection, args):
         '''
@@ -1412,6 +1368,6 @@ class TestWALConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        relpy = connect.set_config("wal", "path", "/var/lib/milvus/wal")
-        config_value = connect.get_config("wal", "path")
-        assert config_value == "/var/lib/milvus/wal"
+        with pytest.raises(Exception) as e:
+            relpy = connect.set_config("wal", "path", "/var/lib/milvus/wal")
+
