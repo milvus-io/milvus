@@ -96,7 +96,7 @@ class TestSearchBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index()
+        params=gen_binary_index()
     )
     def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)
@@ -107,7 +107,7 @@ class TestSearchBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index()
+        params=gen_binary_index()
     )
     def get_hamming_index(self, request, connect):
         logging.getLogger().info(request.param)
@@ -118,7 +118,7 @@ class TestSearchBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index()
+        params=gen_binary_index()
     )
     def get_structure_index(self, request, connect):
         logging.getLogger().info(request.param)
@@ -215,6 +215,7 @@ class TestSearchBase:
             assert check_id_result(res[0], ids[0])
 
     @pytest.mark.level(2)
+    @pytest.mark.skip
     def test_search_after_index_different_metric_type(self, connect, collection, get_simple_index):
         '''
         target: test search with different metric_type
