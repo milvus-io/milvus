@@ -63,7 +63,6 @@ using_ccache_if_defined( MILVUS_USE_CCACHE )
 include( ExternalProject )
 include( ThirdPartyPackages )
 
-add_subdirectory( thirdparty )
 
 
 # **************************** Compiler arguments ****************************
@@ -109,6 +108,7 @@ append_flags( CMAKE_CXX_FLAGS
 
 # **************************** Source files ****************************
 
+add_subdirectory( thirdparty )
 add_subdirectory( src )
 
 # Unittest lib
