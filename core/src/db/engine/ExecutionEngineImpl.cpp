@@ -1153,7 +1153,10 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     }
 
     milvus::json conf = extra_params;
+    if (conf.contains(knowhere::Metric::TYPE))
+        MappingMetricType(conf[knowhere::Metric::TYPE], conf);
     conf[knowhere::meta::TOPK] = k;
+
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
     if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
@@ -1192,6 +1195,8 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     }
 
     milvus::json conf = extra_params;
+    if (conf.contains(knowhere::Metric::TYPE))
+        MappingMetricType(conf[knowhere::Metric::TYPE], conf);
     conf[knowhere::meta::TOPK] = k;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
     if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
