@@ -59,3 +59,7 @@ timeout(time: 120, unit: 'MINUTES') {
         }
     }
 }
+
+boolean isTimeTriggeredBuild() {
+    return (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) ? true : false;
+}
