@@ -25,8 +25,7 @@ default_fields = gen_default_fields()
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),
-                                     "params": {"nprobe": 10}}}}
+            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim), "metric_type":"L2","params": {"nprobe": 10}}}}
         ]
     }
 }
@@ -174,7 +173,6 @@ class TestFlushBase:
         res = connect.count_entities(collection_new)
         assert res == nb_new
 
-    @pytest.mark.skip(reason="search not support yet")
     def test_add_flush_multiable_times(self, connect, collection):
         '''
         method: add entities, flush serveral times
@@ -235,7 +233,6 @@ class TestFlushBase:
         res = connect.count_entities(id_collection)
         assert res == nb
 
-    @pytest.mark.skip(reason="search not support yet")
     def test_delete_flush_multiable_times(self, connect, collection):
         '''
         method: delete entities, flush serveral times
