@@ -46,6 +46,9 @@ DeleteSnapshotIndex(const std::string& collection_name, const std::string& field
 bool
 IsVectorField(const engine::snapshot::FieldPtr& field);
 
+bool
+IsVectorField(engine::DataType type);
+
 Status
 GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info);
 
