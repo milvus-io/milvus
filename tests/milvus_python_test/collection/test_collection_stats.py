@@ -49,7 +49,7 @@ class TestStatsBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index()
+        params=gen_binary_index()
     )
     def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)

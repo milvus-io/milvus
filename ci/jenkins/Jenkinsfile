@@ -5,16 +5,13 @@ String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
 pipeline {
     agent none
-
     triggers {
         cron """${cron_timezone}
             ${cron_string}"""
     }
-
     options {
         timestamps()
     }
-
     parameters{
         choice choices: ['Release', 'Debug'], description: 'Build Type', name: 'BUILD_TYPE'
         choice choices: ['False', 'True'], description: 'Is Manual Trigger Or Not', name: 'IS_MANUAL_TRIGGER_TYPE'
@@ -23,7 +20,6 @@ pipeline {
         string defaultValue: 'http://192.168.1.201/artifactory/milvus', description: 'JFROG ARTFACTORY URL', name: 'JFROG_ARTFACTORY_URL', trim: true
         string defaultValue: '1a527823-d2b7-44fd-834b-9844350baf14', description: 'JFROG CREDENTIALS ID', name: 'JFROG_CREDENTIALS_ID', trim: true
     }
-
     environment {
         PROJECT_NAME = "milvus"
         MILVUS_ROOT_PATH="/var/lib"
@@ -33,15 +29,103 @@ pipeline {
         PIPELINE_NAME = "milvus-ci"
         HELM_BRANCH = "0.10.1"
     }
-
     stages {
-        stage ('Milvus CI') {
+        stage ('Milvus Build and Unittest') {
             matrix {
-                agent none
                 axes {
                     axis {
                         name 'OS_NAME'
-                        values 'ubuntu18.04', 'centos7'
+                        values 'centos7'
+                    }
+                    axis {
+                        name 'CPU_ARCH'
+                        values 'amd64'
+                    }
+                    axis {
+                        name 'BINARY_VERSION'
+                        values 'gpu', 'cpu'
+                    }
+                }
+                environment {
+                    PACKAGE_VERSION = VersionNumber([
+                        versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}'
+                    ]);
+                }
+                agent {
+                    kubernetes {
+                        label "${OS_NAME}-${BINARY_VERSION}-build-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                        defaultContainer 'jnlp'
+                        customWorkspace '/home/jenkins/agent/workspace'
+                        yamlFile "ci/jenkins/pod/milvus-${BINARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
+                    }
+                }
+                stages {
+                    stage('Build and Unittest') {
+                        steps {
+                            container("milvus-${BINARY_VERSION}-build-env") {
+                                script {
+                                    load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
+                                    load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
+                                    load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
+                                    load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stage ('Publish Docker Images') {
+            matrix {
+                axes {
+                    axis {
+                        name 'OS_NAME'
+                        values 'centos7'
+                    }
+                    axis {
+                        name 'CPU_ARCH'
+                        values 'amd64'
+                    }
+                    axis {
+                        name 'BINARY_VERSION'
+                        values 'gpu', 'cpu'
+                    }
+                }
+                environment {
+                    PACKAGE_VERSION = VersionNumber([
+                        versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}'
+                    ]);
+                    SOURCE_REPO = "${params.DOKCER_REGISTRY_URL}/milvus/engine"
+                    TARGET_REPO = "${params.DOKCER_REGISTRY_URL}/milvus/engine"
+                    SOURCE_TAG = "${CHANGE_TARGET ? CHANGE_TARGET : SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
+                    TARGET_TAG = "${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
+                }
+                agent {
+                    kubernetes {
+                        label "${OS_NAME}-${BINARY_VERSION}-publish-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                        defaultContainer 'jnlp'
+                        yamlFile 'ci/jenkins/pod/docker-pod.yaml'
+                    }
+                }
+                stages {
+                    stage('Publish') {
+                        steps {
+                            container('publish-images') {
+                                script {
+                                    load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stage ('Dev Test') {
+            matrix {
+                axes {
+                    axis {
+                        name 'OS_NAME'
+                        values 'centos7'
                     }
 
                     axis {
@@ -54,162 +138,43 @@ pipeline {
                         values 'gpu', 'cpu'
                     }
                 }
-                when {
-                    not {
-                        expression {return OS_NAME == "ubuntu18.04" && !isTimeTriggeredBuild()}
-                    }
-                }
-
                 environment {
-                    PACKAGE_VERSION = VersionNumber([
-                        versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
-                    ]);
                     DOCKER_VERSION = "${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
-                    CHANGE_DOCKER_VERSION = "${CHANGE_TARGET}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
-                    CACHA_DOCKER_VERSION = "${CHANGE_TARGET ? CHANGE_DOCKER_VERSION : DOCKER_VERSION}"
+                    FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
+                    FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")
+                    HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
+                    SHARDS_HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-shards-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
+                    DEV_TEST_ARTIFACTS = "_artifacts/${FORMAT_OS_NAME}/${BINARY_VERSION}"
                 }
-
+                agent {
+                    kubernetes {
+                        label "${OS_NAME}-${BINARY_VERSION}-dev-test-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                        defaultContainer 'jnlp'
+                        yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
+                    }
+                }
                 stages {
-                    stage("Milvus Build and Unittest") {
-                        agent {
-                            kubernetes {
-                                label "${OS_NAME}-${BINARY_VERSION}-build-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
-                                defaultContainer 'jnlp'
-                                customWorkspace '/home/jenkins/agent/workspace'
-                                yamlFile "ci/jenkins/pod/milvus-${BINARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
-                            }
-                        }
-
-                        stages {
-                            stage('Build') {
-                                steps {
-                                    container("milvus-${BINARY_VERSION}-build-env") {
-                                        script {
-                                            try{
-                                                boolean isNightlyTest = isTimeTriggeredBuild()
-                                                if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                                    load "${env.WORKSPACE}/ci/jenkins/step/nightlyBuild.groovy"
-                                                } else {
-                                                    load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
-                                                }
-                                            } catch (Exception e) {
-                                                containerLog "milvus-${BINARY_VERSION}-build-env"
-                                                throw e
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            stage('Unittest') {
-                                steps {
-                                    container("milvus-${BINARY_VERSION}-build-env") {
-                                        script {
-                                            load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
-                                        }
-                                    }
-                                }
-                            }
-
-                            stage('Code Coverage') {
-                                steps {
-                                    container("milvus-${BINARY_VERSION}-build-env") {
-                                        script {
-                                            load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
-                                        }
-                                    }
-                                }
-                            }
-
-                            stage('Upload Package') {
-                                steps {
-                                    container("milvus-${BINARY_VERSION}-build-env") {
-                                        script {
-                                            load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
-                                        }
+                    stage('Test') {
+                        steps {
+                            container('milvus-test-env') {
+                                script {
+                                    load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
+                                    if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
+                                        load "${env.WORKSPACE}/ci/jenkins/step/shardsDevTest.groovy"
                                     }
                                 }
                             }
                         }
                     }
-
-                    stage('Publish Docker images') {
-                        environment {
-                            SOURCE_REPO = "${params.DOKCER_REGISTRY_URL}/milvus/engine"
-                            TARGET_REPO = "${params.DOKCER_REGISTRY_URL}/milvus/engine"
-                            SOURCE_TAG = "${CACHA_DOCKER_VERSION}"
-                            TARGET_TAG = "${DOCKER_VERSION}"
-                        }
-
-                        agent {
-                            kubernetes {
-                                label "${OS_NAME}-${BINARY_VERSION}-publish-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
-                                defaultContainer 'jnlp'
-                                yamlFile 'ci/jenkins/pod/docker-pod.yaml'
-                            }
-                        }
-
-                        stages {
-                            stage('Publish') {
-                                steps {
-                                    container('publish-images') {
-                                        script {
-                                            load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    stage('Deploy to Development') {
-                        environment {
-                            FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
-                            FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")
-                            HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
-                            SHARDS_HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-shards-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
-                            DEV_TEST_ARTIFACTS = "_artifacts/${FORMAT_OS_NAME}/${BINARY_VERSION}"
-                        }
-
-                        agent {
-                            kubernetes {
-                                label "${OS_NAME}-${BINARY_VERSION}-dev-test-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
-                                defaultContainer 'jnlp'
-                                yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
-                            }
-                        }
-
-                        stages {
-                            stage('Dev Test') {
-                                steps {
-                                    container('milvus-test-env') {
-                                        script {
-                                            sh "mkdir -p ${env.DEV_TEST_ARTIFACTS}"
-
-                                            boolean isNightlyTest = isTimeTriggeredBuild()
-                                            if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
-                                                load "${env.WORKSPACE}/ci/jenkins/step/shardsDevNightlyTest.groovy"
-                                            } else {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        post {
-                            cleanup {
-                                container('milvus-test-env') {
-                                    script {
-                                        archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
-                                        load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
-                                        boolean isNightlyTest = isTimeTriggeredBuild()
-                                        if (isNightlyTest || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                            load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDev.groovy"
-                                        }
-                                    }
+                }
+                post {
+                    cleanup {
+                        container('milvus-test-env') {
+                            script {
+                                archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
+                                load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDevTest.groovy"
+                                if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
+                                    load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDevTest.groovy"
                                 }
                             }
                         }
@@ -221,8 +186,7 @@ pipeline {
     post {
         unsuccessful {
             script {
-                boolean isNightlyTest = isTimeTriggeredBuild()
-                if (isNightlyTest) {
+                if (isTimeTriggeredBuild()) {
                     // Send an email only if the build status has changed from green/unstable to red
                     emailext subject: '$DEFAULT_SUBJECT',
                     body: '$DEFAULT_CONTENT',
@@ -238,16 +202,6 @@ pipeline {
     }
 }
 
-boolean isEmptyChangelog() {
-    if (currentBuild.changeSets.size() == 0) {
-        return true
-    }
-    return false
-}
-
 boolean isTimeTriggeredBuild() {
-    if (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) {
-        return true
-    }
-    return false
+    return (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) ? true : false;
 }
