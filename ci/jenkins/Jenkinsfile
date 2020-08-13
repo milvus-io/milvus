@@ -173,7 +173,6 @@ pipeline {
                         steps {
                             container('milvus-test-env') {
                                 script {
-                                    sh "mkdir -p ${env.DEV_TEST_ARTIFACTS}"
                                     load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
                                     if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
                                         load "${env.WORKSPACE}/ci/jenkins/step/shardsDevTest.groovy"
