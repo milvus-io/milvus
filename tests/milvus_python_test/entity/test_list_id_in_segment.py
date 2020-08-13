@@ -12,6 +12,7 @@ segment_row_count = 100000
 nb = 6000
 tag = "1970-01-01"
 field_name = default_float_vec_field_name
+binary_field_name = default_binary_vec_field_name
 collection_id = "list_id_in_segment"
 entity = gen_entities(1)
 raw_vector, binary_entity = gen_binary_entities(1)
@@ -28,7 +29,10 @@ def get_segment_id(connect, collection, nb=1, vec_type='float', index_params=Non
     ids = connect.insert(collection, entities)
     connect.flush([collection])
     if index_params:
-        connect.create_index(collection, field_name, index_params)
+        if vec_type == 'float':
+            connect.create_index(collection, field_name, index_params)
+        else:
+            connect.create_index(collection, binary_field_name, index_params)
     stats = connect.get_collection_stats(collection)
     return ids, stats["partitions"][0]["segments"][0]["id"]
 
@@ -196,7 +200,6 @@ class TestListIdInSegmentBase:
         assert len(vector_ids) == 1
         assert vector_ids[0] == ids[1]
 
-    @pytest.mark.level(2)
     def test_list_id_in_segment_with_index_ip(self, connect, collection, get_simple_index):
         '''
         target: get vector ids when there is index
@@ -254,7 +257,7 @@ class TestListIdInSegmentBinary:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index()
+        params=gen_binary_index()
     )
     def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)
@@ -270,7 +273,7 @@ class TestListIdInSegmentBinary:
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        ids, seg_id = get_segment_id(connect, jac_collection, nb=nb, index_params=get_jaccard_index, vec_type='binary')
+        ids, seg_id = get_segment_id(connect, binary_collection, nb=nb, index_params=get_jaccard_index, vec_type='binary')
         vector_ids = connect.list_id_in_segment(binary_collection, seg_id)
         # TODO: 
 
@@ -281,7 +284,7 @@ class TestListIdInSegmentBinary:
         expected: status ok
         '''
         connect.create_partition(binary_collection, tag)
-        ids = connect.insert(binary_collection, entities, partition_tag=tag)
+        ids = connect.insert(binary_collection, binary_entities, partition_tag=tag)
         connect.flush([binary_collection])
         stats = connect.get_collection_stats(binary_collection)
         assert stats["partitions"][1]["tag"] == tag

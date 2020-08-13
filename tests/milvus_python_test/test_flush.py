@@ -25,8 +25,7 @@ default_fields = gen_default_fields()
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),
-                                     "params": {"nprobe": 10}}}}
+            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim), "metric_type":"L2","params": {"nprobe": 10}}}}
         ]
     }
 }
@@ -87,8 +86,6 @@ class TestFlushBase:
         # with pytest.raises(Exception) as e:
         #     connect.flush([collection])
 
-    # TODO
-    @pytest.mark.level(2)
     def test_add_partition_flush(self, connect, id_collection):
         '''
         method: add entities into partition in collection, flush serveral times
@@ -108,8 +105,6 @@ class TestFlushBase:
         res_count = connect.count_entities(id_collection)
         assert res_count == nb * 2
 
-    # TODO
-    @pytest.mark.level(2)
     def test_add_partitions_flush(self, connect, id_collection):
         '''
         method: add entities into partitions in collection, flush one
@@ -127,8 +122,6 @@ class TestFlushBase:
         res = connect.count_entities(id_collection)
         assert res == 2 * nb
 
-    # TODO
-    @pytest.mark.level(2)
     def test_add_collections_flush(self, connect, id_collection):
         '''
         method: add entities into collections, flush one
@@ -150,8 +143,6 @@ class TestFlushBase:
         res = connect.count_entities(collection_new)
         assert res == nb
 
-    # TODO
-    @pytest.mark.level(2)
     def test_add_collections_fields_flush(self, connect, id_collection, get_filter_field, get_vector_field):
         '''
         method: create collection with different fields, and add entities into collections, flush one
@@ -182,7 +173,6 @@ class TestFlushBase:
         res = connect.count_entities(collection_new)
         assert res == nb_new
 
-    @pytest.mark.skip(reason="search not support yet")
     def test_add_flush_multiable_times(self, connect, collection):
         '''
         method: add entities, flush serveral times
@@ -199,8 +189,6 @@ class TestFlushBase:
         logging.getLogger().debug(res)
         assert res
 
-    # TODO
-    @pytest.mark.level(2)
     # TODO: stable case
     def test_add_flush_auto(self, connect, id_collection):
         '''
@@ -230,8 +218,6 @@ class TestFlushBase:
     def same_ids(self, request):
         yield request.param
 
-    # TODO
-    @pytest.mark.level(2)
     def test_add_flush_same_ids(self, connect, id_collection, same_ids):
         '''
         method: add entities, with same ids, count(same ids) < 15, > 15
@@ -247,7 +233,6 @@ class TestFlushBase:
         res = connect.count_entities(id_collection)
         assert res == nb
 
-    @pytest.mark.skip(reason="search not support yet")
     def test_delete_flush_multiable_times(self, connect, collection):
         '''
         method: delete entities, flush serveral times

@@ -98,8 +98,6 @@ class TestCreateBase:
         assert tag_name in tag_list
         assert "_default" in tag_list
 
-    # TODO
-    @pytest.mark.level(2)
     def test_create_partition_insert_default(self, connect, id_collection):
         '''
         target: test create partition, and insert vectors, check status returned
@@ -111,8 +109,6 @@ class TestCreateBase:
         insert_ids = connect.insert(id_collection, entities, ids)
         assert len(insert_ids) == len(ids)
  
-    # TODO
-    @pytest.mark.level(2)
     def test_create_partition_insert_with_tag(self, connect, id_collection):
         '''
         target: test create partition, and insert vectors, check status returned
@@ -136,8 +132,6 @@ class TestCreateBase:
         with pytest.raises(Exception) as e:
             insert_ids = connect.insert(collection, entities, ids, partition_tag=tag_new)
 
-    # TODO
-    @pytest.mark.level(2)
     def test_create_partition_insert_same_tags(self, connect, id_collection):
         '''
         target: test create partition, and insert vectors, check status returned

@@ -132,7 +132,6 @@ class TestCreateCollection:
             connect.create_collection(collection, default_fields)
 
     # TODO: assert exception
-    @pytest.mark.level(2)
     def test_create_collection_without_connection(self, dis_connect):
         '''
         target: test create collection, without connection

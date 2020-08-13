@@ -37,7 +37,7 @@ class SegmentReader {
     Load();
 
     Status
-    LoadField(const std::string& field_name, engine::BinaryDataPtr& raw);
+    LoadField(const std::string& field_name, engine::BinaryDataPtr& raw, bool to_cache = true);
 
     Status
     LoadFields();

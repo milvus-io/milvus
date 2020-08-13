@@ -111,8 +111,6 @@ class TestGetBase:
         with pytest.raises(Exception) as e:
             res = connect.get_entity_by_id(collection, ids)
 
-    # TODO
-    @pytest.mark.level(2)
     def test_get_entity_same_ids(self, connect, id_collection):
         '''
         target: test.get_entity_by_id, with the same ids
@@ -127,8 +125,6 @@ class TestGetBase:
         assert len(res) == 1
         assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
 
-    # TODO
-    @pytest.mark.level(2)
     def test_get_entity_params_same_ids(self, connect, id_collection):
         '''
         target: test.get_entity_by_id, with the same ids
@@ -244,7 +240,6 @@ class TestGetBase:
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
-    @pytest.mark.skip
     def test_get_entities_tags_B(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -266,7 +261,6 @@ class TestGetBase:
         for i in range(get_pos, get_pos*2):
             assert_equal_vector(res[i].get(default_float_vec_field_name), new_entities[-1]["values"][i-get_pos])
 
-    @pytest.mark.level(2)
     def test_get_entities_indexed_tag(self, connect, collection, get_simple_index, get_pos):
         '''
         target: test.get_entity_by_id
@@ -343,9 +337,6 @@ class TestGetBase:
         with pytest.raises(Exception) as e:
             res = connect.get_entity_by_id(collection, get_ids, fields = fields)
 
-    # TODO
-    @pytest.mark.level(2)
-    @pytest.mark.skip
     def test_get_entity_id_not_exised(self, connect, collection):
         '''
         target: test get entity, params entity_id not existed
@@ -374,8 +365,6 @@ class TestGetBase:
       The following cases are used to test `get_entity_by_id` function, after deleted
     ******************************************************************
     """
-    # TODO
-    @pytest.mark.level(2)
     def test_get_entity_after_delete(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -391,8 +380,6 @@ class TestGetBase:
         res = connect.get_entity_by_id(collection, get_ids)
         assert res[0] is None
 
-    # TODO
-    @pytest.mark.level(2)
     def test_get_entities_after_delete(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -409,8 +396,6 @@ class TestGetBase:
         for i in range(get_pos):
             assert res[i] is None
 
-    # TODO
-    @pytest.mark.level(2)
     def test_get_entities_after_delete_compact(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -428,7 +413,6 @@ class TestGetBase:
         for i in range(get_pos):
             assert res[i] is None
 
-    @pytest.mark.level(2)
     def test_get_entities_indexed_batch(self, connect, collection, get_simple_index, get_pos):
         '''
         target: test.get_entity_by_id
@@ -443,7 +427,6 @@ class TestGetBase:
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
-    @pytest.mark.level(2)
     def test_get_entities_indexed_single(self, connect, collection, get_simple_index, get_pos):
         '''
         target: test.get_entity_by_id
@@ -460,8 +443,6 @@ class TestGetBase:
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entity[-1]["values"][0])
 
-    # TODO
-    @pytest.mark.level(2)
     def test_get_entities_after_delete_disable_autoflush(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -481,8 +462,6 @@ class TestGetBase:
         finally:
             enable_flush(connect)
 
-    # TODO:
-    @pytest.mark.level(2)
     def test_get_entities_after_delete_same_ids(self, connect, id_collection):
         '''
         target: test.get_entity_by_id
@@ -499,8 +478,6 @@ class TestGetBase:
         res = connect.get_entity_by_id(id_collection, get_ids)
         assert res[0] is None
 
-    # TODO
-    @pytest.mark.level(2)
     def test_get_entity_after_delete_with_partition(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id

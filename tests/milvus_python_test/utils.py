@@ -44,7 +44,7 @@ default_index_params = [
     {"nlist": 1024, "m": 16},
     {"M": 48, "efConstruction": 500},
     # {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
-    {"n_trees": 4},
+    {"n_trees": 50},
     {"nlist": 1024},
     {"nlist": 1024}
 ]
@@ -216,7 +216,7 @@ def gen_default_fields(auto_id=True):
             {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}},
         ],
         "segment_row_count": segment_row_count,
-        "auto_id" : auto_id
+        "auto_id" : auto_id 
     }
     return default_fields
 
@@ -229,7 +229,7 @@ def gen_binary_default_fields(auto_id=True):
             {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": dimension}}
         ],
         "segment_row_count": segment_row_count,
-        "auto_id" : auto_id
+        "auto_id" : auto_id 
     }
     return default_fields
 
@@ -352,8 +352,8 @@ def gen_invalid_ranges():
 
 def gen_valid_ranges():
     ranges = [
-        {"GT": 0, "LT": nb // 2},
-        {"GT": nb//2, "LT": nb * 2},
+        {"GT": 0, "LT": nb//2},
+        {"GT": nb // 2, "LT": nb*2},
         {"GT": 0},
         {"LT": nb},
         {"GT": -1, "LT": top_k},
@@ -779,7 +779,7 @@ def get_search_param(index_type):
     elif index_type == "NSG":
         search_params.update({"search_length": 100})
     elif index_type == "ANNOY":
-        search_params.update({"search_k": 100})
+        search_params.update({"search_k": 1000})
     else:
         logging.getLogger().error("Invalid index_type.")
         raise Exception("Invalid index_type.")
