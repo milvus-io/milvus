@@ -219,7 +219,7 @@ class TestSearchBase:
         '''
         target: test search with different metric_type
         method: build index with L2, and search using IP
-        expected: exception raised
+        expected: using FLAT 
         '''
         search_metric_type = "IP"
         index_type = get_simple_index["index_type"]
@@ -229,8 +229,9 @@ class TestSearchBase:
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
         query, vecs = gen_query_vectors(field_name, entities, top_k, nq, metric_type=search_metric_type, search_params=search_param)
-        with pytest.raises(Exception) as e:
-            res = connect.search(collection, query)
+        res = connect.search(collection, query)
+        assert len(res) == nq
+        assert len(res[0]) == top_k
 
     @pytest.mark.level(2)
     def test_search_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
