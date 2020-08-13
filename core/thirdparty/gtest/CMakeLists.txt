@@ -12,26 +12,29 @@
 #-------------------------------------------------------------------------------
 
 # *********************************** FetchContent ***********************************
-# Cons: force install at INSTALL_DIRS, EXCLUDE_FROM_ALL can aviod install
 # Pros: Simple, done at configure time, can be used immediately
 # ************************************************************************************
-# include( FetchContent )
-# set( CMAKE_POLICY_DEFAULT_CMP0022 NEW ) # for googletest only
-#
-# FetchContent_Declare(
-#     googletest
-#     URL     "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz"
-#             "https://gitee.com/quicksilver/googletest/repository/archive/release-${GTEST_VERSION}.zip"
-#     URL_MD5 2e6fbeb6a91310a16efe181886c59596
-# )
-#
-# if ( NOT googletest_POPULATED )
-#     FetchContent_Populate( googletest )
-#
-#     add_subdirectory( ${googletest_SOURCE_DIR}
-#                       ${googletest_BINARY_DIR}
-#                       )
-# endif()
+message( STATUS "Building gtest-${GTEST_VERSION} from source" )
+include( FetchContent )
+set( CMAKE_POLICY_DEFAULT_CMP0022 NEW ) # for googletest only
+
+FetchContent_Declare(
+    googletest
+    URL     ${GTEST_SOURCE_URL} 
+    URL_MD5 "f9137c5bc18b7d74027936f0f1bfa5c8"
+    SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-src
+    BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-build
+
+)
+
+if ( NOT googletest_POPULATED )
+    FetchContent_Populate( googletest )
+
+    add_subdirectory( ${googletest_SOURCE_DIR}
+                      ${googletest_BINARY_DIR}
+                      EXCLUDE_FROM_ALL
+                      )
+endif()
 
 # ****************************************************************
 # Create ALIAS Target
@@ -52,35 +55,5 @@
 # endif()
 
 
-message( STATUS "Building gtest-${GTEST_VERSION} from source" )
-set( GTEST_CMAKE_CXX_FLAGS ${EP_CXX_FLAGS} )
-set( gtest_DOWNLOAD_DIR ${MILVUS_BINARY_DIR}/3rdparty_download/googletest_download )
-
-# Download and unpack googletest at configure time
-configure_file( CMakeLists.txt.in ${gtest_DOWNLOAD_DIR}/CMakeLists.txt )
-
-
-execute_process(COMMAND             "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
-                WORKING_DIRECTORY   ${gtest_DOWNLOAD_DIR}
-)
-execute_process(COMMAND             "${CMAKE_COMMAND}" --build .
-                WORKING_DIRECTORY   ${gtest_DOWNLOAD_DIR}
-)
-
-add_compile_options(    ${EP_COMMON_TOOLCHAIN}
-                        "-D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
-                        "-D CMAKE_C_FLAGS=${EP_C_FLAGS}"
-                        "-D CMAKE_C_FLAGS_${UPPERCASE_BUILD_TYPE}=${EP_C_FLAGS}"
-                        "-D CMAKE_CXX_FLAGS=${EP_CXX_FLAGS}"
-                        "-D CMAKE_CXX_FLAGS_${UPPERCASE_BUILD_TYPE}=${EP_CXX_FLAGS}"
-)
-# Add googletest directly to our build. This adds the following targets:
-# gtest, gtest_main, gmock and gmock_main
-add_subdirectory("${CMAKE_CURRENT_BINARY_DIR}/googletest-src"
-                 "${CMAKE_CURRENT_BINARY_DIR}/googletest-build"
-                 EXCLUDE_FROM_ALL
-)
-
-# get_property(var DIRECTORY PROPERTY COMPILE_OPTIONS )
 get_property(var DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/googletest-src" PROPERTY COMPILE_OPTIONS )
 message(STATUS "gtest compile options: ${var}")

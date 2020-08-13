@@ -40,7 +40,6 @@ while getopts "p:d:t:f:s:ulrcghzmei" arg; do
     ;;
   r)
     if [[ -d ${BUILD_OUTPUT_DIR} ]]; then
-      rm ./${BUILD_OUTPUT_DIR} -r
       MAKE_CLEAN="ON"
     fi
     ;;
@@ -102,6 +101,13 @@ cd ${BUILD_OUTPUT_DIR}
 # force update the variables each time
 make rebuild_cache >/dev/null 2>&1
 
+
+if [[ ${MAKE_CLEAN} == "ON" ]]; then
+  echo "Runing make clean in ${BUILD_OUTPUT_DIR} ..."
+  make clean
+  exit 0
+fi
+
 CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
@@ -119,9 +125,6 @@ CMAKE_CMD="cmake \
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
 
-if [[ ${MAKE_CLEAN} == "ON" ]]; then
-  make clean
-fi
 
 if [[ ${RUN_CPPLINT} == "ON" ]]; then
   # cpplint check
