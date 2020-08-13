@@ -214,25 +214,25 @@ class TestSearchBase:
             assert res[0]._distances[0] < epsilon
             assert check_id_result(res[0], ids[0])
 
-    @pytest.mark.level(2)
-    @pytest.mark.skip
     def test_search_after_index_different_metric_type(self, connect, collection, get_simple_index):
         '''
         target: test search with different metric_type
         method: build index with L2, and search using IP
-        expected: using FLAT 
+        expected: search ok if flat index, search failed if other indexes 
         '''
         search_metric_type = "IP"
         index_type = get_simple_index["index_type"]
-        if index_type != "FLAT":
-            pytest.skip("skip flat")
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
         query, vecs = gen_query_vectors(field_name, entities, top_k, nq, metric_type=search_metric_type, search_params=search_param)
-        res = connect.search(collection, query)
-        assert len(res) == nq
-        assert len(res[0]) == top_k
+        if index_type != "FLAT":
+            res = connect.search(collection, query)
+            assert len(res) == nq
+            assert len(res[0]) == top_k
+        else:
+            with pytest.raises(Exception) as e:
+                res = connect.search(collection, query)
 
     @pytest.mark.level(2)
     def test_search_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
