@@ -62,8 +62,7 @@ CmdReq::OnExecute() {
             auto words = split(cmd_, ' ');
             if (words.size() == 2) {
                 result_ = ConfigMgr::GetInstance().Get(words[1]);
-            }
-            else {
+            } else {
                 stat = Status(SERVER_UNEXPECTED_ERROR, "Wrong parameter size ");
             }
         } catch (ConfigStatus& cs) {
@@ -76,8 +75,7 @@ CmdReq::OnExecute() {
             auto words = split(cmd_, ' ');
             if (words.size() == 3) {
                 ConfigMgr::GetInstance().Set(words[1], words[2]);
-            }
-            else {
+            } else {
                 stat = Status(SERVER_UNEXPECTED_ERROR, "Wrong parameter size ");
             }
         } catch (ConfigStatus& cs) {
