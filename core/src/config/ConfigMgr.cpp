@@ -224,7 +224,7 @@ ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
             lock.unlock();
             Notify(name);
         } else {
-            throw ConfigStatus(SetReturn::IMMUTABLE,"Config " + name + " is not modifiable");
+            throw ConfigStatus(SetReturn::IMMUTABLE, "Config " + name + " is not modifiable");
         }
     } catch (ConfigStatus& cs) {
         throw cs;
