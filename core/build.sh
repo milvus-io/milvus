@@ -16,8 +16,6 @@ PROFILING="OFF"
 RUN_CPPLINT="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 GPU_VERSION="OFF" #defaults to CPU version
-FAISS_ROOT="" #FAISS root path
-FAISS_SOURCE="BUNDLED"
 WITH_PROMETHEUS="ON"
 FIU_ENABLE="OFF"
 CUDA_ARCH="DEFAULT"
@@ -32,10 +30,6 @@ while getopts "p:d:t:f:s:ulrcghzmei" arg; do
     ;;
   t)
     BUILD_TYPE=$OPTARG # BUILD_TYPE
-    ;;
-  f)
-    FAISS_ROOT=$OPTARG
-    FAISS_SOURCE="AUTO"
     ;;
   u)
     echo "Build and run unittest cases"
@@ -75,9 +69,6 @@ parameter:
 -p: install prefix(default: $(pwd)/milvus)
 -d: db data path(default: /tmp/milvus)
 -t: build type(default: Debug)
--f: FAISS root path(default: empty). The path should be an absolute path
-    containing the pre-installed lib/ and include/ directory of FAISS. If they can't be found,
-    we will build the original FAISS from source instead.
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -r: remove previous build directory(default: OFF)
@@ -90,7 +81,7 @@ parameter:
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f \${FAISS_ROOT} -s \${CUDA_ARCH}[-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH}[-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h]
                 "
     exit 0
     ;;
@@ -115,8 +106,6 @@ CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
--DFAISS_ROOT=${FAISS_ROOT} \
--DFAISS_SOURCE=${FAISS_SOURCE} \
 -DOpenBLAS_SOURCE=AUTO \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
