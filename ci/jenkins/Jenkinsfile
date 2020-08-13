@@ -28,6 +28,7 @@ pipeline {
         SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
         PIPELINE_NAME = "milvus-ci"
         HELM_BRANCH = "0.10.1"
+        EXCLUDE_OS_NAME = isTimeTriggeredBuild() ? "" : "ubuntu18.04"
     }
     stages {
         stage ('Milvus Build and Unittest') {
@@ -50,7 +51,7 @@ pipeline {
                     exclude {
                         axis {
                             name 'OS_NAME'
-                            values isTimeTriggeredBuild() ? '' : 'ubuntu18.04'
+                            values EXCLUDE_OS_NAME
                         }
                     }
                 }
@@ -103,7 +104,7 @@ pipeline {
                     exclude {
                         axis {
                             name 'OS_NAME'
-                            values isTimeTriggeredBuild() ? '' : 'ubuntu18.04'
+                            values EXCLUDE_OS_NAME
                         }
                     }
                 }
@@ -158,7 +159,7 @@ pipeline {
                     exclude {
                         axis {
                             name 'OS_NAME'
-                            values isTimeTriggeredBuild() ? '' : 'ubuntu18.04'
+                            values EXCLUDE_OS_NAME
                         }
                     }
                 }
