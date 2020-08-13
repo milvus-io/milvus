@@ -8,7 +8,7 @@ metadata:
 spec:
   containers:
   - name: milvus-cpu-build-env
-    image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.10.1-ubuntu18.04
+    image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.10.2-ubuntu18.04
     env:
     - name: POD_IP
       valueFrom:
@@ -17,7 +17,7 @@ spec:
     - name: OS_NAME
       value: "ubuntu18.04"
     - name: BUILD_ENV_IMAGE_ID
-      value: "78f93a8d512a5563ae29c2ba8aea4b1194d0ae7749b5973e20503ce9778d81e1"
+      value: "4e30ebe398d1a10150c625e52f44d5426c71a557afbb3f16ee9cea20e52e1b9d"
     command:
     - cat
     tty: true

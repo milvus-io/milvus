@@ -102,7 +102,7 @@ SegmentReader::Load() {
 }
 
 Status
-SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& raw) {
+SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& raw, bool to_cache) {
     try {
         segment_ptr_->GetFixedFieldData(field_name, raw);
         if (raw != nullptr) {
@@ -124,7 +124,9 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
             auto& ss_codec = codec::Codec::instance();
             ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, raw);
 
-            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, raw);  // put into cache
+            if (to_cache) {
+                cache::CpuCacheMgr::GetInstance().InsertItem(file_path, raw);  // put into cache
+            }
         } else {
             raw = std::static_pointer_cast<engine::BinaryData>(data_obj);
         }
@@ -300,7 +302,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 }
                 int64_t dimension = json[knowhere::meta::DIM];
                 engine::BinaryDataPtr raw;
-                STATUS_CHECK(LoadField(field_name, raw));
+                STATUS_CHECK(LoadField(field_name, raw, false));
 
                 auto dataset = knowhere::GenDataset(segment_commit->GetRowCount(), dimension, raw->data_.data());
 
@@ -319,6 +321,8 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 index_ptr->SetUids(uids);
                 index_ptr->SetBlacklist(concurrent_bitset_ptr);
                 segment_ptr_->SetVectorIndex(field_name, index_ptr);
+
+                cache::CpuCacheMgr::GetInstance().InsertItem(temp_index_path, index_ptr);
             }
 
             return Status::OK();

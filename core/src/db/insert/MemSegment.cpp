@@ -18,7 +18,6 @@
 #include <vector>
 
 #include "config/ServerConfig.h"
-#include "db/Constants.h"
 #include "db/Types.h"
 #include "db/Utils.h"
 #include "db/snapshot/Operations.h"
