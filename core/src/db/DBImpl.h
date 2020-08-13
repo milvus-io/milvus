@@ -25,7 +25,6 @@
 
 #include "config/ConfigMgr.h"
 #include "utils/ThreadPool.h"
-#include "wal/WalManager.h"
 
 namespace milvus {
 namespace engine {
@@ -121,7 +120,7 @@ class DBImpl : public DB, public ConfigObserver {
 
  private:
     void
-    InternalFlush(const std::string& collection_name = "");
+    InternalFlush(const std::string& collection_name = "", bool merge = true);
 
     void
     TimingFlushThread();
@@ -145,12 +144,6 @@ class DBImpl : public DB, public ConfigObserver {
     WaitBuildIndexFinish();
 
     void
-    TimingWalThread();
-
-    Status
-    ExecWalRecord(const wal::MXLogRecord& record);
-
-    void
     StartMergeTask(const std::set<std::string>& collection_names, bool force_merge_all = false);
 
     void
@@ -172,14 +165,10 @@ class DBImpl : public DB, public ConfigObserver {
     MemManagerPtr mem_mgr_;
     MergeManagerPtr merge_mgr_ptr_;
 
-    //    std::shared_ptr<wal::WalManager> wal_mgr_;
-    std::thread bg_wal_thread_;
-
     std::thread bg_flush_thread_;
     std::thread bg_metric_thread_;
     std::thread bg_index_thread_;
 
-    SimpleWaitNotify swn_wal_;
     SimpleWaitNotify swn_flush_;
     SimpleWaitNotify swn_metric_;
     SimpleWaitNotify swn_index_;
