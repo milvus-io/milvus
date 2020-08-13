@@ -1,4 +1,6 @@
 timeout(time: 180, unit: 'MINUTES') {
+    sh "mkdir -p ${env.DEV_TEST_ARTIFACTS}"
+
     dir ('milvus-helm') {
         sh 'helm version'
         sh 'helm repo add stable https://kubernetes.oss-cn-hangzhou.aliyuncs.com/charts'

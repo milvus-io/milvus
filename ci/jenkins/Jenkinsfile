@@ -35,7 +35,7 @@ pipeline {
                 axes {
                     axis {
                         name 'OS_NAME'
-                        values 'centos7', 'ubuntu18.04'
+                        values 'centos7'
                     }
                     axis {
                         name 'CPU_ARCH'
@@ -44,11 +44,6 @@ pipeline {
                     axis {
                         name 'BINARY_VERSION'
                         values 'gpu', 'cpu'
-                    }
-                }
-                when {
-                    not {
-                        expression {OS_NAME == "ubuntu18.04" && !isTimeTriggeredBuild()}
                     }
                 }
                 environment {
@@ -85,7 +80,7 @@ pipeline {
                 axes {
                     axis {
                         name 'OS_NAME'
-                        values 'centos7', 'ubuntu18.04'
+                        values 'centos7'
                     }
                     axis {
                         name 'CPU_ARCH'
@@ -94,11 +89,6 @@ pipeline {
                     axis {
                         name 'BINARY_VERSION'
                         values 'gpu', 'cpu'
-                    }
-                }
-                when {
-                    not {
-                        expression {OS_NAME == "ubuntu18.04" && !isTimeTriggeredBuild()}
                     }
                 }
                 environment {
@@ -135,7 +125,7 @@ pipeline {
                 axes {
                     axis {
                         name 'OS_NAME'
-                        values 'centos7', 'ubuntu18.04'
+                        values 'centos7'
                     }
 
                     axis {
@@ -146,11 +136,6 @@ pipeline {
                     axis {
                         name 'BINARY_VERSION'
                         values 'gpu', 'cpu'
-                    }
-                }
-                when {
-                    not {
-                        expression {OS_NAME == "ubuntu18.04" && !isTimeTriggeredBuild()}
                     }
                 }
                 environment {
