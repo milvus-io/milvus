@@ -35,7 +35,7 @@ pipeline {
                 axes {
                     axis {
                         name 'OS_NAME'
-                        values 'centos7'
+                        values 'centos7', 'ubuntu18.04'
                     }
                     axis {
                         name 'CPU_ARCH'
@@ -44,6 +44,14 @@ pipeline {
                     axis {
                         name 'BINARY_VERSION'
                         values 'gpu', 'cpu'
+                    }
+                }
+                excludes {
+                    exclude {
+                        axis {
+                            name 'OS_NAME'
+                            values isTimeTriggeredBuild() : '' ? 'ubuntu18.04'
+                        }
                     }
                 }
                 environment {
@@ -80,7 +88,7 @@ pipeline {
                 axes {
                     axis {
                         name 'OS_NAME'
-                        values 'centos7'
+                        values 'centos7', 'ubuntu18.04'
                     }
                     axis {
                         name 'CPU_ARCH'
@@ -89,6 +97,14 @@ pipeline {
                     axis {
                         name 'BINARY_VERSION'
                         values 'gpu', 'cpu'
+                    }
+                }
+                excludes {
+                    exclude {
+                        axis {
+                            name 'OS_NAME'
+                            values isTimeTriggeredBuild() : '' ? 'ubuntu18.04'
+                        }
                     }
                 }
                 environment {
@@ -125,7 +141,7 @@ pipeline {
                 axes {
                     axis {
                         name 'OS_NAME'
-                        values 'centos7'
+                        values 'centos7', 'ubuntu18.04'
                     }
 
                     axis {
@@ -136,6 +152,14 @@ pipeline {
                     axis {
                         name 'BINARY_VERSION'
                         values 'gpu', 'cpu'
+                    }
+                }
+                excludes {
+                    exclude {
+                        axis {
+                            name 'OS_NAME'
+                            values isTimeTriggeredBuild() : '' ? 'ubuntu18.04'
+                        }
                     }
                 }
                 environment {
