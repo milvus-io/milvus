@@ -20,7 +20,7 @@ WITH_PROMETHEUS="ON"
 FIU_ENABLE="OFF"
 CUDA_ARCH="DEFAULT"
 
-while getopts "p:d:t:f:s:ulrcghzmei" arg; do
+while getopts "p:d:t:s:ulrcghzmei" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
