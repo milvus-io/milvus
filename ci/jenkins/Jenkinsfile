@@ -69,10 +69,7 @@ pipeline {
                         steps {
                             container("milvus-${BINARY_VERSION}-build-env") {
                                 script {
-                                    load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
-                                    load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
-                                    load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
-                                    load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
+                                    buildPipeline()
                                 }
                             }
                         }
@@ -122,7 +119,7 @@ pipeline {
                         steps {
                             container('publish-images') {
                                 script {
-                                    load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
+                                    publishImagesPipeline()
                                 }
                             }
                         }
@@ -174,9 +171,9 @@ pipeline {
                             container('milvus-test-env') {
                                 script {
                                     sh "mkdir -p ${env.DEV_TEST_ARTIFACTS}"
-                                    load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
+                                    singleDevTestPipeline()
                                     if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                        load "${env.WORKSPACE}/ci/jenkins/step/shardsDevNightlyTest.groovy"
+                                        shardsDevTestPipeline()
                                     }
                                 }
                             }
@@ -188,9 +185,9 @@ pipeline {
                         container('milvus-test-env') {
                             script {
                                 archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
-                                load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
+                                cleanupSingleDevTestPipeline()
                                 if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                    load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDev.groovy"
+                                    cleanupShardsDevTestPipeline()
                                 }
                             }
                         }
@@ -220,4 +217,31 @@ pipeline {
 
 boolean isTimeTriggeredBuild() {
     return (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) ? true : false;
+}
+
+def buildPipeline() {
+    load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
+    load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
+    load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
+    load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
+}
+
+def publishImagesPipeline() {
+    load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
+}
+
+def singleDevTestPipeline() {
+    load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
+}
+
+def shardsDevTestPipeline() {
+    load "${env.WORKSPACE}/ci/jenkins/step/shardsDevTest.groovy"
+}
+
+def cleanupSingleDevTestPipeline() {
+    load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDevTest.groovy"
+}
+
+def cleanupShardsDevTestPipeline() {
+    load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDevTest.groovy"
 }
