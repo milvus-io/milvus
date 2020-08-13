@@ -802,6 +802,9 @@ DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
         {
             const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
             status = mem_mgr_->Flush(collection_ids);
+            if (!status.ok()) {
+                return;
+            }
         }
 
         for (auto id : collection_ids) {

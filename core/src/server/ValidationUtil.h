@@ -49,5 +49,8 @@ ValidateSearchTopk(int64_t top_k);
 
 extern Status
 ValidatePartitionTags(const std::vector<std::string>& partition_tags);
+
+extern Status
+ValidateInsertDataSize(const engine::DataChunkPtr& data);
 }  // namespace server
 }  // namespace milvus
