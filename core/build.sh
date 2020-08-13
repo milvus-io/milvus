@@ -132,7 +132,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   fi
   echo "cpplint check passed!"
 
-  clang-format check
+  # clang-format check
   make check-clang-format
   if [ $? -ne 0 ]; then
     echo "ERROR! clang-format check failed"
@@ -140,15 +140,16 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   fi
   echo "clang-format check passed!"
 
-#    # clang-tidy check
-#    make check-clang-tidy
-#    if [ $? -ne 0 ]; then
-#        echo "ERROR! clang-tidy check failed"
-#        exit 1
-#    fi
-#    echo "clang-tidy check passed!"
+  # clang-tidy check
+  # check rules referenced from:
+  # https://github.com/apache/incubator-mxnet/blob/master/.clang-tidy
+#  make check-clang-tidy
+#  if [ $? -ne 0 ]; then
+#      echo "ERROR! clang-tidy check failed"
+#      exit 1
+#  fi
+#  echo "clang-tidy check passed!"
 else
-
   # compile and build
   make -j ${jobs} install || exit 1
 fi
