@@ -99,7 +99,7 @@ bool
 CompoundSegmentsOperation::StaleSegmentFilesModified() {
     for (auto& kv : stale_segment_files_) {
         for (auto& file : kv.second) {
-            auto segment_file = GetStartedSS()->GetResource<SegmentFile>(file->GetID());
+            auto segment_file = GetAdjustedSS()->GetResource<SegmentFile>(file->GetID());
             if (segment_file == nullptr || segment_file->IsDeactive()) {
                 return true;
             }
