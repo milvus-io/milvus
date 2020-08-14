@@ -92,15 +92,9 @@ struct ServerConfig {
         } http;
     } network;
 
-    struct DB {
-        Floating archive_disk_threshold{0.0};
-        Integer archive_days_threshold{0};
-    } db;
-
     struct Storage {
         String path{"unknown"};
         Integer auto_flush_interval{0};
-        Integer file_cleanup_timeout{0};
     } storage;
 
     struct Cache {
