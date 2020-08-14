@@ -14,10 +14,10 @@
 # Thirdpart cxx and c flags
 add_compile_options( -O3 -fPIC -Wno-error -fopenmp )
 
-if (NOT KNOWHERE_VERBOSE_THIRDPARTY_BUILD)
-    set(EP_LOG_OPTIONS LOG_CONFIGURE 1 LOG_BUILD 1 LOG_INSTALL 1 LOG_DOWNLOAD 1)
+if ( NOT KNOWHERE_VERBOSE_THIRDPARTY_BUILD )
+    set( EP_LOG_OPTIONS LOG_CONFIGURE 1 LOG_BUILD 1 LOG_INSTALL 1 LOG_DOWNLOAD 1 )
 else ()
-    set(EP_LOG_OPTIONS)
+    set( EP_LOG_OPTIONS )
 endif ()
 
 set( MAKE_BUILD_ARGS "-j6" )
@@ -29,14 +29,14 @@ set( FETCHCONTENT_QUIET     OFF )
 # ----------------------------------------------------------------------
 # Find pthreads
 
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
+set( THREADS_PREFER_PTHREAD_FLAG ON )
+find_package( Threads REQUIRED )
 
 # ****************************** Thirdparty googletest ***************************************
-if (MILVUS_BUILD_TESTS)
+if ( MILVUS_BUILD_TESTS )
     if ( DEFINED ENV{MILVUS_GTEST_URL} )
         set( GTEST_SOURCE_URL "$ENV{MILVUS_GTEST_URL}" )
-    else ()
+    else()
         set( GTEST_SOURCE_URL
             "https://gitee.com/quicksilver/googletest/repository/archive/release-${GTEST_VERSION}.zip" )
     endif()
@@ -44,18 +44,17 @@ if (MILVUS_BUILD_TESTS)
 endif()
 
 # ****************************** Thirdparty grpc ***************************************
-if (MILVUS_WITH_GRPC)
-    if (DEFINED ENV{MILVUS_GRPC_URL})
-        set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
-    else ()
-        set(GRPC_SOURCE_URL
-                "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip"
-                )
-    endif ()
+if ( MILVUS_WITH_GRPC )
+    if ( DEFINED ENV{MILVUS_GRPC_URL} )
+        set( GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}" )
+    else()
+        set( GRPC_SOURCE_URL
+             "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip" )
+    endif()
     add_subdirectory( grpc )
 endif ()
 
-if (MILVUS_WITH_YAMLCPP)
+# ****************************** Thirdparty yaml ***************************************
+if ( MILVUS_WITH_YAMLCPP )
     add_subdirectory( yaml-cpp )
-
 endif()

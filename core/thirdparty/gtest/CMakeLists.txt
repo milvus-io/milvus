@@ -55,5 +55,5 @@ endif()
 # endif()
 
 
-get_property(var DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/googletest-src" PROPERTY COMPILE_OPTIONS )
-message(STATUS "gtest compile options: ${var}")
+get_property( var DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/googletest-src" PROPERTY COMPILE_OPTIONS )
+message( STATUS "gtest compile options: ${var}" )
