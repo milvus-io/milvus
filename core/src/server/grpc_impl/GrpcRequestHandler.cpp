@@ -1698,17 +1698,17 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             if (vector_param_it != it.value().end()) {
                 const std::string& field_name = vector_param_it.key();
                 vector_query->field_name = field_name;
-                nlohmann::json vector_json = vector_param_it.value();
-                int64_t topk = vector_json["topk"];
+                nlohmann::json param_json = vector_param_it.value();
+                int64_t topk = param_json["topk"];
                 status = server::ValidateSearchTopk(topk);
                 if (!status.ok()) {
                     return status;
                 }
                 vector_query->topk = topk;
-                if (vector_json.contains("metric_type")) {
-                    std::string metric_type = vector_json["metric_type"];
+                if (param_json.contains("metric_type")) {
+                    std::string metric_type = param_json["metric_type"];
                     vector_query->metric_type = metric_type;
-                    query_ptr->metric_types.insert({field_name, vector_json["metric_type"]});
+                    query_ptr->metric_types.insert({field_name, param_json["metric_type"]});
                 }
                 if (!vector_param_it.value()["params"].empty()) {
                     vector_query->extra_params = vector_param_it.value()["params"];
