@@ -85,7 +85,11 @@ class WebRequestHandler {
     IsBinaryCollection(const std::string& collection_name, bool& bin);
 
     Status
-    CopyRecordsFromJson(const nlohmann::json& json, engine::VectorsData& vectors, bool bin);
+    CopyRecordsFromJson(const nlohmann::json& json, std::vector<uint8_t>& vectors_data, bool bin);
+
+    Status
+    CopyData2Json(const engine::DataChunkPtr& data_chunk, const engine::snapshot::FieldElementMappings& field_mappings,
+                  const std::vector<int64_t>& id_array, nlohmann::json& json_res);
 
  protected:
     Status
@@ -124,19 +128,18 @@ class WebRequestHandler {
     SetConfig(const nlohmann::json& json, std::string& result_str);
 
     Status
-    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& boolean_query);
+    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& boolean_query, std::string& field_name,
+                         query::QueryPtr& query_ptr);
 
     Status
-    ProcessBoolQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query);
+    ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
+                            query::QueryPtr& query_ptr);
 
     Status
     Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
 
     Status
     DeleteByIDs(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
-
-    Status
-    GetVectorsByIDs(const std::string& collection_name, const std::vector<int64_t>& ids, nlohmann::json& json_out);
 
     Status
     GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
@@ -167,12 +170,10 @@ class WebRequestHandler {
 #endif
 
     StatusDto::ObjectWrapper
-    CreateCollection(const CollectionRequestDto::ObjectWrapper& table_schema);
-    StatusDto::ObjectWrapper
-    ShowCollections(const OQueryParams& query_params, OString& result);
+    CreateCollection(const milvus::server::web::OString& body);
 
     StatusDto::ObjectWrapper
-    CreateHybridCollection(const OString& body);
+    ShowCollections(const OQueryParams& query_params, OString& result);
 
     StatusDto::ObjectWrapper
     GetCollection(const OString& collection_name, const OQueryParams& query_params, OString& result);
@@ -181,10 +182,10 @@ class WebRequestHandler {
     DropCollection(const OString& collection_name);
 
     StatusDto::ObjectWrapper
-    CreateIndex(const OString& collection_name, const OString& body);
+    CreateIndex(const OString& collection_name, const OString& field_name, const OString& body);
 
     StatusDto::ObjectWrapper
-    DropIndex(const OString& collection_name);
+    DropIndex(const OString& collection_name, const OString& field_name);
 
     StatusDto::ObjectWrapper
     CreatePartition(const OString& collection_name, const PartitionRequestDto::ObjectWrapper& param);
@@ -221,7 +222,7 @@ class WebRequestHandler {
     GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
     StatusDto::ObjectWrapper
-    VectorsOp(const OString& collection_name, const OString& payload, OString& response);
+    EntityOp(const OString& collection_name, const OString& payload, OString& response);
 
     /**
      *
