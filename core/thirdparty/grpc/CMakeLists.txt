@@ -4,7 +4,6 @@ message(STATUS "Building GRPC-${GRPC_VERSION} from source")
 # ******************************************************************
 # FetchContent
 # ******************************************************************
-include(FetchContent)
 FetchContent_Declare(
     grpc
     URL     ${GRPC_SOURCE_URL}

@@ -65,7 +65,9 @@ endif ()
 
 set( MAKE_BUILD_ARGS "-j6" )
 
+include( FetchContent )
 set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
+set(FETCHCONTENT_QUIET OFF)
 # ----------------------------------------------------------------------
 # Find pthreads
 
@@ -94,3 +96,8 @@ if (MILVUS_WITH_GRPC)
     endif ()
     add_subdirectory( grpc )
 endif ()
+
+if (MILVUS_WITH_YAMLCPP)
+    add_subdirectory( yaml-cpp )
+
+endif()

@@ -531,11 +531,11 @@ macro(build_yamlcpp)
 endmacro()
 
 if (MILVUS_WITH_YAMLCPP)
-    resolve_dependency(yaml-cpp)
-
-    get_target_property(YAMLCPP_INCLUDE_DIR yaml-cpp INTERFACE_INCLUDE_DIRECTORIES)
-    link_directories(SYSTEM ${YAMLCPP_PREFIX}/lib/)
-    include_directories(SYSTEM ${YAMLCPP_INCLUDE_DIR})
+    # resolve_dependency(yaml-cpp)
+    #
+    # get_target_property(YAMLCPP_INCLUDE_DIR yaml-cpp INTERFACE_INCLUDE_DIRECTORIES)
+    # link_directories(SYSTEM ${YAMLCPP_PREFIX}/lib/)
+    # include_directories(SYSTEM ${YAMLCPP_INCLUDE_DIR})
 endif ()
 
 # ----------------------------------------------------------------------
