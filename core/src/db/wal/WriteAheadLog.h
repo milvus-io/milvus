@@ -9,30 +9,35 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/DBFactory.h"
-#include "db/DBImpl.h"
-#include "db/transcript/Transcript.h"
-#include "db/wal/WriteAheadLog.h"
+#pragma once
+
+#include "db/DBProxy.h"
+
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace milvus {
 namespace engine {
 
-DBPtr
-DBFactory::BuildDB(const DBOptions& options) {
-    DBPtr db = std::make_shared<DBImpl>(options);
+class WriteAheadLog : public DBProxy {
+ public:
+    explicit WriteAheadLog(const DBPtr& db);
 
-    // need wal? wal must be after db
-    if (options.wal_enable_) {
-        db = std::make_shared<WriteAheadLog>(db);
-    }
+    Status
+    Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) override;
 
-    // need transcript? transcript must be after wal
-    if (options.transcript_enable_) {
-        db = std::make_shared<Transcript>(db, options.replay_script_path_);
-    }
+    Status
+    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) override;
 
-    return db;
-}
+    Status
+    Flush(const std::string& collection_name) override;
+
+    Status
+    Flush() override;
+
+ private:
+};
 
 }  // namespace engine
 }  // namespace milvus

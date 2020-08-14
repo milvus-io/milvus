@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "DB.h"
+#include "db/DBProxy.h"
 
 #include <memory>
 #include <string>
@@ -20,9 +20,9 @@
 namespace milvus {
 namespace engine {
 
-class DBProxy : public DB {
+class Transcript : public DBProxy {
  public:
-    explicit DBProxy(const DBPtr& db);
+    Transcript(const DBPtr& db, const std::string& replay_script_path);
 
     Status
     Start() override;
@@ -104,8 +104,8 @@ class DBProxy : public DB {
     Status
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) override;
 
- protected:
-    DBPtr db_;
+ private:
+    std::string replay_script_path_;
 };
 
 }  // namespace engine

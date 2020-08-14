@@ -23,6 +23,12 @@ DBProxy::DBProxy(const DBPtr& db) : db_(db) {
 }
 
 Status
+DBProxy::Start() {
+    DB_CHECK
+    return db_->Start();
+}
+
+Status
 DBProxy::Stop() {
     DB_CHECK
     return db_->Stop();

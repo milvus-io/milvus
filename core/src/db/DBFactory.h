@@ -21,9 +21,6 @@ namespace engine {
 
 class DBFactory {
  public:
-    static DBOptions
-    BuildOption();
-
     static DBPtr
     BuildDB(const DBOptions& options);
 };

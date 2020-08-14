@@ -33,7 +33,7 @@ namespace {
 const char* VECTOR_FIELD_NAME = "vector";
 
 milvus::Status
-CreateCollection(const std::shared_ptr<DBImpl>& db, const std::string& collection_name, const LSN_TYPE& lsn) {
+CreateCollection(const std::shared_ptr<DB>& db, const std::string& collection_name, const LSN_TYPE& lsn) {
     CreateCollectionContext context;
     context.lsn = lsn;
     auto collection_schema = std::make_shared<Collection>(collection_name);
@@ -51,7 +51,7 @@ CreateCollection(const std::shared_ptr<DBImpl>& db, const std::string& collectio
 static constexpr int64_t COLLECTION_DIM = 128;
 
 milvus::Status
-CreateCollection2(std::shared_ptr<DBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
+CreateCollection2(std::shared_ptr<DB> db, const std::string& collection_name, const LSN_TYPE& lsn) {
     CreateCollectionContext context;
     context.lsn = lsn;
     auto collection_schema = std::make_shared<Collection>(collection_name);
@@ -79,7 +79,7 @@ CreateCollection2(std::shared_ptr<DBImpl> db, const std::string& collection_name
 }
 
 milvus::Status
-CreateCollection3(std::shared_ptr<DBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
+CreateCollection3(std::shared_ptr<DB> db, const std::string& collection_name, const LSN_TYPE& lsn) {
     CreateCollectionContext context;
     context.lsn = lsn;
     auto collection_schema = std::make_shared<Collection>(collection_name);

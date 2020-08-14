@@ -188,7 +188,11 @@ struct DBOptions {
     bool wal_enable_ = true;
     int64_t buffer_size_ = 256;
     std::string mxlog_path_ = "/tmp/milvus/wal/";
-};  // Options
+
+    // transcript configurations
+    bool transcript_enable_ = true;
+    std::string replay_script_path_;  // for replay
+};                                    // Options
 
 }  // namespace engine
 }  // namespace milvus
