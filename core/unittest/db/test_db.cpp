@@ -1256,13 +1256,13 @@ TEST_F(DBTest, DeleteStaleTest) {
         del_ids.push_back(entity_ids2[i]);
     }
 
-    fiu_init(0);
-    fiu_enable_random("MemCollection.ApplyDeletes.RandomSleep", 1, nullptr, 0, 0.5);
+//    fiu_init(0);
+//    fiu_enable_random("MemCollection.ApplyDeletes.RandomSleep", 1, nullptr, 0, 0.5);
 //    auto build_thread = std::thread(build_task, collection_name, VECTOR_FIELD_NAME);
     auto delete_thread = std::thread(delete_task, collection_name, del_ids);
     delete_thread.join();
 //    build_thread.join();
-    fiu_disable("MemCollection.ApplyDeletes.RandomSleep");
+//    fiu_disable("MemCollection.ApplyDeletes.RandomSleep");
     db_->Flush();
     int64_t row_count;
     status = db_->CountEntities(collection_name, row_count);

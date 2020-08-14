@@ -199,6 +199,7 @@ CompoundSegmentsOperation::DoExecute(StorePtr store) {
     CollectionCommitOperation cc_op(context_, GetAdjustedSS());
     STATUS_CHECK(cc_op(store));
     STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
+    std::cout << "\n*** Create new CC " << context_.new_collection_commit->GetID() << "\n" << std::endl;
     auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(meta::oUpdate).CreatePtr();
     AddStepWithLsn(*context_.new_collection_commit, context_.lsn, cc_ctx_p);
 

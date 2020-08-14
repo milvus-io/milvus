@@ -111,18 +111,25 @@ MemCollection::Serialize(uint64_t wal_lsn) {
 
     if (!doc_ids_to_delete_.empty()) {
         while (true) {
+            std::string ms;
+            std::vector<std::string> doc_ids_str;
+            for (auto & id : doc_ids_to_delete_) {
+                doc_ids_str.push_back(std::to_string(id));
+            }
+            StringHelpFunctions::MergeStringWithDelimeter(doc_ids_str, ",", ms);
+            std::cout << "\n**** try to delete ids: [" << ms << "]\n" << std::endl;
             auto status = ApplyDeletes();
             if (status.ok()) {
                 break;
             } else if (status.code() == SS_STALE_ERROR) {
                 std::string err = "ApplyDeletes is stale, try again";
                 LOG_ENGINE_WARNING_ << err;
-                std::cout << err << std::endl;
+                std::cerr << "\n***" << err << "\n" << std::endl;
                 continue;
             } else {
                 std::string err = "ApplyDeletes failed: " + status.ToString();
                 LOG_ENGINE_ERROR_ << err;
-                std::cout << err << std::endl;
+                std::cerr << "\n***" << err << "\n" << std::endl;
                 return status;
             }
         }
@@ -282,8 +289,8 @@ MemCollection::ApplyDeletes() {
             segment::IdBloomFilterPtr bloom_filter;
             STATUS_CHECK(segment_writer->CreateBloomFilter(bloom_filter_file_path, bloom_filter));
             auto delete_docs = std::make_shared<segment::DeletedDocs>();
-            std::vector<id_t> uids;
-            STATUS_CHECK(segment_reader->LoadUids(uids));
+//            std::vector<id_t> uids;
+//            STATUS_CHECK(segment_reader->LoadUids(uids));
             for (size_t i = 0; i < uids.size(); i++) {
                 if (std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i])) {
                     delete_docs->AddDeletedDoc(i);
