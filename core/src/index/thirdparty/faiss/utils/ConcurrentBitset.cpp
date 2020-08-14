@@ -105,7 +105,7 @@ ConcurrentBitset::operator|=(ConcurrentBitset& bitset) {
     size_t n64 = n8 / 8;
 
     for (size_t i = 0; i < n64; i++) {
-        u64_1[i] &= u64_2[i];
+        u64_1[i] |= u64_2[i];
     }
 
     size_t remain = n8 % 8;
@@ -134,7 +134,7 @@ ConcurrentBitset::operator|(const std::shared_ptr<ConcurrentBitset>& bitset) {
     size_t n64 = n8 / 8;
 
     for (size_t i = 0; i < n64; i++) {
-        result_64[i] = u64_1[i] & u64_2[i];
+        result_64[i] = u64_1[i] | u64_2[i];
     }
 
     size_t remain = n8 % 8;
@@ -150,7 +150,7 @@ ConcurrentBitset::operator|(const std::shared_ptr<ConcurrentBitset>& bitset) {
 
 ConcurrentBitset&
 ConcurrentBitset::operator^=(ConcurrentBitset& bitset) {
-    //    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
+    //    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) { 
     //        bitset_[i].fetch_xor(bitset.bitset()[i].load());
     //    }
 

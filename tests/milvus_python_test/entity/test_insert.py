@@ -116,7 +116,6 @@ class TestInsertBase:
         connect.flush([collection])
         connect.drop_collection(collection)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_create_index(self, connect, collection, get_simple_index):
         '''
@@ -129,7 +128,6 @@ class TestInsertBase:
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
         '''
@@ -141,8 +139,6 @@ class TestInsertBase:
         ids = connect.insert(collection, entities)
         assert len(ids) == nb
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_search(self, connect, collection):
         '''
@@ -166,8 +162,6 @@ class TestInsertBase:
     def insert_count(self, request):
         yield request.param
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_ids(self, connect, id_collection, insert_count):
         '''
@@ -184,8 +178,6 @@ class TestInsertBase:
         res_count = connect.count_entities(id_collection)
         assert res_count == nb
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_the_same_ids(self, connect, id_collection, insert_count):
         '''
@@ -310,8 +302,6 @@ class TestInsertBase:
         ids = connect.insert(collection, entities, partition_tag=tag)
         assert len(ids) == nb
 
-    # TODO
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_tag_with_ids(self, connect, id_collection):
         '''
@@ -588,8 +578,6 @@ class TestAddAsync:
         future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_status)
         future.done()
 
-    # TODO:
-    @pytest.mark.level(2)
     def _test_insert_async_long(self, connect, collection):
         '''
         target: test insert vectors with different length of vectors
@@ -692,7 +680,6 @@ class TestInsertMultiCollections:
         connect.flush([collection_name])
         assert len(ids) == 1
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_create_index_insert_vector_another(self, connect, collection, get_simple_index):
         '''
@@ -706,7 +693,6 @@ class TestInsertMultiCollections:
         ids = connect.insert(collection, entity)
         connect.drop_collection(collection_name)
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_vector_create_index_another(self, connect, collection, get_simple_index):
         '''
@@ -721,7 +707,6 @@ class TestInsertMultiCollections:
         count = connect.count_entities(collection_name)
         assert count == 0
 
-    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_vector_sleep_create_index_another(self, connect, collection, get_simple_index):
         '''

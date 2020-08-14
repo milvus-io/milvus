@@ -36,6 +36,8 @@ RUN source /etc/profile.d/devtoolset-7.sh && \
 RUN yum install -y ccache && \
     rm -rf /var/cache/yum/*
 
+ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/lib"
+
 # use login shell to activate environment un the RUN commands
 SHELL [ "/bin/bash", "-c", "-l" ]
 

@@ -326,7 +326,7 @@ ClientTest::Test() {
     ListCollections(table_array);
 
     CreateCollection(collection_name);
-    GetCollectionInfo(collection_name);
+//    GetCollectionInfo(collection_name);
     GetCollectionStats(collection_name);
 
     ListCollections(table_array);
@@ -336,6 +336,7 @@ ClientTest::Test() {
     Flush(collection_name);
     CountEntities(collection_name);
     CreateIndex(collection_name, 1024);
+    GetCollectionInfo(collection_name);
     //    GetCollectionStats(collection_name);
     //
     BuildVectors(NQ, COLLECTION_DIMENSION);
