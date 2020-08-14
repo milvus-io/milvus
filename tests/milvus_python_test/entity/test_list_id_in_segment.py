@@ -200,16 +200,18 @@ class TestListIdInSegmentBase:
         assert len(vector_ids) == 1
         assert vector_ids[0] == ids[1]
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_with_index_ip(self, connect, collection, get_simple_index):
         '''
         target: get vector ids when there is index
         method: call list_id_in_segment and check if the segment contains vectors
-        expected: status ok
+        expected: ids returned in ids inserted
         '''
         get_simple_index["metric_type"] = "IP"
         ids, seg_id = get_segment_id(connect, collection, nb=nb, index_params=get_simple_index)
         vector_ids = connect.list_id_in_segment(collection, seg_id)
         # TODO: 
+        assert vector_ids == ids
 
 
 class TestListIdInSegmentBinary:
