@@ -23,9 +23,6 @@ set( CONFIG_SRCS    ConfigMgr.h
 add_library( config ${CONFIG_SRCS} )
 target_link_libraries ( config yaml-cpp )
 
-# get_target_property( YAML_CPP_INCLUDE_DIR yaml-cpp INCLUDE_DIRECTORIES )
-# target_include_directories( config PUBLIC ${YAML_CPP_INCLUDE_DIR})
-
 
 if ( BUILD_UNIT_TEST )
     add_executable( ConfigTypeTest )
