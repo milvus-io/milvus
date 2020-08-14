@@ -38,7 +38,6 @@
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
-#include "wal/WalDefinations.h"
 
 #include <fiu-local.h>
 #include <src/scheduler/job/BuildIndexJob.h>
@@ -134,9 +133,7 @@ DBImpl::Stop() {
 
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         // flush all without merge
-        wal::MXLogRecord record;
-        record.type = wal::MXLogType::Flush;
-        ExecWalRecord(record);
+        InternalFlush("", false);
 
         // wait flush thread finish
         swn_flush_.Notify();
@@ -467,15 +464,26 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     }
 
     // insert entities: collection_name is field id
-    wal::MXLogRecord record;
-    record.lsn = 0;
-    record.collection_id = collection_name;
-    record.partition_tag = partition_name;
-    record.data_chunk = data_chunk;
-    record.length = data_chunk->count_;
-    record.type = wal::MXLogType::Entity;
+    snapshot::PartitionPtr part = ss->GetPartition(partition_name);
+    if (part == nullptr) {
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << partition_name;
+        return Status(DB_ERROR, "Invalid partiiton name");
+    }
 
-    STATUS_CHECK(ExecWalRecord(record));
+    int64_t collection_id = ss->GetCollectionId();
+    int64_t partition_id = part->GetID();
+
+    auto status = mem_mgr_->InsertEntities(collection_id, partition_id, data_chunk, 0);
+    if (!status.ok()) {
+        return status;
+    }
+    if (mem_mgr_->GetCurrentMem() > options_.insert_buffer_size_) {
+        LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force flush";
+        InternalFlush();
+    }
+
+    // metrics
+    milvus::server::CollectInsertMetrics metrics(data_chunk->count_, status);
 
     return Status::OK();
 }
@@ -504,16 +512,14 @@ Status
 DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) {
     CHECK_INITIALIZED;
 
-    Status status;
-    wal::MXLogRecord record;
-    record.lsn = 0;  // need to get from meta ?
-    record.type = wal::MXLogType::Delete;
-    record.collection_id = collection_name;
-    record.ids = entity_ids.data();
-    record.length = entity_ids.size();
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (!status.ok()) {
+        LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "delete", 0) << "Get snapshot fail: " << status.message();
+        return status;
+    }
 
-    status = ExecWalRecord(record);
-
+    status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), entity_ids, 0);
     return status;
 }
 
@@ -771,11 +777,54 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
 // Internal APIs
 ////////////////////////////////////////////////////////////////////////////////
 void
-DBImpl::InternalFlush(const std::string& collection_name) {
-    wal::MXLogRecord record;
-    record.type = wal::MXLogType::Flush;
-    record.collection_id = collection_name;
-    ExecWalRecord(record);
+DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
+    Status status;
+    std::set<std::string> flushed_collections;
+    if (!collection_name.empty()) {
+        // flush one collection
+        snapshot::ScopedSnapshotT ss;
+        status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+        if (!status.ok()) {
+            LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
+            return;
+        }
+
+        {
+            const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            int64_t collection_id = ss->GetCollectionId();
+            status = mem_mgr_->Flush(collection_id);
+            if (!status.ok()) {
+                return;
+            }
+        }
+
+        flushed_collections.insert(collection_name);
+    } else {
+        // flush all collections
+        std::set<int64_t> collection_ids;
+        {
+            const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            status = mem_mgr_->Flush(collection_ids);
+            if (!status.ok()) {
+                return;
+            }
+        }
+
+        for (auto id : collection_ids) {
+            snapshot::ScopedSnapshotT ss;
+            status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, id);
+            if (!status.ok()) {
+                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
+                return;
+            }
+
+            flushed_collections.insert(ss->GetName());
+        }
+    }
+
+    if (merge) {
+        StartMergeTask(flushed_collections);
+    }
 }
 
 void
@@ -930,188 +979,6 @@ DBImpl::WaitBuildIndexFinish() {
         iter.wait();
     }
     //    LOG_ENGINE_DEBUG_ << "End WaitBuildIndexFinish";
-}
-
-void
-DBImpl::TimingWalThread() {
-    //    SetThreadName("wal_thread");
-    //    server::SystemInfo::GetInstance().Init();
-    //
-    //    std::chrono::system_clock::time_point next_auto_flush_time;
-    //    auto get_next_auto_flush_time = [&]() {
-    //        return std::chrono::system_clock::now() + std::chrono::seconds(options_.auto_flush_interval_);
-    //    };
-    //    if (options_.auto_flush_interval_ > 0) {
-    //        next_auto_flush_time = get_next_auto_flush_time();
-    //    }
-    //
-    //    InternalFlush();
-    //    while (true) {
-    //        if (options_.auto_flush_interval_ > 0) {
-    //            if (std::chrono::system_clock::now() >= next_auto_flush_time) {
-    //                InternalFlush();
-    //                next_auto_flush_time = get_next_auto_flush_time();
-    //            }
-    //        }
-    //
-    //        wal::MXLogRecord record;
-    //        auto error_code = wal_mgr_->GetNextRecord(record);
-    //        if (error_code != WAL_SUCCESS) {
-    //            LOG_ENGINE_ERROR_ << "WAL background GetNextRecord error";
-    //            break;
-    //        }
-    //
-    //        if (record.type != wal::MXLogType::None) {
-    //            ExecWalRecord(record);
-    //            if (record.type == wal::MXLogType::Flush) {
-    //                // notify flush request to return
-    //                flush_req_swn_.Notify();
-    //
-    //                // if user flush all manually, update auto flush also
-    //                if (record.collection_id.empty() && options_.auto_flush_interval_ > 0) {
-    //                    next_auto_flush_time = get_next_auto_flush_time();
-    //                }
-    //            }
-    //
-    //        } else {
-    //            if (!initialized_.load(std::memory_order_acquire)) {
-    //                InternalFlush();
-    //                flush_req_swn_.Notify();
-    //                // SS TODO
-    //                // WaitMergeFileFinish();
-    //                // WaitBuildIndexFinish();
-    //                LOG_ENGINE_DEBUG_ << "WAL background thread exit";
-    //                break;
-    //            }
-    //
-    //            if (options_.auto_flush_interval_ > 0) {
-    //                swn_wal_.Wait_Until(next_auto_flush_time);
-    //            } else {
-    //                swn_wal_.Wait();
-    //            }
-    //        }
-    //    }
-}
-
-Status
-DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
-    auto force_flush_if_mem_full = [&]() -> void {
-        if (mem_mgr_->GetCurrentMem() > options_.insert_buffer_size_) {
-            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force flush";
-            InternalFlush();
-        }
-    };
-
-    auto get_collection_partition_id = [&](const wal::MXLogRecord& record, int64_t& col_id,
-                                           int64_t& part_id) -> Status {
-        snapshot::ScopedSnapshotT ss;
-        auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
-        if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get snapshot fail: " << status.message();
-            return status;
-        }
-        col_id = ss->GetCollectionId();
-        snapshot::PartitionPtr part = ss->GetPartition(record.partition_tag);
-        if (part == nullptr) {
-            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
-            return status;
-        }
-        part_id = part->GetID();
-
-        return Status::OK();
-    };
-
-    Status status;
-
-    switch (record.type) {
-        case wal::MXLogType::Entity: {
-            int64_t collection_name = 0, partition_id = 0;
-            status = get_collection_partition_id(record, collection_name, partition_id);
-            if (!status.ok()) {
-                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << status.message();
-                return status;
-            }
-
-            status = mem_mgr_->InsertEntities(collection_name, partition_id, record.data_chunk, record.lsn);
-            force_flush_if_mem_full();
-
-            // metrics
-            milvus::server::CollectInsertMetrics metrics(record.length, status);
-            break;
-        }
-
-        case wal::MXLogType::Delete: {
-            snapshot::ScopedSnapshotT ss;
-            status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
-            if (!status.ok()) {
-                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "delete", 0) << "Get snapshot fail: " << status.message();
-                return status;
-            }
-
-            std::vector<id_t> delete_ids;
-            delete_ids.resize(record.length);
-            memcpy(delete_ids.data(), record.ids, record.length * sizeof(id_t));
-            status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), delete_ids, record.lsn);
-            if (!status.ok()) {
-                return status;
-            }
-
-            break;
-        }
-
-        case wal::MXLogType::Flush: {
-            if (!record.collection_id.empty()) {
-                // flush one collection
-                snapshot::ScopedSnapshotT ss;
-                status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, record.collection_id);
-                if (!status.ok()) {
-                    LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
-                    return status;
-                }
-
-                {
-                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-                    int64_t collection_id = ss->GetCollectionId();
-                    status = mem_mgr_->Flush(collection_id);
-                    if (!status.ok()) {
-                        return status;
-                    }
-                }
-
-                std::set<std::string> flushed_collections;
-                flushed_collections.insert(record.collection_id);
-                StartMergeTask(flushed_collections);
-
-            } else {
-                // flush all collections
-                std::set<int64_t> collection_ids;
-                {
-                    const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-                    status = mem_mgr_->Flush(collection_ids);
-                }
-
-                std::set<std::string> flushed_collections;
-                for (auto id : collection_ids) {
-                    snapshot::ScopedSnapshotT ss;
-                    status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, id);
-                    if (!status.ok()) {
-                        LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
-                        return status;
-                    }
-
-                    flushed_collections.insert(ss->GetName());
-                }
-
-                StartMergeTask(flushed_collections);
-            }
-            break;
-        }
-
-        default:
-            break;
-    }
-
-    return status;
 }
 
 void

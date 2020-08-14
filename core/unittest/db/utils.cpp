@@ -28,7 +28,6 @@
 #include "config/ServerConfig.h"
 #include "codecs/Codec.h"
 #include "db/DBFactory.h"
-#include "db/Options.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
@@ -47,69 +46,6 @@
 INITIALIZE_EASYLOGGINGPP
 
 namespace {
-
-static const char* CONFIG_STR =
-    "version: 0.5\n"
-    "\n"
-    "cluster:\n"
-    "  enable: false\n"
-    "  role: rw\n"
-    "\n"
-    "general:\n"
-    "  timezone: UTC+8\n"
-    "  meta_uri: mock://:@:/\n"
-    "\n"
-    "network:\n"
-    "  bind.address: 0.0.0.0\n"
-    "  bind.port: 19530\n"
-    "  http.enable: true\n"
-    "  http.port: 19121\n"
-    "\n"
-    "storage:\n"
-    "  path: /tmp/milvus\n"
-    "  auto_flush_interval: 1\n"
-    "\n"
-    "wal:\n"
-    "  enable: true\n"
-    "  recovery_error_ignore: false\n"
-    "  buffer_size: 256MB\n"
-    "  path: /tmp/milvus/wal\n"
-    "\n"
-    "cache:\n"
-    "  cache_size: 4GB\n"
-    "  insert_buffer_size: 1GB\n"
-    "  preload_collection:\n"
-    "\n"
-    "gpu:\n"
-    "  enable: true\n"
-    "  cache_size: 1GB\n"
-    "  gpu_search_threshold: 1000\n"
-    "  search_devices:\n"
-    "    - gpu0\n"
-    "  build_index_devices:\n"
-    "    - gpu0\n"
-    "\n"
-    "logs:\n"
-    "  level: debug\n"
-    "  trace.enable: true\n"
-    "  path: /tmp/milvus/logs\n"
-    "  max_log_file_size: 1024MB\n"
-    "  log_rotate_num: 0\n"
-    "\n"
-    "metric:\n"
-    "  enable: false\n"
-    "  address: 127.0.0.1\n"
-    "  port: 9091\n"
-    "\n";
-
-void
-WriteToFile(const std::string &file_path, const char *content) {
-    std::fstream fs(file_path.c_str(), std::ios_base::out);
-
-    // write data to file
-    fs << content;
-    fs.close();
-}
 
 class DBTestEnvironment : public ::testing::Environment {
  public:

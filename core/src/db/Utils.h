@@ -14,7 +14,6 @@
 #include <ctime>
 #include <string>
 
-#include "Options.h"
 #include "db/Types.h"
 #include "utils/Status.h"
 

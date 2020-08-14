@@ -12,7 +12,6 @@
 #pragma once
 
 #include "MergeManager.h"
-#include "db/Options.h"
 
 #include <memory>
 

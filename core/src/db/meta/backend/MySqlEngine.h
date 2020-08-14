@@ -15,7 +15,7 @@
 #include <mutex>
 #include <vector>
 
-#include "db/Options.h"
+#include "db/Types.h"
 #include "db/meta/backend/MetaEngine.h"
 #include "db/meta/backend/MySQLConnectionPool.h"
 
