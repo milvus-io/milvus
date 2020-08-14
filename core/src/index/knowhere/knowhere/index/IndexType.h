@@ -64,6 +64,7 @@ extern const char* INDEX_RHNSWFlat;
 extern const char* INDEX_RHNSWPQ;
 extern const char* INDEX_RHNSWSQ;
 extern const char* INDEX_ANNOY;
+extern const char* INDEX_NGT;
 }  // namespace IndexEnum
 
 enum class IndexMode { MODE_CPU = 0, MODE_GPU = 1 };
