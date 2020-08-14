@@ -261,6 +261,7 @@ class TestGetBase:
         for i in range(get_pos, get_pos*2):
             assert_equal_vector(res[i].get(default_float_vec_field_name), new_entities[-1]["values"][i-get_pos])
 
+    @pytest.mark.level(2)
     def test_get_entities_indexed_tag(self, connect, collection, get_simple_index, get_pos):
         '''
         target: test.get_entity_by_id
@@ -427,6 +428,7 @@ class TestGetBase:
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
+    @pytest.mark.level(2)
     def test_get_entities_indexed_single(self, connect, collection, get_simple_index, get_pos):
         '''
         target: test.get_entity_by_id

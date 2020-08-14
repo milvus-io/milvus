@@ -34,7 +34,7 @@ class TestListCollections:
         method: create collection, assert the value returned by list_collections method
         expected: True
         '''
-        collection_num = 100
+        collection_num = 50
         for i in range(collection_num):
             collection_name = gen_unique_str(collection_id)
             connect.create_collection(collection_name, default_fields)
@@ -60,6 +60,7 @@ class TestListCollections:
         collection_name = gen_unique_str(collection_id)
         assert collection_name not in connect.list_collections()
 
+    @pytest.mark.level(2)
     def test_list_collections_no_collection(self, connect):
         '''
         target: test show collections is correct or not, if no collection in db
