@@ -22,7 +22,7 @@ namespace engine {
 
 class DBProxy : public DB {
  public:
-    explicit DBProxy(const DBPtr& db);
+    DBProxy(const DBPtr& db, const DBOptions& options);
 
     Status
     Start() override;
@@ -106,6 +106,7 @@ class DBProxy : public DB {
 
  protected:
     DBPtr db_;
+    DBOptions options_;
 };
 
 }  // namespace engine

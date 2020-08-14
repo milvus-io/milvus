@@ -11,10 +11,26 @@
 
 #pragma once
 
+#include <string>
+
 namespace milvus {
 namespace engine {
 
-class ScriptCodec {};
+class ScriptCodec {
+ public:
+    ScriptCodec() = default;
+
+    static ScriptCodec&
+    GetInstance();
+
+    void
+    SetScriptPath(const std::string& path) {
+        script_path_ = path;
+    }
+
+ private:
+    std::string script_path_;
+};
 
 }  // namespace engine
 }  // namespace milvus

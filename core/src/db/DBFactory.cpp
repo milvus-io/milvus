@@ -23,12 +23,12 @@ DBFactory::BuildDB(const DBOptions& options) {
 
     // need wal? wal must be after db
     if (options.wal_enable_) {
-        db = std::make_shared<WriteAheadLog>(db);
+        db = std::make_shared<WriteAheadLog>(db, options);
     }
 
     // need transcript? transcript must be after wal
     if (options.transcript_enable_) {
-        db = std::make_shared<Transcript>(db, options.replay_script_path_);
+        db = std::make_shared<Transcript>(db, options);
     }
 
     return db;

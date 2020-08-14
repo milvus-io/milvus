@@ -22,7 +22,7 @@ namespace engine {
 
 class Transcript : public DBProxy {
  public:
-    Transcript(const DBPtr& db, const std::string& replay_script_path);
+    Transcript(const DBPtr& db, const DBOptions& options);
 
     Status
     Start() override;
@@ -105,7 +105,6 @@ class Transcript : public DBProxy {
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) override;
 
  private:
-    std::string replay_script_path_;
 };
 
 }  // namespace engine

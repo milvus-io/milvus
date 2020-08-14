@@ -16,7 +16,7 @@
 namespace milvus {
 namespace engine {
 
-WriteAheadLog::WriteAheadLog(const DBPtr& db) : DBProxy(db) {
+WriteAheadLog::WriteAheadLog(const DBPtr& db, const DBOptions& options) : DBProxy(db, options) {
     // db must implemented
     if (db == nullptr) {
         throw Exception(DB_ERROR, "null pointer");

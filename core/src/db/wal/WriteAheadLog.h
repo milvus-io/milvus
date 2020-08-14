@@ -22,7 +22,7 @@ namespace engine {
 
 class WriteAheadLog : public DBProxy {
  public:
-    explicit WriteAheadLog(const DBPtr& db);
+    WriteAheadLog(const DBPtr& db, const DBOptions& options);
 
     Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) override;

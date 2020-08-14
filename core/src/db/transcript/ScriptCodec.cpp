@@ -12,5 +12,13 @@
 #include "db/transcript/ScriptCodec.h"
 
 namespace milvus {
-namespace engine {}  // namespace engine
+namespace engine {
+
+ScriptCodec&
+ScriptCodec::GetInstance() {
+    static ScriptCodec s_codec;
+    return s_codec;
+}
+
+}  // namespace engine
 }  // namespace milvus

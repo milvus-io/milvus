@@ -19,7 +19,7 @@ namespace engine {
         return Status::OK(); \
     }
 
-DBProxy::DBProxy(const DBPtr& db) : db_(db) {
+DBProxy::DBProxy(const DBPtr& db, const DBOptions& options) : db_(db), options_(options) {
 }
 
 Status

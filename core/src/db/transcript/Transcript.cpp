@@ -12,14 +12,15 @@
 #include "db/transcript/Transcript.h"
 #include "db/transcript/ScriptCodec.h"
 #include "db/transcript/ScriptReplay.h"
-
+#include "utils/CommonUtil.h"
 #include "utils/Exception.h"
+
+#include <boost/filesystem.hpp>
 
 namespace milvus {
 namespace engine {
 
-Transcript::Transcript(const DBPtr& db, const std::string& replay_script_path)
-    : DBProxy(db), replay_script_path_(replay_script_path) {
+Transcript::Transcript(const DBPtr& db, const DBOptions& options) : DBProxy(db, options) {
     // db must implemented
     if (db == nullptr) {
         throw Exception(DB_ERROR, "null pointer");
@@ -35,9 +36,22 @@ Transcript::Start() {
     }
 
     // replay script in necessary
-    if (!replay_script_path_.empty()) {
+    if (!options_.replay_script_path_.empty()) {
         ScriptReplay replay;
-        return replay.Replay(db_, replay_script_path_);
+        return replay.Replay(db_, options_.replay_script_path_);
+    } else {
+        ScriptCodec& codec = ScriptCodec::GetInstance();
+        boost::filesystem::path db_path(options_.meta_.path_);
+        auto transcript_path = db_path.parent_path();
+        transcript_path /= "transcript";
+        std::string path = transcript_path.c_str();
+        status = CommonUtil::CreateDirectory(path);
+        if (!status.ok()) {
+            std::cerr << "Error: Failed to create transcript path: " << path << std::endl;
+            kill(0, SIGUSR1);
+        }
+
+        codec.SetScriptPath(path);
     }
 
     return Status::OK();
