@@ -76,6 +76,12 @@ storage:
 #                      | files in advance before implementing data changes. WAL     |            |                 |
 #                      | ensures the atomicity and durability for Milvus operations.|            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# recovery_error_ignore| Whether to ignore logs with errors that happens during WAL | Boolean    | false           |
+#                      | recovery. If true, when Milvus restarts for recovery and   |            |                 |
+#                      | there are errors in WAL log files, log files with errors   |            |                 |
+#                      | are ignored. If false, Milvus does not restart when there  |            |                 |
+#                      | are errors in WAL log files.                               |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 # buffer_size          | Sum total of the read buffer and the write buffer in Bytes.| String     | 256MB           |
 #                      | buffer_size must be in range [64MB, 4096MB].               |            |                 |
 #                      | If the value you specified is out of range, Milvus         |            |                 |
@@ -88,6 +94,7 @@ storage:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 wal:
   enable: true
+  recovery_error_ignore: false
   buffer_size: 256MB
   path: @MILVUS_DB_PATH@/wal
 

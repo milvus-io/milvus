@@ -102,6 +102,9 @@ ConfigMgr::ConfigMgr() {
 
         /* wal */
         {"wal.enable", CreateBoolConfig("wal.enable", false, &config.wal.enable.value, true, nullptr, nullptr)},
+        {"wal.recovery_error_ignore",
+         CreateBoolConfig("wal.recovery_error_ignore", false, &config.wal.recovery_error_ignore.value, false, nullptr,
+                          nullptr)},
         {"wal.buffer_size", CreateSizeConfig("wal.buffer_size", false, 64 * MB, 4096 * MB,
                                              &config.wal.buffer_size.value, 256 * MB, nullptr, nullptr)},
         {"wal.path",

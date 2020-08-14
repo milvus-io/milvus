@@ -82,7 +82,7 @@ class DB {
     ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) = 0;
 
     virtual Status
-    CreateIndex(const server::ContextPtr& context, const std::string& collection_id, const std::string& field_name,
+    CreateIndex(const server::ContextPtr& context, const std::string& collection_name, const std::string& field_name,
                 const CollectionIndex& index) = 0;
 
     virtual Status
@@ -103,7 +103,7 @@ class DB {
     DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) = 0;
 
     virtual Status
-    ListIDInSegment(const std::string& collection_id, int64_t segment_id, IDNumbers& entity_ids) = 0;
+    ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) = 0;
 
     virtual Status
     Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) = 0;
