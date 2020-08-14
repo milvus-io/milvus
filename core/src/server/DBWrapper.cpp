@@ -121,20 +121,14 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
-    //    // preload collection
-    //    std::string preload_collections;
-    //    s = config.GetCacheConfigPreloadCollection(preload_collections);
-    //    if (!s.ok()) {
-    //        std::cerr << s.ToString() << std::endl;
-    //        return s;
-    //    }
-    //
-    //    s = PreloadCollections(preload_collections);
-    //    if (!s.ok()) {
-    //        std::cerr << "ERROR! Failed to preload tables: " << preload_collections << std::endl;
-    //        std::cerr << s.ToString() << std::endl;
-    //        kill(0, SIGUSR1);
-    //    }
+    // preload collection
+    std::string preload_collections = config.cache.preload_collection();
+    s = PreloadCollections(preload_collections);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to preload collections: " << preload_collections << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
 
     return Status::OK();
 }
@@ -150,38 +144,39 @@ DBWrapper::StopService() {
     return Status::OK();
 }
 
-// Status
-// DBWrapper::PreloadCollections(const std::string& preload_collections) {
-//    if (preload_collections.empty()) {
-//        // do nothing
-//    } else if (preload_collections == "*") {
-//        // load all tables
-//        // SS TODO: Replace name with id
-//        std::vector<std::string> names;
-//        auto status = db_->AllCollections(names);
-//        if (!status.ok()) {
-//            return status;
-//        }
-//
-//        for (auto& name : names) {
-//            auto status = db_->PreloadCollection(nullptr, name);
-//            if (!status.ok()) {
-//                return status;
-//            }
-//        }
-//    } else {
-//        std::vector<std::string> collection_names;
-//        StringHelpFunctions::SplitStringByDelimeter(preload_collections, ",", collection_names);
-//        for (auto& name : collection_names) {
-//            auto status = db_->PreloadCollection(nullptr, name);
-//            if (!status.ok()) {
-//                return status;
-//            }
-//        }
-//    }
-//
-//    return Status::OK();
-//}
+Status
+DBWrapper::PreloadCollections(const std::string& preload_collections) {
+    if (preload_collections.empty()) {
+        // do nothing
+    } else if (preload_collections == "*") {
+        // load all collections
+        std::vector<std::string> names;
+        auto status = db_->ListCollections(names);
+        if (!status.ok()) {
+            return status;
+        }
+
+        for (auto& name : names) {
+            std::vector<std::string> field_names;  // input empty field names will load all fileds
+            auto status = db_->LoadCollection(nullptr, name, field_names);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+    } else {
+        std::vector<std::string> collection_names;
+        StringHelpFunctions::SplitStringByDelimeter(preload_collections, ",", collection_names);
+        for (auto& name : collection_names) {
+            std::vector<std::string> field_names;  // input empty field names will load all fileds
+            auto status = db_->LoadCollection(nullptr, name, field_names);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+    }
+
+    return Status::OK();
+}
 
 }  // namespace server
 }  // namespace milvus

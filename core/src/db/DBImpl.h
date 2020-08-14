@@ -102,6 +102,7 @@ class DBImpl : public DB, public ConfigObserver {
     Status
     ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) override;
 
+    // if the input field_names is empty, will load all fields of this collection
     Status
     LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
                    const std::vector<std::string>& field_names, bool force = false) override;
