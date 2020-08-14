@@ -11,6 +11,13 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
+if ( DEFINED ENV{MILVUS_GRPC_URL} )
+    set( GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}" )
+else()
+    set( GRPC_SOURCE_URL
+         "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip" )
+endif()
+
 message( STATUS "Building GRPC-${GRPC_VERSION} from source" )
 FetchContent_Declare(
     grpc
