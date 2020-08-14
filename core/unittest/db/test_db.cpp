@@ -17,6 +17,7 @@
 #include <set>
 #include <string>
 #include <experimental/filesystem>
+#include <src/cache/CpuCacheMgr.h>
 
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
@@ -617,9 +618,9 @@ TEST_F(DBTest, MergeTest) {
         std::string res_path = milvus::engine::snapshot::GetResPath<SegmentFile>(root_path, segment_file);
         if (std::experimental::filesystem::is_regular_file(res_path) ||
             std::experimental::filesystem::is_regular_file(res_path +
-                milvus::codec::IdBloomFilterFormat::FilePostfix()) ||
+                                                           milvus::codec::IdBloomFilterFormat::FilePostfix()) ||
             std::experimental::filesystem::is_regular_file(res_path +
-                milvus::codec::DeletedDocsFormat::FilePostfix())) {
+                                                           milvus::codec::DeletedDocsFormat::FilePostfix())) {
             segment_file_paths.insert(res_path);
             std::cout << res_path << std::endl;
         }
@@ -660,7 +661,7 @@ TEST_F(DBTest, GetEntityTest) {
     };
 
     auto fill_field_names = [&](const milvus::engine::snapshot::FieldElementMappings& field_mappings,
-            std::vector<std::string>& field_names) -> void {
+                                std::vector<std::string>& field_names) -> void {
         if (field_names.empty()) {
             for (const auto& schema : field_mappings) {
                 field_names.emplace_back(schema.first->GetName());
@@ -704,9 +705,6 @@ TEST_F(DBTest, GetEntityTest) {
     status = db_->GetCollectionInfo(collection_name, collection, field_mappings);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
-
-
-
     {
         std::vector<std::string> field_names;
         fill_field_names(field_mappings, field_names);
@@ -717,12 +715,11 @@ TEST_F(DBTest, GetEntityTest) {
         ASSERT_TRUE(status.ok()) << status.ToString();
         ASSERT_TRUE(get_data_chunk->count_ == get_row_size(valid_row));
 
-        for (const auto &name : field_names) {
+        for (const auto& name : field_names) {
             ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->Size() == dataChunkPtr->fixed_fields_[name]->Size());
             ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->data_ == dataChunkPtr->fixed_fields_[name]->data_);
         }
     }
-
 
     {
         std::vector<std::string> field_names;
@@ -750,7 +747,7 @@ TEST_F(DBTest, GetEntityTest) {
         ASSERT_TRUE(status.ok()) << status.ToString();
         ASSERT_TRUE(get_data_chunk->count_ == get_row_size(valid_row));
 
-        for (const auto &name : field_names) {
+        for (const auto& name : field_names) {
             ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->Size() == dataChunkPtr->fixed_fields_[name]->Size());
             ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->data_ == dataChunkPtr->fixed_fields_[name]->data_);
         }
@@ -1099,7 +1096,6 @@ TEST_F(DBTest, FetchTest) {
 
         milvus::engine::IDNumbers segment_entity_ids;
         status = db_->ListIDInSegment(collection_name, id, segment_entity_ids);
-        std::cout << status.message() << std::endl;
         ASSERT_TRUE(status.ok());
 
         if (tag == partition_name) {
@@ -1255,7 +1251,7 @@ TEST_F(DBTest, DeleteStaleTest) {
     status = db_->Flush(collection_name);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
-    for (size_t i = 0; i < del_id_pair; i ++) {
+    for (size_t i = 0; i < del_id_pair; i++) {
         del_ids.push_back(entity_ids[i]);
         del_ids.push_back(entity_ids2[i]);
     }
@@ -1280,4 +1276,59 @@ TEST_F(DBTest, DeleteStaleTest) {
 //        ASSERT_TRUE(status.ok()) << status.ToString();
 //        ASSERT_EQ(entity_data_chunk->count_, 0) << "[" << j << "] Delete id " << del_ids[j] << " failed.";
 //    }
+}
+
+TEST_F(DBTest, LoadTest) {
+    std::string collection_name = "LOAD_TEST";
+    auto status = CreateCollection2(db_, collection_name, 0);
+    ASSERT_TRUE(status.ok());
+
+    std::string partition_name = "p1";
+    status = db_->CreatePartition(collection_name, partition_name);
+    ASSERT_TRUE(status.ok());
+
+    // insert 1000 entities into default partition
+    // insert 1000 entities into partition 'p1'
+    const uint64_t entity_count = 1000;
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities(entity_count, 0, data_chunk);
+
+    status = db_->Insert(collection_name, "", data_chunk);
+    ASSERT_TRUE(status.ok());
+
+    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
+
+    status = db_->Insert(collection_name, partition_name, data_chunk);
+    ASSERT_TRUE(status.ok());
+
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok());
+
+    auto& cache_mgr = milvus::cache::CpuCacheMgr::GetInstance();
+    cache_mgr.ClearCache();
+
+    // load "vector", "field_1"
+    std::vector<std::string> fields = {VECTOR_FIELD_NAME, "field_1"};
+    status = db_->LoadCollection(dummy_context_, collection_name, fields);
+    ASSERT_TRUE(status.ok());
+
+    // 2 segments, 2 fields, at least 4 files loaded
+    ASSERT_GE(cache_mgr.ItemCount(), 4);
+
+    int64_t total_size = entity_count * (COLLECTION_DIM * sizeof(float) + sizeof(int64_t)) * 2;
+    ASSERT_GE(cache_mgr.CacheUsage(), total_size);
+
+    // load all fields
+    fields.clear();
+    cache_mgr.ClearCache();
+
+    status = db_->LoadCollection(dummy_context_, collection_name, fields);
+    ASSERT_TRUE(status.ok());
+
+    // 2 segments, 4 fields, at least 8 files loaded
+    ASSERT_GE(cache_mgr.ItemCount(), 8);
+
+    total_size =
+        entity_count * (COLLECTION_DIM * sizeof(float) + sizeof(int32_t) + sizeof(int64_t) + sizeof(double)) * 2;
+    ASSERT_GE(cache_mgr.CacheUsage(), total_size);
 }

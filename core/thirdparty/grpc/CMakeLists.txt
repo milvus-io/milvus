@@ -1,5 +1,5 @@
- # Another way is to use CMake's FetchContent module to clone gRPC at
-# configure time. This makes gRPC's source code available to your project,
+# Another way is to use CMake's FetchContent module to clone gRPC at
+# configure time. This makes gRPC's source code available to project,
 message(STATUS "Building GRPC-${GRPC_VERSION} from source")
 # ******************************************************************
 # FetchContent
@@ -13,24 +13,12 @@ FetchContent_Declare(
     )
 set(FETCHCONTENT_QUIET OFF)
 
-# Compile options for grpc only
-add_compile_options(    ${EP_COMMON_TOOLCHAIN}
-                        "-D CMAKE_BUILD_TYPE=Release"
-                        "-D CMAKE_C_FLAGS=${EP_C_FLAGS}"
-                        "-D CMAKE_C_FLAGS_${UPPERCASE_BUILD_TYPE}=${EP_C_FLAGS}"
-                        "-D CMAKE_CXX_FLAGS=${EP_CXX_FLAGS}"
-                        "-D CMAKE_CXX_FLAGS_${UPPERCASE_BUILD_TYPE}=${EP_CXX_FLAGS}"
-                        )
-
 # using openSSL rather than boringssl
 set(gRPC_SSL_PROVIDER "package" CACHE STRING "OPENSSL" FORCE)
-# zlib build by grpc
-set( gRPC_ZLIB_PROVIDER "module" )
 FetchContent_GetProperties( grpc )
 if ( NOT grpc_POPULATED )
 
-    FetchContent_Populate( grpc
-        )
+    FetchContent_Populate( grpc )
 
     # Adding the following targets:
     # libprotobuf
@@ -45,7 +33,7 @@ endif()
 
 # get grpc COMPILE_OPTIONS )
 get_property(var DIRECTORY "${grpc_SOURCE_DIR}" PROPERTY COMPILE_OPTIONS )
-message(STATUS "grpc compile options: ${var}")
+message(STATUS "grpc src compile options: ${var}")
 
 
 # **************************************************************************
@@ -98,5 +86,3 @@ add_custom_command(
 # Include generated *.pb.h files
 include_directories("${MILVUS_SOURCE_DIR}/gen-milvus-test")
 include_directories("${MILVUS_SOURCE_DIR}/gen-status-test")
-
-

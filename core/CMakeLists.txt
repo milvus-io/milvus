@@ -66,7 +66,6 @@ set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
 set(FETCHCONTENT_QUIET OFF)
 include( ThirdPartyPackages )
 
-add_subdirectory( thirdparty )
 
 
 # **************************** Compiler arguments ****************************
@@ -112,6 +111,7 @@ append_flags( CMAKE_CXX_FLAGS
 
 # **************************** Source files ****************************
 
+add_subdirectory( thirdparty )
 add_subdirectory( src )
 
 # Unittest lib
