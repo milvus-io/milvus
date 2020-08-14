@@ -16,9 +16,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "db/Options.h"
 #include "db/SimpleWaitNotify.h"
 #include "db/SnapshotHandlers.h"
+#include "db/Types.h"
 #include "db/insert/MemManager.h"
 #include "db/merge/MergeManager.h"
 #include "db/snapshot/Context.h"

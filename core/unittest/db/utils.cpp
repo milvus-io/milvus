@@ -28,7 +28,6 @@
 #include "config/ServerConfig.h"
 #include "codecs/Codec.h"
 #include "db/DBFactory.h"
-#include "db/Options.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
