@@ -18,6 +18,7 @@ aux_source_directory( ${MILVUS_ENGINE_SRC}/db/insert        DB_INSERT_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/merge         DB_MERGE_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/wal           DB_WAL_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/snapshot      DB_SNAPSHOT_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/transcript    DB_TRANSCRIPT_FILES )
 
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta          DB_META_MAIN_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta/backend  DB_META_BACKEND_FILES )
@@ -42,6 +43,7 @@ set( ENGINE_FILES   ${DB_MAIN_FILES}
                     ${DB_MERGE_FILES}
                     ${DB_WAL_FILES}
                     ${DB_SNAPSHOT_FILES}
+                    ${DB_TRANSCRIPT_FILES}
                     ${THIRDPARTY_FILES}
                     ${WRAPPER_FILES}
                     )

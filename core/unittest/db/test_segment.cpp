@@ -29,7 +29,7 @@ using SegmentVisitor = milvus::engine::SegmentVisitor;
 
 namespace {
 milvus::Status
-CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
+CreateCollection(std::shared_ptr<DB> db, const std::string& collection_name, const LSN_TYPE& lsn) {
     CreateCollectionContext context;
     context.lsn = lsn;
     auto collection_schema = std::make_shared<Collection>(collection_name);
