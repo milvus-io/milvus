@@ -15,8 +15,7 @@ if ( DEFINED ENV{MILVUS_YAMLCPP_URL} )
     set( YAMLCPP_SOURCE_URL "$ENV{MILVUS_YAMLCPP_URL}" )
 else()
     set( YAMLCPP_SOURCE_URL
-        "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz"
-        "https://gitee.com/quicksilver/yaml-cpp/repository/archive/yaml-cpp-${YAMLCPP_VERSION}.zip" )
+        "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz" )
 endif()
 
 message( STATUS "Building yaml-cpp-${YAMLCPP_VERSION} from source" )
