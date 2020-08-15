@@ -34,23 +34,11 @@ find_package( Threads REQUIRED )
 
 # ****************************** Thirdparty googletest ***************************************
 if ( MILVUS_BUILD_TESTS )
-    if ( DEFINED ENV{MILVUS_GTEST_URL} )
-        set( GTEST_SOURCE_URL "$ENV{MILVUS_GTEST_URL}" )
-    else()
-        set( GTEST_SOURCE_URL
-            "https://gitee.com/quicksilver/googletest/repository/archive/release-${GTEST_VERSION}.zip" )
-    endif()
     add_subdirectory( gtest )
 endif()
 
 # ****************************** Thirdparty grpc ***************************************
 if ( MILVUS_WITH_GRPC )
-    if ( DEFINED ENV{MILVUS_GRPC_URL} )
-        set( GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}" )
-    else()
-        set( GRPC_SOURCE_URL
-             "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip" )
-    endif()
     add_subdirectory( grpc )
 endif ()
 

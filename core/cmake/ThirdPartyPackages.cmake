@@ -16,7 +16,6 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         SQLite
         libunwind
         gperftools
-        ZLIB
         Opentracing
         fiu
         AWS
@@ -42,8 +41,6 @@ macro(build_dependency DEPENDENCY_NAME)
         build_libunwind()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "gperftools")
         build_gperftools()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "ZLIB")
-        build_zlib()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "Opentracing")
         build_opentracing()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "fiu")
@@ -254,13 +251,6 @@ if (DEFINED ENV{MILVUS_GPERFTOOLS_URL})
 else ()
     set(GPERFTOOLS_SOURCE_URL
             "https://github.com/gperftools/gperftools/releases/download/gperftools-${GPERFTOOLS_VERSION}/gperftools-${GPERFTOOLS_VERSION}.tar.gz")
-endif ()
-
-if (DEFINED ENV{MILVUS_ZLIB_URL})
-    set(ZLIB_SOURCE_URL "$ENV{MILVUS_ZLIB_URL}")
-else ()
-    set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz"
-                        "https://gitee.com/quicksilver/zlib/repository/archive/${ZLIB_VERSION}.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_OPENTRACING_URL})
@@ -572,48 +562,6 @@ if (MILVUS_WITH_GPERFTOOLS)
     get_target_property(GPERFTOOLS_INCLUDE_DIR gperftools INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${GPERFTOOLS_INCLUDE_DIR})
     link_directories(SYSTEM ${GPERFTOOLS_PREFIX}/lib)
-endif ()
-
-# ----------------------------------------------------------------------
-# zlib
-
-macro(build_zlib)
-    message(STATUS "Building ZLIB-${ZLIB_VERSION} from source")
-    set(ZLIB_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix/src/zlib_ep")
-    set(ZLIB_STATIC_LIB_NAME libz.a)
-    set(ZLIB_STATIC_LIB "${ZLIB_PREFIX}/lib/${ZLIB_STATIC_LIB_NAME}")
-    set(ZLIB_INCLUDE_DIR "${ZLIB_PREFIX}/include")
-    set(ZLIB_CMAKE_ARGS ${EP_COMMON_CMAKE_ARGS} "-DCMAKE_INSTALL_PREFIX=${ZLIB_PREFIX}"
-            -DBUILD_SHARED_LIBS=OFF)
-
-    ExternalProject_Add(zlib_ep
-            URL
-            ${ZLIB_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            URL_MD5
-            "0095d2d2d1f3442ce1318336637b695f"
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            "${ZLIB_STATIC_LIB}"
-            CMAKE_ARGS
-            ${ZLIB_CMAKE_ARGS})
-
-    file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
-    add_library(zlib STATIC IMPORTED)
-    set_target_properties(zlib
-            PROPERTIES IMPORTED_LOCATION "${ZLIB_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ZLIB_INCLUDE_DIR}")
-
-    add_dependencies(zlib zlib_ep)
-endmacro()
-
-if (MILVUS_WITH_ZLIB)
-    # resolve_dependency(ZLIB)
-    #
-    # get_target_property(ZLIB_INCLUDE_DIR zlib INTERFACE_INCLUDE_DIRECTORIES)
-    # include_directories(SYSTEM ${ZLIB_INCLUDE_DIR})
 endif ()
 
 # ----------------------------------------------------------------------

@@ -27,7 +27,7 @@
 #include "cache/GpuCacheMgr.h"
 #include "config/ServerConfig.h"
 #include "codecs/Codec.h"
-#include "db/DBFactory.h"
+#include "db/DBImpl.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
