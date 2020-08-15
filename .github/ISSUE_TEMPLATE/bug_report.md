@@ -7,7 +7,7 @@ assignees: ''
 
 ---
 
-**Please state you issue using the following template and, most importantly, in English.**
+**Please state your issue using the following template and, most importantly, in English.**
 
 **Describe the bug**
 A clear and concise description of what the bug is.
