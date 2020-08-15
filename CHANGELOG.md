@@ -2,7 +2,16 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.10.2 (TBD)
+# Milvus 0.10.3 (TBD)
+## Bug
+
+## Feature
+
+## Improvement
+
+## Task
+
+# Milvus 0.10.2 (2020-08-15)
 
 ## Bug
 -   \#2890 Fix the index size caculation in cache
