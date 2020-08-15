@@ -29,11 +29,14 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#define WEB_LOG_PREFIX "[Web] "
-
 namespace milvus {
 namespace server {
 namespace web {
+
+#define WEB_LOG_PREFIX "[Web] "
+
+#define ADD_DEFAULT_CORS(endpoint) \
+    ADD_CORS(endpoint, "*", "OPTIONS, GET, POST, PUT, DELETE")
 
 class WebController : public oatpp::web::server::api::ApiController {
  public:
@@ -52,7 +55,7 @@ class WebController : public oatpp::web::server::api::ApiController {
      */
 #include OATPP_CODEGEN_BEGIN(ApiController)
 
-    ADD_CORS(root)
+    ADD_DEFAULT_CORS(root)
 
     ENDPOINT("GET", "/", root) {
         auto response = createResponse(Status::CODE_200, "Welcome to milvus");
@@ -60,7 +63,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(State)
+    ADD_DEFAULT_CORS(State)
 
     ENDPOINT("GET", "/state", State) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/state\'");
@@ -68,7 +71,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return createDtoResponse(Status::CODE_200, StatusDto::createShared());
     }
 
-    ADD_CORS(GetDevices)
+    ADD_DEFAULT_CORS(GetDevices)
 
     ENDPOINT("GET", "/devices", GetDevices) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/devices\'");
@@ -92,13 +95,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(AdvancedConfigOptions)
+    ADD_DEFAULT_CORS(AdvancedConfigOptions)
 
     ENDPOINT("OPTIONS", "/config/advanced", AdvancedConfigOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ADD_CORS(GetAdvancedConfig)
+    ADD_DEFAULT_CORS(GetAdvancedConfig)
 
     ENDPOINT("GET", "/config/advanced", GetAdvancedConfig) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/config/advanced\'");
@@ -123,7 +126,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(SetAdvancedConfig)
+    ADD_DEFAULT_CORS(SetAdvancedConfig)
 
     ENDPOINT("PUT", "/config/advanced", SetAdvancedConfig, BODY_DTO(AdvancedConfigDtoT, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/config/advanced\'");
@@ -149,13 +152,13 @@ class WebController : public oatpp::web::server::api::ApiController {
 
 #ifdef MILVUS_GPU_VERSION
 
-    ADD_CORS(GPUConfigOptions)
+    ADD_DEFAULT_CORS(GPUConfigOptions)
 
     ENDPOINT("OPTIONS", "/config/gpu_resources", GPUConfigOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ADD_CORS(GetGPUConfig)
+    ADD_DEFAULT_CORS(GetGPUConfig)
 
     ENDPOINT("GET", "/config/gpu_resources", GetGPUConfig) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/config/gpu_resources\'");
@@ -181,7 +184,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(SetGPUConfig)
+    ADD_DEFAULT_CORS(SetGPUConfig)
 
     ENDPOINT("PUT", "/config/gpu_resources", SetGPUConfig, BODY_DTO(GPUConfigDto::ObjectWrapper, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/config/gpu_resources\'");
@@ -207,13 +210,13 @@ class WebController : public oatpp::web::server::api::ApiController {
 
 #endif
 
-    ADD_CORS(CollectionsOptions)
+    ADD_DEFAULT_CORS(CollectionsOptions)
 
     ENDPOINT("OPTIONS", "/collections", CollectionsOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ADD_CORS(CreateCollection)
+    ADD_DEFAULT_CORS(CreateCollection)
 
     ENDPOINT("POST", "/collections", CreateCollection, BODY_STRING(String, body_str)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections\'");
@@ -238,7 +241,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(ShowCollections)
+    ADD_DEFAULT_CORS(ShowCollections)
 
     ENDPOINT("GET", "/collections", ShowCollections, QUERIES(QueryParams, query_params)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections\'");
@@ -283,13 +286,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(CollectionOptions)
+    ADD_DEFAULT_CORS(CollectionOptions)
 
     ENDPOINT("OPTIONS", "/collections/{collection_name}", CollectionOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ADD_CORS(GetCollection)
+    ADD_DEFAULT_CORS(GetCollection)
 
     ENDPOINT("GET", "/collections/{collection_name}", GetCollection, PATH(String, collection_name),
              QUERIES(QueryParams, query_params)) {
@@ -333,7 +336,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(DropCollection)
+    ADD_DEFAULT_CORS(DropCollection)
 
     ENDPOINT("DELETE", "/collections/{collection_name}", DropCollection, PATH(String, collection_name)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "DELETE \'/collections/" + collection_name->std_str() + "\'");
@@ -361,13 +364,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(IndexOptions)
+    ADD_DEFAULT_CORS(IndexOptions)
 
     ENDPOINT("OPTIONS", "/collections/{collection_name}/indexes", IndexOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ADD_CORS(CreateIndex)
+    ADD_DEFAULT_CORS(CreateIndex)
 
     ENDPOINT("POST", "/collections/{collection_name}/fields/{field_name}/indexes/{index_name}", CreateIndex,
              PATH(String, collection_name), PATH(String, field_name), PATH(String, index_name),
@@ -397,7 +400,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    //    ADD_CORS(GetIndex)
+    //    ADD_DEFAULT_CORS(GetIndex)
     //
     //    ENDPOINT("GET", "/collections/{collection_name}/fields/{field_name}/indexes", GetIndex,
     //             PATH(String, collection_name), PATH(String, field_name)) {
@@ -429,7 +432,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     //        return response;
     //    }
 
-    ADD_CORS(DropIndex)
+    ADD_DEFAULT_CORS(DropIndex)
 
     ENDPOINT("DELETE", "/collections/{collection_name}/fields/{field_name}/indexes/{index_name}", DropIndex,
              PATH(String, collection_name), PATH(String, field_name), PATH(String, index_name)) {
@@ -459,13 +462,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(PartitionsOptions)
+    ADD_DEFAULT_CORS(PartitionsOptions)
 
     ENDPOINT("OPTIONS", "/collections/{collection_name}/partitions", PartitionsOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ADD_CORS(CreatePartition)
+    ADD_DEFAULT_CORS(CreatePartition)
 
     ENDPOINT("POST", "/collections/{collection_name}/partitions", CreatePartition, PATH(String, collection_name),
              BODY_DTO(PartitionRequestDtoT, body)) {
@@ -494,7 +497,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(ShowPartitions)
+    ADD_DEFAULT_CORS(ShowPartitions)
 
     ENDPOINT("GET", "/collections/{collection_name}/partitions", ShowPartitions, PATH(String, collection_name),
              QUERIES(QueryParams, query_params)) {
@@ -527,7 +530,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(DropPartition)
+    ADD_DEFAULT_CORS(DropPartition)
 
     ENDPOINT("DELETE", "/collections/{collection_name}/partitions", DropPartition, PATH(String, collection_name),
              BODY_STRING(String, body)) {
@@ -556,7 +559,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(GetEntities)
+    ADD_DEFAULT_CORS(GetEntities)
 
     ENDPOINT("GET", "/collections/{collection_name}/partitions/{partition_tag}/entities", GetEntities,
              PATH(String, collection_name), PATH(String, partition_tag), QUERIES(QueryParams, query_params),
@@ -575,7 +578,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     }
 
-    ADD_CORS(ShowSegments)
+    ADD_DEFAULT_CORS(ShowSegments)
 
     ENDPOINT("GET", "/collections/{collection_name}/segments", ShowSegments, PATH(String, collection_name),
              QUERIES(QueryParams, query_params)) {
@@ -596,7 +599,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     }
 
-    ADD_CORS(GetSegmentInfo)
+    ADD_DEFAULT_CORS(GetSegmentInfo)
     /**
      *
      * GetSegmentVector
@@ -621,13 +624,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     }
 
-    ADD_CORS(VectorsOptions)
+    ADD_DEFAULT_CORS(VectorsOptions)
 
     ENDPOINT("OPTIONS", "/collections/{collection_name}/entities", VectorsOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ADD_CORS(InsertEntity)
+    ADD_DEFAULT_CORS(InsertEntity)
 
     ENDPOINT("POST", "/hybrid_collections/{collection_name}/entities", InsertEntity, PATH(String, collection_name),
              BODY_STRING(String, body)) {
@@ -657,7 +660,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(EntityOp)
+    ADD_DEFAULT_CORS(EntityOp)
 
     ENDPOINT("PUT", "/hybrid_collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
              BODY_STRING(String, body)) {
@@ -687,13 +690,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(SystemOptions)
+    ADD_DEFAULT_CORS(SystemOptions)
 
     ENDPOINT("OPTIONS", "/system/{info}", SystemOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ADD_CORS(SystemInfo)
+    ADD_DEFAULT_CORS(SystemInfo)
 
     ENDPOINT("GET", "/system/{info}", SystemInfo, PATH(String, info), QUERIES(QueryParams, query_params)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/system/" + info->std_str() + "\'");
@@ -717,7 +720,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_CORS(SystemOp)
+    ADD_DEFAULT_CORS(SystemOp)
 
     ENDPOINT("PUT", "/system/{op}", SystemOp, PATH(String, op), BODY_STRING(String, body_str)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/system/" + op->std_str() + "\'");
