@@ -42,6 +42,21 @@ class TestLoadCollection:
         connect.create_index(collection, field_name, get_simple_index)
         connect.load_collection(collection)
 
+    # TODO:
+    @pytest.mark.level(1)
+    def test_load_collection_after_index_binary(self, connect, binary_collection):
+        '''
+        target: test load binary_collection, after index created
+        method: insert and create index, load binary_collection with correct params
+        expected: describe raise exception
+        ''' 
+        # connect.insert(binary_collection, entities)
+        # connect.flush([binary_collection])
+        # logging.getLogger().info(get_simple_index)
+        # connect.create_index(binary_collection, field_name, get_simple_index)
+        # connect.load_collection(binary_collection)
+        pass
+
     def load_empty_collection(self, connect, collection):
         '''
         target: test load collection
@@ -50,7 +65,7 @@ class TestLoadCollection:
         '''
         connect.load_collection(collection)
 
-    @pytest.mark.level(1)
+    @pytest.mark.level(2)
     def test_load_collection_dis_connect(self, dis_connect, collection):
         '''
         target: test load collection, without connection
@@ -65,6 +80,15 @@ class TestLoadCollection:
         collection_name = gen_unique_str(collection_id)
         with pytest.raises(Exception) as e:
             connect.load_collection(collection_name)
+
+    # TODO:
+    @pytest.mark.level(2)
+    def test_load_collection_after_search(self, connect, collection):
+        pass
+
+    @pytest.mark.level(2)
+    def test_load_collection_before_search(self, connect, collection):
+        pass
 
 
 class TestLoadCollectionInvalid(object):
