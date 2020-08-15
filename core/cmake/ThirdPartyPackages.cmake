@@ -662,10 +662,10 @@ macro(build_opentracing)
 endmacro()
 
 if (MILVUS_WITH_OPENTRACING)
-    resolve_dependency(Opentracing)
-
-    get_target_property(OPENTRACING_INCLUDE_DIR opentracing INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${OPENTRACING_INCLUDE_DIR})
+    # resolve_dependency(Opentracing)
+    #
+    # get_target_property(OPENTRACING_INCLUDE_DIR opentracing INTERFACE_INCLUDE_DIRECTORIES)
+    # include_directories(SYSTEM ${OPENTRACING_INCLUDE_DIR})
 endif ()
 
 # ----------------------------------------------------------------------
