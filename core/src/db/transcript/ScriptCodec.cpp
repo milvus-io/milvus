@@ -9,29 +9,15 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/DBFactory.h"
-#include "db/DBImpl.h"
-#include "db/transcript/Transcript.h"
-#include "db/wal/WriteAheadLog.h"
+#include "db/transcript/ScriptCodec.h"
 
 namespace milvus {
 namespace engine {
 
-DBPtr
-DBFactory::BuildDB(const DBOptions& options) {
-    DBPtr db = std::make_shared<DBImpl>(options);
-
-    // need wal? wal must be after db
-    if (options.wal_enable_) {
-        db = std::make_shared<WriteAheadLog>(db, options);
-    }
-
-    // need transcript? transcript must be after wal
-    if (options.transcript_enable_) {
-        db = std::make_shared<Transcript>(db, options);
-    }
-
-    return db;
+ScriptCodec&
+ScriptCodec::GetInstance() {
+    static ScriptCodec s_codec;
+    return s_codec;
 }
 
 }  // namespace engine

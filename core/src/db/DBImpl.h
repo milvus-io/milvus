@@ -80,7 +80,7 @@ class DBImpl : public DB, public ConfigObserver {
                 const std::string& field_name, const CollectionIndex& index) override;
 
     Status
-    DropIndex(const std::string& collection_name, const std::string& field_name = "") override;
+    DropIndex(const std::string& collection_name, const std::string& field_name) override;
 
     Status
     DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) override;
@@ -105,7 +105,7 @@ class DBImpl : public DB, public ConfigObserver {
     // if the input field_names is empty, will load all fields of this collection
     Status
     LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
-                   const std::vector<std::string>& field_names, bool force = false) override;
+                   const std::vector<std::string>& field_names, bool force) override;
 
     Status
     Flush(const std::string& collection_name) override;
@@ -114,7 +114,7 @@ class DBImpl : public DB, public ConfigObserver {
     Flush() override;
 
     Status
-    Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold = 0.0) override;
+    Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) override;
 
     void
     ConfigUpdate(const std::string& name) override;

@@ -19,7 +19,7 @@
 #include <set>
 #include <string>
 
-#include "db/DBImpl.h"
+#include "db/DB.h"
 #include "db/meta/MetaAdapter.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Context.h"
@@ -82,7 +82,7 @@ using IterateSegmentFileHandler = milvus::engine::snapshot::IterateHandler<Segme
 using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
 using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
 using SegmentFileIterator = milvus::engine::snapshot::SegmentFileIterator;
-using DBImpl = milvus::engine::DBImpl;
+using DB = milvus::engine::DB;
 using Status = milvus::Status;
 using Store = milvus::engine::snapshot::Store;
 
@@ -343,7 +343,7 @@ class SnapshotTest : public BaseTest {
 ///////////////////////////////////////////////////////////////////////////////
 class DBTest : public BaseTest {
  protected:
-    std::shared_ptr<DBImpl> db_;
+    std::shared_ptr<DB> db_;
 
     milvus::engine::DBOptions
     GetOptions();
@@ -360,7 +360,7 @@ class DBTest : public BaseTest {
 ///////////////////////////////////////////////////////////////////////////////
 class SegmentTest : public BaseTest {
  protected:
-    std::shared_ptr<DBImpl> db_;
+    std::shared_ptr<DB> db_;
 
     void
     SetUp() override;
@@ -383,7 +383,7 @@ class MetaTest : public BaseTest {
 ///////////////////////////////////////////////////////////////////////////////
 class SchedulerTest : public BaseTest {
  protected:
-    std::shared_ptr<DBImpl> db_;
+    std::shared_ptr<DB> db_;
 
     void
     SetUp() override;
