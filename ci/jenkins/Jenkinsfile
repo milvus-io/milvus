@@ -110,9 +110,7 @@ pipeline {
                     stage('Publish') {
                         steps {
                             container('publish-images') {
-                                script {
-                                    MPLModule('Publish')
-                                }
+                                MPLModule('Publish')
                             }
                         }
                     }
@@ -156,11 +154,9 @@ pipeline {
                     stage('Test') {
                         steps {
                             container('milvus-test-env') {
-                                script {
-                                    MPLModule('Single Node DevTest')
-                                    if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                        MPLModule('Mishards DevTest')
-                                    }
+                                MPLModule('Single Node DevTest')
+                                if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
+                                    MPLModule('Mishards DevTest')
                                 }
                             }
                         }
@@ -169,12 +165,10 @@ pipeline {
                 post {
                     cleanup {
                         container('milvus-test-env') {
-                            script {
-                                archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
-                                MPLModule('Cleanup Single Node DevTest')
-                                if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                    MPLModule('Cleanup Mishards DevTest')
-                                }
+                            archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
+                            MPLModule('Cleanup Single Node DevTest')
+                            if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
+                                MPLModule('Cleanup Mishards DevTest')
                             }
                         }
                     }
