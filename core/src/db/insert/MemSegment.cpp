@@ -165,7 +165,8 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
 
                 break;
             }
-            default: {}
+            default:
+                break;
         }
     }
 

@@ -275,7 +275,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
         if (data == nullptr || data->data_.empty())
             continue;
 
-        auto single_size = (id_size != 0) ? (data->data_.size() / id_size) : (id_size);
+        auto single_size = (id_size != 0) ? (data->data_.size() / id_size) : 0;
 
         auto field_value = response->add_fields();
         auto vector_record = field_value->mutable_vector_record();

@@ -131,7 +131,8 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
 
                 break;
             }
-            default: {}
+            default:
+                break;
         }
     }
 
