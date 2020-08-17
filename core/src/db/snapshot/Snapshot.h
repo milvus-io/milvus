@@ -86,7 +86,7 @@ class Snapshot : public ReferenceProxy {
 
     PartitionPtr
     GetPartition(const std::string& name) const {
-        ID_TYPE id;
+        ID_TYPE id = 0;
         auto status = GetPartitionId(name, id);
         if (!status.ok()) {
             return nullptr;

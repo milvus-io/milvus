@@ -67,6 +67,8 @@ Segment::AddField(const std::string& field_name, DataType field_type, int64_t fi
             real_field_width = field_width;
             break;
         }
+        default:
+            break;
     }
 
     field_types_.insert(std::make_pair(field_name, field_type));
@@ -221,7 +223,7 @@ Segment::SetFixedFieldData(const std::string& field_name, BinaryDataPtr& data) {
     }
 
     fixed_fields_[field_name] = data;
-    if (row_count_ == 0) {
+    if (row_count_ == 0 && width != 0) {
         row_count_ = data->Size() / width;
     }
     return Status::OK();
