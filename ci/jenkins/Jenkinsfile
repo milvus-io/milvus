@@ -155,9 +155,7 @@ pipeline {
                         steps {
                             container('milvus-test-env') {
                                 MPLModule('Single Node DevTest')
-                                if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                    MPLModule('Mishards DevTest')
-                                }
+                                MPLModule('Mishards DevTest')
                             }
                         }
                     }
@@ -167,9 +165,7 @@ pipeline {
                         container('milvus-test-env') {
                             archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
                             MPLModule('Cleanup Single Node DevTest')
-                            if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                MPLModule('Cleanup Mishards DevTest')
-                            }
+                            MPLModule('Cleanup Mishards DevTest')
                         }
                     }
                 }
