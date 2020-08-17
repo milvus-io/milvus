@@ -8,6 +8,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Feature
 
 ## Improvement
+-   \#3213 Allow users to specify a distance type at runtime for Flat index
 
 ## Task
 
