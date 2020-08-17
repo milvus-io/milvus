@@ -363,7 +363,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_CORS(IndexOptions)
 
-    ENDPOINT("OPTIONS", "/collections/{collection_name}/indexes", IndexOptions) {
+    ENDPOINT("OPTIONS", "/collections/{collection_name}/fields/{field_name}/indexes/{index_name}", IndexOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
@@ -372,7 +372,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ENDPOINT("POST", "/collections/{collection_name}/fields/{field_name}/indexes/{index_name}", CreateIndex,
              PATH(String, collection_name), PATH(String, field_name), PATH(String, index_name),
              BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/tables/" + collection_name->std_str() + "/indexes\'");
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections/" + collection_name->std_str() + "/indexes\'");
         tr.RecordSection("Received request.");
 
         auto handler = WebRequestHandler();
@@ -621,9 +621,9 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     }
 
-    ADD_CORS(VectorsOptions)
+    ADD_CORS(EntityOptions)
 
-    ENDPOINT("OPTIONS", "/collections/{collection_name}/entities", VectorsOptions) {
+    ENDPOINT("OPTIONS", "/collections/{collection_name}/entities", EntityOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 

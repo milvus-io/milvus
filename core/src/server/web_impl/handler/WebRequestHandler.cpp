@@ -547,10 +547,18 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
             }
             engine::VectorsData vector_data;
             for (auto& vector_records : vector_param_it.value()["values"]) {
-                // TODO: Binary vector???
-                for (auto& data : vector_records) {
-                    vector_query->query_vector.float_data.emplace_back(data.get<float>());
+                if (field_type_.find(vector_name) != field_type_.end()) {
+                    if (field_type_.at(vector_name) == engine::DataType::VECTOR_FLOAT) {
+                        for (auto& data : vector_records) {
+                            vector_query->query_vector.float_data.emplace_back(data.get<float>());
+                        }
+                    } else if (field_type_.at(vector_name) == engine::DataType::VECTOR_BINARY) {
+                        for (auto& data : vector_records) {
+                            vector_query->query_vector.binary_data.emplace_back(data.get<int8_t>());
+                        }
+                    }
                 }
+
             }
             query_ptr->index_fields.insert(vector_name);
         }
@@ -651,6 +659,9 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
     status = req_handler_.GetCollectionInfo(context_ptr_, collection_name, collection_schema);
     if (!status.ok()) {
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
+    }
+    for (const auto& field : collection_schema.fields_) {
+        field_type_.insert({field.first, field.second.field_type_});
     }
 
     milvus::json extra_params;
