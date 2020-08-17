@@ -11,22 +11,25 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( TEST_FILES ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
+set( TEST_FILES
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_web.cpp
                 )
 
-add_executable( test_db
-                ${SCHEDULER_FILES}
-                ${TEST_FILES}
+add_executable( test_server
+            ${TEST_FILES}
+            ${SCHEDULER_FILES}
                 # ${grpc_server_files}
                 # ${grpc_service_files}
-                ${web_server_files}
+#                ${web_server_files}
                 # ${server_delivery_files}
                 # ${server_files}
                 # ${server_init_files}
                 )
+get_target_property( var server INCLUDE_DIRECTORIES)
+#set_target_properties( server PROPERTIES INTERFACE_INCLUDE_DIRECTORIES $<BUILD_INTERFACE:${var}>)
 
-target_link_libraries( test_db  ${UNITTEST_LIBS}
+target_link_libraries( test_server
+        ${UNITTEST_LIBS}
                                 server
                                  milvus_engine
                                  metrics

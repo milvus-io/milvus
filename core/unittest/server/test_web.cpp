@@ -23,7 +23,7 @@
 #include <oatpp/web/client/ApiClient.hpp>
 #include <oatpp/web/client/HttpRequestExecutor.hpp>
 
-#include "config/Config.h"
+#include "config/ConfigMgr.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
@@ -219,7 +219,7 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("OPTIONS", "/config/advanced", optionsAdvanced)
 
     API_CALL("PUT", "/config/advanced", setAdvanced,
-             BODY_DTO(milvus::server::web::AdvancedConfigDto::ObjectWrapper, body))
+             BODY_DTO(milvus::server::web::AdvancedConfigDtoT, body))
 
 #ifdef MILVUS_GPU_VERSION
 
@@ -234,7 +234,7 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("OPTIONS", "/collections", optionsCollections)
 
-    API_CALL("POST", "/collections", createCollection, BODY_String(String, body))
+    API_CALL("POST", "/collections", createCollection, BODY_STRING(String, body_str))
 
     API_CALL("GET", "/collections", showCollections, QUERY(String, offset), QUERY(String, page_size))
 
@@ -260,7 +260,7 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("POST", "/collections/{collection_name}/partitions", createPartition,
              PATH(String, collection_name, "collection_name"),
-             BODY_DTO(milvus::server::web::PartitionRequestDto::ObjectWrapper, body))
+             BODY_DTO(milvus::server::web::PartitionRequestDtoT, body))
 
     API_CALL("GET", "/collections/{collection_name}/partitions", showPartitions,
              PATH(String, collection_name, "collection_name"),
@@ -311,8 +311,8 @@ class WebControllerTest : public ::testing::Test {
         fs.flush();
         fs.close();
 
-        milvus::server::Config& config = milvus::server::Config::GetInstance();
-        config.LoadConfigFile(config_path);
+        milvus::ConfigMgr::GetInstance().Init();
+        milvus::ConfigMgr::GetInstance().Load(config_path);
 
         auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
         res_mgr->Clear();
@@ -326,14 +326,12 @@ class WebControllerTest : public ::testing::Test {
 
         milvus::engine::DBOptions opt;
 
-        milvus::server::Config::GetInstance().SetGeneralConfigMetaURI("sqlite://:@:/");
+        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "sqlite://:@:/", true);
         boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
-        milvus::server::Config::GetInstance().SetStorageConfigPath(CONTROLLER_TEST_CONFIG_DIR);
-        milvus::server::Config::GetInstance().SetWalConfigWalPath(CONTROLLER_TEST_CONFIG_WAL_DIR);
 
         milvus::server::DBWrapper::GetInstance().StartService();
 
-        milvus::server::Config::GetInstance().SetNetworkConfigHTTPPort("29999");
+        milvus::ConfigMgr::GetInstance().Set("network.http.port", "29999", true);
 
         milvus::server::web::WebServer::GetInstance().Start();
 
@@ -358,8 +356,8 @@ class WebControllerTest : public ::testing::Test {
         fs << CONTROLLER_TEST_VALID_CONFIG_STR;
         fs.close();
 
-        milvus::server::Config& config = milvus::server::Config::GetInstance();
-        config.LoadConfigFile(std::string(CONTROLLER_TEST_CONFIG_DIR) + CONTROLLER_TEST_CONFIG_FILE);
+        milvus::ConfigMgr::GetInstance().Init();
+        milvus::ConfigMgr::GetInstance().Load(std::string(CONTROLLER_TEST_CONFIG_DIR) + CONTROLLER_TEST_CONFIG_FILE);
 
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
         OATPP_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, objectMapper);
@@ -380,4 +378,52 @@ class WebControllerTest : public ::testing::Test {
     TestClientP client_ptr;
 };
 
+TEST_F(WebControllerTest, OPTIONS) {
+    auto response = client_ptr->root(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->getState(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->optionsAdvanced(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+
+#ifdef MILVUS_GPU_VERSION
+    response = client_ptr->optionsGpuConfig(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+#endif
+
+    response = client_ptr->optionsIndexes("test", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+
+    response = client_ptr->optionsPartitions("collection_name", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+
+    response = client_ptr->optionsCollection("collection", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+
+    response = client_ptr->optionsCollections(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+
+    response = client_ptr->optionsEntity("collection", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, CREATE_COLLECTION) {
+    nlohmann::json mapping_json = R"({
+        "collection_name": "test_collection",
+        "fields": [
+            {
+                "field_name": "field_vec",
+                "field_type": "VECTOR_FLOAT",
+                "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
+                "extra_params": {"dimension": 128, "metric_type":  "L2"}
+            }
+        ]
+    })";
+
+    auto response = client_ptr->createCollection(mapping_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDtoT>(object_mapper.get());
+}
 
