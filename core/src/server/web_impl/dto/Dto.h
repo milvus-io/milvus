@@ -18,7 +18,7 @@ namespace milvus {
 namespace server {
 namespace web {
 
-using OObject = oatpp::data::mapping::type::Object;
+using ODTO = oatpp::DTO;
 }
 }  // namespace server
 }  // namespace milvus
