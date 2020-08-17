@@ -90,7 +90,7 @@ if (MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_MINOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
-    set(MILVUS_VERSION "0.10.1")
+    set(MILVUS_VERSION "0.10.3")
 endif ()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")

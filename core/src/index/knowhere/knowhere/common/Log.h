@@ -27,6 +27,24 @@ SetThreadName(const std::string& name);
 std::string
 GetThreadName();
 
+void
+log_trace_(const std::string&);
+
+void
+log_debug_(const std::string&);
+
+void
+log_info_(const std::string&);
+
+void
+log_warning_(const std::string&);
+
+void
+log_error_(const std::string&);
+
+void
+log_fatal_(const std::string&);
+
 /*
  * Please use LOG_MODULE_LEVEL_C macro in member function of class
  * and LOG_MODULE_LEVEL_ macro in other functions.

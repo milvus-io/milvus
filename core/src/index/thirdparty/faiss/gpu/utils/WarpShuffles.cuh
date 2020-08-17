@@ -91,6 +91,7 @@ inline __device__ T* shfl_xor(T* const val,
   return (T*) shfl_xor(v, laneMask, width);
 }
 
+#ifdef FAISS_USE_FLOAT16
 // CUDA 9.0+ has half shuffle
 #if CUDA_VERSION < 9000
 inline __device__ half shfl(half v,
@@ -113,5 +114,6 @@ inline __device__ half shfl_xor(half v,
   return h;
 }
 #endif // CUDA_VERSION
+#endif
 
 } } // namespace

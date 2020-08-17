@@ -27,6 +27,7 @@ GpuIndexIVF::GpuIndexIVF(GpuResources* resources,
     nlist(nlistIn),
     nprobe(1),
     quantizer(nullptr) {
+
   init_();
 
   // Only IP and L2 are supported for now
