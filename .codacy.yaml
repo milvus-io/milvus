@@ -7,3 +7,7 @@ exclude_paths:
   - 'core/src/grpc/gen-status/**'
   - 'sdk/grpc-gen/**'
   - 'core/thirdparty/**'
+  - 'ci/**'
+  - 'docker/**'
+  - 'docs/**'
+  - 'tests/**'
