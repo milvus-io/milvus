@@ -61,9 +61,11 @@ import_mysql_inc()
 using_ccache_if_defined( MILVUS_USE_CCACHE )
 
 include( ExternalProject )
+include( FetchContent )
+set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
+set(FETCHCONTENT_QUIET OFF)
 include( ThirdPartyPackages )
 
-add_subdirectory( thirdparty )
 
 
 # **************************** Compiler arguments ****************************
@@ -109,6 +111,7 @@ append_flags( CMAKE_CXX_FLAGS
 
 # **************************** Source files ****************************
 
+add_subdirectory( thirdparty )
 add_subdirectory( src )
 
 # Unittest lib

@@ -11,48 +11,33 @@
 
 #pragma once
 
-#include <string>
+#include "db/DBProxy.h"
 
-#include "db/DB.h"
-#include "utils/Status.h"
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace milvus {
-namespace server {
+namespace engine {
 
-class DBWrapper {
- private:
-    DBWrapper() = default;
-    ~DBWrapper() = default;
-
+class WriteAheadLog : public DBProxy {
  public:
-    static DBWrapper&
-    GetInstance() {
-        static DBWrapper wrapper;
-        return wrapper;
-    }
-
-    static engine::DBPtr
-    DB() {
-        return GetInstance().EngineDB();
-    }
+    WriteAheadLog(const DBPtr& db, const DBOptions& options);
 
     Status
-    StartService();
-    Status
-    StopService();
+    Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) override;
 
-    engine::DBPtr
-    EngineDB() {
-        return db_;
-    }
+    Status
+    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) override;
+
+    Status
+    Flush(const std::string& collection_name) override;
+
+    Status
+    Flush() override;
 
  private:
-    Status
-    PreloadCollections(const std::string& preload_collections);
-
- private:
-    engine::DBPtr db_;
 };
 
-}  // namespace server
+}  // namespace engine
 }  // namespace milvus

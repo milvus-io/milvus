@@ -16,7 +16,6 @@
 
 #include <sqlite3.h>
 
-#include "db/Options.h"
 #include "db/meta/backend/MetaEngine.h"
 #include "utils/Status.h"
 

@@ -287,7 +287,7 @@ RHNSWPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     int64_t dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
     IVFPQConfAdapter::GetValidMList(dimension, resset);
 
-    CheckIntByValues(knowhere::IndexParams::m, resset);
+    CheckIntByValues(knowhere::IndexParams::PQM, resset);
     return ConfAdapter::CheckTrain(oricfg, mode);
 }
 

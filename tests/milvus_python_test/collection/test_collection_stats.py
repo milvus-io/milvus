@@ -49,7 +49,7 @@ class TestStatsBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index()
+        params=gen_binary_index()
     )
     def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)
@@ -301,6 +301,7 @@ class TestStatsBase:
             assert stats["partitions"][0]["segments"][0]["row_count"] == nb
             connect.drop_collection(collection_list[i])
 
+    @pytest.mark.level(2)
     def test_collection_count_multi_collections_indexed(self, connect):
         '''
         target: test collection rows_count is correct or not with multiple collections of L2

@@ -11,29 +11,18 @@
 
 #pragma once
 
-#include <atomic>
-#include <list>
+#include "DB.h"
+
 #include <memory>
-#include <mutex>
-#include <set>
 #include <string>
-#include <thread>
-#include <unordered_map>
 #include <vector>
-
-#include "db/DB.h"
-
-#include "config/ConfigMgr.h"
-#include "utils/ThreadPool.h"
 
 namespace milvus {
 namespace engine {
 
-class DBImpl : public DB, public ConfigObserver {
+class DBProxy : public DB {
  public:
-    explicit DBImpl(const DBOptions& options);
-
-    ~DBImpl();
+    DBProxy(const DBPtr& db, const DBOptions& options);
 
     Status
     Start() override;
@@ -76,8 +65,8 @@ class DBImpl : public DB, public ConfigObserver {
     ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) override;
 
     Status
-    CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
-                const std::string& field_name, const CollectionIndex& index) override;
+    CreateIndex(const server::ContextPtr& context, const std::string& collection_name, const std::string& field_name,
+                const CollectionIndex& index) override;
 
     Status
     DropIndex(const std::string& collection_name, const std::string& field_name) override;
@@ -97,12 +86,11 @@ class DBImpl : public DB, public ConfigObserver {
     DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) override;
 
     Status
-    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) override;
-
-    Status
     ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) override;
 
-    // if the input field_names is empty, will load all fields of this collection
+    Status
+    Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) override;
+
     Status
     LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
                    const std::vector<std::string>& field_names, bool force) override;
@@ -116,84 +104,10 @@ class DBImpl : public DB, public ConfigObserver {
     Status
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) override;
 
-    void
-    ConfigUpdate(const std::string& name) override;
-
- private:
-    void
-    InternalFlush(const std::string& collection_name = "", bool merge = true);
-
-    void
-    TimingFlushThread();
-
-    void
-    StartMetricTask();
-
-    void
-    TimingMetricThread();
-
-    void
-    StartBuildIndexTask(const std::vector<std::string>& collection_names);
-
-    void
-    BackgroundBuildIndexTask(std::vector<std::string> collection_names);
-
-    void
-    TimingIndexThread();
-
-    void
-    WaitBuildIndexFinish();
-
-    void
-    StartMergeTask(const std::set<std::string>& collection_names, bool force_merge_all = false);
-
-    void
-    BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all);
-
-    void
-    WaitMergeFileFinish();
-
-    void
-    SuspendIfFirst();
-
-    void
-    ResumeIfLast();
-
- private:
+ protected:
+    DBPtr db_;
     DBOptions options_;
-    std::atomic<bool> initialized_;
-
-    MemManagerPtr mem_mgr_;
-    MergeManagerPtr merge_mgr_ptr_;
-
-    std::thread bg_flush_thread_;
-    std::thread bg_metric_thread_;
-    std::thread bg_index_thread_;
-
-    SimpleWaitNotify swn_flush_;
-    SimpleWaitNotify swn_metric_;
-    SimpleWaitNotify swn_index_;
-
-    SimpleWaitNotify flush_req_swn_;
-    SimpleWaitNotify index_req_swn_;
-
-    ThreadPool merge_thread_pool_;
-    std::mutex merge_result_mutex_;
-    std::list<std::future<void>> merge_thread_results_;
-
-    ThreadPool index_thread_pool_;
-    std::mutex index_result_mutex_;
-    std::list<std::future<void>> index_thread_results_;
-
-    std::mutex build_index_mutex_;
-
-    std::mutex flush_merge_compact_mutex_;
-
-    int64_t live_search_num_ = 0;
-    std::mutex suspend_build_mutex_;
-};  // SSDBImpl
-
-using DBImplPtr = std::shared_ptr<DBImpl>;
+};
 
 }  // namespace engine
 }  // namespace milvus

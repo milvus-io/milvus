@@ -11,48 +11,20 @@
 
 #pragma once
 
+#include "db/DB.h"
+
 #include <string>
 
-#include "db/DB.h"
-#include "utils/Status.h"
-
 namespace milvus {
-namespace server {
+namespace engine {
 
-class DBWrapper {
- private:
-    DBWrapper() = default;
-    ~DBWrapper() = default;
-
+class ScriptReplay {
  public:
-    static DBWrapper&
-    GetInstance() {
-        static DBWrapper wrapper;
-        return wrapper;
-    }
-
-    static engine::DBPtr
-    DB() {
-        return GetInstance().EngineDB();
-    }
+    ScriptReplay() = default;
 
     Status
-    StartService();
-    Status
-    StopService();
-
-    engine::DBPtr
-    EngineDB() {
-        return db_;
-    }
-
- private:
-    Status
-    PreloadCollections(const std::string& preload_collections);
-
- private:
-    engine::DBPtr db_;
+    Replay(const DBPtr& db, const std::string& replay_script_path);
 };
 
-}  // namespace server
+}  // namespace engine
 }  // namespace milvus

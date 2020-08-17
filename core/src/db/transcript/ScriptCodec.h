@@ -13,46 +13,24 @@
 
 #include <string>
 
-#include "db/DB.h"
-#include "utils/Status.h"
-
 namespace milvus {
-namespace server {
+namespace engine {
 
-class DBWrapper {
- private:
-    DBWrapper() = default;
-    ~DBWrapper() = default;
-
+class ScriptCodec {
  public:
-    static DBWrapper&
-    GetInstance() {
-        static DBWrapper wrapper;
-        return wrapper;
-    }
+    ScriptCodec() = default;
 
-    static engine::DBPtr
-    DB() {
-        return GetInstance().EngineDB();
-    }
+    static ScriptCodec&
+    GetInstance();
 
-    Status
-    StartService();
-    Status
-    StopService();
-
-    engine::DBPtr
-    EngineDB() {
-        return db_;
+    void
+    SetScriptPath(const std::string& path) {
+        script_path_ = path;
     }
 
  private:
-    Status
-    PreloadCollections(const std::string& preload_collections);
-
- private:
-    engine::DBPtr db_;
+    std::string script_path_;
 };
 
-}  // namespace server
+}  // namespace engine
 }  // namespace milvus

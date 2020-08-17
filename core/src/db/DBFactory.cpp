@@ -11,22 +11,27 @@
 
 #include "db/DBFactory.h"
 #include "db/DBImpl.h"
-#include "meta/MetaFactory.h"
+#include "db/transcript/Transcript.h"
+#include "db/wal/WriteAheadLog.h"
 
 namespace milvus {
 namespace engine {
 
-DBOptions
-DBFactory::BuildOption() {
-    auto meta = MetaFactory::BuildOption();
-    DBOptions options;
-    options.meta_ = meta;
-    return options;
-}
-
 DBPtr
 DBFactory::BuildDB(const DBOptions& options) {
-    return std::make_shared<DBImpl>(options);
+    DBPtr db = std::make_shared<DBImpl>(options);
+
+    // need wal? wal must be after db
+    if (options.wal_enable_) {
+        db = std::make_shared<WriteAheadLog>(db, options);
+    }
+
+    // need transcript? transcript must be after wal
+    if (options.transcript_enable_) {
+        db = std::make_shared<Transcript>(db, options);
+    }
+
+    return db;
 }
 
 }  // namespace engine

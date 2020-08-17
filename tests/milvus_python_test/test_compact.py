@@ -323,17 +323,17 @@ class TestCompactBase:
         method: create 50 collections, add entities into them and compact in turn
         expected: status ok
         '''
-        nq = 100
-        num_collections = 50
-        entities = gen_entities(nq)
+        nb = 100
+        num_collections = 20
+        entities = gen_entities(nb)
         collection_list = []
         for i in range(num_collections):
             collection_name = gen_unique_str("test_compact_multi_collection_%d" % i)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
-        time.sleep(6)
         for i in range(num_collections):
             ids = connect.insert(collection_list[i], entities)
+            connect.delete_entity_by_id(collection_list[i], ids[:nb//2])
             status = connect.compact(collection_list[i])
             assert status.OK()
 

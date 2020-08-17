@@ -14,10 +14,8 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         MySQLPP
         Prometheus
         SQLite
-        yaml-cpp
         libunwind
         gperftools
-        ZLIB
         Opentracing
         fiu
         AWS
@@ -39,14 +37,10 @@ macro(build_dependency DEPENDENCY_NAME)
         build_prometheus()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "SQLite")
         build_sqlite()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "yaml-cpp")
-        build_yamlcpp()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "libunwind")
         build_libunwind()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "gperftools")
         build_gperftools()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "ZLIB")
-        build_zlib()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "Opentracing")
         build_opentracing()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "fiu")
@@ -245,13 +239,6 @@ else ()
             "https://www.sqlite.org/2019/sqlite-autoconf-${SQLITE_VERSION}.tar.gz")
 endif ()
 
-if (DEFINED ENV{MILVUS_YAMLCPP_URL})
-    set(YAMLCPP_SOURCE_URL "$ENV{MILVUS_YAMLCPP_URL}")
-else ()
-    set(YAMLCPP_SOURCE_URL "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz"
-                           "https://gitee.com/quicksilver/yaml-cpp/repository/archive/yaml-cpp-${YAMLCPP_VERSION}.zip")
-endif ()
-
 if (DEFINED ENV{MILVUS_LIBUNWIND_URL})
     set(LIBUNWIND_SOURCE_URL "$ENV{MILVUS_LIBUNWIND_URL}")
 else ()
@@ -264,13 +251,6 @@ if (DEFINED ENV{MILVUS_GPERFTOOLS_URL})
 else ()
     set(GPERFTOOLS_SOURCE_URL
             "https://github.com/gperftools/gperftools/releases/download/gperftools-${GPERFTOOLS_VERSION}/gperftools-${GPERFTOOLS_VERSION}.tar.gz")
-endif ()
-
-if (DEFINED ENV{MILVUS_ZLIB_URL})
-    set(ZLIB_SOURCE_URL "$ENV{MILVUS_ZLIB_URL}")
-else ()
-    set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz"
-                        "https://gitee.com/quicksilver/zlib/repository/archive/${ZLIB_VERSION}.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_OPENTRACING_URL})
@@ -492,51 +472,6 @@ if (MILVUS_WITH_SQLITE)
     link_directories(SYSTEM ${SQLITE_PREFIX}/lib/)
 endif ()
 
-# ----------------------------------------------------------------------
-# yaml-cpp
-
-macro(build_yamlcpp)
-    message(STATUS "Building yaml-cpp-${YAMLCPP_VERSION} from source")
-    set(YAMLCPP_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/yaml-cpp_ep-prefix/src/yaml-cpp_ep")
-    set(YAMLCPP_STATIC_LIB "${YAMLCPP_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}yaml-cpp${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(YAMLCPP_INCLUDE_DIR "${YAMLCPP_PREFIX}/include")
-    set(YAMLCPP_CMAKE_ARGS
-            ${EP_COMMON_CMAKE_ARGS}
-            "-DCMAKE_INSTALL_PREFIX=${YAMLCPP_PREFIX}"
-            -DCMAKE_INSTALL_LIBDIR=lib
-            -DYAML_CPP_BUILD_TESTS=OFF
-            -DYAML_CPP_BUILD_TOOLS=OFF)
-
-    ExternalProject_Add(yaml-cpp_ep
-            URL
-            ${YAMLCPP_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            URL_MD5
-            "5b943e9af0060d0811148b037449ef82"
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            "${YAMLCPP_STATIC_LIB}"
-            CMAKE_ARGS
-            ${YAMLCPP_CMAKE_ARGS})
-
-    file(MAKE_DIRECTORY "${YAMLCPP_INCLUDE_DIR}")
-    add_library(yaml-cpp STATIC IMPORTED)
-    set_target_properties(yaml-cpp
-            PROPERTIES IMPORTED_LOCATION "${YAMLCPP_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${YAMLCPP_INCLUDE_DIR}")
-
-    add_dependencies(yaml-cpp yaml-cpp_ep)
-endmacro()
-
-if (MILVUS_WITH_YAMLCPP)
-    resolve_dependency(yaml-cpp)
-
-    get_target_property(YAMLCPP_INCLUDE_DIR yaml-cpp INTERFACE_INCLUDE_DIRECTORIES)
-    link_directories(SYSTEM ${YAMLCPP_PREFIX}/lib/)
-    include_directories(SYSTEM ${YAMLCPP_INCLUDE_DIR})
-endif ()
 
 # ----------------------------------------------------------------------
 # libunwind
@@ -627,48 +562,6 @@ if (MILVUS_WITH_GPERFTOOLS)
     get_target_property(GPERFTOOLS_INCLUDE_DIR gperftools INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${GPERFTOOLS_INCLUDE_DIR})
     link_directories(SYSTEM ${GPERFTOOLS_PREFIX}/lib)
-endif ()
-
-# ----------------------------------------------------------------------
-# zlib
-
-macro(build_zlib)
-    message(STATUS "Building ZLIB-${ZLIB_VERSION} from source")
-    set(ZLIB_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix/src/zlib_ep")
-    set(ZLIB_STATIC_LIB_NAME libz.a)
-    set(ZLIB_STATIC_LIB "${ZLIB_PREFIX}/lib/${ZLIB_STATIC_LIB_NAME}")
-    set(ZLIB_INCLUDE_DIR "${ZLIB_PREFIX}/include")
-    set(ZLIB_CMAKE_ARGS ${EP_COMMON_CMAKE_ARGS} "-DCMAKE_INSTALL_PREFIX=${ZLIB_PREFIX}"
-            -DBUILD_SHARED_LIBS=OFF)
-
-    ExternalProject_Add(zlib_ep
-            URL
-            ${ZLIB_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            URL_MD5
-            "0095d2d2d1f3442ce1318336637b695f"
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            "${ZLIB_STATIC_LIB}"
-            CMAKE_ARGS
-            ${ZLIB_CMAKE_ARGS})
-
-    file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
-    add_library(zlib STATIC IMPORTED)
-    set_target_properties(zlib
-            PROPERTIES IMPORTED_LOCATION "${ZLIB_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ZLIB_INCLUDE_DIR}")
-
-    add_dependencies(zlib zlib_ep)
-endmacro()
-
-if (MILVUS_WITH_ZLIB)
-    # resolve_dependency(ZLIB)
-    #
-    # get_target_property(ZLIB_INCLUDE_DIR zlib INTERFACE_INCLUDE_DIRECTORIES)
-    # include_directories(SYSTEM ${ZLIB_INCLUDE_DIR})
 endif ()
 
 # ----------------------------------------------------------------------
