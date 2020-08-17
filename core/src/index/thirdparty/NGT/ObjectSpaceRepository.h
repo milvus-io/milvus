@@ -17,6 +17,7 @@
 #pragma once
 
 
+#include <sstream>
 #include	"Common.h"
 #include	"ObjectSpace.h"
 #include	"ObjectRepository.h"
@@ -358,7 +359,11 @@ namespace NGT {
     }
 
 
-    void serialize(const std::string &ofile) { ObjectRepository::serialize(ofile, this); }
+    void serialize(const std::string & ofile) { ObjectRepository::serialize(ofile, this); }
+    // for milvus
+    void serialize(std::stringstream & obj) { ObjectRepository::serialize(obj, this); }
+    // for milvus
+    void deserialize(std::stringstream & obj) { ObjectRepository::deserialize(obj, this); }
     void deserialize(const std::string &ifile) { ObjectRepository::deserialize(ifile, this); }
     void serializeAsText(const std::string &ofile) { ObjectRepository::serializeAsText(ofile, this); }
     void deserializeAsText(const std::string &ifile) { ObjectRepository::deserializeAsText(ifile, this); }

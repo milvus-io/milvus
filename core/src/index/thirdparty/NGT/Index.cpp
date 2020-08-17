@@ -14,6 +14,7 @@
 // limitations under the License.
 //
 
+#include <sstream>
 #include	"NGT/defines.h"
 #include	"NGT/Common.h"
 #include	"NGT/ObjectSpaceRepository.h"
@@ -108,6 +109,34 @@ NGT::Index::open(const string &database, bool rdOnly) {
   }
   index = idx;
   path = database;
+}
+
+// for milvus
+NGT::Index * NGT::Index::loadIndex(std::stringstream & obj, std::stringstream & grp, std::stringstream & prf, std::stringstream & tre)
+{
+    NGT::Property prop;
+    prop.load(prf);
+    if (prop.databaseType != NGT::Index::Property::DatabaseType::Memory)
+    {
+        NGTThrowException("GraphIndex: Cannot open. Not memory type.");
+    }
+    assert(prop.dimension != 0);
+    Index * idx = 0;
+    if (prop.indexType == NGT::Index::Property::GraphAndTree)
+    {
+        idx = new NGT::GraphAndTreeIndex(prop);
+    }
+    else if (prop.indexType == NGT::Index::Property::Graph)
+    {
+        idx = new NGT::GraphIndex(prop);
+    }
+    else
+    {
+        NGTThrowException("Index::Open: Not found IndexType in property file.");
+    }
+    idx->index = idx;
+    idx->loadIndexFromStream(obj, grp, tre);
+    return idx;
 }
 
 //For milvus
@@ -612,6 +641,9 @@ NGT::GraphIndex::loadIndex(const string &ifile, bool readOnly) {
   repository.deserialize(isg);
 #endif
 }
+
+// for milvus
+void NGT::GraphIndex::saveProperty(std::stringstream & prf) { NGT::Property::save(*this, prf); }
 
 void 
 NGT::GraphIndex::saveProperty(const std::string &file) {

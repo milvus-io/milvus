@@ -17,6 +17,8 @@
 #pragma once
 
 #include <cstddef>
+#include <ostream>
+#include <sstream>
 #include	<string>
 #include	<vector>
 #include	<map>
@@ -397,7 +399,10 @@ namespace NGT {
     static void create(const std::string &database, NGT::Property &prop, bool redirect = false) { createGraphAndTree(database, prop, redirect); }
     // For milvus
     static NGT::Index * createGraphAndTree(const float * row_data, NGT::Property & prop, size_t dataSize);
-    static void createGraphAndTree(const std::string &database, NGT::Property &prop, const std::string &dataFile, size_t dataSize = 0, bool redirect = false);
+    static NGT::Index *
+    loadIndex(std::stringstream & obj, std::stringstream & grp, std::stringstream & prf, std::stringstream & tre);
+    static void createGraphAndTree(
+        const std::string & database, NGT::Property & prop, const std::string & dataFile, size_t dataSize = 0, bool redirect = false);
     static void createGraphAndTree(const std::string &database, NGT::Property &prop, bool redirect = false) { createGraphAndTree(database, prop, "", redirect); }
     // For milvus
     static NGT::Index * createGraph(const float * row_data, NGT::Property & prop, size_t dataSize);
@@ -450,8 +455,17 @@ namespace NGT {
       }
       redirector.end();
     }
-    virtual void saveIndex(const std::string &ofile) { getIndex().saveIndex(ofile); }
+    // for milvus
+    virtual void saveIndex(std::stringstream & obj, std::stringstream & grp, std::stringstream & prf, std::stringstream & tre)
+    {
+        getIndex().saveIndex(obj, grp, prf, tre);
+    }
+    virtual void saveIndex(const std::string & ofile) { getIndex().saveIndex(ofile); }
     virtual void loadIndex(const std::string &ofile) { getIndex().loadIndex(ofile); }
+    virtual void loadIndexFromStream(std::stringstream & obj, std::stringstream & grp, std::stringstream & tre)
+    {
+        getIndex().loadIndexFromStream(obj, grp, tre);
+    }
     virtual Object *allocateObject(const std::string &textLine, const std::string &sep) { return getIndex().allocateObject(textLine, sep); }
     virtual Object *allocateObject(const std::vector<double> &obj) { return getIndex().allocateObject(obj); }
     virtual Object *allocateObject(const std::vector<float> &obj) { return getIndex().allocateObject(obj); }
@@ -699,6 +713,9 @@ namespace NGT {
 #endif
     }
 
+    // for milvus
+    void saveObjectRepository(std::stringstream & obj) { objectSpace->serialize(obj); }
+
     void saveGraph(const std::string &ofile) {
 #ifndef NGT_SHARED_MEMORY_ALLOCATOR
       std::string fname = ofile + "/grp";
@@ -712,17 +729,37 @@ namespace NGT {
 #endif
     }
 
+    // for milvus
+    void saveGraph(std::stringstream & grp) { repository.serialize(grp); }
+
+    //for milvus
+    virtual void
+    saveIndex(std::stringstream & obj, std::stringstream & grp, std::stringstream & prf, [[maybe_unused]] std::stringstream & tre)
+    {
+        saveObjectRepository(obj);
+        saveGraph(grp);
+        saveProperty(prf);
+    }
     virtual void saveIndex(const std::string &ofile) {
       saveObjectRepository(ofile);
       saveGraph(ofile);
       saveProperty(ofile);
     }
 
+    void saveProperty(std::stringstream & prf);
     void saveProperty(const std::string &file);
 
     void exportProperty(const std::string &file);
 
     virtual void loadIndex(const std::string &ifile, bool readOnly);
+
+    // for milvus
+    virtual void
+    loadIndexFromStream(std::stringstream & obj, std::stringstream & grp, [[maybe_unused]] std::stringstream & tre)
+    {
+        objectSpace->deserialize(obj);
+        repository.deserialize(grp);
+    }
 
     virtual void exportIndex(const std::string &ofile) {
       try {
@@ -1366,6 +1403,13 @@ namespace NGT {
       DVPTree::objectSpace = GraphIndex::objectSpace;
     }
 
+    // for milvus
+    void saveIndex(std::stringstream & obj, std::stringstream & grp, std::stringstream & prf, [[maybe_unused]] std::stringstream & tre)
+    {
+        GraphIndex::saveIndex(obj, grp, prf, tre);
+        DVPTree::serialize(tre);
+    }
+
     void saveIndex(const std::string &ofile) {
       GraphIndex::saveIndex(ofile);
 #ifndef NGT_SHARED_MEMORY_ALLOCATOR
@@ -1378,6 +1422,14 @@ namespace NGT {
       }
       DVPTree::serialize(ost);
 #endif
+    }
+    // for milvus
+    void loadIndexFromStream(std::stringstream & obj, std::stringstream & grp, [[maybe_unused]] std::stringstream & tre)
+    {
+        GraphIndex::objectSpace->deserialize(obj);
+        repository.deserialize(grp);
+        DVPTree::objectSpace = GraphIndex::objectSpace;
+        DVPTree::deserialize(tre);
     }
 
     void loadIndex(const std::string &ifile, bool readOnly) {
@@ -1650,11 +1702,22 @@ namespace NGT {
       Index::Property::set(p);
       NeighborhoodGraph::Property::set(p);
     }
-    void load(const std::string &file) {
-      NGT::PropertySet prop;
-      prop.load(file + "/prf");
-      Index::Property::importProperty(prop);
-      NeighborhoodGraph::Property::importProperty(prop);
+
+    // for milvus
+    void load(std::stringstream & prf)
+    {
+        NGT::PropertySet prop;
+        prop.load(prf);
+        Index::Property::importProperty(prop);
+        NeighborhoodGraph::Property::importProperty(prop);
+    }
+
+    void load(const std::string & file)
+    {
+        NGT::PropertySet prop;
+        prop.load(file + "/prf");
+        Index::Property::importProperty(prop);
+        NeighborhoodGraph::Property::importProperty(prop);
     }
 
     void save(const std::string &file) {
@@ -1662,6 +1725,15 @@ namespace NGT {
       Index::Property::exportProperty(prop);
       NeighborhoodGraph::Property::exportProperty(prop);
       prop.save(file + "/prf");
+    }
+
+    // for milvus
+    static void save(GraphIndex & graphIndex, std::stringstream & prf)
+    {
+        NGT::PropertySet prop;
+        graphIndex.getGraphIndexProperty().exportProperty(prop);
+        graphIndex.getGraphProperty().exportProperty(prop);
+        prop.save(prf);
     }
 
     static void save(GraphIndex &graphIndex, const std::string &file) {

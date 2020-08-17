@@ -16,10 +16,11 @@
 
 #pragma once
 
-#include	"NGT/defines.h"
-#include	"NGT/Common.h"
-#include	"NGT/ObjectSpaceRepository.h"
-#include	<algorithm>
+#include <algorithm>
+#include <sstream>
+#include "NGT/Common.h"
+#include "NGT/ObjectSpaceRepository.h"
+#include "NGT/defines.h"
 
 namespace NGT {
   class DVPTree;
@@ -52,8 +53,12 @@ namespace NGT {
       void setType(Type t) { id = (t << 31) | getID(); }
       void setRaw(NodeID i) { id = i; }
       void setNull() { id = 0; }
+      // for milvus
+      void serialize(std::stringstream & os) { NGT::Serializer::write(os, id); }
       void serialize(std::ofstream &os) { NGT::Serializer::write(os, id); }
       void deserialize(std::ifstream &is) { NGT::Serializer::read(is, id); }
+      // for milvus
+      void deserialize(std::stringstream & is) { NGT::Serializer::read(is, id); }
       void serializeAsText(std::ofstream &os) { NGT::Serializer::writeAsText(os, id);	}
       void deserializeAsText(std::ifstream &is) { NGT::Serializer::readAsText(is, id); }
     protected:
@@ -87,6 +92,13 @@ namespace NGT {
       return *this;
     }
 
+    // for milvus
+    void serialize(std::stringstream & os)
+    {
+        id.serialize(os);
+        parent.serialize(os);
+    }
+
     void serialize(std::ofstream &os) {
       id.serialize(os);
       parent.serialize(os);
@@ -95,6 +107,12 @@ namespace NGT {
     void deserialize(std::ifstream &is) {
       id.deserialize(is);
       parent.deserialize(is);
+    }
+
+    void deserialize(std::stringstream & is)
+    {
+        id.deserialize(is);
+        parent.deserialize(is);
     }
 
     void serializeAsText(std::ofstream &os) {
@@ -218,6 +236,26 @@ namespace NGT {
     Distance *getBorders() { return borders; }
 #endif // NGT_SHARED_MEMORY_ALLOCATOR
 
+    // for milvus
+    void serialize(std::stringstream & os, ObjectSpace * objectspace = 0)
+    {
+        Node::serialize(os);
+        if (pivot == 0)
+        {
+            NGTThrowException("Node::write: pivot is null!");
+        }
+        assert(objectspace != 0);
+        getPivot().serialize(os, objectspace);
+        NGT::Serializer::write(os, childrenSize);
+        for (size_t i = 0; i < childrenSize; i++)
+        {
+            getChildren()[i].serialize(os);
+        }
+        for (size_t i = 0; i < childrenSize - 1; i++)
+        {
+            NGT::Serializer::write(os, getBorders()[i]);
+        }
+    }
 #if defined(NGT_SHARED_MEMORY_ALLOCATOR) 
     void serialize(std::ofstream &os, SharedMemoryAllocator &allocator, ObjectSpace *objectspace = 0) {
 #else
@@ -252,6 +290,43 @@ namespace NGT {
     void deserialize(std::ifstream &is, ObjectSpace *objectspace = 0) {
       Node::deserialize(is);
       if (pivot == 0) {
+#ifdef NGT_SHARED_MEMORY_ALLOCATOR
+	pivot = PersistentObject::allocate(*objectspace);
+#else
+	pivot = PersistentObject::allocate(*objectspace);
+#endif
+      }
+      assert(objectspace != 0);
+#if defined(NGT_SHARED_MEMORY_ALLOCATOR)
+      std::cerr << "not implemented" << std::endl;
+      assert(0);
+#else
+      getPivot().deserialize(is, objectspace);
+#endif
+      NGT::Serializer::read(is, childrenSize);
+      assert(children != 0);
+      for (size_t i = 0; i < childrenSize; i++) {
+#if defined(NGT_SHARED_MEMORY_ALLOCATOR)
+	assert(0);
+#else
+	getChildren()[i].deserialize(is);
+#endif
+      }
+      assert(borders != 0);
+      for (size_t i = 0; i < childrenSize - 1; i++) {
+#if defined(NGT_SHARED_MEMORY_ALLOCATOR)
+	assert(0);
+#else
+	NGT::Serializer::read(is, getBorders()[i]);
+#endif
+      }
+    }
+    // for milvus
+    void deserialize(std::stringstream & is, ObjectSpace * objectspace = 0)
+    {
+        Node::deserialize(is);
+        if (pivot == 0)
+        {
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
 	pivot = PersistentObject::allocate(*objectspace);
 #else
@@ -448,6 +523,29 @@ namespace NGT {
     NGT::ObjectDistance *getObjectIDs() { return objectIDs; }
 #endif // NGT_SHARED_MEMORY_ALLOCATOR
 
+    // for milvus
+    void serialize(std::stringstream & os, ObjectSpace * objectspace = 0)
+    {
+        Node::serialize(os);
+        NGT::Serializer::write(os, objectSize);
+        for (int i = 0; i < objectSize; i++)
+        {
+            objectIDs[i].serialize(os);
+        }
+        if (pivot == 0)
+        {
+            // Before insertion, parent ID == 0 and object size == 0, that indicates an empty index
+            if (parent.getID() != 0 || objectSize != 0)
+            {
+                NGTThrowException("Node::write: pivot is null!");
+            }
+        }
+        else
+        {
+            assert(objectspace != 0);
+            pivot->serialize(os, objectspace);
+        }
+    }
     void serialize(std::ofstream &os, ObjectSpace *objectspace = 0) {
       Node::serialize(os);
 #ifdef NGT_NODE_USE_VECTOR
@@ -480,6 +578,47 @@ namespace NGT {
     }
     void deserialize(std::ifstream &is, ObjectSpace *objectspace = 0) {
       Node::deserialize(is);
+
+#ifdef NGT_NODE_USE_VECTOR
+      objectIDs.clear();
+      NGT::Serializer::read(is, objectIDs);
+#else
+      assert(objectIDs != 0);
+      NGT::Serializer::read(is, objectSize);
+      for (int i = 0; i < objectSize; i++) {
+#if defined(NGT_SHARED_MEMORY_ALLOCATOR)
+	std::cerr << "not implemented" << std::endl;
+	assert(0);
+#else
+	getObjectIDs()[i].deserialize(is);
+#endif
+      }
+#endif
+      if (parent.getID() == 0 && objectSize == 0) {
+	// The index is empty
+	return;
+      }
+      if (pivot == 0) {
+#ifdef NGT_SHARED_MEMORY_ALLOCATOR
+	pivot = PersistentObject::allocate(*objectspace);
+#else
+	pivot = PersistentObject::allocate(*objectspace);
+	assert(pivot != 0);
+#endif
+      }
+      assert(objectspace != 0);
+#if defined(NGT_SHARED_MEMORY_ALLOCATOR)
+      std::cerr << "not implemented" << std::endl;
+      assert(0);
+#else
+      getPivot().deserialize(is, objectspace);
+#endif
+    }
+
+    // for milvus
+    void deserialize(std::stringstream & is, ObjectSpace * objectspace = 0)
+    {
+        Node::deserialize(is);
 
 #ifdef NGT_NODE_USE_VECTOR
       objectIDs.clear();

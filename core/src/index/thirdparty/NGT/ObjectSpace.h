@@ -26,7 +26,14 @@ namespace NGT {
   class ObjectDistances : public std::vector<ObjectDistance> {
   public:
     ObjectDistances(NGT::ObjectSpace *os = 0) {}
+    // for milvus
+    void serialize(std::stringstream & os, ObjectSpace * objspace = 0) { NGT::Serializer::write(os, (std::vector<ObjectDistance> &)*this); }
     void serialize(std::ofstream &os, ObjectSpace *objspace = 0) { NGT::Serializer::write(os, (std::vector<ObjectDistance>&)*this);}
+    // for milvus
+    void deserialize(std::stringstream & is, ObjectSpace * objspace = 0)
+    {
+        NGT::Serializer::read(is, (std::vector<ObjectDistance> &)*this);
+    }
     void deserialize(std::ifstream &is, ObjectSpace *objspace = 0) { NGT::Serializer::read(is, (std::vector<ObjectDistance>&)*this);}
 
     void serializeAsText(std::ofstream &os, ObjectSpace *objspace = 0) { 
@@ -203,6 +210,10 @@ namespace NGT {
     Comparator &getComparator() { return *comparator; }
 
     virtual void serialize(const std::string &of) = 0;
+    // for milvus
+    virtual void serialize(std::stringstream & obj) = 0;
+    // for milvus
+    virtual void deserialize(std::stringstream & obj) = 0;
     virtual void deserialize(const std::string &ifile) = 0;
     virtual void serializeAsText(const std::string &of) = 0;
     virtual void deserializeAsText(const std::string &of) = 0;

@@ -5,6 +5,7 @@
 #include <NGT/Index.h>
 
 #include <knowhere/common/Exception.h>
+#include <knowhere/index/IndexType.h>
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <memory>
 

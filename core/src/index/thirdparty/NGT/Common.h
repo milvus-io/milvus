@@ -649,6 +649,32 @@ namespace NGT {
 	os << i->first << "\t" << i->second << std::endl;
       }
     }
+    // for milvus
+    void save(std::stringstream & prf)
+    {
+        for (std::map<std::string, std::string>::iterator i = this->begin(); i != this->end(); i++)
+        {
+            prf << i->first << "\t" << i->second << std::endl;
+        }
+    }
+
+    // for milvus
+    void load(std::stringstream & is)
+    {
+        std::string line;
+        while (getline(is, line))
+        {
+            std::vector<std::string> tokens;
+            NGT::Common::tokenize(line, tokens, "\t");
+            if (tokens.size() != 2)
+            {
+                std::cerr << "Property file is illegal. " << line << std::endl;
+                continue;
+            }
+            set(tokens[0], tokens[1]);
+        }
+    }
+
     void load(std::ifstream &is) {
       std::string line;
       while (getline(is, line)) {
@@ -664,16 +690,14 @@ namespace NGT {
   };
 
   namespace Serializer {
-    static inline void read(std::istream &is, uint8_t *v, size_t s) {
-      is.read((char*)v, s);
-    }
+      static inline void read(std::istream & is, uint8_t * v, size_t s) { is.read((char *)v, s); }
 
-    static inline void write(std::ostream &os, const uint8_t *v, size_t s) {
-      os.write((const char*)v, s);
-    }
+      static inline void write(std::ostream & os, const uint8_t * v, size_t s) { os.write((const char *)v, s); }
 
-    template <typename TYPE> void write(std::ostream &os, const TYPE v) {
-      os.write((const char*)&v, sizeof(TYPE));
+      template <typename TYPE>
+      void write(std::ostream & os, const TYPE v)
+      {
+          os.write((const char *)&v, sizeof(TYPE));
     }
 
     template <typename TYPE> void writeAsText(std::ostream &os, const TYPE v) {
@@ -684,8 +708,10 @@ namespace NGT {
       }
     }
 
-    template <typename TYPE> void read(std::istream &is, TYPE &v) {
-      is.read((char*)&v, sizeof(TYPE));
+    template <typename TYPE>
+    void read(std::istream & is, TYPE & v)
+    {
+        is.read((char *)&v, sizeof(TYPE));
     }
 
     template <typename TYPE> void readAsText(std::istream &is, TYPE &v) {
@@ -1423,6 +1449,31 @@ namespace NGT {
       }
     }
 
+    // for milvus
+    void serialize(std::stringstream & os, ObjectSpace * objectspace = 0)
+    {
+        NGT::Serializer::write(os, std::vector<TYPE *>::size());
+        for (size_t idx = 0; idx < std::vector<TYPE *>::size(); idx++)
+        {
+            if ((*this)[idx] == 0)
+            {
+                NGT::Serializer::write(os, '-');
+            }
+            else
+            {
+                NGT::Serializer::write(os, '+');
+                if (objectspace == 0)
+                {
+                    (*this)[idx]->serialize(os);
+                }
+                else
+                {
+                    (*this)[idx]->serialize(os, objectspace);
+                }
+            }
+        }
+    }
+
     void deserialize(std::ifstream &is, ObjectSpace *objectspace = 0) {
       if (!is.is_open()) {
 	NGTThrowException("NGT::Common: Not open the specified stream yet.");
@@ -1438,6 +1489,50 @@ namespace NGT {
 	case '-':
 	  {
 	    std::vector<TYPE*>::push_back(0);
+#ifdef ADVANCED_USE_REMOVED_LIST
+	    if (i != 0) {
+	      removedList.push(i);
+	    }
+#endif
+	  }
+	  break;
+	case '+':
+	  {
+	    if (objectspace == 0) {
+	      TYPE *v = new TYPE;
+	      v->deserialize(is);
+	      std::vector<TYPE*>::push_back(v);
+	    } else {
+	      TYPE *v = new TYPE(objectspace);
+	      v->deserialize(is, objectspace);
+	      std::vector<TYPE*>::push_back(v);
+	    }
+	  }
+	  break;
+	default:
+	  {
+	    assert(type == '-' || type == '+');
+	    break;
+	  }
+	}
+      }
+    }
+
+    void deserialize(std::stringstream & is, ObjectSpace * objectspace = 0)
+    {
+        deleteAll();
+        size_t s;
+        NGT::Serializer::read(is, s);
+        std::vector<TYPE *>::reserve(s);
+        for (size_t i = 0; i < s; i++)
+        {
+            char type;
+            NGT::Serializer::read(is, type);
+            switch (type)
+            {
+                case '-':
+                {
+                    std::vector<TYPE *>::push_back(0);
 #ifdef ADVANCED_USE_REMOVED_LIST
 	    if (i != 0) {
 	      removedList.push(i);
@@ -1592,9 +1687,22 @@ namespace NGT {
       NGT::Serializer::write(os, id);
       NGT::Serializer::write(os, distance);
     }
+    // for milvus
+    void serialize(std::stringstream & os)
+    {
+        NGT::Serializer::write(os, id);
+        NGT::Serializer::write(os, distance);
+    }
     void deserialize(std::ifstream &is) {
       NGT::Serializer::read(is, id);
       NGT::Serializer::read(is, distance);
+    }
+
+    // for milvus
+    void deserialize(std::stringstream & is)
+    {
+        NGT::Serializer::read(is, id);
+        NGT::Serializer::read(is, distance);
     }
 
     void serializeAsText(std::ofstream &os) {

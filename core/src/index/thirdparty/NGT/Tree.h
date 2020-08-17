@@ -20,6 +20,7 @@
 #include	"NGT/Common.h"
 #include	"NGT/Node.h"
 
+#include <sstream>
 #include	<string>
 #include	<vector>
 #include	<stack>
@@ -341,6 +342,13 @@ namespace NGT {
       }
     }
 
+    // for milvus
+    void serialize(std::stringstream & os)
+    {
+        leafNodes.serialize(os, objectSpace);
+        internalNodes.serialize(os, objectSpace);
+    }
+
     void serialize(std::ofstream &os) {
       leafNodes.serialize(os, objectSpace);
       internalNodes.serialize(os, objectSpace);
@@ -349,6 +357,12 @@ namespace NGT {
     void deserialize(std::ifstream &is) {
       leafNodes.deserialize(is, objectSpace);
       internalNodes.deserialize(is, objectSpace);
+    }
+
+    void deserialize(std::stringstream & is)
+    {
+        leafNodes.deserialize(is, objectSpace);
+        internalNodes.deserialize(is, objectSpace);
     }
 
     void serializeAsText(std::ofstream &os) {

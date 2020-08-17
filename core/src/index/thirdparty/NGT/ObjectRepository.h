@@ -15,6 +15,7 @@
 //
 
 #pragma once
+#include <sstream>
 
 namespace NGT {
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
@@ -39,6 +40,9 @@ namespace NGT {
       Parent::push_back((PersistentObject*)0);
     }
 
+    // for milvus
+    void serialize(std::stringstream & obj, ObjectSpace * ospace) { Parent::serialize(obj, ospace); }
+
     void serialize(const std::string &ofile, ObjectSpace *ospace) { 
       std::ofstream objs(ofile);
       if (!objs.is_open()) {
@@ -47,6 +51,12 @@ namespace NGT {
 	NGTThrowException(msg);
       }
       Parent::serialize(objs, ospace); 
+    }
+
+    void deserialize(std::stringstream & obj, ObjectSpace * ospace)
+    {
+        assert(ospace != 0);
+        Parent::deserialize(obj, ospace);
     }
 
     void deserialize(const std::string &ifile, ObjectSpace *ospace) { 

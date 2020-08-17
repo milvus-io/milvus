@@ -17,6 +17,7 @@
 #pragma once
 
 #include	<bitset>
+#include <sstream>
 
 #include	"NGT/defines.h"
 #include	"NGT/Common.h"
@@ -152,9 +153,21 @@ namespace NGT {
       VECTOR::serialize(os);
       Serializer::write(os, *prevsize);
     }
+    // for milvus
+    void serialize(std::stringstream & grp)
+    {
+        VECTOR::serialize(grp);
+        Serializer::write(grp, *prevsize);
+    }
     void deserialize(std::ifstream &is) {
       VECTOR::deserialize(is);      
       Serializer::read(is, *prevsize);
+    }
+    // for milvus
+    void deserialize(std::stringstream & is)
+    {
+        VECTOR::deserialize(is);
+        Serializer::read(is, *prevsize);
     }
     void show() {
       for (size_t i = 0; i < this->size(); i++) {
