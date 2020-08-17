@@ -65,7 +65,6 @@ MXLogFileHandler::Load(char* buf, uint32_t data_offset, uint32_t data_size) {
         if (ret != data_size) {
             LOG_WAL_ERROR_ << LogOut("MXLogFileHandler::Load error, expect read %d but read %d", data_size, ret);
         }
-        __glibcxx_assert(ret == data_size);
     }
     return true;
 }

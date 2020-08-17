@@ -26,9 +26,9 @@ KnowhereException::KnowhereException(const std::string& m, const char* funcName,
     msg.resize(size + 1);
     snprintf(&msg[0], msg.size(), "Error in %s at %s:%d: %s", funcName, file, line, m.c_str());
 #else
-    size_t pos;
     std::string filename;
     try {
+        size_t pos;
         std::string file_path(file);
         pos = file_path.find_last_of('/');
         filename = file_path.substr(pos + 1);

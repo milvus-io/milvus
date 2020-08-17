@@ -67,7 +67,8 @@ Segment::AddField(const std::string& field_name, DataType field_type, int64_t fi
             real_field_width = field_width;
             break;
         }
-        default: {}
+        default:
+            break;
     }
 
     field_types_.insert(std::make_pair(field_name, field_type));
