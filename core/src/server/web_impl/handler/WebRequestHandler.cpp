@@ -222,6 +222,7 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
         one_json["id"] = id_array[i];
         json_res.push_back(one_json);
     }
+    return Status::OK();
 }
 
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
