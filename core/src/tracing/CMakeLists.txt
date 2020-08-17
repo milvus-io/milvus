@@ -15,14 +15,11 @@ aux_source_directory( ${MILVUS_ENGINE_SRC}/tracing  TRACING_FILES )
 
 add_library( tracing STATIC ${TRACING_FILES} )
 
-set( TRACING_LIB    
-                    # opentracing
-                    # opentracing_mocktracer
-                    opentracing::opentracing
+set( TRACING_LIB    opentracing::opentracing
                     opentracing::mocktracer
                     pthread
                     z
                     dl
                     )
 
-target_link_libraries( tracing ${TRACING_LIB} )
+target_link_libraries( tracing PUBLIC ${TRACING_LIB} )

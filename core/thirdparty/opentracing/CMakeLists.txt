@@ -43,16 +43,18 @@ if ( NOT opentracing_POPULATED )
                       ${opentracing_BINARY_DIR}
                       EXCLUDE_FROM_ALL )
 
+    # Opentracing-cpp CMakeLists.txt file didn't give a
+    # correct interface directories
+    target_include_directories( opentracing-static
+        INTERFACE   $<BUILD_INTERFACE:${opentracing_SOURCE_DIR}/include>
+                    $<BUILD_INTERFACE:${opentracing_BINARY_DIR}/include>
+                    $<BUILD_INTERFACE:${opentracing_SOURCE_DIR}/3rd_party/include> )
+    target_include_directories( opentracing_mocktracer-static
+        INTERFACE  $<BUILD_INTERFACE:${opentracing_SOURCE_DIR}/mocktracer/include> )
     # Adding the following ALIAS Targets:
     # opentracing::opentracing
     # opentracing::mocktracer
     if ( NOT TARGET opentracing::opentracing )
-        # Opentracing-cpp CMakeLists.txt file didn't give a
-        # correct interface directories
-        target_include_directories( opentracing-static
-            PUBLIC  $<BUILD_INTERFACE:${opentracing_SOURCE_DIR}/include>
-                    $<BUILD_INTERFACE:${opentracing_BINARY_DIR}/include>
-                    $<BUILD_INTERFACE:${opentracing_SOURCE_DIR}/3rd_party/include> )
         add_library( opentracing::opentracing ALIAS opentracing-static )
     endif()
     if ( NOT TARGET opentracing::mocktracer )
@@ -63,4 +65,3 @@ endif()
 
 get_property( var DIRECTORY "${opentracing_SOURCE_DIR}" PROPERTY COMPILE_OPTIONS )
 message( STATUS "opentracing compile options: ${var}" )
-
