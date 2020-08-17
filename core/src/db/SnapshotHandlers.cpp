@@ -10,6 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/SnapshotHandlers.h"
+
+#include "config/ServerConfig.h"
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
@@ -44,7 +46,7 @@ SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss,
 
 Status
 SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
-    if (segment_commit->GetRowCount() < engine::BUILD_INDEX_THRESHOLD) {
+    if (segment_commit->GetRowCount() < config.engine.build_index_threshold()) {
         return Status::OK();
     }
 
