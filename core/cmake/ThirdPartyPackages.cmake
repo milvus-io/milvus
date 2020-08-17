@@ -270,8 +270,8 @@ endif ()
 if (DEFINED ENV{MILVUS_OATPP_URL})
     set(OATPP_SOURCE_URL "$ENV{MILVUS_OATPP_URL}")
 else ()
-    # set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
-    set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/${OATPP_VERSION}.zip")
+     set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
+#    set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/${OATPP_VERSION}.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_AWS_URL})
@@ -686,7 +686,7 @@ macro(build_oatpp)
             ${OATPP_SOURCE_URL}
             ${EP_LOG_OPTIONS}
             URL_MD5
-            "ae7143a8014ffed77c5340ac29af29f4"
+            "396350ca4fe5bedab3769e09eee2cc9f"
             CMAKE_ARGS
             ${OATPP_CMAKE_ARGS}
             BUILD_COMMAND

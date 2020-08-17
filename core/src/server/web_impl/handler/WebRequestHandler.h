@@ -152,59 +152,59 @@ class WebRequestHandler {
     }
 
  public:
-    StatusDto::ObjectWrapper
-    GetDevices(DevicesDto::ObjectWrapper& devices);
+    StatusDtoT
+    GetDevices(DevicesDtoT& devices);
 
-    StatusDto::ObjectWrapper
-    GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& config);
+    StatusDtoT
+    GetAdvancedConfig(AdvancedConfigDtoT& config);
 
-    StatusDto::ObjectWrapper
-    SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& config);
+    StatusDtoT
+    SetAdvancedConfig(const AdvancedConfigDtoT& config);
 
 #ifdef MILVUS_GPU_VERSION
-    StatusDto::ObjectWrapper
-    GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto);
+    StatusDtoT
+    GetGpuConfig(GPUConfigDtoT& gpu_config_dto);
 
-    StatusDto::ObjectWrapper
-    SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto);
+    StatusDtoT
+    SetGpuConfig(const GPUConfigDtoT& gpu_config_dto);
 #endif
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     CreateCollection(const milvus::server::web::OString& body);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     ShowCollections(const OQueryParams& query_params, OString& result);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     GetCollection(const OString& collection_name, const OQueryParams& query_params, OString& result);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     DropCollection(const OString& collection_name);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     CreateIndex(const OString& collection_name, const OString& field_name, const OString& body);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     DropIndex(const OString& collection_name, const OString& field_name);
 
-    StatusDto::ObjectWrapper
-    CreatePartition(const OString& collection_name, const PartitionRequestDto::ObjectWrapper& param);
+    StatusDtoT
+    CreatePartition(const OString& collection_name, const PartitionRequestDtoT& param);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
-                   PartitionListDto::ObjectWrapper& partition_list_dto);
+                   PartitionListDtoT& partition_list_dto);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     DropPartition(const OString& collection_name, const OString& body);
 
     /***********
      *
      * Segment
      */
-    StatusDto::ObjectWrapper
+    StatusDtoT
     ShowSegments(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     GetSegmentInfo(const OString& collection_name, const OString& segment_name, const OString& info,
                    const OQueryParams& query_params, OString& result);
 
@@ -212,26 +212,26 @@ class WebRequestHandler {
      *
      * Vector
      */
-    StatusDto::ObjectWrapper
-    InsertEntity(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
+    StatusDtoT
+    InsertEntity(const OString& collection_name, const OString& body, VectorIdsDtoT& ids_dto);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     GetEntity(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     EntityOp(const OString& collection_name, const OString& payload, OString& response);
 
     /**
      *
      * System
      */
-    StatusDto::ObjectWrapper
+    StatusDtoT
     SystemInfo(const OString& cmd, const OQueryParams& query_params, OString& response_str);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     SystemOp(const OString& op, const OString& body_str, OString& response_str);
 
  public:

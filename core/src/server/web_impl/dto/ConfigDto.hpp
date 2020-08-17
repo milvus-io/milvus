@@ -14,14 +14,12 @@
 #include "server/web_impl/Constants.h"
 #include "server/web_impl/dto/Dto.h"
 
-namespace milvus {
-namespace server {
-namespace web {
+namespace milvus::server::web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class AdvancedConfigDto : public OObject {
-    DTO_INIT(AdvancedConfigDto, Object);
+class AdvancedConfigDto : public ODTO {
+    DTO_INIT(AdvancedConfigDto, DTO);
 
     DTO_FIELD(Int64, cpu_cache_capacity) = VALUE_CONFIG_CPU_CACHE_CAPACITY_DEFAULT;
     DTO_FIELD(Boolean, cache_insert_data) = VALUE_CONFIG_CACHE_INSERT_DATA_DEFAULT;
@@ -33,8 +31,10 @@ class AdvancedConfigDto : public OObject {
 #endif
 };
 
-class GPUConfigDto : public OObject {
-    DTO_INIT(GPUConfigDto, Object);
+using AdvancedConfigDtoT = oatpp::Object<AdvancedConfigDto>;
+
+class GPUConfigDto : public ODTO {
+    DTO_INIT(GPUConfigDto, DTO);
 
     DTO_FIELD(Boolean, enable) = true;
     DTO_FIELD(Int64, cache_capacity) = 1;
@@ -44,6 +44,6 @@ class GPUConfigDto : public OObject {
 
 #include OATPP_CODEGEN_END(DTO)
 
-} // namespace web
-} // namespace server
-} // namespace milvus
+using GPUConfigDtoT = oatpp::Object<GPUConfigDto>;
+
+} // namespace milvus::server::web
