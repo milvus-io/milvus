@@ -24,7 +24,7 @@ StructuredIndexSort<T>::StructuredIndexSort() : is_built_(false), data_() {
 
 template <typename T>
 StructuredIndexSort<T>::StructuredIndexSort(const size_t n, const T* values) : is_built_(false) {
-    Build(n, values);
+    StructuredIndexSort<T>::Build(n, values);
 }
 
 template <typename T>

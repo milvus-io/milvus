@@ -1264,18 +1264,18 @@ TEST_F(DBTest, DeleteStaleTest) {
     build_thread.join();
     fiu_disable("MemCollection.ApplyDeletes.RandomSleep");
     db_->Flush();
-//    int64_t row_count;
-//    status = db_->CountEntities(collection_name, row_count);
-//    ASSERT_TRUE(status.ok()) << status.ToString();
-//    ASSERT_EQ(row_count, 10000 * 2 - 2 * del_id_pair);
-//
-//    std::vector<bool> valid_row;
-//    milvus::engine::DataChunkPtr entity_data_chunk;
-//    for (size_t j = 0; j < del_ids.size(); j++) {
-//        status = db_->GetEntityByID(collection_name, {del_ids[j]}, {}, valid_row, entity_data_chunk);
-//        ASSERT_TRUE(status.ok()) << status.ToString();
-//        ASSERT_EQ(entity_data_chunk->count_, 0) << "[" << j << "] Delete id " << del_ids[j] << " failed.";
-//    }
+    int64_t row_count;
+    status = db_->CountEntities(collection_name, row_count);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(row_count, 10000 * 2 - 2 * del_id_pair);
+
+    std::vector<bool> valid_row;
+    milvus::engine::DataChunkPtr entity_data_chunk;
+    for (size_t j = 0; j < del_ids.size(); j++) {
+        status = db_->GetEntityByID(collection_name, {del_ids[j]}, {}, valid_row, entity_data_chunk);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_EQ(entity_data_chunk->count_, 0) << "[" << j << "] Delete id " << del_ids[j] << " failed.";
+    }
 }
 
 TEST_F(DBTest, LoadTest) {

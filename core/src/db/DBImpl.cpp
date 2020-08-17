@@ -68,13 +68,13 @@ DBImpl::DBImpl(const DBOptions& options)
     /* watch on storage.auto_flush_interval */
     ConfigMgr::GetInstance().Attach("storage.auto_flush_interval", this);
 
-    Start();
+    DBImpl::Start();
 }
 
 DBImpl::~DBImpl() {
     ConfigMgr::GetInstance().Detach("storage.auto_flush_interval", this);
 
-    Stop();
+    DBImpl::Stop();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -673,7 +673,7 @@ DBImpl::Flush(const std::string& collection_name) {
     }
 
     Status status;
-    bool has_collection;
+    bool has_collection = false;
     status = HasCollection(collection_name, has_collection);
     if (!status.ok()) {
         return status;
@@ -714,7 +714,7 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
     const std::lock_guard<std::mutex> merge_lock(flush_merge_compact_mutex_);
 
     Status status;
-    bool has_collection;
+    bool has_collection = false;
     status = HasCollection(collection_name, has_collection);
     if (!status.ok()) {
         return status;
