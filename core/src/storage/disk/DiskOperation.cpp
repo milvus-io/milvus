@@ -17,7 +17,7 @@
 
 #include <experimental/filesystem>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include "storage/disk/DiskOperation.h"
 #include "utils/Exception.h"

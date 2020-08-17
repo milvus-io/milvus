@@ -39,7 +39,7 @@
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <src/scheduler/job/BuildIndexJob.h>
 #include <limits>
 #include <utility>

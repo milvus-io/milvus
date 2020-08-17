@@ -15,7 +15,7 @@
 #include <string>
 #include <thread>
 #include <gtest/gtest.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <fiu-control.h>
 
 #include "config/ServerConfig.h"
