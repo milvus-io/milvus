@@ -19,7 +19,7 @@
 #include	"NGT/defines.h"
 
 #if defined(NGT_NO_AVX)
-#warning "*** SIMD is *NOT* available! ***"
+
 #else
 #include	<immintrin.h>
 #endif

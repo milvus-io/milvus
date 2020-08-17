@@ -1117,12 +1117,12 @@ namespace NGT {
 
     size_t getObjectRepositorySize() { return objectSpace->getRepository().size(); }
 	// For milvus
-    size_t getNumberOfVector() { return getObjectRepositorySize() - 1; }
+    virtual size_t getNumberOfVector() { return getObjectRepositorySize() - 1; }
 
     size_t getSizeOfElement() { return objectSpace->getSizeOfElement(); }
 
 	// For milvus
-    size_t getDimension() { return objectSpace->getDimension(); }
+    virtual size_t getDimension() { return objectSpace->getDimension(); }
 
     Object *allocateObject(const std::string &textLine, const std::string &sep) {
       return objectSpace->allocateNormalizedObject(textLine, sep);

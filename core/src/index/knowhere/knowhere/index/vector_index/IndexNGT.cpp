@@ -12,7 +12,7 @@ namespace milvus {
 namespace knowhere {
 
 BinarySet
-IndexNGT::Serialize(const Config& config = Config()) override {
+IndexNGT::Serialize(const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -59,76 +59,73 @@ IndexNGT::Serialize(const Config& config = Config()) override {
 }
 
 void
-IndexNGT::Load(const BinarySet& index_binary) override {
+IndexNGT::Load(const BinarySet& index_binary) {
     auto obj_size = index_binary.GetByName("ngt_obj_size");
     uint64_t obj_size_;
     memcpy(&obj_size_, obj_size->data.get(), sizeof(uint64_t));
     auto obj_data = index_binary.GetByName("ngt_obj_data");
-    std::string obj_str(obj_data->data.get(), obj_size);
+    std::string obj_str((char*)(obj_data->data.get()), obj_size_);
 
     auto grp_size = index_binary.GetByName("ngt_grp_size");
     uint64_t grp_size_;
     memcpy(&grp_size_, grp_size->data.get(), sizeof(uint64_t));
     auto grp_data = index_binary.GetByName("ngt_grp_data");
-    std::string grp_str(grp_data->data.get(), grp_size);
+    std::string grp_str((char*)(grp_data->data.get()), grp_size_);
 
     auto prf_size = index_binary.GetByName("ngt_prf_size");
     uint64_t prf_size_;
     memcpy(&prf_size_, prf_size->data.get(), sizeof(uint64_t));
     auto prf_data = index_binary.GetByName("ngt_prf_data");
-    std::string prf_str(prf_data->data.get(), prf_size);
+    std::string prf_str((char*)(prf_data->data.get()), prf_size_);
 
     auto tre_size = index_binary.GetByName("ngt_tre_size");
     uint64_t tre_size_;
     memcpy(&tre_size_, tre_size->data.get(), sizeof(uint64_t));
     auto tre_data = index_binary.GetByName("ngt_tre_data");
-    std::string tre_str(tre_data->data.get(), tre_size);
+    std::string tre_str((char*)(tre_data->data.get()), tre_size_);
 
     std::stringstream obj(obj_str);
     std::stringstream grp(grp_str);
     std::stringstream prf(prf_str);
     std::stringstream tre(tre_str);
 
-    index_ = NGT::Index::loadIndex(obj, grp, prf, tre);
+    index_ = std::shared_ptr<NGT::Index>(NGT::Index::loadIndex(obj, grp, prf, tre));
 }
 
 void
-IndexNG::Train(const DatasetPtr& dataset_ptr, const Config& config) override {
+IndexNGT::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr);
 
     NGT::Property prop;
     prop.setDefaultForCreateIndex();
     prop.dimension = dim;
 
-    auto metric_type = config[Metric::TYPE];
-    switch (metric_type) {
-        case Metric::L2:
-            prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeL2;
-            break;
-        case Metric::HAMMING:
-            prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeHamming;
-            break;
-        case Metric::JACCARD:
-            prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeJaccard;
-            break;
-        default:
-            KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
-    }
-    index_ = std::make_shared<NGT::Index>(NGT::Index::createGraphAndTree(p_data, prop, rows));
+    MetricType metric_type = config[Metric::TYPE];
+
+    if (metric_type == Metric::L2)
+        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeL2;
+    else if (metric_type == Metric::HAMMING)
+        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeHamming;
+    else if (metric_type == Metric::JACCARD)
+        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeJaccard;
+    else
+        KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
+    index_ =
+        std::shared_ptr<NGT::Index>(NGT::Index::createGraphAndTree(reinterpret_cast<const float*>(p_data), prop, rows));
 }
 
 void
-IndexNGT::AddWithoutIds(const DatasetPtr dataset_ptr, const Config() config) override {
+IndexNGT::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     GET_TENSOR_DATA(dataset_ptr);
 
-    index_->append(p_data, rows);
+    index_->append(reinterpret_cast<const float*>(p_data), rows);
 }
 
 DatasetPtr
-IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) override {
+IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -151,15 +148,7 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) override {
         NGT::SearchContainer sc(*object);
 
         size_t step = sp.step == 0 ? UINT_MAX : sp.step;
-        double epsilon;
-        if (sp.step != 0) {
-            epsilon = sp.beginOfEpsilon + (sp.endOfEpsilon - sp.beginOfEpsilon) * n / step;
-        } else {
-            epsilon = sp.beginOfEpsilon + sp.stepOfEpsilon * n;
-            if (epsilon > sp.endOfEpsilon) {
-                break;
-            }
-        }
+        double epsilon = sp.beginOfEpsilon;
 
         NGT::ObjectDistances res;
         sc.setResults(&res);

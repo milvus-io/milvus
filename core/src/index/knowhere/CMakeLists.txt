@@ -68,6 +68,7 @@ set(vector_index_srcs
         knowhere/index/vector_index/IndexRHNSWFlat.cpp
         knowhere/index/vector_index/IndexRHNSWSQ.cpp
         knowhere/index/vector_index/IndexRHNSWPQ.cpp
+        knowhere/index/vector_index/IndexNGT.cpp
         )
 
 set(vector_offset_index_srcs

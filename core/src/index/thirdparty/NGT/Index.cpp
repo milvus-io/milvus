@@ -121,21 +121,22 @@ NGT::Index * NGT::Index::loadIndex(std::stringstream & obj, std::stringstream & 
         NGTThrowException("GraphIndex: Cannot open. Not memory type.");
     }
     assert(prop.dimension != 0);
-    Index * idx = 0;
+    NGT::Index * idx = new NGT::Index();
     if (prop.indexType == NGT::Index::Property::GraphAndTree)
     {
-        idx = new NGT::GraphAndTreeIndex(prop);
+        auto iidx = new NGT::GraphAndTreeIndex(prop);
+        idx->index = iidx;
     }
     else if (prop.indexType == NGT::Index::Property::Graph)
     {
-        idx = new NGT::GraphIndex(prop);
+        auto iidx = new NGT::GraphIndex(prop);
+        idx->index = iidx;
     }
     else
     {
         NGTThrowException("Index::Open: Not found IndexType in property file.");
     }
-    idx->index = idx;
-    idx->loadIndexFromStream(obj, grp, tre);
+    idx->index->loadIndexFromStream(obj, grp, tre);
     return idx;
 }
 
@@ -147,18 +148,20 @@ NGT::Index * NGT::Index::createGraphAndTree(const float * row_data, NGT::Propert
     {
         NGTThrowException("Index::createGraphAndTree. Dimension is not specified.");
     }
+    NGT::Index * res = new NGT::Index();
     prop.indexType = NGT::Index::Property::IndexType::GraphAndTree;
     NGT::Index * idx = new NGT::GraphAndTreeIndex(prop);
     assert(idx != 0);
     try
     {
         loadRawDataAndCreateIndex(idx, row_data, prop.threadPoolSize, dataSize);
-        idx->index = idx;
-        return idx;
+        res->index = idx;
+        return res;
     }
     catch (Exception & err)
     {
         delete idx;
+        delete res;
         throw err;
     }
 }
@@ -200,17 +203,19 @@ NGT::Index * NGT::Index::createGraph(const float * row_data, NGT::Property & pro
         NGTThrowException("Index::createGraphAndTree. Dimension is not specified.");
     }
     prop.indexType = NGT::Index::Property::IndexType::Graph;
+    NGT::Index * res = new NGT::Index();
     NGT::Index * idx = new NGT::GraphAndTreeIndex(prop);
     assert(idx != 0);
     try
     {
         loadRawDataAndCreateIndex(idx, row_data, prop.threadPoolSize, dataSize);
-        idx->index = idx;
-        return idx;
+        res->index = idx;
+        return res;
     }
     catch (Exception & err)
     {
         delete idx;
+        delete res;
         throw err;
     }
 }
