@@ -14,20 +14,18 @@
 #include "server/web_impl/dto/Dto.h"
 #include "server/web_impl/Constants.h"
 
-namespace milvus {
-namespace server {
-namespace web {
+namespace milvus::server::web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class VectorIdsDto : public oatpp::data::mapping::type::Object {
-    DTO_INIT(VectorIdsDto, Object)
+class VectorIdsDto : public ODTO {
+    DTO_INIT(VectorIdsDto, DTO)
 
-    DTO_FIELD(List<String>::ObjectWrapper, ids);
+    DTO_FIELD(List<String>, ids);
 };
 
 #include OATPP_CODEGEN_END(DTO)
 
-} // namespace web
-} // namespace server
-} // namespace milvus
+using VectorIdsDtoT = oatpp::Object<VectorIdsDto>;
+
+} // namespace milvus::server::web
