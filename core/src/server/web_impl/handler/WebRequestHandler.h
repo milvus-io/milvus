@@ -162,11 +162,11 @@ class WebRequestHandler {
     SetAdvancedConfig(const AdvancedConfigDtoT& config);
 
 #ifdef MILVUS_GPU_VERSION
-    StatusDto::ObjectWrapper
-    GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto);
+    StatusDtoT
+    GetGpuConfig(GPUConfigDtoT& gpu_config_dto);
 
-    StatusDto::ObjectWrapper
-    SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto);
+    StatusDtoT
+    SetGpuConfig(const GPUConfigDtoT& gpu_config_dto);
 #endif
 
     StatusDtoT

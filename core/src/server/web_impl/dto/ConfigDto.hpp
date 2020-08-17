@@ -44,4 +44,6 @@ class GPUConfigDto : public ODTO {
 
 #include OATPP_CODEGEN_END(DTO)
 
+using GPUConfigDtoT = oatpp::Object<GPUConfigDto>;
+
 } // namespace milvus::server::web

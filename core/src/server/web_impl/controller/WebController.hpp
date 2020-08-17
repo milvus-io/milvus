@@ -29,9 +29,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-namespace milvus {
-namespace server {
-namespace web {
+namespace milvus::server::web {
 
 #define WEB_LOG_PREFIX "[Web] "
 
@@ -169,7 +167,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.GetGpuConfig(gpu_config_dto);
-        switch (status_dto->code->getValue()) {
+        switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_200, gpu_config_dto);
                 break;
@@ -177,7 +175,7 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+        std::string ttr = "Done. Status: code = " + std::to_string(*(status_dto->code)) +
                           ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
 
@@ -186,7 +184,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_DEFAULT_CORS(SetGPUConfig)
 
-    ENDPOINT("PUT", "/config/gpu_resources", SetGPUConfig, BODY_DTO(GPUConfigDto::ObjectWrapper, body)) {
+    ENDPOINT("PUT", "/config/gpu_resources", SetGPUConfig, BODY_DTO(Object<GPUConfigDto>, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/config/gpu_resources\'");
         tr.RecordSection("Received request.");
 
@@ -194,7 +192,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto status_dto = handler.SetGpuConfig(body);
 
         std::shared_ptr<OutgoingResponse> response;
-        switch (status_dto->code->getValue()) {
+        switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_200, status_dto);
                 break;
@@ -202,7 +200,7 @@ class WebController : public oatpp::web::server::api::ApiController {
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
 
-        std::string ttr = "Done. Status: code = " + std::to_string(status_dto->code->getValue()) +
+        std::string ttr = "Done. Status: code = " + std::to_string(*(status_dto->code)) +
                           ", reason = " + status_dto->message->std_str() + ". Total cost";
         tr.ElapseFromBegin(ttr);
         return response;
@@ -752,6 +750,5 @@ class WebController : public oatpp::web::server::api::ApiController {
 #include OATPP_CODEGEN_END(ApiController)
 };
 
-}  // namespace web
-}  // namespace server
-}  // namespace milvus
+}  // namespace milvus::server::web
+

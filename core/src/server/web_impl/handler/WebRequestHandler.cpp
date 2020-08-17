@@ -855,7 +855,7 @@ WebRequestHandler::GetDevices(DevicesDtoT& devices_dto) {
     for (size_t i = 0; i < count; i++) {
         auto device_dto = DeviceInfoDto::createShared();
         device_dto->memory = device_mems.at(i) >> 30;
-        devices_dto->gpus->put("GPU" + OString(std::to_string(i).c_str()), device_dto);
+        devices_dto->gpus->emplace_back("GPU" + OString(std::to_string(i).c_str()), device_dto);
     }
 #endif
 
@@ -964,8 +964,8 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDtoT& advanced_config) 
 
 #ifdef MILVUS_GPU_VERSION
 
-StatusDto::ObjectWrapper
-WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
+StatusDtoT
+WebRequestHandler::GetGpuConfig(GPUConfigDtoT& gpu_config_dto) {
     //    std::string reply;
     //    std::string gpu_cmd_prefix = "get_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
     //
@@ -1018,8 +1018,8 @@ WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 
-StatusDto::ObjectWrapper
-WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
+StatusDtoT
+WebRequestHandler::SetGpuConfig(const GPUConfigDtoT& gpu_config_dto) {
     //    // Step 1: Check config param
     //    if (nullptr == gpu_config_dto->enable.get()) {
     //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'enable\' miss")
