@@ -42,11 +42,12 @@ SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_comm
 SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss, const std::string& field_name,
                                                    snapshot::IDS_TYPE& segment_ids)
     : BaseT(ss), field_name_(field_name), segment_ids_(segment_ids) {
+    build_index_threshold_ = config.engine.build_index_threshold();
 }
 
 Status
 SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
-    if (segment_commit->GetRowCount() < config.engine.build_index_threshold()) {
+    if (segment_commit->GetRowCount() < build_index_threshold_) {
         return Status::OK();
     }
 
