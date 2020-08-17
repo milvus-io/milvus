@@ -11,7 +11,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-if (DEFINED ENV{MILVUS_OPENTRACING_URL})
+if ( DEFINED ENV{MILVUS_OPENTRACING_URL} )
     set(OPENTRACING_SOURCE_URL "$ENV{MILVUS_OPENTRACING_URL}")
 else ()
     set(OPENTRACING_SOURCE_URL
