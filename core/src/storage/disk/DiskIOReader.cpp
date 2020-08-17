@@ -21,9 +21,9 @@ DiskIOReader::Open(const std::string& name) {
     return fs_.is_open();
 }
 
-bool
+void
 DiskIOReader::Read(void* ptr, int64_t size) {
-    return fs_.read(reinterpret_cast<char*>(ptr), size).good();
+    fs_.read(reinterpret_cast<char*>(ptr), size);
 }
 
 void

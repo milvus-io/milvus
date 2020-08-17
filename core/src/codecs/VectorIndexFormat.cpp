@@ -48,9 +48,7 @@ VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::strin
     }
 
     size_t num_bytes;
-    if (!fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t))) {
-        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read raw file size: " + file_path);
-    }
+    fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t));
 
     data = std::make_shared<knowhere::Binary>();
     data->size = num_bytes;
@@ -58,9 +56,7 @@ VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::strin
 
     // Beginning of file is num_bytes
     fs_ptr->reader_ptr_->Seekg(sizeof(size_t));
-    if (!fs_ptr->reader_ptr_->Read(data->data.get(), num_bytes)) {
-        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read raw file data: " + file_path);
-    }
+    fs_ptr->reader_ptr_->Read(data->data.get(), num_bytes);
     fs_ptr->reader_ptr_->Close();
 
     double span = recorder.RecordSection("End");
@@ -89,30 +85,22 @@ VectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::str
     LOG_ENGINE_DEBUG_ << "Start to ReadIndex(" << full_file_path << ") length: " << length << " bytes";
     while (rp < length) {
         size_t meta_length;
-        if (!fs_ptr->reader_ptr_->Read(&meta_length, sizeof(meta_length))) {
-            THROW_ERROR(SERVER_CANNOT_READ_FILE, "Failed to read vector index meta length: " + full_file_path);
-        }
+        fs_ptr->reader_ptr_->Read(&meta_length, sizeof(meta_length));
         rp += sizeof(meta_length);
         fs_ptr->reader_ptr_->Seekg(rp);
 
         auto meta = new char[meta_length];
-        if (!fs_ptr->reader_ptr_->Read(meta, meta_length)) {
-            THROW_ERROR(SERVER_CANNOT_READ_FILE, "Failed to read vector index meta data: " + full_file_path);
-        }
+        fs_ptr->reader_ptr_->Read(meta, meta_length);
         rp += meta_length;
         fs_ptr->reader_ptr_->Seekg(rp);
 
         size_t bin_length;
-        if (!fs_ptr->reader_ptr_->Read(&bin_length, sizeof(bin_length))) {
-            THROW_ERROR(SERVER_CANNOT_READ_FILE, "Failed to read vector index bin length: " + full_file_path);
-        }
+        fs_ptr->reader_ptr_->Read(&bin_length, sizeof(bin_length));
         rp += sizeof(bin_length);
         fs_ptr->reader_ptr_->Seekg(rp);
 
         auto bin = new uint8_t[bin_length];
-        if (!fs_ptr->reader_ptr_->Read(bin, bin_length)) {
-            THROW_ERROR(SERVER_CANNOT_READ_FILE, "Failed to read vector index bin data: " + full_file_path);
-        }
+        fs_ptr->reader_ptr_->Read(bin, bin_length);
         rp += bin_length;
         fs_ptr->reader_ptr_->Seekg(rp);
 

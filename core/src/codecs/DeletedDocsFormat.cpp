@@ -50,18 +50,13 @@ DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& 
     }
 
     size_t num_bytes;
-    if (!fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t))) {
-        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read deleted docs file size: " + full_file_path);
-    }
+    fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t));
 
     auto deleted_docs_size = num_bytes / sizeof(engine::offset_t);
     std::vector<engine::offset_t> deleted_docs_list;
     deleted_docs_list.resize(deleted_docs_size);
 
-    if (!fs_ptr->reader_ptr_->Read(deleted_docs_list.data(), num_bytes)) {
-        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read deleted docs file data: " + full_file_path);
-    }
-
+    fs_ptr->reader_ptr_->Read(deleted_docs_list.data(), num_bytes);
     fs_ptr->reader_ptr_->Close();
 
     deleted_docs = std::make_shared<segment::DeletedDocs>(deleted_docs_list);
@@ -87,17 +82,9 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
         if (!fs_ptr->reader_ptr_->Open(temp_path)) {
             THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open tmp deleted docs file: " + temp_path);
         }
-
-        if (!fs_ptr->reader_ptr_->Read(&old_num_bytes, sizeof(size_t))) {
-            THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read tmp deleted docs file size: " + temp_path);
-        }
-
+        fs_ptr->reader_ptr_->Read(&old_num_bytes, sizeof(size_t));
         delete_ids.resize(old_num_bytes / sizeof(engine::offset_t));
-
-        if (!fs_ptr->reader_ptr_->Read(delete_ids.data(), old_num_bytes)) {
-            THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read tmp deleted docs file data: " + temp_path);
-        }
-
+        fs_ptr->reader_ptr_->Read(delete_ids.data(), old_num_bytes);
         fs_ptr->reader_ptr_->Close();
     } else {
         old_num_bytes = 0;
@@ -129,9 +116,7 @@ DeletedDocsFormat::ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::stri
     }
 
     size_t num_bytes;
-    if (!fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t))) {
-        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read deleted docs file size: " + full_file_path);
-    }
+    fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t));
 
     size = num_bytes / sizeof(engine::offset_t);
     fs_ptr->reader_ptr_->Close();

@@ -54,9 +54,7 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
     compress->size = length;
 
     fs_ptr->reader_ptr_->Seekg(0);
-    if (!fs_ptr->reader_ptr_->Read(compress->data.get(), length)) {
-        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read vector compress file data: " + full_file_path);
-    }
+    fs_ptr->reader_ptr_->Read(compress->data.get(), length);
     fs_ptr->reader_ptr_->Close();
 
     double span = recorder.RecordSection("End");

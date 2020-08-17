@@ -37,16 +37,11 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     }
 
     size_t num_bytes;
-    if (!fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t))) {
-        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file size: " + file_path);
-    }
+    fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t));
 
     raw = std::make_shared<engine::BinaryData>();
     raw->data_.resize(num_bytes);
-    if (!fs_ptr->reader_ptr_->Read(raw->data_.data(), num_bytes)) {
-        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file data: " + file_path);
-    }
-
+    fs_ptr->reader_ptr_->Read(raw->data_.data(), num_bytes);
     fs_ptr->reader_ptr_->Close();
 }
 
@@ -62,9 +57,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     }
 
     size_t total_num_bytes;
-    if (!fs_ptr->reader_ptr_->Read(&total_num_bytes, sizeof(size_t))) {
-        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file size: " + file_path);
-    }
+    fs_ptr->reader_ptr_->Read(&total_num_bytes, sizeof(size_t));
 
     offset += sizeof(size_t);  // Beginning of file is num_bytes
     if (offset + num_bytes > total_num_bytes) {
@@ -74,9 +67,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     raw = std::make_shared<engine::BinaryData>();
     raw->data_.resize(num_bytes);
     fs_ptr->reader_ptr_->Seekg(offset);
-    if (!fs_ptr->reader_ptr_->Read(raw->data_.data(), num_bytes)) {
-        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file data: " + file_path);
-    }
+    fs_ptr->reader_ptr_->Read(raw->data_.data(), num_bytes);
     fs_ptr->reader_ptr_->Close();
 }
 
@@ -92,16 +83,13 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     }
 
     size_t total_num_bytes;
-    if (!fs_ptr->reader_ptr_->Read(&total_num_bytes, sizeof(size_t))) {
-        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file size: " + file_path);
-    }
+    fs_ptr->reader_ptr_->Read(&total_num_bytes, sizeof(size_t));
 
     int64_t total_bytes = 0;
     for (auto& range : read_ranges) {
         if (range.offset_ > total_num_bytes) {
             THROW_ERROR(SERVER_INVALID_ARGUMENT, "Invalid argument to read: " + file_path);
         }
-
         total_bytes += range.num_bytes_;
     }
 
@@ -111,12 +99,9 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     for (auto& range : read_ranges) {
         int64_t offset = range.offset_ + sizeof(size_t);
         fs_ptr->reader_ptr_->Seekg(offset);
-        if (!fs_ptr->reader_ptr_->Read(raw->data_.data() + poz, range.num_bytes_)) {
-            THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file data: " + file_path);
-        }
+        fs_ptr->reader_ptr_->Read(raw->data_.data() + poz, range.num_bytes_);
         poz += range.num_bytes_;
     }
-
     fs_ptr->reader_ptr_->Close();
 }
 
