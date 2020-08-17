@@ -250,13 +250,6 @@ else ()
             "https://github.com/gperftools/gperftools/releases/download/gperftools-${GPERFTOOLS_VERSION}/gperftools-${GPERFTOOLS_VERSION}.tar.gz")
 endif ()
 
-if (DEFINED ENV{MILVUS_OPENTRACING_URL})
-    set(OPENTRACING_SOURCE_URL "$ENV{MILVUS_OPENTRACING_URL}")
-else ()
-    set(OPENTRACING_SOURCE_URL "https://github.com/opentracing/opentracing-cpp/archive/${OPENTRACING_VERSION}.tar.gz"
-          "https://gitee.com/quicksilver/opentracing-cpp/repository/archive/${OPENTRACING_VERSION}.zip")
-endif ()
-
 if (DEFINED ENV{MILVUS_FIU_URL})
     set(FIU_SOURCE_URL "$ENV{MILVUS_FIU_URL}")
 else ()
