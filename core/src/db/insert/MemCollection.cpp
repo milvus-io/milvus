@@ -208,13 +208,15 @@ MemCollection::ApplyDeletes() {
             }
         }
 
+        size_t delete_ids_delta = delete_ids.size();
+
         std::vector<engine::id_t> uids;
         STATUS_CHECK(segment_reader->LoadUids(uids));
 
         // Step 2: Load previous delete_id and merge into 'delete_ids'
         segment::DeletedDocsPtr prev_del_docs;
         STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
-        std::vector<engine::offset_t> pre_del_ids;
+        std::vector<engine::id_t> pre_del_ids;
         if (prev_del_docs) {
             auto pre_doc_ids = prev_del_docs->GetDeletedDocs();
             if (!pre_doc_ids.empty()) {
@@ -300,7 +302,7 @@ MemCollection::ApplyDeletes() {
             }
 
             STATUS_CHECK(
-                segments_op->CommitRowCountDelta(segment->GetID(), delete_docs->GetCount() - pre_del_ids.size(), true));
+                segments_op->CommitRowCountDelta(segment->GetID(), delete_ids_delta, true));
 
             STATUS_CHECK(segment_writer->WriteDeletedDocs(del_docs_path, delete_docs));
             STATUS_CHECK(segment_writer->WriteBloomFilter(bloom_filter_file_path, bloom_filter));
