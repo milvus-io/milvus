@@ -32,7 +32,7 @@ namespace codec {
 
 void
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::BinaryDataPtr& raw) {
-    if (!fs_ptr->reader_ptr_->open(file_path)) {
+    if (!fs_ptr->reader_ptr_->Open(file_path)) {
         THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open file: " + file_path);
     }
 
@@ -47,7 +47,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file data: " + file_path);
     }
 
-    fs_ptr->reader_ptr_->close();
+    fs_ptr->reader_ptr_->Close();
 }
 
 void
@@ -57,7 +57,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         THROW_ERROR(SERVER_INVALID_ARGUMENT, "Invalid input to read: " + file_path);
     }
 
-    if (!fs_ptr->reader_ptr_->open(file_path)) {
+    if (!fs_ptr->reader_ptr_->Open(file_path)) {
         THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open file: " + file_path);
     }
 
@@ -73,11 +73,11 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 
     raw = std::make_shared<engine::BinaryData>();
     raw->data_.resize(num_bytes);
-    fs_ptr->reader_ptr_->seekg(offset);
+    fs_ptr->reader_ptr_->Seekg(offset);
     if (!fs_ptr->reader_ptr_->Read(raw->data_.data(), num_bytes)) {
         THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file data: " + file_path);
     }
-    fs_ptr->reader_ptr_->close();
+    fs_ptr->reader_ptr_->Close();
 }
 
 void
@@ -87,7 +87,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         return;
     }
 
-    if (!fs_ptr->reader_ptr_->open(file_path)) {
+    if (!fs_ptr->reader_ptr_->Open(file_path)) {
         THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open file: " + file_path);
     }
 
@@ -110,14 +110,14 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     int64_t poz = 0;
     for (auto& range : read_ranges) {
         int64_t offset = range.offset_ + sizeof(size_t);
-        fs_ptr->reader_ptr_->seekg(offset);
+        fs_ptr->reader_ptr_->Seekg(offset);
         if (!fs_ptr->reader_ptr_->Read(raw->data_.data() + poz, range.num_bytes_)) {
             THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file data: " + file_path);
         }
         poz += range.num_bytes_;
     }
 
-    fs_ptr->reader_ptr_->close();
+    fs_ptr->reader_ptr_->Close();
 }
 
 void
@@ -127,14 +127,14 @@ BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_
         return;
     }
 
-    if (!fs_ptr->writer_ptr_->open(file_path)) {
+    if (!fs_ptr->writer_ptr_->Open(file_path)) {
         THROW_ERROR(SERVER_CANNOT_CREATE_FILE, "Fail to open file: " + file_path);
     }
 
     size_t num_bytes = raw->data_.size();
-    fs_ptr->writer_ptr_->write(&num_bytes, sizeof(size_t));
-    fs_ptr->writer_ptr_->write((void*)(raw->data_.data()), num_bytes);
-    fs_ptr->writer_ptr_->close();
+    fs_ptr->writer_ptr_->Write(&num_bytes, sizeof(size_t));
+    fs_ptr->writer_ptr_->Write((void*)(raw->data_.data()), num_bytes);
+    fs_ptr->writer_ptr_->Close();
 }
 
 }  // namespace codec

@@ -34,19 +34,19 @@ class DiskIOReader : public IOReader {
     operator=(DiskIOReader&&) = delete;
 
     bool
-    open(const std::string& name) override;
+    Open(const std::string& name) override;
 
     bool
     Read(void* ptr, int64_t size) override;
 
     void
-    seekg(int64_t pos) override;
+    Seekg(int64_t pos) override;
 
     int64_t
-    length() override;
+    Length() override;
 
     void
-    close() override;
+    Close() override;
 
  public:
     std::string name_;

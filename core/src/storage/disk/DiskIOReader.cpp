@@ -15,7 +15,7 @@ namespace milvus {
 namespace storage {
 
 bool
-DiskIOReader::open(const std::string& name) {
+DiskIOReader::Open(const std::string& name) {
     name_ = name;
     fs_ = std::fstream(name_, std::ios::in | std::ios::binary);
     return fs_.is_open();
@@ -27,12 +27,12 @@ DiskIOReader::Read(void* ptr, int64_t size) {
 }
 
 void
-DiskIOReader::seekg(int64_t pos) {
+DiskIOReader::Seekg(int64_t pos) {
     fs_.seekg(pos);
 }
 
 int64_t
-DiskIOReader::length() {
+DiskIOReader::Length() {
     /* save current position */
     int64_t cur = fs_.tellg();
 
@@ -46,7 +46,7 @@ DiskIOReader::length() {
 }
 
 void
-DiskIOReader::close() {
+DiskIOReader::Close() {
     fs_.close();
 }
 
