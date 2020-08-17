@@ -42,21 +42,21 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
     if (!fs_ptr->reader_ptr_->open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
-        return;
+        THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open vector compress file: " + full_file_path);
     }
 
     int64_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
-        LOG_ENGINE_ERROR_ << "Invalid vector compress length: " << full_file_path;
-        return;
+        THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Invalid vector compress length: " + full_file_path);
     }
 
     compress->data = std::shared_ptr<uint8_t[]>(new uint8_t[length]);
     compress->size = length;
 
     fs_ptr->reader_ptr_->seekg(0);
-    fs_ptr->reader_ptr_->read(compress->data.get(), length);
+    if (!fs_ptr->reader_ptr_->read(compress->data.get(), length)) {
+        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read vector compress file data: " + full_file_path);
+    }
     fs_ptr->reader_ptr_->close();
 
     double span = recorder.RecordSection("End");
@@ -71,8 +71,7 @@ VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::stri
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
     if (!fs_ptr->writer_ptr_->open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
-        return;
+        THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open vector compress: " + full_file_path);
     }
 
     fs_ptr->writer_ptr_->write(compress->data.get(), compress->size);

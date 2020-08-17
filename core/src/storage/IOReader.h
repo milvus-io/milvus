@@ -22,7 +22,7 @@ class IOReader {
     virtual bool
     open(const std::string& name) = 0;
 
-    virtual void
+    virtual bool
     read(void* ptr, int64_t size) = 0;
 
     virtual void

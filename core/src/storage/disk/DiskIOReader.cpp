@@ -18,12 +18,12 @@ bool
 DiskIOReader::open(const std::string& name) {
     name_ = name;
     fs_ = std::fstream(name_, std::ios::in | std::ios::binary);
-    return fs_.good();
+    return fs_.is_open();
 }
 
-void
+bool
 DiskIOReader::read(void* ptr, int64_t size) {
-    fs_.read(reinterpret_cast<char*>(ptr), size);
+    return fs_.read(reinterpret_cast<char*>(ptr), size).good();
 }
 
 void
@@ -33,9 +33,15 @@ DiskIOReader::seekg(int64_t pos) {
 
 int64_t
 DiskIOReader::length() {
+    /* save current position */
+    int64_t cur = fs_.tellg();
+
+    /* move position to end of file */
     fs_.seekg(0, fs_.end);
     int64_t len = fs_.tellg();
-    fs_.seekg(0, fs_.beg);
+
+    /* restore position */
+    fs_.seekg(cur, fs_.beg);
     return len;
 }
 

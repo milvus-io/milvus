@@ -43,14 +43,14 @@ VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::strin
                            knowhere::BinaryPtr& data) {
     milvus::TimeRecorder recorder("VectorIndexFormat::ReadRaw");
 
-    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
-        std::string err_msg = "Failed to open raw file: " + file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
+    if (!fs_ptr->reader_ptr_->open(file_path)) {
+        THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open raw file: " + file_path);
     }
 
     size_t num_bytes;
-    fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
+    if (!fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t))) {
+        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read raw file size: " + file_path);
+    }
 
     data = std::make_shared<knowhere::Binary>();
     data->size = num_bytes;
@@ -58,7 +58,9 @@ VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::strin
 
     // Beginning of file is num_bytes
     fs_ptr->reader_ptr_->seekg(sizeof(size_t));
-    fs_ptr->reader_ptr_->read(data->data.get(), num_bytes);
+    if (!fs_ptr->reader_ptr_->read(data->data.get(), num_bytes)) {
+        THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read raw file data: " + file_path);
+    }
     fs_ptr->reader_ptr_->close();
 
     double span = recorder.RecordSection("End");
@@ -73,15 +75,12 @@ VectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::str
 
     std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
     if (!fs_ptr->reader_ptr_->open(full_file_path)) {
-        std::string err_msg = "Failed to open vector index: " + full_file_path + ", error: " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
+        THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open vector index: " + full_file_path);
     }
 
     int64_t length = fs_ptr->reader_ptr_->length();
     if (length <= 0) {
-        LOG_ENGINE_ERROR_ << "Invalid vector index length: " << full_file_path;
-        return;
+        THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Invalid vector index length: " + full_file_path);
     }
 
     int64_t rp = 0;
@@ -90,22 +89,30 @@ VectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::str
     LOG_ENGINE_DEBUG_ << "Start to ReadIndex(" << full_file_path << ") length: " << length << " bytes";
     while (rp < length) {
         size_t meta_length;
-        fs_ptr->reader_ptr_->read(&meta_length, sizeof(meta_length));
+        if (!fs_ptr->reader_ptr_->read(&meta_length, sizeof(meta_length))) {
+            THROW_ERROR(SERVER_CANNOT_READ_FILE, "Failed to read vector index meta length: " + full_file_path);
+        }
         rp += sizeof(meta_length);
         fs_ptr->reader_ptr_->seekg(rp);
 
         auto meta = new char[meta_length];
-        fs_ptr->reader_ptr_->read(meta, meta_length);
+        if (!fs_ptr->reader_ptr_->read(meta, meta_length)) {
+            THROW_ERROR(SERVER_CANNOT_READ_FILE, "Failed to read vector index meta data: " + full_file_path);
+        }
         rp += meta_length;
         fs_ptr->reader_ptr_->seekg(rp);
 
         size_t bin_length;
-        fs_ptr->reader_ptr_->read(&bin_length, sizeof(bin_length));
+        if (!fs_ptr->reader_ptr_->read(&bin_length, sizeof(bin_length))) {
+            THROW_ERROR(SERVER_CANNOT_READ_FILE, "Failed to read vector index bin length: " + full_file_path);
+        }
         rp += sizeof(bin_length);
         fs_ptr->reader_ptr_->seekg(rp);
 
         auto bin = new uint8_t[bin_length];
-        fs_ptr->reader_ptr_->read(bin, bin_length);
+        if (!fs_ptr->reader_ptr_->read(bin, bin_length)) {
+            THROW_ERROR(SERVER_CANNOT_READ_FILE, "Failed to read vector index bin data: " + full_file_path);
+        }
         rp += bin_length;
         fs_ptr->reader_ptr_->seekg(rp);
 
@@ -167,9 +174,7 @@ VectorIndexFormat::ConstructIndex(const std::string& index_name, knowhere::Binar
         index->UpdateIndexSize();
         LOG_ENGINE_DEBUG_ << "index file size " << length << " index size " << index->IndexSize();
     } else {
-        std::string err_msg = "Fail to create vector index";
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
+        THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Fail to create vector index");
     }
 }
 
@@ -182,8 +187,7 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
     auto binaryset = index->Serialize(knowhere::Config());
 
     if (!fs_ptr->writer_ptr_->open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector index: " << full_file_path;
-        return;
+        THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open vector index: " + full_file_path);
     }
 
     for (auto& iter : binaryset.binary_map_) {

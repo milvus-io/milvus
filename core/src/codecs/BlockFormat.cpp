@@ -32,18 +32,26 @@ namespace codec {
 
 void
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::BinaryDataPtr& raw) {
-    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
-        std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+    if (!fs_ptr->reader_ptr_->open(file_path)) {
+        std::string err_msg = "Failed to open file: " + file_path;
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
     size_t num_bytes;
-    fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
+    if (!fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t))) {
+        std::string err_msg = "Failed to read file size: " + file_path;
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_CANNOT_READ_FILE, err_msg);
+    }
 
     raw = std::make_shared<engine::BinaryData>();
     raw->data_.resize(num_bytes);
-    fs_ptr->reader_ptr_->read(raw->data_.data(), num_bytes);
+    if (!fs_ptr->reader_ptr_->read(raw->data_.data(), num_bytes)) {
+        std::string err_msg = "Failed to read file data: " + file_path;
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
+    }
 
     fs_ptr->reader_ptr_->close();
 }
@@ -57,14 +65,18 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         throw Exception(SERVER_INVALID_ARGUMENT, err_msg);
     }
 
-    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+    if (!fs_ptr->reader_ptr_->open(file_path)) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
     size_t total_num_bytes;
-    fs_ptr->reader_ptr_->read(&total_num_bytes, sizeof(size_t));
+    if (!fs_ptr->reader_ptr_->read(&total_num_bytes, sizeof(size_t))) {
+        std::string err_msg = "Failed to read file size: " + file_path;
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_CANNOT_READ_FILE, err_msg);
+    }
 
     offset += sizeof(size_t);  // Beginning of file is num_bytes
     if (offset + num_bytes > total_num_bytes) {
@@ -76,7 +88,11 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     raw = std::make_shared<engine::BinaryData>();
     raw->data_.resize(num_bytes);
     fs_ptr->reader_ptr_->seekg(offset);
-    fs_ptr->reader_ptr_->read(raw->data_.data(), num_bytes);
+    if (!fs_ptr->reader_ptr_->read(raw->data_.data(), num_bytes)) {
+        std::string err_msg = "Failed to read file data: " + file_path;
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_CANNOT_READ_FILE, err_msg);
+    }
     fs_ptr->reader_ptr_->close();
 }
 
@@ -87,14 +103,18 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         return;
     }
 
-    if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+    if (!fs_ptr->reader_ptr_->open(file_path)) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
     size_t total_num_bytes;
-    fs_ptr->reader_ptr_->read(&total_num_bytes, sizeof(size_t));
+    if (!fs_ptr->reader_ptr_->read(&total_num_bytes, sizeof(size_t))) {
+        std::string err_msg = "Failed to read file size: " + file_path;
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_CANNOT_READ_FILE, err_msg);
+    }
 
     int64_t total_bytes = 0;
     for (auto& range : read_ranges) {
@@ -113,7 +133,11 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     for (auto& range : read_ranges) {
         int64_t offset = range.offset_ + sizeof(size_t);
         fs_ptr->reader_ptr_->seekg(offset);
-        fs_ptr->reader_ptr_->read(raw->data_.data() + poz, range.num_bytes_);
+        if (!fs_ptr->reader_ptr_->read(raw->data_.data() + poz, range.num_bytes_)) {
+            std::string err_msg = "Failed to read file data: " + file_path;
+            LOG_ENGINE_ERROR_ << err_msg;
+            throw Exception(SERVER_CANNOT_READ_FILE, err_msg);
+        }
         poz += range.num_bytes_;
     }
 
@@ -127,7 +151,7 @@ BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_
         return;
     }
 
-    if (!fs_ptr->writer_ptr_->open(file_path.c_str())) {
+    if (!fs_ptr->writer_ptr_->open(file_path)) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);

@@ -22,9 +22,10 @@ S3IOReader::open(const std::string& name) {
     return (S3ClientWrapper::GetInstance().GetObjectStr(name_, buffer_).ok());
 }
 
-void
+bool
 S3IOReader::read(void* ptr, int64_t size) {
     memcpy(ptr, buffer_.data() + pos_, size);
+    return true;
 }
 
 void
