@@ -19,7 +19,7 @@
 namespace milvus {
 
 #define THROW_ERROR(err_code, err_msg) \
-    LOG_ENGINE_ERROR_ << err_msg; \
+    LOG_ENGINE_ERROR_ << err_msg;      \
     throw Exception(err_code, err_msg);
 
 class Exception : public std::exception {
