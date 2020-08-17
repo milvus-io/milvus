@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/ValidationUtil.h"
+#include "db/Constants.h"
 #include "db/Utils.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -400,6 +401,34 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_PARTITION_TAG, msg);
         }
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidateInsertDataSize(const engine::DataChunkPtr& data) {
+    int64_t total_size = 0;
+    for (auto& pair : data->fixed_fields_) {
+        if (pair.second == nullptr) {
+            continue;
+        }
+
+        total_size += pair.second->Size();
+    }
+
+    for (auto& pair : data->variable_fields_) {
+        if (pair.second == nullptr) {
+            continue;
+        }
+
+        total_size += pair.second->Size();
+    }
+
+    if (total_size > engine::MAX_INSERT_DATA_SIZE) {
+        std::string msg = "The amount of data inserted each time cannot exceed " +
+                          std::to_string(engine::MAX_INSERT_DATA_SIZE / engine::MB) + " MB";
+        return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
     }
 
     return Status::OK();

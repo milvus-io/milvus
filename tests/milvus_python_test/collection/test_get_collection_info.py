@@ -10,6 +10,7 @@ from utils import *
 collection_id = "info"
 default_fields = gen_default_fields() 
 segment_row_count = 5000
+field_name = "float_vector"
 
 
 class TestInfoBase:
@@ -34,6 +35,17 @@ class TestInfoBase:
     )
     def get_segment_row_count(self, request):
         yield request.param
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_simple_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if str(connect._cmd("mode")) == "CPU":
+            if request.param["index_type"] in index_cpu_not_support():
+                pytest.skip("sq8h not support in CPU mode")
+        return request.param
 
     """
     ******************************************************************
@@ -76,6 +88,14 @@ class TestInfoBase:
         connect.create_collection(collection_name, fields)
         # assert segment size
 
+    def test_get_collection_info_after_index_created(self, connect, collection, get_simple_index):
+        connect.create_index(collection, field_name, get_simple_index)
+        res = connect.get_collection_info(collection)
+        for field in res["fields"]:
+            if field["field"] == field_name:
+                index = field["indexes"][0]
+                assert index["index_type"] == get_simple_index["index_type"]
+                assert index["metric_type"] == get_simple_index["metric_type"]
 
     @pytest.mark.level(2)
     def test_get_collection_info_without_connection(self, collection, dis_connect):
@@ -98,6 +118,7 @@ class TestInfoBase:
         with pytest.raises(Exception) as e:
             res = connect.get_collection_info(connect, collection_name)
 
+    @pytest.mark.level(2)
     def test_get_collection_info_multithread(self, connect):
         '''
         target: test create collection with multithread

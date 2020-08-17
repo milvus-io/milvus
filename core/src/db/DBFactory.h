@@ -12,7 +12,6 @@
 #pragma once
 
 #include "DB.h"
-#include "Options.h"
 
 #include <memory>
 #include <string>
@@ -22,9 +21,6 @@ namespace engine {
 
 class DBFactory {
  public:
-    static DBOptions
-    BuildOption();
-
     static DBPtr
     BuildDB(const DBOptions& options);
 };

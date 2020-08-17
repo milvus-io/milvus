@@ -59,12 +59,14 @@ InsertReq::OnExecute() {
                           "The vector field is empty, Make sure you have entered vector records"};
         }
 
+        // step 1: check collection existence
         bool exist = false;
         auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
         if (!exist) {
             return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
+        // step 2: construct insert data
         engine::DataChunkPtr data_chunk = std::make_shared<engine::DataChunk>();
         data_chunk->count_ = row_count_;
         for (auto& pair : chunk_data_) {
@@ -72,11 +74,22 @@ InsertReq::OnExecute() {
             bin->data_.swap(pair.second);
             data_chunk->fixed_fields_.insert(std::make_pair(pair.first, bin));
         }
+
+        // step 3: check insert data limitation
+        status = ValidateInsertDataSize(data_chunk);
+        if (!status.ok()) {
+            LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid vector data: %s", "insert", 0, status.message().c_str());
+            return status;
+        }
+
+        // step 4: insert data into db
         status = DBWrapper::DB()->Insert(collection_name_, partition_name_, data_chunk);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "Insert", 0, status.message().c_str());
             return status;
         }
+
+        // step 5: return entity id to client
         chunk_data_[engine::FIELD_UID] = data_chunk->fixed_fields_[engine::FIELD_UID]->data_;
 
         rc.ElapseFromBegin("done");

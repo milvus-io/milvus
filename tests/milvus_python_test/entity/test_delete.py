@@ -290,6 +290,7 @@ class TestDeleteBase:
         res_get = connect.get_entity_by_id(collection, delete_ids)
         assert res_get[0] is None
 
+    @pytest.mark.level(2)
     def test_index_insert_single_delete_get(self, connect, id_collection, get_simple_index):
         '''
         method: create index, insert entities, and delete

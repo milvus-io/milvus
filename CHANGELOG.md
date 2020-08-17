@@ -53,13 +53,14 @@ Please mark all changes in change log and use the issue from GitHub
 
 ## Task
 
-# Milvus 0.10.2 (TBD)
+# Milvus 0.10.2 (2020-08-15)
 
 ## Bug
 -   \#2890 Fix the index size caculation in cache
 -   \#2952 Fix the result merging of IVF_PQ IP
 -   \#2975 Fix config UT failed
 -   \#3012 If the cache is too small, queries using multiple GPUs will cause to crash
+-   \#3133 Reverse query result in mishards if metric type is IP
 
 ## Feature
 

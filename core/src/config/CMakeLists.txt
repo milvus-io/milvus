@@ -21,7 +21,7 @@ set( CONFIG_SRCS    ConfigMgr.h
                     )
 
 add_library( config ${CONFIG_SRCS} )
-add_dependencies( config yaml-cpp )
+target_link_libraries ( config yaml-cpp )
 
 
 if ( BUILD_UNIT_TEST )
@@ -34,7 +34,7 @@ if ( BUILD_UNIT_TEST )
                            gtest_main
                            gmock
                            gmock_main
-                           yaml-cpp )
+                           )
 
     add_test ( NAME     ConfigTypeTest
                COMMAND  $<TARGET_FILE:ConfigTypeTest>

@@ -99,9 +99,6 @@ ConfigMgr::ConfigMgr() {
         {"storage.auto_flush_interval",
          CreateIntegerConfig("storage.auto_flush_interval", true, 0, std::numeric_limits<int64_t>::max(),
                              &config.storage.auto_flush_interval.value, 1, nullptr, nullptr)},
-        {"storage.file_cleanup_timeout",
-         CreateIntegerConfig("storage.file_cleanup_timeout", false, 0, 3600, &config.storage.file_cleanup_timeout.value,
-                             10, nullptr, nullptr)},
 
         /* wal */
         {"wal.enable", CreateBoolConfig("wal.enable", false, &config.wal.enable.value, true, nullptr, nullptr)},
@@ -178,14 +175,6 @@ ConfigMgr::ConfigMgr() {
                              &config.engine.omp_thread_num.value, 0, nullptr, nullptr)},
         {"engine.simd_type", CreateEnumConfig("engine.simd_type", false, &SimdMap, &config.engine.simd_type.value,
                                               SimdType::AUTO, nullptr, nullptr)},
-
-        /* db */
-        {"db.archive_disk_threshold",
-         CreateFloatingConfig("db.archive_disk_threshold", false, 0.0, 1.0, &config.db.archive_disk_threshold.value,
-                              0.0, nullptr, nullptr)},
-        {"db.archive_days_threshold",
-         CreateIntegerConfig("db.archive_days_threshold", false, 0, std::numeric_limits<int64_t>::max(),
-                             &config.db.archive_days_threshold.value, 0, nullptr, nullptr)},
     };
 }
 

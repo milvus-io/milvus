@@ -9,20 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
-
-#include "MergeManager.h"
-
-#include <memory>
+#include "db/transcript/ScriptReplay.h"
+#include "db/transcript/ScriptCodec.h"
 
 namespace milvus {
 namespace engine {
 
-class MergeManagerFactory {
- public:
-    static MergeManagerPtr
-    SSBuild(const DBOptions& options);
-};
+Status
+ScriptReplay::Replay(const DBPtr& db, const std::string& replay_script_path) {
+    return Status::OK();
+}
 
 }  // namespace engine
 }  // namespace milvus

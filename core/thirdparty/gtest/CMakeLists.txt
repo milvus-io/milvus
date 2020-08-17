@@ -11,29 +11,34 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-# *********************************** FetchContent ***********************************
-# Pros: Simple, done at configure time, can be used immediately
-# ************************************************************************************
+if ( DEFINED ENV{MILVUS_GTEST_URL} )
+    set( GTEST_SOURCE_URL "$ENV{MILVUS_GTEST_URL}" )
+else()
+    set( GTEST_SOURCE_URL
+        "https://gitee.com/quicksilver/googletest/repository/archive/release-${GTEST_VERSION}.zip" )
+endif()
+
 message( STATUS "Building gtest-${GTEST_VERSION} from source" )
 include( FetchContent )
 set( CMAKE_POLICY_DEFAULT_CMP0022 NEW ) # for googletest only
 
 FetchContent_Declare(
     googletest
-    URL     ${GTEST_SOURCE_URL} 
-    URL_MD5 "f9137c5bc18b7d74027936f0f1bfa5c8"
-    SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-src
-    BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-build
+    URL        ${GTEST_SOURCE_URL} 
+    URL_MD5    "f9137c5bc18b7d74027936f0f1bfa5c8"
+    SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/googletest-src
+    BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/googletest-build
 
 )
 
 if ( NOT googletest_POPULATED )
     FetchContent_Populate( googletest )
 
+    # Adding the following targets:
+    # gtest, gtest_main, gmock, gmock_main
     add_subdirectory( ${googletest_SOURCE_DIR}
                       ${googletest_BINARY_DIR}
-                      EXCLUDE_FROM_ALL
-                      )
+                      EXCLUDE_FROM_ALL )
 endif()
 
 # ****************************************************************
@@ -55,5 +60,5 @@ endif()
 # endif()
 
 
-get_property(var DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/googletest-src" PROPERTY COMPILE_OPTIONS )
-message(STATUS "gtest compile options: ${var}")
+get_property( var DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/googletest-src" PROPERTY COMPILE_OPTIONS )
+message( STATUS "gtest compile options: ${var}" )
