@@ -15,24 +15,20 @@
 #include "server/web_impl/dto/StatusDto.hpp"
 #include "server/web_impl/Constants.h"
 
-namespace milvus {
-namespace server {
-namespace web {
+namespace milvus::server::web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class IndexRequestDto : public oatpp::data::mapping::type::Object {
- DTO_INIT(IndexRequestDto, Object)
+class IndexRequestDto : public ODTO {
+ DTO_INIT(IndexRequestDto, DTO)
 
     DTO_FIELD(String, index_type) = VALUE_INDEX_INDEX_TYPE_DEFAULT;
 
-    DTO_FIELD(String, params) = VALUE_INDEX_NLIST_DEFAULT;
+    DTO_FIELD(String, params);
 };
 
 using IndexDto = IndexRequestDto;
 
 #include OATPP_CODEGEN_END(DTO)
 
-} // namespace web
-} // namespace server
-} // namespace milvus
+} // namespace milvus::server::web

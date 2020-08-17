@@ -43,6 +43,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2543 Remove secondary_path related code
 -   \#2544 Optimize unittest build
 -   \#2561 Clean util dependencies with other modules
+-   \#2568 Upgrade thirdparty oatpp to v1.1.0
 -   \#2612 Move all APIs in utils into namespace milvus 
 -   \#2675 Print out system memory size when report invalid cpu cache size 
 -   \#2686 Remove dependency on sqlite_orm

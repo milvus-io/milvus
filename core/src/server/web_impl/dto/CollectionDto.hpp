@@ -15,14 +15,12 @@
 #include "server/web_impl/dto/StatusDto.hpp"
 #include "server/web_impl/Constants.h"
 
-namespace milvus {
-namespace server {
-namespace web {
+namespace milvus::server::web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class CollectionRequestDto : public oatpp::data::mapping::type::Object {
- DTO_INIT(CollectionRequestDto, Object)
+class CollectionRequestDto : public ODTO {
+ DTO_INIT(CollectionRequestDto, DTO)
 
     DTO_FIELD(String, collection_name, "collection_name");
     DTO_FIELD(Int64, dimension, "dimension");
@@ -30,8 +28,8 @@ class CollectionRequestDto : public oatpp::data::mapping::type::Object {
     DTO_FIELD(String, metric_type, "metric_type") = VALUE_COLLECTION_METRIC_TYPE_DEFAULT;
 };
 
-class CollectionFieldsDto : public oatpp::data::mapping::type::Object {
- DTO_INIT(CollectionFieldsDto, Object)
+class CollectionFieldsDto : public ODTO {
+ DTO_INIT(CollectionFieldsDto, DTO)
 
     DTO_FIELD(String, collection_name);
     DTO_FIELD(Int64, dimension);
@@ -42,21 +40,19 @@ class CollectionFieldsDto : public oatpp::data::mapping::type::Object {
     DTO_FIELD(String, index_params);
 };
 
-class CollectionListDto : public OObject {
- DTO_INIT(CollectionListDto, Object)
+class CollectionListDto : public ODTO {
+ DTO_INIT(CollectionListDto, DTO)
 
     DTO_FIELD(List<String>::ObjectWrapper, collection_names);
 };
 
-class CollectionListFieldsDto : public OObject {
-    DTO_INIT(CollectionListFieldsDto, Object)
+class CollectionListFieldsDto : public ODTO {
+    DTO_INIT(CollectionListFieldsDto, DTO)
 
-    DTO_FIELD(List<CollectionFieldsDto::ObjectWrapper>::ObjectWrapper, collections);
+    DTO_FIELD(List<Object<CollectionFieldsDto>>, collections);
     DTO_FIELD(Int64, count) = 0L;
 };
 
 #include OATPP_CODEGEN_END(DTO)
 
-} // namespace web
-} // namespace server
-} // namespace milvus
+}  // namespace milvus::server::web
