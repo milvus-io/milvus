@@ -18,7 +18,7 @@ timeout(time: 120, unit: 'MINUTES') {
                                      kubectl logs --namespace milvus -l \"app.kubernetes.io/name=milvus,app.kubernetes.io/instance=${env.HELM_RELEASE_NAME}\" -c milvus && \
                                      helm status -n milvus ${env.HELM_RELEASE_NAME}"
                 sh script: helmStatusCMD, returnStatus: true
-                sh script: "helm uninstall -n milvus ${env.HELM_RELEASE_NAME} && sleep 1m", returnStatus: true
+                MPLModule('Cleanup Single Node DevTest')
                 throw exc
             }
         }
@@ -36,7 +36,7 @@ timeout(time: 120, unit: 'MINUTES') {
 
     if (isTimeTriggeredBuild()) {
         // sqlite database backend test
-        load "ci/jenkins/step/cleanupSingleDev.groovy"
+        MPLModule('Cleanup Single Node DevTest')
 
         retry(3) {
             try {
@@ -48,9 +48,7 @@ timeout(time: 120, unit: 'MINUTES') {
                                      kubectl logs --namespace milvus -l \"app=milvus,release=${env.HELM_RELEASE_NAME}\" -c milvus && \
                                      helm status -n milvus ${env.HELM_RELEASE_NAME}"
                 def helmResult = sh script: helmStatusCMD, returnStatus: true
-                if (!helmResult) {
-                    sh "helm uninstall -n milvus ${env.HELM_RELEASE_NAME} && sleep 1m"
-                }
+                MPLModule('Cleanup Single Node DevTest')
                 throw exc
             }
         }

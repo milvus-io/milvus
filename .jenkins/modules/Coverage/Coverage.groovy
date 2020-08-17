@@ -1,4 +1,4 @@
-timeout(time: 30, unit: 'MINUTES') {
+timeout(time: 10, unit: 'MINUTES') {
     dir ("ci/scripts") {
         sh ". ./before-install.sh && ./coverage.sh"
         String formatFlag = "${BINARY_VERSION}-version-${OS_NAME}-unittest".replaceAll("\\.", "_").replaceAll("-", "_")
