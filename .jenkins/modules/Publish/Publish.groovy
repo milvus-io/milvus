@@ -27,26 +27,11 @@ dir ("docker/deploy") {
     } catch (exc) {
         throw exc
     } finally {
-        deleteImages("${sourceImage}", true)
+        def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${sourceImage} 2>&1 > /dev/null")
+        if (isExistImage == 0) {
+            sh(returnStatus: true, script: "docker rmi -f \$(docker inspect --type=image --format \"{{.ID}}\" ${sourceImage})")
+        }
         sh "docker-compose down --rmi all"
         sh(returnStatus: true, script: "docker rmi -f \$(docker images | grep '<none>' | awk '{print \$3}')")
     }
-}
-
-boolean deleteImages(String imageName, boolean force) {
-    def imageNameStr = imageName.trim()
-    def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageNameStr} 2>&1 > /dev/null")
-    if (isExistImage == 0) {
-        def deleteImageStatus = 0
-        if (force) {
-            deleteImageStatus = sh(returnStatus: true, script: "docker rmi -f \$(docker inspect --type=image --format \"{{.ID}}\" ${imageNameStr})")
-        } else {
-            deleteImageStatus = sh(returnStatus: true, script: "docker rmi ${imageNameStr}")
-        }
-
-        if (deleteImageStatus != 0) {
-            return false
-        }
-    }
-    return true
 }
