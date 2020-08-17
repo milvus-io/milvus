@@ -37,7 +37,7 @@ class DiskIOReader : public IOReader {
     open(const std::string& name) override;
 
     bool
-    read(void* ptr, int64_t size) override;
+    Read(void* ptr, int64_t size) override;
 
     void
     seekg(int64_t pos) override;

@@ -22,7 +22,7 @@ DiskIOReader::open(const std::string& name) {
 }
 
 bool
-DiskIOReader::read(void* ptr, int64_t size) {
+DiskIOReader::Read(void* ptr, int64_t size) {
     return fs_.read(reinterpret_cast<char*>(ptr), size).good();
 }
 

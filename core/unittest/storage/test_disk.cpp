@@ -45,12 +45,12 @@ TEST_F(StorageTest, DISK_RW_TEST) {
         std::string content_out;
         while (rp < length) {
             size_t len;
-            reader.read(&len, sizeof(len));
+            reader.Read(&len, sizeof(len));
             rp += sizeof(len);
             reader.seekg(rp);
 
             auto data = new char[len];
-            reader.read(data, len);
+            reader.Read(data, len);
             rp += len;
             reader.seekg(rp);
 

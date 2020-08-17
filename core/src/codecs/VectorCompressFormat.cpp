@@ -54,7 +54,7 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
     compress->size = length;
 
     fs_ptr->reader_ptr_->seekg(0);
-    if (!fs_ptr->reader_ptr_->read(compress->data.get(), length)) {
+    if (!fs_ptr->reader_ptr_->Read(compress->data.get(), length)) {
         THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read vector compress file data: " + full_file_path);
     }
     fs_ptr->reader_ptr_->close();

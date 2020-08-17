@@ -97,7 +97,7 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
     fs_ptr->reader_ptr_->seekg(0);
 
     int32_t data_type = 0;
-    if (!fs_ptr->reader_ptr_->read(&data_type, sizeof(data_type))) {
+    if (!fs_ptr->reader_ptr_->Read(&data_type, sizeof(data_type))) {
         THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read structured index type: " + full_file_path);
     }
     rp += sizeof(data_type);
@@ -106,28 +106,28 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
     LOG_ENGINE_DEBUG_ << "Start to read_index(" << full_file_path << ") length: " << length << " bytes";
     while (rp < length) {
         size_t meta_length;
-        if (!fs_ptr->reader_ptr_->read(&meta_length, sizeof(meta_length))) {
+        if (!fs_ptr->reader_ptr_->Read(&meta_length, sizeof(meta_length))) {
             THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read structured index meta length: " + full_file_path);
         }
         rp += sizeof(meta_length);
         fs_ptr->reader_ptr_->seekg(rp);
 
         auto meta = new char[meta_length];
-        if (!fs_ptr->reader_ptr_->read(meta, meta_length)) {
+        if (!fs_ptr->reader_ptr_->Read(meta, meta_length)) {
             THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read structured index meta data: " + full_file_path);
         }
         rp += meta_length;
         fs_ptr->reader_ptr_->seekg(rp);
 
         size_t bin_length;
-        if (!fs_ptr->reader_ptr_->read(&bin_length, sizeof(bin_length))) {
+        if (!fs_ptr->reader_ptr_->Read(&bin_length, sizeof(bin_length))) {
             THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read structured index bin length: " + full_file_path);
         }
         rp += sizeof(bin_length);
         fs_ptr->reader_ptr_->seekg(rp);
 
         auto bin = new uint8_t[bin_length];
-        if (!fs_ptr->reader_ptr_->read(bin, bin_length)) {
+        if (!fs_ptr->reader_ptr_->Read(bin, bin_length)) {
             THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read structured index bin data: " + full_file_path);
         }
         rp += bin_length;

@@ -37,13 +37,13 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     }
 
     size_t num_bytes;
-    if (!fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t))) {
+    if (!fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t))) {
         THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file size: " + file_path);
     }
 
     raw = std::make_shared<engine::BinaryData>();
     raw->data_.resize(num_bytes);
-    if (!fs_ptr->reader_ptr_->read(raw->data_.data(), num_bytes)) {
+    if (!fs_ptr->reader_ptr_->Read(raw->data_.data(), num_bytes)) {
         THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file data: " + file_path);
     }
 
@@ -62,7 +62,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     }
 
     size_t total_num_bytes;
-    if (!fs_ptr->reader_ptr_->read(&total_num_bytes, sizeof(size_t))) {
+    if (!fs_ptr->reader_ptr_->Read(&total_num_bytes, sizeof(size_t))) {
         THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file size: " + file_path);
     }
 
@@ -74,7 +74,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     raw = std::make_shared<engine::BinaryData>();
     raw->data_.resize(num_bytes);
     fs_ptr->reader_ptr_->seekg(offset);
-    if (!fs_ptr->reader_ptr_->read(raw->data_.data(), num_bytes)) {
+    if (!fs_ptr->reader_ptr_->Read(raw->data_.data(), num_bytes)) {
         THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file data: " + file_path);
     }
     fs_ptr->reader_ptr_->close();
@@ -92,7 +92,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     }
 
     size_t total_num_bytes;
-    if (!fs_ptr->reader_ptr_->read(&total_num_bytes, sizeof(size_t))) {
+    if (!fs_ptr->reader_ptr_->Read(&total_num_bytes, sizeof(size_t))) {
         THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file size: " + file_path);
     }
 
@@ -111,7 +111,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     for (auto& range : read_ranges) {
         int64_t offset = range.offset_ + sizeof(size_t);
         fs_ptr->reader_ptr_->seekg(offset);
-        if (!fs_ptr->reader_ptr_->read(raw->data_.data() + poz, range.num_bytes_)) {
+        if (!fs_ptr->reader_ptr_->Read(raw->data_.data() + poz, range.num_bytes_)) {
             THROW_ERROR(SERVER_CANNOT_READ_FILE, "Fail to read file data: " + file_path);
         }
         poz += range.num_bytes_;

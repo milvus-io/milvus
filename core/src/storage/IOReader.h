@@ -23,7 +23,7 @@ class IOReader {
     open(const std::string& name) = 0;
 
     virtual bool
-    read(void* ptr, int64_t size) = 0;
+    Read(void* ptr, int64_t size) = 0;
 
     virtual void
     seekg(int64_t pos) = 0;
