@@ -1,4 +1,5 @@
-if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
+def isTimeTriggeredBuild = currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0
+if (isTimeTriggeredBuild || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
     timeout(time: 180, unit: 'MINUTES') {
         sh "mkdir -p ${env.DEV_TEST_ARTIFACTS}"
 
