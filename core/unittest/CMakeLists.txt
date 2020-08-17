@@ -54,8 +54,8 @@ set( UNITTEST_LIBS  sqlite
                     libstdc++fs.a
                     pthread
                     gfortran
-                    opentracing
-                    opentracing_mocktracer
+                    opentracing::opentracing
+                    opentracing::mocktracer
                     fiu
                     dl
                     z

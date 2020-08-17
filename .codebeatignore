@@ -6,4 +6,7 @@ core/thirdparty/**
 sdk/build-support/**
 sdk/thirdparty/**
 sdk/grpc-gen/**
-
+ci/**
+docker/**
+docs/**
+tests/**
