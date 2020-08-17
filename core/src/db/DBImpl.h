@@ -37,10 +37,10 @@ class DBImpl : public DB, public ConfigObserver {
     ~DBImpl();
 
     Status
-    Start();
+    Start() override;
 
     Status
-    Stop();
+    Stop() override;
 
     Status
     CreateCollection(const snapshot::CreateCollectionContext& context) override;

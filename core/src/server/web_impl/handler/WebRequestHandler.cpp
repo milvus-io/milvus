@@ -839,7 +839,7 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
         }
     }
 
-    bool bin;
+    bool bin = false;
     status = IsBinaryCollection(collection_name, bin);
     if (!status.ok()) {
         return status;
@@ -848,7 +848,7 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
     nlohmann::json vectors_json, attrs_json;
     for (size_t i = 0; i < vector_batch.size(); i++) {
         nlohmann::json vector_json;
-        if (bin) {
+        if (bin != 0) {
             vector_json["vector"] = vector_batch.at(i).binary_data_;
         } else {
             vector_json["vector"] = vector_batch.at(i).float_data_;
@@ -872,7 +872,7 @@ WebRequestHandler::GetVectorsByIDs(const std::string& collection_name, const std
         return status;
     }
 
-    bool bin;
+    bool bin = false;
     status = IsBinaryCollection(collection_name, bin);
     if (!status.ok()) {
         return status;

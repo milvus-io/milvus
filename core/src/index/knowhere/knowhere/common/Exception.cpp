@@ -26,13 +26,19 @@ KnowhereException::KnowhereException(const std::string& m, const char* funcName,
     msg.resize(size + 1);
     snprintf(&msg[0], msg.size(), "Error in %s at %s:%d: %s", funcName, file, line, m.c_str());
 #else
-    std::string file_path(file);
-    auto const pos = file_path.find_last_of('/');
-    auto filename = file_path.substr(pos + 1).c_str();
+    size_t pos;
+    std::string filename;
+    try {
+        std::string file_path(file);
+        pos = file_path.find_last_of('/');
+        filename = file_path.substr(pos + 1);
+    } catch (std::exception& e) {
+        LOG_KNOWHERE_ERROR_ << e.what();
+    }
 
-    int size = snprintf(nullptr, 0, "Error in %s at %s:%d: %s", funcName, filename, line, m.c_str());
+    int size = snprintf(nullptr, 0, "Error in %s at %s:%d: %s", funcName, filename.c_str(), line, m.c_str());
     msg.resize(size + 1);
-    snprintf(&msg[0], msg.size(), "Error in %s at %s:%d: %s", funcName, filename, line, m.c_str());
+    snprintf(&msg[0], msg.size(), "Error in %s at %s:%d: %s", funcName, filename.c_str(), line, m.c_str());
 #endif
 }
 

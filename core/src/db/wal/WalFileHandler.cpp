@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/wal/WalFileHandler.h"
+#include "utils/Log.h"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -42,6 +43,9 @@ MXLogFileHandler::Load(char* buf, uint32_t data_offset) {
             read_size = file_size - data_offset;
             fseek(p_file_, data_offset, SEEK_SET);
             auto ret = fread(buf, 1, read_size, p_file_);
+            if (ret != read_size) {
+                LOG_WAL_ERROR_ << LogOut("MXLogFileHandler::Load error, expect read %d but read %d", read_size, ret);
+            }
             __glibcxx_assert(ret == read_size);
         }
     }
@@ -57,7 +61,10 @@ MXLogFileHandler::Load(char* buf, uint32_t data_offset, uint32_t data_size) {
         }
 
         fseek(p_file_, data_offset, SEEK_SET);
-        auto ret = fread(buf, 1, data_size, p_file_);
+        size_t ret = fread(buf, 1, data_size, p_file_);
+        if (ret != data_size) {
+            LOG_WAL_ERROR_ << LogOut("MXLogFileHandler::Load error, expect read %d but read %d", data_size, ret);
+        }
         __glibcxx_assert(ret == data_size);
     }
     return true;

@@ -107,7 +107,7 @@ MemCollection::EraseMem(int64_t partition_id) {
 
 Status
 MemCollection::Serialize(uint64_t wal_lsn) {
-    TimeRecorder recorder("MemCollection::Serialize collection " + collection_id_);
+    TimeRecorder recorder("MemCollection::Serialize collection ", collection_id_);
 
     if (!doc_ids_to_delete_.empty()) {
         while (true) {
