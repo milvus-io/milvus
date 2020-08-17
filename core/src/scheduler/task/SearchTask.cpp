@@ -22,6 +22,7 @@
 
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
+#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
@@ -122,6 +123,9 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, Segmen
         milvus::json json_params;
         if (!file_->index_params_.empty()) {
             json_params = milvus::json::parse(file_->index_params_);
+            if (json_params.contains(knowhere::Metric::TYPE) &&
+                (engine_type == EngineType::FAISS_BIN_IDMAP || engine_type == EngineType::FAISS_IDMAP))
+                ascending_reduce = json_params[knowhere::Metric::TYPE] != static_cast<int>(MetricType::IP);
         }
         //        if (auto job = job_.lock()) {
         //            auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
