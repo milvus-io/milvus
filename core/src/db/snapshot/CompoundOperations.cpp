@@ -119,7 +119,6 @@ CompoundSegmentsOperation::DoExecute(StorePtr store) {
     }
 
     if (StaleSegmentFilesModified()) {
-        std::cerr << "\n*** " << "Segment file out-dated\n" << std::endl;
         return Status(SS_STALE_ERROR, "Segment file has been stale");
     }
 
@@ -158,9 +157,7 @@ CompoundSegmentsOperation::DoExecute(StorePtr store) {
             context.new_segment = context_.new_segment;
         }
 
-        auto ass = GetAdjustedSS();
-        std::cout << "\n*** Adjusted SS is " << ass->GetID() << "\n" << std::endl;
-        SegmentCommitOperation sc_op(context, ass);
+        SegmentCommitOperation sc_op(context, GetAdjustedSS());
         STATUS_CHECK(sc_op(store));
         SegmentCommitPtr new_sc;
         STATUS_CHECK(sc_op.GetResource(new_sc));
@@ -171,9 +168,7 @@ CompoundSegmentsOperation::DoExecute(StorePtr store) {
             auto is_sub = std::get<1>(it_delta->second);
             if (delta != 0) {
                 auto new_row_cnt = 0;
-                std::cout << "\n*** seg id " << m_seg_id <<  " Pre row count is " << new_sc->GetRowCount() << "\n" << std::endl;
                 if (is_sub && new_sc->GetRowCount() < delta) {
-                    std::cerr << "\n*** Invalid row coun\n" << std::endl;
                     return Status(SS_ERROR, "Invalid row count delta for segment " + std::to_string(m_seg_id));
                 } else if (is_sub) {
                     new_row_cnt = new_sc->GetRowCount() - delta;
@@ -182,8 +177,6 @@ CompoundSegmentsOperation::DoExecute(StorePtr store) {
                 }
                 new_sc->SetRowCount(new_row_cnt);
                 segc_ctx_p->AddAttr(RowCountField::Name);
-            } else {
-                std::cout << "\n*** Segment " << m_seg_id << " delta is 0\n" << std::endl;
             }
         }
 
@@ -206,7 +199,6 @@ CompoundSegmentsOperation::DoExecute(StorePtr store) {
     CollectionCommitOperation cc_op(context_, GetAdjustedSS());
     STATUS_CHECK(cc_op(store));
     STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
-    std::cout << "\n*** Create new CC " << context_.new_collection_commit->GetID() << "\n" << std::endl;
     auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(meta::oUpdate).CreatePtr();
     AddStepWithLsn(*context_.new_collection_commit, context_.lsn, cc_ctx_p);
 
