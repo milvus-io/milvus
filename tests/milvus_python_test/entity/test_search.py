@@ -1109,7 +1109,6 @@ class TestSearchDSL(object):
         term["term"].update({"a": [0]})
         expr = {"must": [gen_default_vector_expr(default_query), term]}
         query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
@@ -1199,7 +1198,6 @@ class TestSearchDSL(object):
         range = gen_default_range_expr(ranges=ranges)
         expr = {"must": [gen_default_vector_expr(default_query), range]}
         query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
         res = connect.search(collection, query)
         assert len(res) == nq
         assert len(res[0]) == top_k
@@ -1283,7 +1281,6 @@ class TestSearchDSL(object):
         term = update_term_expr({"term": {}}, [term_first, term_second])
         expr = {"must": [gen_default_vector_expr(default_query), term]}
         query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
         res = connect.search(collection, query)
         assert len(res) == nq
         assert len(res[0]) == 0
@@ -1332,7 +1329,6 @@ class TestSearchDSL(object):
         range_second = gen_default_range_expr(field="float", ranges={"GT": nb // 2, "LT": nb})
         expr = {"must": [gen_default_vector_expr(default_query), range_first, range_second]}
         query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
         res = connect.search(collection, query)
         assert len(res) == nq
         assert len(res[0]) == 0
@@ -1350,7 +1346,6 @@ class TestSearchDSL(object):
         range = update_range_expr({"range": {}}, [range_first, range_second])
         expr = {"must": [gen_default_vector_expr(default_query), range]}
         query = update_query_expr(default_query, expr=expr)
-        logging.getLogger().info(query)
         res = connect.search(collection, query)
         assert len(res) == nq
         assert len(res[0]) == 0
