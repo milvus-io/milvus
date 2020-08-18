@@ -11,39 +11,34 @@
 
 #pragma once
 
+#include "db/DBProxy.h"
+
 #include <memory>
 #include <string>
-#include <unordered_map>
-
-#include "db/Types.h"
-#include "db/meta/MetaFactory.h"
-#include "db/wal/WalDefinations.h"
-#include "db/wal/WalFileHandler.h"
+#include <vector>
 
 namespace milvus {
 namespace engine {
-namespace wal {
 
-extern const char* WAL_META_FILE_NAME;
-
-class MXLogMetaHandler {
+class WalProxy : public DBProxy {
  public:
-    explicit MXLogMetaHandler(const std::string& internal_meta_file_path);
-    ~MXLogMetaHandler();
+    WalProxy(const DBPtr& db, const DBOptions& options);
 
-    bool
-    GetMXLogInternalMeta(uint64_t& wal_lsn);
+    Status
+    Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
+           id_t op_id) override;
 
-    bool
-    SetMXLogInternalMeta(uint64_t wal_lsn);
+    Status
+    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id) override;
+
+    Status
+    Flush(const std::string& collection_name) override;
+
+    Status
+    Flush() override;
 
  private:
-    FILE* wal_meta_fp_;
-    uint64_t latest_wal_lsn_ = 0;
 };
 
-using MXLogMetaHandlerPtr = std::shared_ptr<MXLogMetaHandler>;
-
-}  // namespace wal
 }  // namespace engine
 }  // namespace milvus

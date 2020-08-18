@@ -57,6 +57,7 @@ class SafeIDGenerator : public IDGenerator {
         return instance;
     }
 
+    SafeIDGenerator() = default;
     ~SafeIDGenerator() override = default;
 
     id_t
@@ -66,8 +67,6 @@ class SafeIDGenerator : public IDGenerator {
     GetNextIDNumbers(size_t n, IDNumbers& ids) override;
 
  private:
-    SafeIDGenerator() = default;
-
     Status
     NextIDNumbers(size_t n, IDNumbers& ids);
 
