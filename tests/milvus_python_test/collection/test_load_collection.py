@@ -99,11 +99,6 @@ class TestLoadBase:
     def test_load_collection_after_search(self, connect, collection):
         pass
 
-    # TODO:
-    @pytest.mark.level(2)
-    def test_load_collection_before_search(self, connect, collection):
-        pass
-
 
 class TestLoadCollectionInvalid(object):
     """
