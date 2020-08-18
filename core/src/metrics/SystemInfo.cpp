@@ -41,13 +41,13 @@ SystemInfo::Init() {
     // initialize CPU information
     try {
         struct tms time_sample;
-        char line[128];
         last_cpu_ = times(&time_sample);
         last_sys_cpu_ = time_sample.tms_stime;
         last_user_cpu_ = time_sample.tms_utime;
         num_processors_ = 0;
         FILE* file = fopen("/proc/cpuinfo", "r");
         if (file) {
+            char line[128];
             while (fgets(line, 128, file) != nullptr) {
                 if (strncmp(line, "processor", 9) == 0) {
                     num_processors_++;
