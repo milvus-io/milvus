@@ -26,8 +26,9 @@ FetchContent_Declare(
     googletest
     URL        ${GTEST_SOURCE_URL} 
     URL_MD5    "f9137c5bc18b7d74027936f0f1bfa5c8"
-    SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/googletest-src
-    BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/googletest-build
+    DOWNLOAD_DIR    ${MILVUS_BINARY_DIR}/3rdparty_download/download
+    SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-src
+    BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-build
 
 )
 
