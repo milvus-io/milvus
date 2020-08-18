@@ -11,39 +11,22 @@
 
 #pragma once
 
-#include <memory>
 #include <string>
-#include <unordered_map>
 
-#include "db/Types.h"
-#include "db/meta/MetaFactory.h"
-#include "db/wal/WalDefinations.h"
-#include "db/wal/WalFileHandler.h"
+#include "db/wal/WalOperation.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
-namespace wal {
 
-extern const char* WAL_META_FILE_NAME;
-
-class MXLogMetaHandler {
+class WalOperationCodec {
  public:
-    explicit MXLogMetaHandler(const std::string& internal_meta_file_path);
-    ~MXLogMetaHandler();
+    static Status
+    SerializeOperation(const std::string& path, const InsertEntityOperationPtr& operation);
 
-    bool
-    GetMXLogInternalMeta(uint64_t& wal_lsn);
-
-    bool
-    SetMXLogInternalMeta(uint64_t wal_lsn);
-
- private:
-    FILE* wal_meta_fp_;
-    uint64_t latest_wal_lsn_ = 0;
+    static Status
+    SerializeOperation(const std::string& path, const DeleteEntityOperationPtr& operation);
 };
 
-using MXLogMetaHandlerPtr = std::shared_ptr<MXLogMetaHandler>;
-
-}  // namespace wal
 }  // namespace engine
 }  // namespace milvus

@@ -20,9 +20,9 @@
 namespace milvus {
 namespace engine {
 
-class Transcript : public DBProxy {
+class TranscriptProxy : public DBProxy {
  public:
-    Transcript(const DBPtr& db, const DBOptions& options);
+    TranscriptProxy(const DBPtr& db, const DBOptions& options);
 
     Status
     Start() override;
