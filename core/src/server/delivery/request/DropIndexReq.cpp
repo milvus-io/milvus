@@ -15,7 +15,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>

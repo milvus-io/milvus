@@ -14,7 +14,7 @@
 #include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/index_factory.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <string>
 #include <utility>
 

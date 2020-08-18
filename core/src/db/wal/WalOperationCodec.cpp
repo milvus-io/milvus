@@ -9,30 +9,20 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
-
-#include <memory>
-#include <string>
+#include "db/wal/WalOperationCodec.h"
 
 namespace milvus {
-namespace storage {
+namespace engine {
 
-class IOWriter {
- public:
-    virtual bool
-    Open(const std::string& name) = 0;
+Status
+WalOperationCodec::SerializeOperation(const std::string& path, const InsertEntityOperationPtr& operation) {
+    return Status::OK();
+}
 
-    virtual void
-    Write(void* ptr, int64_t size) = 0;
+Status
+WalOperationCodec::SerializeOperation(const std::string& path, const DeleteEntityOperationPtr& operation) {
+    return Status::OK();
+}
 
-    virtual int64_t
-    Length() = 0;
-
-    virtual void
-    Close() = 0;
-};
-
-using IOWriterPtr = std::shared_ptr<IOWriter>;
-
-}  // namespace storage
+}  // namespace engine
 }  // namespace milvus

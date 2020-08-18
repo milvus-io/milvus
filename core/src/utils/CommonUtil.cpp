@@ -13,7 +13,7 @@
 #include "utils/Log.h"
 
 #include <dirent.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>

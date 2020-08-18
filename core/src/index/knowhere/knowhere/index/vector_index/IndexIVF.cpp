@@ -23,7 +23,7 @@
 #include <faiss/gpu/GpuCloner.h>
 #endif
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <chrono>
 #include <memory>
 #include <string>

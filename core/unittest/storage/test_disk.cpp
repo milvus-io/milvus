@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 
 #include "easyloggingpp/easylogging++.h"
@@ -27,32 +27,32 @@ TEST_F(StorageTest, DISK_RW_TEST) {
 
     {
         milvus::storage::DiskIOWriter writer;
-        ASSERT_TRUE(writer.open(index_name));
+        ASSERT_TRUE(writer.Open(index_name));
         size_t len = content.length();
-        writer.write(&len, sizeof(len));
-        writer.write((void*)(content.data()), len);
-        ASSERT_TRUE(len + sizeof(len) == writer.length());
-        writer.close();
+        writer.Write(&len, sizeof(len));
+        writer.Write((void*)(content.data()), len);
+        ASSERT_TRUE(len + sizeof(len) == writer.Length());
+        writer.Close();
     }
 
     {
         milvus::storage::DiskIOReader reader;
-        ASSERT_FALSE(reader.open("/tmp/notexist"));
-        ASSERT_TRUE(reader.open(index_name));
-        int64_t length = reader.length();
+        ASSERT_FALSE(reader.Open("/tmp/notexist"));
+        ASSERT_TRUE(reader.Open(index_name));
+        int64_t length = reader.Length();
         int64_t rp = 0;
-        reader.seekg(rp);
+        reader.Seekg(rp);
         std::string content_out;
         while (rp < length) {
             size_t len;
-            reader.read(&len, sizeof(len));
+            reader.Read(&len, sizeof(len));
             rp += sizeof(len);
-            reader.seekg(rp);
+            reader.Seekg(rp);
 
             auto data = new char[len];
-            reader.read(data, len);
+            reader.Read(data, len);
             rp += len;
-            reader.seekg(rp);
+            reader.Seekg(rp);
 
             content_out += std::string(data, len);
 
@@ -60,7 +60,7 @@ TEST_F(StorageTest, DISK_RW_TEST) {
         }
 
         ASSERT_TRUE(content == content_out);
-        reader.close();
+        reader.Close();
     }
 }
 

@@ -19,7 +19,7 @@
 #endif
 
 #include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"

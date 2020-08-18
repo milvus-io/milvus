@@ -33,16 +33,16 @@ class S3IOWriter : public IOWriter {
     operator=(S3IOWriter&&) = delete;
 
     bool
-    open(const std::string& name) override;
+    Open(const std::string& name) override;
 
     void
-    write(void* ptr, int64_t size) override;
+    Write(void* ptr, int64_t size) override;
 
     int64_t
-    length() override;
+    Length() override;
 
     void
-    close() override;
+    Close() override;
 
  public:
     std::string name_;

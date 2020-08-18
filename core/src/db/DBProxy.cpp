@@ -121,9 +121,10 @@ DBProxy::DescribeIndex(const std::string& collection_name, const std::string& fi
 }
 
 Status
-DBProxy::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) {
+DBProxy::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
+                id_t op_id) {
     DB_CHECK
-    return db_->Insert(collection_name, partition_name, data_chunk);
+    return db_->Insert(collection_name, partition_name, data_chunk, op_id);
 }
 
 Status
@@ -135,9 +136,9 @@ DBProxy::GetEntityByID(const std::string& collection_name, const IDNumbers& id_a
 }
 
 Status
-DBProxy::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) {
+DBProxy::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id) {
     DB_CHECK
-    return db_->DeleteEntityByID(collection_name, entity_ids);
+    return db_->DeleteEntityByID(collection_name, entity_ids, op_id);
 }
 
 Status

@@ -11,28 +11,22 @@
 
 #pragma once
 
-#include <memory>
 #include <string>
 
+#include "db/wal/WalOperation.h"
+#include "utils/Status.h"
+
 namespace milvus {
-namespace storage {
+namespace engine {
 
-class IOWriter {
+class WalOperationCodec {
  public:
-    virtual bool
-    Open(const std::string& name) = 0;
+    static Status
+    SerializeOperation(const std::string& path, const InsertEntityOperationPtr& operation);
 
-    virtual void
-    Write(void* ptr, int64_t size) = 0;
-
-    virtual int64_t
-    Length() = 0;
-
-    virtual void
-    Close() = 0;
+    static Status
+    SerializeOperation(const std::string& path, const DeleteEntityOperationPtr& operation);
 };
 
-using IOWriterPtr = std::shared_ptr<IOWriter>;
-
-}  // namespace storage
+}  // namespace engine
 }  // namespace milvus

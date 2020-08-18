@@ -9,30 +9,15 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include <fiu-control.h>
+#include <fiu/fiu-local.h>
+#include <gtest/gtest.h>
 
-#include <memory>
-#include <string>
+#include "config/ServerConfig.h"
 
-namespace milvus {
-namespace storage {
-
-class IOWriter {
- public:
-    virtual bool
-    Open(const std::string& name) = 0;
-
-    virtual void
-    Write(void* ptr, int64_t size) = 0;
-
-    virtual int64_t
-    Length() = 0;
-
-    virtual void
-    Close() = 0;
-};
-
-using IOWriterPtr = std::shared_ptr<IOWriter>;
-
-}  // namespace storage
-}  // namespace milvus
+TEST(ServerConfigTest, parse_invalid_devices) {
+    fiu_init(0);
+    fiu_enable("ParseGPUDevices.invalid_format", 1, nullptr, 0);
+    auto collections = milvus::ParseGPUDevices("gpu0,gpu1");
+    ASSERT_EQ(collections.size(), 0);
+}
