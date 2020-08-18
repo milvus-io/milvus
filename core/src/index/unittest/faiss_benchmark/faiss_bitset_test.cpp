@@ -359,7 +359,7 @@ CreateBitset(int32_t size, int32_t percentage) {
 void
 test_with_nprobes(const std::string& ann_test_name, const std::string& index_key, faiss::Index* cpu_index,
                   faiss::gpu::StandardGpuResources& res, const QueryMode query_mode, const faiss::Index::distance_t* xq,
-                  const faiss::Index::idx_t* gt, const std::vector<int32_t> nprobes, const int32_t index_add_loops,
+                  const faiss::Index::idx_t* gt, const std::vector<int32_t>& nprobes, const int32_t index_add_loops,
                   const int32_t search_loops) {
     double t0 = elapsed();
 
