@@ -54,5 +54,5 @@ endif()
 
 # ****************************** Thirdparty libperftools ***************************************
 if ( ENABLE_CPU_PROFILING )
-    include( "profilers/ProfilerPackages.cmake" )
+    add_subdirectory( profilers )
 endif ()
