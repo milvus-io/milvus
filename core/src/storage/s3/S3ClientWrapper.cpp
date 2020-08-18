@@ -16,7 +16,7 @@
 #include <aws/s3/model/GetObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <fstream>
 #include <iostream>
 #include <memory>

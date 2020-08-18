@@ -12,7 +12,7 @@
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "knowhere/common/Log.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <utility>
 
 namespace milvus {

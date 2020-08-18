@@ -11,8 +11,8 @@
 
 #include "db/DBFactory.h"
 #include "db/DBImpl.h"
-#include "db/transcript/Transcript.h"
-#include "db/wal/WriteAheadLog.h"
+#include "db/transcript/TranscriptProxy.h"
+#include "db/wal/WalProxy.h"
 
 namespace milvus {
 namespace engine {
@@ -23,12 +23,12 @@ DBFactory::BuildDB(const DBOptions& options) {
 
     // need wal? wal must be after db
     if (options.wal_enable_) {
-        db = std::make_shared<WriteAheadLog>(db, options);
+        db = std::make_shared<WalProxy>(db, options);
     }
 
     // need transcript? transcript must be after wal
     if (options.transcript_enable_) {
-        db = std::make_shared<Transcript>(db, options);
+        db = std::make_shared<TranscriptProxy>(db, options);
     }
 
     return db;

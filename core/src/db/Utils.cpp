@@ -11,7 +11,7 @@
 
 #include "db/Utils.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include <unistd.h>
 #include <boost/filesystem.hpp>
@@ -144,6 +144,29 @@ GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids) {
         ids.resize(pair->second->data_.size() / sizeof(engine::id_t));
         memcpy((void*)(ids.data()), pair->second->data_.data(), pair->second->data_.size());
     }
+}
+
+int64_t
+GetSizeOfChunk(const engine::DataChunkPtr& chunk) {
+    if (chunk == nullptr) {
+        return 0;
+    }
+
+    int64_t total_size = 0;
+    for (auto& pair : chunk->fixed_fields_) {
+        if (pair.second == nullptr) {
+            continue;
+        }
+        total_size += pair.second->Size();
+    }
+    for (auto& pair : chunk->variable_fields_) {
+        if (pair.second == nullptr) {
+            continue;
+        }
+        total_size += pair.second->Size();
+    }
+
+    return total_size;
 }
 
 }  // namespace utils

@@ -12,7 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <iostream>
 #include <thread>
 

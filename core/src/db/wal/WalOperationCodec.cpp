@@ -9,17 +9,20 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-#include <fiu/fiu-local.h>
+#include "db/wal/WalOperationCodec.h"
 
-#include "easyloggingpp/easylogging++.h"
+namespace milvus {
+namespace engine {
 
-INITIALIZE_EASYLOGGINGPP
-
-int
-main(int argc, char** argv) {
-    fiu_init(0);
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+Status
+WalOperationCodec::SerializeOperation(const std::string& path, const InsertEntityOperationPtr& operation) {
+    return Status::OK();
 }
+
+Status
+WalOperationCodec::SerializeOperation(const std::string& path, const DeleteEntityOperationPtr& operation) {
+    return Status::OK();
+}
+
+}  // namespace engine
+}  // namespace milvus
