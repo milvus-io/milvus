@@ -3,7 +3,7 @@ if (isTimeTriggeredBuild || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
 	retry(3) {
 	    def helmResult = sh script: "helm status -n milvus ${env.SHARDS_HELM_RELEASE_NAME}", returnStatus: true
 	    if (!helmResult) {
-	        sh "helm uninstall -n milvus ${env.SHARDS_HELM_RELEASE_NAME} && sleep 1m"
+	        sh "helm uninstall -n milvus ${env.SHARDS_HELM_RELEASE_NAME}"
 	    }
 	}
 }
