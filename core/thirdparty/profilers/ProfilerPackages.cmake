@@ -37,8 +37,10 @@ macro( build_libunwind )
     file( MAKE_DIRECTORY "${LIBUNWIND_INCLUDE_DIR}" )
 
     add_library( libunwind SHARED IMPORTED )
+
     set_target_properties( libunwind
             PROPERTIES
+                IMPORTED_GLOBAL TRUE
                 IMPORTED_LOCATION "${LIBUNWIND_SHARED_LIB}"
                 INTERFACE_INCLUDE_DIRECTORIES "${LIBUNWIND_INCLUDE_DIR}" )
 
@@ -77,11 +79,13 @@ macro( build_gperftools )
 
     ExternalProject_Add_StepDependencies( gperftools_ep build libunwind_ep )
 
+
     file( MAKE_DIRECTORY "${GPERFTOOLS_INCLUDE_DIR}" )
 
     add_library( gperftools STATIC IMPORTED )
     set_target_properties( gperftools
             PROPERTIES
+                IMPORTED_GLOBAL  TRUE
                 IMPORTED_LOCATION               "${GPERFTOOLS_STATIC_LIB}"
                 INTERFACE_INCLUDE_DIRECTORIES   "${GPERFTOOLS_INCLUDE_DIR}"
                 INTERFACE_LINK_LIBRARIES        libunwind )

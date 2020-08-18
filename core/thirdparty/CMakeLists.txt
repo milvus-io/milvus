@@ -51,3 +51,8 @@ endif()
 if ( MILVUS_WITH_OPENTRACING )
     add_subdirectory( opentracing )
 endif()
+
+# ****************************** Thirdparty libperftools ***************************************
+if ( ENABLE_CPU_PROFILING )
+    include( "profilers/ProfilerPackages.cmake" )
+endif ()

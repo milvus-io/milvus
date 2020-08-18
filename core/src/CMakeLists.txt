@@ -26,11 +26,6 @@ foreach (DIR ${INDEX_INCLUDE_DIRS})
     include_directories(${DIR})
 endforeach ()
 
-if ( ENABLE_CPU_PROFILING )
-    include( "../thirdparty/profilers/ProfilerPackages.cmake" )
-    set( PROFILING_LIBS gperftools )
-endif ()
-
 aux_source_directory( ${MILVUS_ENGINE_SRC}/scheduler            SCHEDULER_MAIN_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/scheduler/action     SCHEDULER_ACTION_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/scheduler/event      SCHEDULER_EVENT_FILES )
