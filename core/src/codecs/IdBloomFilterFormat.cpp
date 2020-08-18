@@ -46,9 +46,7 @@ IdBloomFilterFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string
         new_scaling_bloom_from_file(BLOOM_FILTER_CAPACITY, BLOOM_FILTER_ERROR_RATE, full_file_path.c_str());
     fiu_do_on("bloom_filter_nullptr", bloom_filter = nullptr);
     if (bloom_filter == nullptr) {
-        std::string err_msg = "Failed to read bloom filter from file: " + full_file_path + ". " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
+        THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Fail to read bloom filter from file: " + full_file_path);
     }
     id_bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(bloom_filter);
 }
@@ -58,9 +56,7 @@ IdBloomFilterFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::strin
                            const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
     if (scaling_bloom_flush(id_bloom_filter_ptr->GetBloomFilter()) == -1) {
-        std::string err_msg = "Failed to write bloom filter to file: " + full_file_path + ". " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
+        THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Fail to write bloom filter to file: " + full_file_path);
     }
 }
 
@@ -71,9 +67,7 @@ IdBloomFilterFormat::Create(const storage::FSHandlerPtr& fs_ptr, const std::stri
     scaling_bloom_t* bloom_filter =
         new_scaling_bloom(BLOOM_FILTER_CAPACITY, BLOOM_FILTER_ERROR_RATE, full_file_path.c_str());
     if (bloom_filter == nullptr) {
-        std::string err_msg = "Failed to read bloom filter from file: " + full_file_path + ". " + std::strerror(errno);
-        LOG_ENGINE_ERROR_ << err_msg;
-        throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
+        THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Failed to read bloom filter from file: " + full_file_path);
     }
     id_bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(bloom_filter);
 }
