@@ -29,7 +29,7 @@ class ResourceGCEvent : public GCEvent {
  public:
     using Ptr = std::shared_ptr<ResourceGCEvent>;
 
-    explicit ResourceGCEvent(class ResourceT::Ptr res) : res_(res) {
+    explicit ResourceGCEvent(typename ResourceT::Ptr res) : res_(res) {
     }
 
     ~ResourceGCEvent() = default;
