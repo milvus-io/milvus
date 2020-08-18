@@ -24,8 +24,9 @@ FetchContent_Declare(
     opentracing
     URL         ${OPENTRACING_SOURCE_URL}
     URL_MD5     "e598ba4b81ae8e1ceed8cd8bbf86f2fd"
-    SOURCE_DIR  ${CMAKE_CURRENT_BINARY_DIR}/opentracing-src
-    BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/opentracing-build
+    DOWNLOAD_DIR    ${MILVUS_BINARY_DIR}/3rdparty_download/download
+    SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/opentracing-src
+    BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/opentracing-build
     )
 
 set( BUILD_SHARED_LIBS  CACHE BOOL OFF FORCE)
