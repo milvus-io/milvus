@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include "config/ServerConfig.h"
 #include "db/Utils.h"

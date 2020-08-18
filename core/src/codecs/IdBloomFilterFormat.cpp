@@ -17,7 +17,7 @@
 
 #include "codecs/IdBloomFilterFormat.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <memory>
 #include <string>
 

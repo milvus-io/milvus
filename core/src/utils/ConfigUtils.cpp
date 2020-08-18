@@ -19,7 +19,7 @@
 #ifdef MILVUS_GPU_VERSION
 #include <cuda_runtime.h>
 #endif
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <sys/stat.h>
 #include <sys/sysinfo.h>
 #include <unistd.h>
