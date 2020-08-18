@@ -346,14 +346,6 @@ def gen_invalid_range():
     return range
 
 
-def gen_invalid_ranges():
-    ranges = [
-        {"GT": nb, "LT": 0},
-        {"GT": "0", "LT": "1000"}
-    ]
-    return ranges
-
-
 def gen_valid_ranges():
     ranges = [
         {"GT": 0, "LT": nb//2},
