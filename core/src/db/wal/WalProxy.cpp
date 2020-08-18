@@ -26,7 +26,8 @@ WalProxy::WalProxy(const DBPtr& db, const DBOptions& options) : DBProxy(db, opti
 }
 
 Status
-WalProxy::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) {
+WalProxy::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
+                 id_t op_id) {
     // write operation into disk
     InsertEntityOperationPtr op = std::make_shared<InsertEntityOperation>();
     op->collection_name_ = collection_name;
@@ -37,7 +38,7 @@ WalProxy::Insert(const std::string& collection_name, const std::string& partitio
 }
 
 Status
-WalProxy::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) {
+WalProxy::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id) {
     // write operation into disk
     DeleteEntityOperationPtr op = std::make_shared<DeleteEntityOperation>();
     op->collection_name_ = collection_name;
