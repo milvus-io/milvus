@@ -189,7 +189,6 @@ class TestFlushBase:
         logging.getLogger().debug(res)
         assert res
 
-    # TODO: stable case
     def test_add_flush_auto(self, connect, id_collection):
         '''
         method: add entities
@@ -198,7 +197,7 @@ class TestFlushBase:
         # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
         ids = connect.insert(id_collection, entities, ids)
-        timeout = 10
+        timeout = 20
         start_time = time.time()
         while (time.time() - start_time < timeout):
             time.sleep(1)
@@ -312,8 +311,7 @@ class TestFlushAsync:
         future = connect.flush([collection], _async=True)
         status = future.result()
 
-    # TODO:
-    def _test_flush_async(self, connect, collection):
+    def test_flush_async(self, connect, collection):
         nb = 100000
         vectors = gen_vectors(nb, dim)
         connect.insert(collection, entities)
