@@ -70,6 +70,10 @@ def binary_metrics():
     return ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 
+def structure_metrics():
+    return ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
+
+
 def l2(x, y):
     return np.linalg.norm(np.array(x) - np.array(y))
 
