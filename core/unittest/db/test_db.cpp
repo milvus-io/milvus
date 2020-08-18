@@ -970,6 +970,7 @@ TEST_F(DBTest, StatsTest) {
     // validate collection stats
     milvus::json json_stats;
     status = db_->GetCollectionStats(collection_name, json_stats);
+    ASSERT_TRUE(status.ok());
 
     std::string ss = json_stats.dump();
     ASSERT_FALSE(ss.empty());

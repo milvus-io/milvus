@@ -74,12 +74,12 @@ namespace {
 void
 RemoveDirectory(const std::string& path) {
     DIR* dir = nullptr;
-    struct dirent* dmsg;
     const int32_t buf_size = 256;
     char file_name[buf_size];
 
     std::string folder_name = path + "/%s";
     if ((dir = opendir(path.c_str())) != nullptr) {
+        struct dirent* dmsg;
         while ((dmsg = readdir(dir)) != nullptr) {
             if (strcmp(dmsg->d_name, ".") != 0 && strcmp(dmsg->d_name, "..") != 0) {
                 snprintf(file_name, buf_size, folder_name.c_str(), dmsg->d_name);

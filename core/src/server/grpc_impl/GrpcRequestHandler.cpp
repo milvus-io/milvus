@@ -137,16 +137,16 @@ CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRo
 
     std::vector<float> float_array(float_data_size, 0.0f);
     std::vector<uint8_t> binary_array(binary_data_size, 0);
-    int64_t float_offset = 0, binary_offset = 0;
+    int64_t offset = 0;
     if (float_data_size > 0) {
         for (auto& record : grpc_records) {
-            memcpy(&float_array[float_offset], record.float_data().data(), record.float_data_size() * sizeof(float));
-            float_offset += record.float_data_size();
+            memcpy(&float_array[offset], record.float_data().data(), record.float_data_size() * sizeof(float));
+            offset += record.float_data_size();
         }
     } else if (binary_data_size > 0) {
         for (auto& record : grpc_records) {
-            memcpy(&binary_array[binary_offset], record.binary_data().data(), record.binary_data().size());
-            binary_offset += record.binary_data().size();
+            memcpy(&binary_array[offset], record.binary_data().data(), record.binary_data().size());
+            offset += record.binary_data().size();
         }
     }
 

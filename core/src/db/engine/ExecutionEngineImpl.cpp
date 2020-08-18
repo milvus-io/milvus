@@ -582,7 +582,6 @@ ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, Dat
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
 
-    auto status = Status::OK();
     auto range_query_json = range_query->json_obj;
     JSON_NULL_CHECK(range_query_json);
     auto range_it = range_query_json.begin();
@@ -604,7 +603,6 @@ ExecutionEngineImpl::BuildIndex() {
 
     auto segment_visitor = segment_reader_->GetSegmentVisitor();
     auto& snapshot = segment_visitor->GetSnapshot();
-    auto collection = snapshot->GetCollection();
     auto& segment = segment_visitor->GetSegment();
 
     snapshot::OperationContext context;
