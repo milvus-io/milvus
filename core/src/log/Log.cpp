@@ -26,7 +26,7 @@ LogOut(const char* pattern, ...) {
 
     va_list vl;
     va_start(vl, pattern);
-    vsnprintf(str_p.get(), len, pattern, vl);
+    vsnprintf(str_p.get(), len, pattern, vl);  // NOLINT
     va_end(vl);
 
     return std::string(str_p.get());

@@ -165,6 +165,8 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
 
                 break;
             }
+            default:
+                break;
         }
     }
 
@@ -180,7 +182,7 @@ MemSegment::Add(const VectorSourcePtr& source) {
     }
 
     size_t mem_left = GetMemLeft();
-    if (mem_left >= single_entity_mem_size) {
+    if (mem_left >= single_entity_mem_size && single_entity_mem_size != 0) {
         int64_t num_entities_to_add = std::ceil(mem_left / single_entity_mem_size);
         int64_t num_entities_added;
 
