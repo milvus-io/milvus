@@ -65,11 +65,6 @@ endmacro()
 
 macro( build_gperftools )
     message( STATUS "Building gperftools-${GPERFTOOLS_VERSION} from source" )
-    # set( GPERFTOOLS_CONFIGURE_ARGS
-    #         "--quiet"
-    #         "cc=${CCACHE_FOUND} {CMAKE_C_COMPILER}"
-    #         "cxx=${CCACHE_FOUND} {CMAKE_CXX_COMPILER}"
-    #    )
 
     ExternalProject_Add(
         gperftools_ep
