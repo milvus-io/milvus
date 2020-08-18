@@ -37,16 +37,16 @@ all_index_types = [
 ]
 
 default_index_params = [
-    {"nlist": 1024},
-    {"nlist": 1024},
-    {"nlist": 1024},
-    {"nlist": 1024},
-    {"nlist": 1024, "m": 16},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128, "m": 16},
     {"M": 48, "efConstruction": 500},
     # {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
     {"n_trees": 50},
-    {"nlist": 1024},
-    {"nlist": 1024}
+    {"nlist": 128},
+    {"nlist": 128}
 ]
 
 
@@ -68,6 +68,10 @@ def ivf():
 
 def binary_metrics():
     return ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
+
+
+def structure_metrics():
+    return ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 
 def l2(x, y):
@@ -279,12 +283,14 @@ def assert_equal_entity(a, b):
 
 
 def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
-                      metric_type="L2"):
+                      metric_type="L2", replace_vecs=None):
     if rand_vector is True:
         dimension = len(entities[-1]["values"][0])
         query_vectors = gen_vectors(nq, dimension)
     else:
         query_vectors = entities[-1]["values"][:nq]
+    if replace_vecs:
+        query_vectors = replace_vecs
     must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
     must_param["vector"][field_name]["metric_type"] = metric_type
     query = {
@@ -765,7 +771,7 @@ def gen_binary_index():
 def get_search_param(index_type):
     search_params = {"metric_type": "L2"}
     if index_type in ivf() or index_type in binary_support():
-        search_params.update({"nprobe": 32})
+        search_params.update({"nprobe": 64})
     elif index_type == "HNSW":
         search_params.update({"ef": 64})
     elif index_type == "NSG":
