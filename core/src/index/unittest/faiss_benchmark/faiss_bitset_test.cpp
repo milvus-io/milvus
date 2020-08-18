@@ -82,14 +82,14 @@ void*
 hdf5_read(const std::string& file_name, const std::string& dataset_name, H5T_class_t dataset_class, int32_t& d_out,
           int32_t& n_out) {
     hid_t file, dataset, datatype, dataspace, memspace;
-    H5T_class_t t_class;   /* data type class */
-    hsize_t dimsm[3];      /* memory space dimensions */
-    hsize_t dims_out[2];   /* dataset dimensions */
-    hsize_t count[2];      /* size of the hyperslab in the file */
-    hsize_t offset[2];     /* hyperslab offset in the file */
-    hsize_t count_out[3];  /* size of the hyperslab in memory */
-    hsize_t offset_out[3]; /* hyperslab offset in memory */
-    void* data_out = nullptr;        /* output buffer */
+    H5T_class_t t_class;      /* data type class */
+    hsize_t dimsm[3];         /* memory space dimensions */
+    hsize_t dims_out[2];      /* dataset dimensions */
+    hsize_t count[2];         /* size of the hyperslab in the file */
+    hsize_t offset[2];        /* hyperslab offset in the file */
+    hsize_t count_out[3];     /* size of the hyperslab in memory */
+    hsize_t offset_out[3];    /* hyperslab offset in memory */
+    void* data_out = nullptr; /* output buffer */
 
     /* Open the file and the dataset. */
     file = H5Fopen(file_name.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
