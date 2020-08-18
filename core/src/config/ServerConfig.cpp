@@ -9,6 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <fiu/fiu-local.h>
+
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -47,6 +50,11 @@ ParseGPUDevices(const std::string& str) {
     std::string device;
 
     while (std::getline(ss, device, ',')) {
+        fiu_do_on("ParseGPUDevices.invalid_format", device = "");
+        if (device.length() < 4) {
+            /* Invalid format string */
+            return {};
+        }
         device_set.insert(std::stoll(device.substr(3)));
     }
 

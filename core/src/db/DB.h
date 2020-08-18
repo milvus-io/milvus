@@ -91,16 +91,19 @@ class DB {
     virtual Status
     DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) = 0;
 
+    // op_id is for wal machinery, this id will be used in MemManager
     virtual Status
-    Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) = 0;
+    Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
+           id_t op_id = 0) = 0;
 
     virtual Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
                   const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
                   DataChunkPtr& data_chunk) = 0;
 
+    // op_id is for wal machinery, this id will be used in MemManager
     virtual Status
-    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) = 0;
+    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id = 0) = 0;
 
     virtual Status
     ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) = 0;

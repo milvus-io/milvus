@@ -13,7 +13,7 @@
 #include <gtest/gtest.h>
 #include <fstream>
 #include <memory>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <fiu-control.h>
 
 #include "config/Config.h"

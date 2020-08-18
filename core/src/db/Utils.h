@@ -55,6 +55,9 @@ SendExitSignal();
 void
 GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids);
 
+int64_t
+GetSizeOfChunk(const engine::DataChunkPtr& chunk);
+
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

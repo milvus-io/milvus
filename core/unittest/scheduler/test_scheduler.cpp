@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <fiu-control.h>
 
 #include "src/scheduler/SchedInst.h"

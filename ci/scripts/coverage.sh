@@ -76,6 +76,12 @@ fi
 
 # gen code coverage
 ${LCOV_CMD} -d ${DIR_GCNO} -o "${FILE_INFO_MILVUS}" -c
+
+if [ $? -ne 0 ]; then
+    echo "gen ${FILE_INFO_MILVUS} failed"
+    exit 0
+fi
+
 # merge coverage
 ${LCOV_CMD} -a ${FILE_INFO_BASE} -a ${FILE_INFO_MILVUS} -o "${FILE_INFO_OUTPUT}"
 
@@ -95,7 +101,7 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
 
 if [ $? -ne 0 ]; then
     echo "gen ${FILE_INFO_OUTPUT_NEW} failed"
-    exit 2
+    exit 0
 fi
 
 if [[ -n ${CODECOV_TOKEN} ]];then

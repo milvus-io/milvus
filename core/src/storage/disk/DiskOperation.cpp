@@ -17,11 +17,11 @@
 
 #include <experimental/filesystem>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
+#include "log/Log.h"
 #include "storage/disk/DiskOperation.h"
 #include "utils/Exception.h"
-#include "utils/Log.h"
 
 namespace milvus {
 namespace storage {
@@ -38,9 +38,7 @@ DiskOperation::CreateDirectory() {
         auto ret = std::experimental::filesystem::create_directories(dir_path_);
         fiu_do_on("DiskOperation.CreateDirectory.create_directory", ret = false);
         if (!ret) {
-            std::string err_msg = "Failed to create directory: " + dir_path_;
-            LOG_ENGINE_ERROR_ << err_msg;
-            throw Exception(SERVER_CANNOT_CREATE_FOLDER, err_msg);
+            THROW_ERROR(SERVER_CANNOT_CREATE_FOLDER, "Failed to create directory: " + dir_path_);
         }
     }
 }

@@ -11,7 +11,7 @@
 
 #include "scheduler/task/BuildIndexTask.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <memory>
 #include <utility>
 

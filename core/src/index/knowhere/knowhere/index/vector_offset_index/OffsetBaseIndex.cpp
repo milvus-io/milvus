@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <faiss/index_io.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/IndexType.h"
