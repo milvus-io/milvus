@@ -62,10 +62,10 @@ set(link_lib
         milvus_engine
         config
         metrics
-        log
         oatpp
         query
         utils
+        log
         )
 
 if (MILVUS_WITH_PROMETHEUS)

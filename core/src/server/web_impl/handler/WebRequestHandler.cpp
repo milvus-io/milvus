@@ -235,12 +235,15 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
 
     json_out["collection_name"] = schema.collection_name_;
     for (const auto& field : schema.fields_) {
+        if (field.first == engine::FIELD_UID) {
+            continue;
+        }
         nlohmann::json field_json;
         field_json["field_name"] = field.first;
-        field_json["field_type"] = field.second.field_type_;
+        field_json["field_type"] = type2str.at(field.second.field_type_);
         field_json["index_params"] = field.second.index_params_;
         field_json["extra_params"] = field.second.field_params_;
-        json_out["field"].push_back(field_json);
+        json_out["fields"].push_back(field_json);
     }
     return Status::OK();
 }
@@ -558,7 +561,6 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
                         }
                     }
                 }
-
             }
             query_ptr->index_fields.insert(vector_name);
         }
@@ -1146,6 +1148,12 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     }
 
     milvus::json json_params;
+    if (json_str.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
+        json_params[engine::PARAM_SEGMENT_ROW_COUNT] = json_str[engine::PARAM_SEGMENT_ROW_COUNT];
+    }
+    if (json_str.contains(engine::PARAM_UID_AUTOGEN)) {
+        json_params[engine::PARAM_UID_AUTOGEN] = json_str[engine::PARAM_UID_AUTOGEN];
+    }
 
     auto status = req_handler_.CreateCollection(context_ptr_, collection_name, fields, json_params);
 
@@ -1208,8 +1216,8 @@ WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& re
         result_json["collections"] = collections_json;
     }
 
+    AddStatusToJson(result_json, status.code(), status.message());
     result = result_json.dump().c_str();
-
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
@@ -1484,36 +1492,43 @@ WebRequestHandler::GetSegmentInfo(const OString& collection_name, const OString&
  */
 StatusDtoT
 WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::server::web::OString& body,
-                                VectorIdsDtoT& ids_dto) {
+                                EntityIdsDtoT& ids_dto) {
     if (nullptr == body.get() || body->getSize() == 0) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Request payload is required.")
     }
 
     auto body_json = nlohmann::json::parse(body->c_str());
-    std::string partition_name = body_json["partition_tag"];
-    int32_t row_num = body_json["row_num"];
+    std::string partition_name;
+    if (body_json.contains("partition_tag")) {
+        partition_name = body_json["partition_tag"];
+    }
 
     CollectionSchema collection_schema;
     std::unordered_map<std::string, engine::DataType> field_types;
     auto status = req_handler_.GetCollectionInfo(context_ptr_, collection_name->std_str(), collection_schema);
+    if (!status.ok()) {
+        auto msg = "Collection " + collection_name->std_str() + " not exist";
+        RETURN_STATUS_DTO(COLLECTION_NOT_EXISTS, msg.c_str());
+    }
     for (const auto& field : collection_schema.fields_) {
         field_types.insert({field.first, field.second.field_type_});
     }
 
-    auto entities = body_json["entity"];
-    if (!entities.is_array()) {
-        RETURN_STATUS_DTO(ILLEGAL_BODY, "An entity must be an array");
-    }
-
     std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
-
-    for (auto& entity : entities) {
-        std::string field_name = entity["field_name"];
-        auto field_value = entity["field_value"];
-        auto size = field_value.size();
-        if (size != row_num) {
-            RETURN_STATUS_DTO(ILLEGAL_ROWRECORD, "Field row count inconsist");
+    int64_t row_num;
+    for (auto& entity : body_json["entities"].items()) {
+        std::string field_name = entity.key();
+        auto field_value = entity.value();
+        if (!field_value.is_array()) {
+            RETURN_STATUS_DTO(ILLEGAL_ROWRECORD, "Field value is not an array");
         }
+        if (field_name == NAME_ID) {
+            std::vector<uint8_t> temp_data(field_value.size() * sizeof(int64_t), 0);
+            CopyStructuredData<int64_t>(field_value, temp_data);
+            chunk_data.insert({engine::FIELD_UID, temp_data});
+            continue;
+        }
+        row_num = field_value.size();
 
         std::vector<uint8_t> temp_data;
         switch (field_types.at(field_name)) {
@@ -1557,6 +1572,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     if (pair != chunk_data.end()) {
         int64_t count = pair->second.size() / 8;
         int64_t* pdata = reinterpret_cast<int64_t*>(pair->second.data());
+        ids_dto->ids = ids_dto->ids.createShared();
         for (int64_t i = 0; i < count; ++i) {
             ids_dto->ids->push_back(std::to_string(pdata[i]).c_str());
         }
