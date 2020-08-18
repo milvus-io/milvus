@@ -21,18 +21,20 @@ include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
 add_executable(test_storage
-        ${common_files}
-        ${log_files}
-        ${config_files}
-        ${storage_files}
         ${test_files}
         )
 
 target_link_libraries(test_storage
+        ${UNITTEST_LIBS}
         stdc++
-        knowhere
+        server
+        milvus_engine
         metrics
-        ${unittest_libs}
+        config
+        utils
+        tracing
+        query
+        log
         )
 
 install(TARGETS test_storage DESTINATION unittest)
