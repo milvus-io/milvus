@@ -26,7 +26,7 @@ if (isTimeTriggeredBuild || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
                                          kubectl logs --namespace milvus -l \"app.kubernetes.io/name=milvus,app.kubernetes.io/instance=${env.SHARDS_HELM_RELEASE_NAME},component=mishards\" && \
                                          helm status -n milvus ${env.SHARDS_HELM_RELEASE_NAME}"
                     sh script: helmStatusCMD, returnStatus: true
-                    MPLModule('Cleanup Mishards DevTest')
+                    sh script: "helm uninstall -n milvus ${env.SHARDS_HELM_RELEASE_NAME} && sleep 1m", returnStatus: true
                     throw exc
                 }
             }

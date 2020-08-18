@@ -18,7 +18,7 @@ timeout(time: 120, unit: 'MINUTES') {
                                      kubectl logs --namespace milvus -l \"app.kubernetes.io/name=milvus,app.kubernetes.io/instance=${env.HELM_RELEASE_NAME}\" -c milvus && \
                                      helm status -n milvus ${env.HELM_RELEASE_NAME}"
                 sh script: helmStatusCMD, returnStatus: true
-                MPLModule('Cleanup Single Node DevTest')
+                sh script: "helm uninstall -n milvus ${env.HELM_RELEASE_NAME} && sleep 1m", returnStatus: true
                 throw exc
             }
         }
@@ -50,7 +50,7 @@ timeout(time: 120, unit: 'MINUTES') {
                                      kubectl logs --namespace milvus -l \"app=milvus,release=${env.HELM_RELEASE_NAME}\" -c milvus && \
                                      helm status -n milvus ${env.HELM_RELEASE_NAME}"
                 def helmResult = sh script: helmStatusCMD, returnStatus: true
-                MPLModule('Cleanup Single Node DevTest')
+                sh script: "helm uninstall -n milvus ${env.HELM_RELEASE_NAME} && sleep 1m", returnStatus: true
                 throw exc
             }
         }
