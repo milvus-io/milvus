@@ -145,6 +145,7 @@ target_link_libraries( milvus_engine
                        cache
                        storage
                        codecs
+                       tracing
                        ${THIRD_PARTY_LIBS}
                        ${ENGINE_LIBS}
                        )
