@@ -66,8 +66,6 @@ set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
 set(FETCHCONTENT_QUIET OFF)
 include( ThirdPartyPackages )
 
-
-
 # **************************** Compiler arguments ****************************
 
 if ( MILVUS_GPU_VERSION )
