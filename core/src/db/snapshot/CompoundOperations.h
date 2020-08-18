@@ -106,6 +106,10 @@ class CompoundSegmentsOperation : public CompoundBaseOperation<CompoundSegmentsO
     CommitRowCountDelta(ID_TYPE segment_id, SIZE_TYPE delta, bool sub = true);
 
  protected:
+    bool
+    StaleSegmentFilesModified();
+
+ protected:
     std::map<ID_TYPE, std::pair<SIZE_TYPE, bool>> delta_;
     std::map<ID_TYPE, SegmentFile::VecT> stale_segment_files_;
     std::map<ID_TYPE, SegmentFile::VecT> new_segment_files_;
