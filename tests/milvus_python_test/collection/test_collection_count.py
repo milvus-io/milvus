@@ -16,7 +16,8 @@ tag = "tag"
 collection_id = "count_collection"
 add_interval_time = 3
 segment_row_count = 5000
-default_fields = gen_default_fields() 
+default_fields = gen_default_fields()
+default_binary_fields = gen_binary_default_fields()
 entities = gen_entities(nb)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 field_name = "fload_vector"
@@ -493,8 +494,8 @@ class TestCollectionMultiCollections:
             res = connect.count_entities(collection_list[i])
             assert res == insert_count
 
-    # TODO:
-    def _test_collection_count_multi_collections_binary(self, connect, binary_collection, insert_count):
+    @pytest.mark.level(2)
+    def test_collection_count_multi_collections_binary(self, connect, binary_collection, insert_count):
         '''
         target: test collection rows_count is correct or not with multiple collections of JACCARD
         method: create collection and add entities in it,
@@ -503,21 +504,20 @@ class TestCollectionMultiCollections:
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
         res = connect.insert(binary_collection, entities)
-        # logging.getLogger().info(entities)
         collection_list = []
         collection_num = 20
         for i in range(collection_num):
             collection_name = gen_unique_str(collection_id)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, default_binary_fields)
             res = connect.insert(collection_name, entities)
         connect.flush(collection_list)
         for i in range(collection_num):
             res = connect.count_entities(collection_list[i])
             assert res == insert_count
 
-    # TODO:
-    def _test_collection_count_multi_collections_mix(self, connect):
+    @pytest.mark.level(2)
+    def test_collection_count_multi_collections_mix(self, connect):
         '''
         target: test collection rows_count is correct or not with multiple collections of JACCARD
         method: create collection and add entities in it,
@@ -534,7 +534,7 @@ class TestCollectionMultiCollections:
         for i in range(int(collection_num / 2), collection_num):
             collection_name = gen_unique_str(collection_id)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, default_binary_fields)
             res = connect.insert(collection_name, binary_entities)
         connect.flush(collection_list)
         for i in range(collection_num):
