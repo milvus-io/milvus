@@ -412,7 +412,8 @@ DBImpl::DescribeIndex(const std::string& collection_name, const std::string& fie
 }
 
 Status
-DBImpl::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) {
+DBImpl::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
+               id_t op_id) {
     CHECK_INITIALIZED;
 
     if (data_chunk == nullptr) {
@@ -473,7 +474,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     int64_t collection_id = ss->GetCollectionId();
     int64_t partition_id = part->GetID();
 
-    auto status = mem_mgr_->InsertEntities(collection_id, partition_id, data_chunk, 0);
+    auto status = mem_mgr_->InsertEntities(collection_id, partition_id, data_chunk, op_id);
     if (!status.ok()) {
         return status;
     }
@@ -509,7 +510,7 @@ DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_ar
 }
 
 Status
-DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) {
+DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
@@ -519,7 +520,7 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
         return status;
     }
 
-    status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), entity_ids, 0);
+    status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), entity_ids, op_id);
     return status;
 }
 

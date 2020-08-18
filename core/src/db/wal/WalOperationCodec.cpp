@@ -9,29 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/DBFactory.h"
-#include "db/DBImpl.h"
-#include "db/transcript/TranscriptProxy.h"
-#include "db/wal/WalProxy.h"
+#include "db/wal/WalOperationCodec.h"
 
 namespace milvus {
 namespace engine {
 
-DBPtr
-DBFactory::BuildDB(const DBOptions& options) {
-    DBPtr db = std::make_shared<DBImpl>(options);
+Status
+WalOperationCodec::SerializeOperation(const std::string& path, const InsertEntityOperationPtr& operation) {
+    return Status::OK();
+}
 
-    // need wal? wal must be after db
-    if (options.wal_enable_) {
-        db = std::make_shared<WalProxy>(db, options);
-    }
-
-    // need transcript? transcript must be after wal
-    if (options.transcript_enable_) {
-        db = std::make_shared<TranscriptProxy>(db, options);
-    }
-
-    return db;
+Status
+WalOperationCodec::SerializeOperation(const std::string& path, const DeleteEntityOperationPtr& operation) {
+    return Status::OK();
 }
 
 }  // namespace engine
