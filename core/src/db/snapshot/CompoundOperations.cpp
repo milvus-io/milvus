@@ -945,8 +945,8 @@ CreateCollectionOperation::DoExecute(StorePtr store) {
         auto& field_schema = field_kv.first;
         auto& field_elements = field_kv.second;
         FieldPtr field;
-        status = store->CreateResource<Field>(
-            Field(field_schema->GetName(), field_idx, field_schema->GetFtype(), field_schema->GetParams()), field);
+        STATUS_CHECK(store->CreateResource<Field>(
+            Field(field_schema->GetName(), field_idx, field_schema->GetFtype(), field_schema->GetParams()), field));
         auto f_ctx_p = ResourceContextBuilder<Field>().SetOp(meta::oUpdate).CreatePtr();
         AddStepWithLsn(*field, c_context_.lsn, f_ctx_p);
         MappingT element_ids = {};
