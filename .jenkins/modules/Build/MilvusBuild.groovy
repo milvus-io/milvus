@@ -6,9 +6,9 @@ timeout(time: 60, unit: 'MINUTES') {
 		}
 
 		if ("${BINARY_VERSION}" == "gpu") {
-			sh "/bin/bash --login -c \". ./before-install.sh && ./build.sh -t ${params.BUILD_TYPE} -j4 ${env.MILVUS_INSTALL_PREFIX} --with_fiu --coverage -l -g -u\""
+			sh "/bin/bash --login -c \". ./before-install.sh && ./build.sh -t ${params.BUILD_TYPE} -j4 -i ${env.MILVUS_INSTALL_PREFIX} --coverage -l -g -u\""
 		} else {
-			sh "/bin/bash --login -c \". ./before-install.sh && ./build.sh -t ${params.BUILD_TYPE} -j4 ${env.MILVUS_INSTALL_PREFIX} --with_fiu --coverage -l -u\""
+			sh "/bin/bash --login -c \". ./before-install.sh && ./build.sh -t ${params.BUILD_TYPE} -j4 -i ${env.MILVUS_INSTALL_PREFIX} --coverage -l -u\""
 		}
 
 		withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
