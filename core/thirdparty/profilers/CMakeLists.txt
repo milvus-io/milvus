@@ -38,7 +38,12 @@ macro( build_libunwind )
             INSTALL_DIR     ${CMAKE_CURRENT_BINARY_DIR}/libunwind
             URL             ${LIBUNWIND_SOURCE_URL}
             URL_MD5         a04f69d66d8e16f8bf3ab72a69112cd6
-            CONFIGURE_COMMAND   <SOURCE_DIR>/configure --prefix=<INSTALL_DIR>
+            CONFIGURE_COMMAND   <SOURCE_DIR>/configure
+                                    "--prefix=<INSTALL_DIR>"
+                                    "--quiet"
+                                    "--disable-tests"
+                                    "cc=${CCACHE_FOUND} {CMAKE_C_COMPILER}"
+                                    "cxx=${CCACHE_FOUND} {CMAKE_CXX_COMPILER}"
             BUILD_COMMAND       ${MAKE}    ${MAKE_BUILD_ARGS}
             INSTALL_COMMAND     ${MAKE}    install
             ${EP_LOG_OPTIONS} )
@@ -60,11 +65,11 @@ endmacro()
 
 macro( build_gperftools )
     message( STATUS "Building gperftools-${GPERFTOOLS_VERSION} from source" )
-    set( GPERFTOOLS_CONFIGURE_ARGS
-            "--quiet"
-            "cc=${CCACHE_FOUND} {CMAKE_C_COMPILER}"
-            "cxx=${CCACHE_FOUND} {CMAKE_CXX_COMPILER}"
-       )
+    # set( GPERFTOOLS_CONFIGURE_ARGS
+    #         "--quiet"
+    #         "cc=${CCACHE_FOUND} {CMAKE_C_COMPILER}"
+    #         "cxx=${CCACHE_FOUND} {CMAKE_CXX_COMPILER}"
+    #    )
 
     ExternalProject_Add(
         gperftools_ep
@@ -75,12 +80,13 @@ macro( build_gperftools )
             URL                 ${GPERFTOOLS_SOURCE_URL}
             URL_MD5             c6a852a817e9160c79bdb2d3101b4601
             CONFIGURE_COMMAND   <SOURCE_DIR>/configure
-                                    --prefix=<INSTALL_DIR>
-                                    ${GPERFTOOLS_CONFIGURE_ARGS}
-            BUILD_COMMAND       ${MAKE}         ${MAKE_BUILD_ARGS}
-            INSTALL_COMMAND     ${MAKE}         install
-            ${EP_LOG_OPTIONS}
-            )
+                                    "--prefix=<INSTALL_DIR>"
+                                    "--quiet"
+                                    "cc=${CCACHE_FOUND} {CMAKE_C_COMPILER}"
+                                    "cxx=${CCACHE_FOUND} {CMAKE_CXX_COMPILER}"
+            BUILD_COMMAND       ${MAKE}     ${MAKE_BUILD_ARGS}
+            INSTALL_COMMAND     ${MAKE}     install
+            ${EP_LOG_OPTIONS} )
 
 
 
@@ -94,7 +100,7 @@ macro( build_gperftools )
                 INTERFACE_INCLUDE_DIRECTORIES   "${INSTALL_DIR}/include"
                 INTERFACE_LINK_LIBRARIES        libunwind
                 )
-    add_dependencies(gperftools gperftools_ep)
+    add_dependencies( gperftools gperftools_ep )
 endmacro()
 
 
