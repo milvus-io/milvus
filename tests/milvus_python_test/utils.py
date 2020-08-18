@@ -66,6 +66,10 @@ def ivf():
     return ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_SQ8_HYBRID", "IVF_PQ"]
 
 
+def binary_metrics():
+    return ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
+
+
 def l2(x, y):
     return np.linalg.norm(np.array(x) - np.array(y))
 
