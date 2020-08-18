@@ -20,7 +20,7 @@
 #include <memory>
 #include <string>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include "config/ServerConfig.h"
 #include "db/Utils.h"

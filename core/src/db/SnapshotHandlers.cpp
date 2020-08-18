@@ -10,6 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/SnapshotHandlers.h"
+
+#include "config/ServerConfig.h"
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
@@ -40,11 +42,14 @@ SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_comm
 SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss, const std::string& field_name,
                                                    snapshot::IDS_TYPE& segment_ids)
     : BaseT(ss), field_name_(field_name), segment_ids_(segment_ids) {
+    build_index_threshold_ = config.engine.build_index_threshold();
+    LOG_ENGINE_DEBUG_ << "Build index threshold is " << build_index_threshold_;
 }
 
 Status
 SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
-    if (segment_commit->GetRowCount() < engine::BUILD_INDEX_THRESHOLD) {
+    if (segment_commit->GetRowCount() < build_index_threshold_) {
+        LOG_ENGINE_DEBUG_ << "Segment is too small, not to build index, row count " << segment_commit->GetRowCount();
         return Status::OK();
     }
 

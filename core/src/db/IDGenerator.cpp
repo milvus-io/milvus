@@ -13,7 +13,7 @@
 #include "utils/Log.h"
 
 #include <assert.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <chrono>
 #include <iostream>
 #include <string>

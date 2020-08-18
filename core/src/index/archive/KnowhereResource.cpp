@@ -20,7 +20,7 @@
 #include "utils/Error.h"
 #include "utils/Log.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <map>
 #include <set>
 #include <string>

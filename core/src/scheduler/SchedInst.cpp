@@ -14,7 +14,7 @@
 #include "Utils.h"
 #include "config/ServerConfig.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <set>
 #include <string>
 #include <utility>
