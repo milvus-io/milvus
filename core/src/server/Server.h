@@ -39,9 +39,6 @@ class Server {
     Daemonize();
 
     Status
-    LoadConfig();
-
-    Status
     StartService();
     void
     StopService();
