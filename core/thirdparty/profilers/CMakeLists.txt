@@ -91,7 +91,7 @@ macro( build_gperftools )
     set_target_properties( gperftools
             PROPERTIES
                 IMPORTED_GLOBAL                 TRUE
-                IMPORTED_LOCATION               "${INSTALL_DIR}/lib/libprofiler.a"
+                IMPORTED_LOCATION               "${INSTALL_DIR}/lib/libtcmalloc_and_profiler.a"
                 INTERFACE_INCLUDE_DIRECTORIES   "${INSTALL_DIR}/include"
                 INTERFACE_LINK_LIBRARIES        libunwind
                 )
