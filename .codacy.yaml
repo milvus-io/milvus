@@ -11,3 +11,5 @@ exclude_paths:
   - 'docker/**'
   - 'docs/**'
   - 'tests/**'
+  - '.github/**'
+  - '.jenkins/**'
