@@ -860,7 +860,6 @@ Status
 CreatePartitionOperation::DoExecute(StorePtr store) {
     STATUS_CHECK(CheckStale());
 
-    auto collection = GetAdjustedSS()->GetCollection();
     auto partition = context_.new_partition;
 
     if (context_.new_partition) {
@@ -946,53 +945,55 @@ CreateCollectionOperation::DoExecute(StorePtr store) {
         auto& field_schema = field_kv.first;
         auto& field_elements = field_kv.second;
         FieldPtr field;
-        status = store->CreateResource<Field>(
-            Field(field_schema->GetName(), field_idx, field_schema->GetFtype(), field_schema->GetParams()), field);
+        STATUS_CHECK(store->CreateResource<Field>(
+            Field(field_schema->GetName(), field_idx, field_schema->GetFtype(), field_schema->GetParams()), field));
         auto f_ctx_p = ResourceContextBuilder<Field>().SetOp(meta::oUpdate).CreatePtr();
         AddStepWithLsn(*field, c_context_.lsn, f_ctx_p);
         MappingT element_ids = {};
         FieldElementPtr raw_element;
-        status = store->CreateResource<FieldElement>(FieldElement(collection->GetID(), field->GetID(), ELEMENT_RAW_DATA,
-                                                                  FieldElementType::FET_RAW, ELEMENT_RAW_DATA),
-                                                     raw_element);
+        STATUS_CHECK(
+            store->CreateResource<FieldElement>(FieldElement(collection->GetID(), field->GetID(), ELEMENT_RAW_DATA,
+                                                             FieldElementType::FET_RAW, ELEMENT_RAW_DATA),
+                                                raw_element));
         auto fe_ctx_p = ResourceContextBuilder<FieldElement>().SetOp(meta::oUpdate).CreatePtr();
         AddStepWithLsn(*raw_element, c_context_.lsn, fe_ctx_p);
         element_ids.insert(raw_element->GetID());
         for (auto& element_schema : field_elements) {
             FieldElementPtr element;
-            status = store->CreateResource<FieldElement>(
+            STATUS_CHECK(store->CreateResource<FieldElement>(
                 FieldElement(collection->GetID(), field->GetID(), element_schema->GetName(), element_schema->GetFtype(),
                              element_schema->GetTypeName()),
-                element);
+                element));
             auto t_fe_ctx_p = ResourceContextBuilder<FieldElement>().SetOp(meta::oUpdate).CreatePtr();
             AddStepWithLsn(*element, c_context_.lsn, t_fe_ctx_p);
             element_ids.insert(element->GetID());
         }
         FieldCommitPtr field_commit;
-        status = store->CreateResource<FieldCommit>(FieldCommit(collection->GetID(), field->GetID(), element_ids),
-                                                    field_commit);
+        STATUS_CHECK(store->CreateResource<FieldCommit>(FieldCommit(collection->GetID(), field->GetID(), element_ids),
+                                                        field_commit));
         auto fc_ctx_p = ResourceContextBuilder<FieldCommit>().SetOp(meta::oUpdate).CreatePtr();
         AddStepWithLsn(*field_commit, c_context_.lsn, fc_ctx_p);
         field_commit_ids.insert(field_commit->GetID());
     }
     SchemaCommitPtr schema_commit;
-    status = store->CreateResource<SchemaCommit>(SchemaCommit(collection->GetID(), field_commit_ids), schema_commit);
+    STATUS_CHECK(
+        store->CreateResource<SchemaCommit>(SchemaCommit(collection->GetID(), field_commit_ids), schema_commit));
     auto sc_ctx_p = ResourceContextBuilder<SchemaCommit>().SetOp(meta::oUpdate).CreatePtr();
     AddStepWithLsn(*schema_commit, c_context_.lsn, sc_ctx_p);
     PartitionPtr partition;
-    status = store->CreateResource<Partition>(Partition("_default", collection->GetID()), partition);
+    STATUS_CHECK(store->CreateResource<Partition>(Partition("_default", collection->GetID()), partition));
     auto p_ctx_p = ResourceContextBuilder<Partition>().SetOp(meta::oUpdate).CreatePtr();
     AddStepWithLsn(*partition, c_context_.lsn, p_ctx_p);
     context_.new_partition = partition;
     PartitionCommitPtr partition_commit;
-    status = store->CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()),
-                                                    partition_commit);
+    STATUS_CHECK(store->CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()),
+                                                        partition_commit));
     auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(meta::oUpdate).CreatePtr();
     AddStepWithLsn(*partition_commit, c_context_.lsn, pc_ctx_p);
     context_.new_partition_commit = partition_commit;
     CollectionCommitPtr collection_commit;
-    status = store->CreateResource<CollectionCommit>(
-        CollectionCommit(collection->GetID(), schema_commit->GetID(), {partition_commit->GetID()}), collection_commit);
+    STATUS_CHECK(store->CreateResource<CollectionCommit>(
+        CollectionCommit(collection->GetID(), schema_commit->GetID(), {partition_commit->GetID()}), collection_commit));
     auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(meta::oUpdate).CreatePtr();
     AddStepWithLsn(*collection_commit, c_context_.lsn, cc_ctx_p);
     context_.new_collection_commit = collection_commit;

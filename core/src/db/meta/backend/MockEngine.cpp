@@ -60,8 +60,8 @@ MockEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs) {
 
     auto& candidate_raws = resources_[context.table_];
 
-    bool selected = true;
     if (!context.filter_attrs_.empty()) {
+        bool selected = true;
         for (auto& raw : candidate_raws) {
             for (auto& filter_attr : context.filter_attrs_) {
                 auto iter = raw.find(filter_attr.first);
