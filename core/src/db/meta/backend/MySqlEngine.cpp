@@ -18,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <mysql++/mysql++.h>
 
 #include "db/Utils.h"

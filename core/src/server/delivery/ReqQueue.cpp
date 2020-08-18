@@ -14,7 +14,7 @@
 #include "server/delivery/strategy/SearchReqStrategy.h"
 #include "utils/Log.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <unistd.h>
 #include <queue>
 #include <utility>

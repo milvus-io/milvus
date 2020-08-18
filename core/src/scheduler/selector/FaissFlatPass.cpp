@@ -18,7 +18,7 @@
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 namespace milvus {
 namespace scheduler {
 

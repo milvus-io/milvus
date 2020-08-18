@@ -16,7 +16,7 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 TEST(PrometheusTest, PROMETHEUS_TEST) {
     fiu_init(0);

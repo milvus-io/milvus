@@ -85,6 +85,9 @@ else ()
     message( STATUS "Building Milvus CPU version" )
 endif ()
 
+# TODO: remove after all ut set "FIU_ENABLE"
+set(MILVUS_WITH_FIU "ON")
+
 set_milvus_definition( MILVUS_WITH_PROMETHEUS   "MILVUS_WITH_PROMETHEUS" )
 set_milvus_definition( ENABLE_CPU_PROFILING     "ENABLE_CPU_PROFILING" )
 set_milvus_definition( MILVUS_WITH_FIU          "FIU_ENABLE" )

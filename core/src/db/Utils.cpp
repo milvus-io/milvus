@@ -11,7 +11,7 @@
 
 #include "db/Utils.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include <unistd.h>
 #include <boost/filesystem.hpp>
