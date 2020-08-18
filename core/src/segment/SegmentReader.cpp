@@ -124,6 +124,8 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
             auto& ss_codec = codec::Codec::instance();
             ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, raw);
 
+            std::cout<<raw<<std::endl;
+
             if (to_cache) {
                 cache::CpuCacheMgr::GetInstance().InsertItem(file_path, raw);  // put into cache
             }

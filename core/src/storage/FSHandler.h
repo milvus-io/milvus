@@ -18,6 +18,8 @@
 #pragma once
 
 #include <memory>
+#include <iostream>
+
 
 #include "storage/IOReader.h"
 #include "storage/IOWriter.h"

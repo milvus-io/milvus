@@ -26,6 +26,7 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "storage/ExtraFileInfo.h"
 
 namespace milvus {
 namespace codec {
@@ -43,12 +44,16 @@ VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::strin
                            knowhere::BinaryPtr& data) {
     milvus::TimeRecorder recorder("VectorIndexFormat::ReadRaw");
 
+    CHECK_MAGIC_VALID(fs_ptr,file_path);
+    CHECK_SUM_VALID(fs_ptr,file_path);
+
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open raw file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
+    fs_ptr->reader_ptr_->seekg(MAGIC_SIZE+HEADER_SIZE);
     size_t num_bytes;
     fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 
@@ -57,7 +62,7 @@ VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::strin
     data->data = std::shared_ptr<uint8_t[]>(new uint8_t[num_bytes]);
 
     // Beginning of file is num_bytes
-    fs_ptr->reader_ptr_->seekg(sizeof(size_t));
+    fs_ptr->reader_ptr_->seekg(MAGIC_SIZE+HEADER_SIZE+sizeof(size_t));
     fs_ptr->reader_ptr_->read(data->data.get(), num_bytes);
     fs_ptr->reader_ptr_->close();
 
@@ -70,22 +75,24 @@ void
 VectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                              knowhere::BinarySet& data) {
     milvus::TimeRecorder recorder("VectorIndexFormat::ReadIndex");
-
     std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
+
+    CHECK_MAGIC_VALID(fs_ptr,full_file_path);
+    CHECK_SUM_VALID(fs_ptr,full_file_path);
     if (!fs_ptr->reader_ptr_->open(full_file_path)) {
         std::string err_msg = "Failed to open vector index: " + full_file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
-    int64_t length = fs_ptr->reader_ptr_->length();
+    int64_t length = fs_ptr->reader_ptr_->length()-SUM_SIZE;
     if (length <= 0) {
         LOG_ENGINE_ERROR_ << "Invalid vector index length: " << full_file_path;
         return;
     }
 
-    int64_t rp = 0;
-    fs_ptr->reader_ptr_->seekg(0);
+    int64_t rp = MAGIC_SIZE+HEADER_SIZE;
+    fs_ptr->reader_ptr_->seekg(rp);
 
     LOG_ENGINE_DEBUG_ << "Start to ReadIndex(" << full_file_path << ") length: " << length << " bytes";
     while (rp < length) {
@@ -179,13 +186,18 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
     milvus::TimeRecorder recorder("SVectorIndexFormat::WriteIndex");
 
     std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
+    // TODO:add extra info
+    std::unordered_map<std::string,std::string> maps;
+    WRITE_MAGIC(fs_ptr,full_file_path)
+    WRITE_HEADER(fs_ptr,full_file_path, maps);
     auto binaryset = index->Serialize(knowhere::Config());
 
-    if (!fs_ptr->writer_ptr_->open(full_file_path)) {
+    if (!fs_ptr->writer_ptr_->in_open(full_file_path)) {
         LOG_ENGINE_ERROR_ << "Fail to open vector index: " << full_file_path;
         return;
     }
 
+    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE+HEADER_SIZE);
     for (auto& iter : binaryset.binary_map_) {
         auto meta = iter.first.c_str();
         size_t meta_length = iter.first.length();
@@ -198,6 +210,8 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
         fs_ptr->writer_ptr_->write((void*)binary->data.get(), binary_length);
     }
     fs_ptr->writer_ptr_->close();
+
+    WRITE_SUM(fs_ptr,full_file_path);
 
     double span = recorder.RecordSection("End");
     double rate = fs_ptr->writer_ptr_->length() * 1000000.0 / span / 1024 / 1024;

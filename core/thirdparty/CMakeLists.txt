@@ -46,3 +46,6 @@ endif ()
 if ( MILVUS_WITH_YAMLCPP )
     add_subdirectory( yaml-cpp )
 endif()
+
+# ****************************** Thirdparty crc32c ***************************************
+add_subdirectory( crc32c )

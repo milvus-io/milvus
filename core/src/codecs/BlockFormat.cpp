@@ -25,6 +25,7 @@
 
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "storage/ExtraFileInfo.h"
 #include "utils/TimeRecorder.h"
 
 namespace milvus {
@@ -32,12 +33,15 @@ namespace codec {
 
 void
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::BinaryDataPtr& raw) {
+    CHECK_MAGIC_VALID(fs_ptr,file_path);
+    CHECK_SUM_VALID(fs_ptr,file_path);
     if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
+    fs_ptr->reader_ptr_->seekg(MAGIC_SIZE+HEADER_SIZE);
     size_t num_bytes;
     fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 
@@ -51,6 +55,8 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 void
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset, int64_t num_bytes,
                   engine::BinaryDataPtr& raw) {
+    CHECK_MAGIC_VALID(fs_ptr,file_path);
+    CHECK_SUM_VALID(fs_ptr,file_path);
     if (offset < 0 || num_bytes <= 0) {
         std::string err_msg = "Invalid input to read: " + file_path;
         LOG_ENGINE_ERROR_ << err_msg;
@@ -62,6 +68,8 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
+
+    fs_ptr->reader_ptr_->seekg(MAGIC_SIZE+HEADER_SIZE);
 
     size_t total_num_bytes;
     fs_ptr->reader_ptr_->read(&total_num_bytes, sizeof(size_t));
@@ -83,6 +91,8 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 void
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
                   engine::BinaryDataPtr& raw) {
+    CHECK_MAGIC_VALID(fs_ptr,file_path);
+    CHECK_SUM_VALID(fs_ptr,file_path);
     if (read_ranges.empty()) {
         return;
     }
@@ -93,6 +103,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         throw Exception(SERVER_CANNOT_OPEN_FILE, err_msg);
     }
 
+    fs_ptr->reader_ptr_->seekg(MAGIC_SIZE+HEADER_SIZE);
     size_t total_num_bytes;
     fs_ptr->reader_ptr_->read(&total_num_bytes, sizeof(size_t));
 
@@ -126,17 +137,24 @@ BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_
     if (raw == nullptr) {
         return;
     }
+    // TODO:add extra info
+    std::unordered_map<std::string,std::string> maps;
+    WRITE_MAGIC(fs_ptr,file_path)
+    WRITE_HEADER(fs_ptr,file_path, maps);
 
-    if (!fs_ptr->writer_ptr_->open(file_path.c_str())) {
+    if (!fs_ptr->writer_ptr_->in_open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
+    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE+HEADER_SIZE);
+
     size_t num_bytes = raw->data_.size();
     fs_ptr->writer_ptr_->write(&num_bytes, sizeof(size_t));
     fs_ptr->writer_ptr_->write((void*)(raw->data_.data()), num_bytes);
     fs_ptr->writer_ptr_->close();
+    WRITE_SUM(fs_ptr,file_path);
 }
 
 }  // namespace codec

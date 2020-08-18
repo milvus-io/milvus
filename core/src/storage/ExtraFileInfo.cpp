@@ -1,0 +1,175 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
+
+#include <regex>
+#include <iostream>
+
+#include "ExtraFileInfo.h"
+#include "crc32c/crc32c.h"
+
+namespace milvus {
+    namespace storage {
+
+        bool
+        CheckMagic(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path) {
+            if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+                std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+                LOG_ENGINE_ERROR_ << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+
+            char *ch = static_cast<char *>(malloc(MAGIC_SIZE));
+            fs_ptr->reader_ptr_->read(ch, MAGIC_SIZE);
+            bool result = !strcmp(ch,MAGIC);
+
+            fs_ptr->reader_ptr_->close();
+            return result;
+        }
+
+        void
+        WriteMagic(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path) {
+            if (!fs_ptr->writer_ptr_->open(file_path.c_str())) {
+                std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+                LOG_ENGINE_ERROR_ << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+            fs_ptr->writer_ptr_->write((void *) MAGIC, MAGIC_SIZE);
+            fs_ptr->writer_ptr_->close();
+        }
+
+        std::unordered_map<std::string, std::string>
+        ReadHeaderValues(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path) {
+            if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+                std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+                LOG_ENGINE_ERROR_ << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+            fs_ptr->reader_ptr_->seekg(MAGIC_SIZE);
+            char *ch = static_cast<char *>(malloc(HEADER_SIZE));
+            fs_ptr->reader_ptr_->read(ch, HEADER_SIZE);
+
+            std::string data(ch);
+
+            auto result = std::unordered_map<std::string, std::string>();
+
+            std::regex semicolon(";");
+            std::vector<std::string> maps(std::sregex_token_iterator(data.begin(), data.end(), semicolon, -1),
+                                          std::sregex_token_iterator());
+            std::regex equal("=");
+            for (auto &item:maps) {
+                std::vector<std::string> pair(std::sregex_token_iterator(item.begin(), item.end(), equal, -1),
+                                              std::sregex_token_iterator());
+                result.insert(std::make_pair(pair[0], pair[1]));
+            }
+            fs_ptr->reader_ptr_->close();
+
+            return result;
+        }
+
+        std::string
+        ReadHeaderValue(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path, const std::string &key) {
+            auto kv = ReadHeaderValues(fs_ptr, file_path);
+            return kv.at(key);
+        }
+
+        std::uint8_t
+        CalculateSum(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path, bool written) {
+            if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+                std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+                LOG_ENGINE_ERROR_ << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+
+            int size = fs_ptr->reader_ptr_->length();
+            if(written){
+                size -= SUM_SIZE;
+            }
+            char* ch = static_cast<char *>(malloc(size));
+            fs_ptr->reader_ptr_->read(ch,size);
+            std::uint8_t result = crc32c::Crc32c(ch, size);
+            fs_ptr->reader_ptr_->close();
+
+            return result;
+        }
+
+        void
+        WriteSum(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path, int result, bool written) {
+            if (!fs_ptr->writer_ptr_->in_open(file_path.c_str())) {
+                std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+                LOG_ENGINE_ERROR_ << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+
+            if (written) {
+                fs_ptr->writer_ptr_->seekp(-SUM_SIZE, std::ios_base::end);
+            } else {
+                fs_ptr->writer_ptr_->seekp(0, std::ios_base::end);
+            }
+
+            std::string sum = std::to_string(result);
+            sum.resize(SUM_SIZE, '\0');
+            fs_ptr->writer_ptr_->write(sum.data(), SUM_SIZE);
+            fs_ptr->writer_ptr_->close();
+        }
+
+        bool
+        CheckSum(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path) {
+            int result = CalculateSum(fs_ptr, file_path,true);
+            if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+                std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+                LOG_ENGINE_ERROR_ << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+            fs_ptr->reader_ptr_->seekg(-SUM_SIZE, std::ios_base::end);
+            char *record = static_cast<char *>(malloc(SUM_SIZE));
+            fs_ptr->reader_ptr_->read(record, SUM_SIZE);
+
+            fs_ptr->reader_ptr_->close();
+
+            auto sum = (uint8_t) atoi(record);
+            return sum == result;
+        }
+
+        bool
+        WriteHeaderValue(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path,
+                         const std::string &key, const std::string &value) {
+            auto record = ReadHeaderValues(fs_ptr, file_path);
+            record.insert(std::make_pair(key, value));
+            WriteHeaderValues(fs_ptr, file_path, record);
+            return true;
+        }
+
+        bool
+        WriteHeaderValues(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path,
+                          const std::unordered_map<std::string, std::string> &maps) {
+            if (!fs_ptr->writer_ptr_->in_open(file_path.c_str())) {
+                std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+                LOG_ENGINE_ERROR_ << err_msg;
+                throw Exception(SERVER_WRITE_ERROR, err_msg);
+            }
+            fs_ptr->writer_ptr_->seekp(MAGIC_SIZE);
+
+            std::string kv;
+            for (auto &map : maps) {
+                kv.append(map.first + "=" + map.second + ";");
+            }
+            if (kv.size() > HEADER_SIZE) {
+                throw "Exceeded the limit of header data size";
+            }
+
+            fs_ptr->writer_ptr_->write(kv.data(), HEADER_SIZE);
+            fs_ptr->writer_ptr_->close();
+
+            return true;
+        }
+    }
+
+}  // namespace milvus

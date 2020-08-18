@@ -23,6 +23,7 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "storage/ExtraFileInfo.h"
 
 namespace milvus {
 namespace codec {
@@ -41,12 +42,16 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
     milvus::TimeRecorder recorder("VectorCompressFormat::Read");
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
+
+    CHECK_MAGIC_VALID(fs_ptr,full_file_path);
+    CHECK_SUM_VALID(fs_ptr,full_file_path);
+
     if (!fs_ptr->reader_ptr_->open(full_file_path)) {
         LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
         return;
     }
 
-    int64_t length = fs_ptr->reader_ptr_->length();
+    int64_t length = fs_ptr->reader_ptr_->length()-MAGIC_SIZE-HEADER_SIZE-SUM_SIZE;
     if (length <= 0) {
         LOG_ENGINE_ERROR_ << "Invalid vector compress length: " << full_file_path;
         return;
@@ -55,7 +60,7 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
     compress->data = std::shared_ptr<uint8_t[]>(new uint8_t[length]);
     compress->size = length;
 
-    fs_ptr->reader_ptr_->seekg(0);
+    fs_ptr->reader_ptr_->seekg(MAGIC_SIZE+HEADER_SIZE);
     fs_ptr->reader_ptr_->read(compress->data.get(), length);
     fs_ptr->reader_ptr_->close();
 
@@ -70,13 +75,19 @@ VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::stri
     milvus::TimeRecorder recorder("VectorCompressFormat::Write");
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
-    if (!fs_ptr->writer_ptr_->open(full_file_path)) {
+    // TODO:add extra info
+    std::unordered_map<std::string,std::string> maps;
+    WRITE_MAGIC(fs_ptr,full_file_path)
+    WRITE_HEADER(fs_ptr,full_file_path, maps);
+    if (!fs_ptr->writer_ptr_->in_open(full_file_path)) {
         LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
         return;
     }
 
+    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE+HEADER_SIZE);
     fs_ptr->writer_ptr_->write(compress->data.get(), compress->size);
     fs_ptr->writer_ptr_->close();
+    WRITE_SUM(fs_ptr,full_file_path);
 
     double span = recorder.RecordSection("End");
     double rate = compress->size * 1000000.0 / span / 1024 / 1024;

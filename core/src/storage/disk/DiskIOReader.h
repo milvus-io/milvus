@@ -42,6 +42,12 @@ class DiskIOReader : public IOReader {
     void
     seekg(int64_t pos) override;
 
+    void
+    seekg(int64_t pos, std::ios_base::seekdir seekdir) override;
+
+    std::string
+    totallyRead() override;
+
     int64_t
     length() override;
 

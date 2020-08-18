@@ -36,8 +36,17 @@ class DiskIOWriter : public IOWriter {
     bool
     open(const std::string& name) override;
 
+    bool
+    in_open(const std::string& name) override;
+
     void
     write(void* ptr, int64_t size) override;
+
+    void
+    seekp(int64_t pos) override;
+
+    void
+    seekp(int64_t pos, std::ios_base::seekdir seekdir) override;
 
     int64_t
     length() override;

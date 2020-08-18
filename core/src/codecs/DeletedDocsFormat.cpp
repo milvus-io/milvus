@@ -28,6 +28,7 @@
 
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "storage/ExtraFileInfo.h"
 
 namespace milvus {
 namespace codec {
@@ -45,12 +46,15 @@ DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& 
                         segment::DeletedDocsPtr& deleted_docs) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
 
+    CHECK_MAGIC_VALID(fs_ptr,full_file_path);
+    CHECK_SUM_VALID(fs_ptr,full_file_path);
     if (!fs_ptr->reader_ptr_->open(full_file_path)) {
         std::string err_msg = "Failed to open file: " + full_file_path;  // + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
+    fs_ptr->reader_ptr_->seekg(MAGIC_SIZE+HEADER_SIZE);
     size_t num_bytes;
     fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 
@@ -100,15 +104,22 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
         delete_ids.insert(delete_ids.end(), deleted_docs_list.begin(), deleted_docs_list.end());
     }
 
-    if (!fs_ptr->writer_ptr_->open(temp_path)) {
+    // TODO:add extra info
+    std::unordered_map<std::string,std::string> maps;
+    WRITE_MAGIC(fs_ptr,temp_path)
+    WRITE_HEADER(fs_ptr,temp_path, maps);
+
+    if (!fs_ptr->writer_ptr_->in_open(temp_path)) {
         std::string err_msg = "Failed to write from file: " + temp_path;  // + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
+    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE+HEADER_SIZE);
     fs_ptr->writer_ptr_->write(&new_num_bytes, sizeof(size_t));
     fs_ptr->writer_ptr_->write(delete_ids.data(), new_num_bytes);
     fs_ptr->writer_ptr_->close();
+    WRITE_SUM(fs_ptr,temp_path);
 
     // Move temp file to delete file
     std::experimental::filesystem::rename(temp_path, full_file_path);
@@ -117,12 +128,17 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
 void
 DeletedDocsFormat::ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, size_t& size) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
-    if (!fs_ptr->writer_ptr_->open(full_file_path)) {
+
+    CHECK_MAGIC_VALID(fs_ptr,full_file_path);
+    CHECK_SUM_VALID(fs_ptr,full_file_path);
+
+    if (!fs_ptr->reader_ptr_->open(full_file_path)) {
         std::string err_msg = "Failed to open file: " + full_file_path;  // + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_CANNOT_CREATE_FILE, err_msg);
     }
 
+    fs_ptr->reader_ptr_->seekg(MAGIC_SIZE+HEADER_SIZE);
     size_t num_bytes;
     fs_ptr->reader_ptr_->read(&num_bytes, sizeof(size_t));
 

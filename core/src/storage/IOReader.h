@@ -28,6 +28,12 @@ class IOReader {
     virtual void
     seekg(int64_t pos) = 0;
 
+    virtual void
+    seekg(int64_t pos, std::ios_base::seekdir seekdir) = 0;
+
+    virtual std::string
+    totallyRead() = 0;
+
     virtual int64_t
     length() = 0;
 
