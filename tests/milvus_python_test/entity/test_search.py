@@ -22,6 +22,7 @@ nq = 1
 nprobe = 1
 epsilon = 0.001
 field_name = default_float_vec_field_name
+binary_field_name = default_binary_vec_field_name
 default_fields = gen_default_fields()
 search_param = {"nprobe": 1}
 entity = gen_entities(1, is_normal=True)
@@ -29,6 +30,7 @@ raw_vector, binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 default_query, default_query_vecs = gen_query_vectors(field_name, entities, top_k, nq)
+default_binary_query, default_binary_query_vecs = gen_query_vectors(binary_field_name, binary_entities, top_k, nq)
 
 
 def init_data(connect, collection, nb=6000, partition_tags=None):
@@ -179,9 +181,9 @@ class TestSearchBase:
             assert len(res[0]) == top_k
             assert res[0]._distances[0] <= epsilon
             assert check_id_result(res[0], ids[0])
-            # TODO
             res = connect.search(collection, query, fields=["float"])
-            # TODO
+            for i in range(nq):
+                assert entities[1]["values"][:nq][i] in [r.entity.get('float') for r in res[i]]
         else:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
@@ -341,9 +343,8 @@ class TestSearchBase:
             assert res[0]._distances[0] > epsilon
             assert res[1]._distances[0] > epsilon
 
-    # TODO:
     @pytest.mark.level(2)
-    def _test_search_index_partitions_B(self, connect, collection, get_simple_index, get_top_k):
+    def test_search_index_partitions_B(self, connect, collection, get_simple_index, get_top_k):
         '''
         target: test basic search fuction, all the search params is corrent, test all index params, and build
         method: search collection with the given vectors and tags, check the result
@@ -369,11 +370,10 @@ class TestSearchBase:
         else:
             res = connect.search(collection, query, partition_tags=["(.*)tag"])
             assert not check_id_result(res[0], ids[0])
-            assert check_id_result(res[1], new_ids[0])
-            assert res[0]._distances[0] > epsilon
+            assert res[0]._distances[0] < epsilon
             assert res[1]._distances[0] < epsilon
             res = connect.search(collection, query, partition_tags=["new(.*)"])
-            assert res[0]._distances[0] > epsilon
+            assert res[0]._distances[0] < epsilon
             assert res[1]._distances[0] < epsilon
 
     # 
@@ -531,8 +531,7 @@ class TestSearchBase:
         res = connect.search(collection, query)
         assert abs(np.sqrt(res[0]._distances[0]) - min(distance_0, distance_1)) <= gen_inaccuracy(res[0]._distances[0])
 
-    # TODO: distance problem
-    def _test_search_distance_l2_after_index(self, connect, collection, get_simple_index):
+    def test_search_distance_l2_after_index(self, connect, collection, get_simple_index):
         '''
         target: search collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
@@ -551,9 +550,12 @@ class TestSearchBase:
             if min_distance > tmp_dis:
                 min_distance = tmp_dis
         res = connect.search(collection, query)
-        assert abs(np.sqrt(res[0]._distances[0]) - min_distance) <= epsilon
+        tmp_epsilon = epsilon
+        # TODO:
+        if index_type in ["ANNOY", "IVF_PQ"]:
+            tmp_epsilon = 0.1
+        assert abs(np.sqrt(res[0]._distances[0]) - min_distance) <= tmp_epsilon
 
-    # TODO
     @pytest.mark.level(2)
     def test_search_distance_ip(self, connect, collection):
         '''
@@ -571,10 +573,9 @@ class TestSearchBase:
         distance_0 = ip(vecs[0], inside_vecs[0])
         distance_1 = ip(vecs[0], inside_vecs[1])
         res = connect.search(collection, query)
-        assert abs(res[0]._distances[0] - max(distance_0, distance_1)) <= gen_inaccuracy(res[0]._distances[0])
+        assert abs(res[0]._distances[0] - max(distance_0, distance_1)) <= epsilon
 
-    # TODO: distance problem
-    def _test_search_distance_ip_after_index(self, connect, collection, get_simple_index):
+    def test_search_distance_ip_after_index(self, connect, collection, get_simple_index):
         '''
         target: search collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
@@ -596,177 +597,144 @@ class TestSearchBase:
             if max_distance < tmp_dis:
                 max_distance = tmp_dis
         res = connect.search(collection, query)
-        assert abs(res[0]._distances[0] - max_distance) <= gen_inaccuracy(res[0]._distances[0])
+        tmp_epsilon = epsilon
+        # TODO:
+        if index_type in ["ANNOY", "IVF_PQ"]:
+            tmp_epsilon = 0.1
+        assert abs(res[0]._distances[0] - max_distance) <= tmp_epsilon
 
-    # TODO:
-    def _test_search_distance_jaccard_flat_index(self, connect, binary_collection):
+    def test_search_distance_jaccard_flat_index(self, connect, binary_collection):
         '''
         target: search binary_collection, and check the result: distance
-        method: compare the return distance value with value computed with Inner product
+        method: compare the return distance value with value computed with L2
         expected: the return distance equals to the computed value
         '''
-        # from scipy.spatial import distance
-        nprobe = 512
+        nq = 1
         int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
         query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         distance_0 = jaccard(query_int_vectors[0], int_vectors[0])
         distance_1 = jaccard(query_int_vectors[0], int_vectors[1])
-        res = connect.search(binary_collection, query_entities)
+        query, vecs = gen_query_vectors(binary_field_name, query_entities, top_k, nq, metric_type="JACCARD")
+        res = connect.search(binary_collection, query)
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
-    def _test_search_distance_hamming_flat_index(self, connect, binary_collection):
+    @pytest.mark.level(2)
+    def test_search_distance_jaccard_flat_index_L2(self, connect, binary_collection):
+        '''
+        target: search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with L2
+        expected: the return distance equals to the computed value
+        '''
+        nq = 1
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
+        distance_0 = jaccard(query_int_vectors[0], int_vectors[0])
+        distance_1 = jaccard(query_int_vectors[0], int_vectors[1])
+        query, vecs = gen_query_vectors(binary_field_name, query_entities, top_k, nq, metric_type="L2")
+        with pytest.raises(Exception) as e:
+            res = connect.search(binary_collection, query)
+
+    @pytest.mark.level(2)
+    def test_search_distance_hamming_flat_index(self, connect, binary_collection):
         '''
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
         expected: the return distance equals to the computed value
         '''
-        # from scipy.spatial import distance
-        nprobe = 512
+        nq = 1
         int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
         query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         distance_0 = hamming(query_int_vectors[0], int_vectors[0])
         distance_1 = hamming(query_int_vectors[0], int_vectors[1])
-        res = connect.search(binary_collection, query_entities)
+        query, vecs = gen_query_vectors(binary_field_name, query_entities, top_k, nq, metric_type="HAMMING")
+        res = connect.search(binary_collection, query)
         assert abs(res[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
 
-    def _test_search_distance_substructure_flat_index(self, connect, binary_collection):
+    @pytest.mark.level(2)
+    def test_search_distance_substructure_flat_index(self, connect, binary_collection):
         '''
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
         expected: the return distance equals to the computed value
         '''
-        # from scipy.spatial import distance
-        nprobe = 512
-        int_vectors, vectors, ids = self.init_binary_data(connect, binary_collection, nb=2)
-        index_type = "FLAT"
-        index_param = {
-            "nlist": 16384,
-            "metric_type": "SUBSTRUCTURE"
-        }
-        connect.create_index(binary_collection, binary_field_name, index_param)
-        logging.getLogger().info(connect.get_collection_info(binary_collection))
-        logging.getLogger().info(connect.get_index_info(binary_collection))
-        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, binary_collection, nb=1, insert=False)
+        nq = 1
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         distance_0 = substructure(query_int_vectors[0], int_vectors[0])
         distance_1 = substructure(query_int_vectors[0], int_vectors[1])
-        search_param = get_search_param(index_type)
-        status, result = connect.search(binary_collection, top_k, query_vecs, params=search_param)
-        logging.getLogger().info(status)
-        logging.getLogger().info(result)
-        assert len(result[0]) == 0
+        query, vecs = gen_query_vectors(binary_field_name, query_entities, top_k, nq, metric_type="SUBSTRUCTURE")
+        res = connect.search(binary_collection, query)
+        assert len(res[0]) == 0
 
-    def _test_search_distance_substructure_flat_index_B(self, connect, binary_collection):
+    @pytest.mark.level(2)
+    def test_search_distance_substructure_flat_index_B(self, connect, binary_collection):
         '''
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with SUB 
         expected: the return distance equals to the computed value
         '''
-        # from scipy.spatial import distance
         top_k = 3
-        nprobe = 512
-        int_vectors, vectors, ids = self.init_binary_data(connect, binary_collection, nb=2)
-        index_type = "FLAT"
-        index_param = {
-            "nlist": 16384,
-            "metric_type": "SUBSTRUCTURE"
-        }
-        connect.create_index(binary_collection, binary_field_name, index_param)
-        logging.getLogger().info(connect.get_collection_info(binary_collection))
-        logging.getLogger().info(connect.get_index_info(binary_collection))
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
         query_int_vectors, query_vecs = gen_binary_sub_vectors(int_vectors, 2)
-        search_param = get_search_param(index_type)
-        status, result = connect.search(binary_collection, top_k, query_vecs, params=search_param)
-        logging.getLogger().info(status)
-        logging.getLogger().info(result)
-        assert len(result[0]) == 1
-        assert len(result[1]) == 1
-        assert result[0][0].distance <= epsilon
-        assert result[0][0].id == ids[0]
-        assert result[1][0].distance <= epsilon
-        assert result[1][0].id == ids[1]
+        query, vecs = gen_query_vectors(binary_field_name, entities, top_k, nq, metric_type="SUBSTRUCTURE", replace_vecs=query_vecs)
+        res = connect.search(binary_collection, query)
+        assert res[0][0].distance <= epsilon
+        assert res[0][0].id == ids[0]
+        assert res[1][0].distance <= epsilon
+        assert res[1][0].id == ids[1]
 
-    def _test_search_distance_superstructure_flat_index(self, connect, binary_collection):
+    @pytest.mark.level(2)
+    def test_search_distance_superstructure_flat_index(self, connect, binary_collection):
         '''
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
         expected: the return distance equals to the computed value
         '''
-        # from scipy.spatial import distance
-        nprobe = 512
-        int_vectors, vectors, ids = self.init_binary_data(connect, binary_collection, nb=2)
-        index_type = "FLAT"
-        index_param = {
-            "nlist": 16384,
-            "metric_type": "SUBSTRUCTURE"
-        }
-        connect.create_index(binary_collection, binary_field_name, index_param)
-        logging.getLogger().info(connect.get_collection_info(binary_collection))
-        logging.getLogger().info(connect.get_index_info(binary_collection))
-        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, binary_collection, nb=1, insert=False)
+        nq = 1
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         distance_0 = superstructure(query_int_vectors[0], int_vectors[0])
         distance_1 = superstructure(query_int_vectors[0], int_vectors[1])
-        search_param = get_search_param(index_type)
-        status, result = connect.search(binary_collection, top_k, query_vecs, params=search_param)
-        logging.getLogger().info(status)
-        logging.getLogger().info(result)
-        assert len(result[0]) == 0
+        query, vecs = gen_query_vectors(binary_field_name, query_entities, top_k, nq, metric_type="SUPERSTRUCTURE")
+        res = connect.search(binary_collection, query)
+        assert len(res[0]) == 0
 
-    def _test_search_distance_superstructure_flat_index_B(self, connect, binary_collection):
+    @pytest.mark.level(2)
+    def test_search_distance_superstructure_flat_index_B(self, connect, binary_collection):
         '''
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with SUPER
         expected: the return distance equals to the computed value
         '''
-        # from scipy.spatial import distance
         top_k = 3
-        nprobe = 512
-        int_vectors, vectors, ids = self.init_binary_data(connect, binary_collection, nb=2)
-        index_type = "FLAT"
-        index_param = {
-            "nlist": 16384,
-            "metric_type": "SUBSTRUCTURE"
-        }
-        connect.create_index(binary_collection, binary_field_name, index_param)
-        logging.getLogger().info(connect.get_collection_info(binary_collection))
-        logging.getLogger().info(connect.get_index_info(binary_collection))
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
         query_int_vectors, query_vecs = gen_binary_super_vectors(int_vectors, 2)
-        search_param = get_search_param(index_type)
-        status, result = connect.search(binary_collection, top_k, query_vecs, params=search_param)
-        logging.getLogger().info(status)
-        logging.getLogger().info(result)
-        assert len(result[0]) == 2
-        assert len(result[1]) == 2
-        assert result[0][0].id in ids
-        assert result[0][0].distance <= epsilon
-        assert result[1][0].id in ids
-        assert result[1][0].distance <= epsilon
+        query, vecs = gen_query_vectors(binary_field_name, entities, top_k, nq, metric_type="SUPERSTRUCTURE", replace_vecs=query_vecs)
+        res = connect.search(binary_collection, query)
+        assert len(res[0]) == 2
+        assert len(res[1]) == 2
+        assert res[0][0].id in ids
+        assert res[0][0].distance <= epsilon
+        assert res[1][0].id in ids
+        assert res[1][0].distance <= epsilon
 
-    def _test_search_distance_tanimoto_flat_index(self, connect, binary_collection):
+    @pytest.mark.level(2)
+    def test_search_distance_tanimoto_flat_index(self, connect, binary_collection):
         '''
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with Inner product
         expected: the return distance equals to the computed value
         '''
-        # from scipy.spatial import distance
-        nprobe = 512
-        int_vectors, vectors, ids = self.init_binary_data(connect, binary_collection, nb=2)
-        index_type = "FLAT"
-        index_param = {
-            "nlist": 16384,
-            "metric_type": "TANIMOTO"
-        }
-        connect.create_index(binary_collection, binary_field_name, index_param)
-        logging.getLogger().info(connect.get_collection_info(binary_collection))
-        logging.getLogger().info(connect.get_index_info(binary_collection))
-        query_int_vectors, query_vecs, tmp_ids = self.init_binary_data(connect, binary_collection, nb=1, insert=False)
+        nq = 1
+        int_vectors, entities, ids = init_binary_data(connect, binary_collection, nb=2)
+        query_int_vectors, query_entities, tmp_ids = init_binary_data(connect, binary_collection, nb=1, insert=False)
         distance_0 = tanimoto(query_int_vectors[0], int_vectors[0])
         distance_1 = tanimoto(query_int_vectors[0], int_vectors[1])
-        search_param = get_search_param(index_type)
-        status, result = connect.search(binary_collection, top_k, query_vecs, params=search_param)
-        logging.getLogger().info(status)
-        logging.getLogger().info(result)
-        assert abs(result[0][0].distance - min(distance_0, distance_1)) <= epsilon
+        query, vecs = gen_query_vectors(binary_field_name, query_entities, top_k, nq, metric_type="TANIMOTO")
+        res = connect.search(binary_collection, query)
+        assert abs(res[0][0].distance - min(distance_0, distance_1)) <= epsilon
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(30)
     def test_search_concurrent_multithreads(self, connect, args):
         '''
@@ -800,6 +768,7 @@ class TestSearchBase:
         for t in threads:
             t.join()
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(30)
     def test_search_concurrent_multithreads_single_connection(self, connect, args):
         '''
@@ -832,6 +801,7 @@ class TestSearchBase:
         for t in threads:
             t.join()
 
+    @pytest.mark.level(2)
     def test_search_multi_collections(self, connect, args):
         '''
         target: test search multi collections of L2
