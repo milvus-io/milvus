@@ -56,7 +56,7 @@ GetCollectionInfoReq::OnExecute() {
             milvus::json field_index_param;
             auto field_elements = field_kv.second;
             for (const auto& element : field_elements) {
-                if (element->GetFtype() == (engine::snapshot::FTYPE_TYPE)engine::FieldElementType::FET_INDEX) {
+                if (element->GetFtype() == engine::FieldElementType::FET_INDEX) {
                     field_index_param = element->GetParams();
                     auto type = element->GetTypeName();
                     field_schema.index_params_ = field_index_param;

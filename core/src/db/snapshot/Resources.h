@@ -265,6 +265,27 @@ class FtypeField {
     FTYPE_TYPE ftype_;
 };
 
+class FEtypeField {
+ public:
+    static constexpr const char* Name = "field_element_type";
+
+    explicit FEtypeField(FTYPE_TYPE type) : ftype_(type) {
+    }
+
+    FTYPE_TYPE
+    GetFtype() const {
+        return ftype_;
+    }
+
+    void
+    SetFtype(FTYPE_TYPE type) {
+        ftype_ = type;
+    }
+
+ protected:
+    FTYPE_TYPE ftype_;
+};
+
 class FieldIdField {
  public:
     static constexpr const char* Name = "field_id";
@@ -623,7 +644,7 @@ class SegmentFile : public BaseResource<SegmentFile>,
                     public PartitionIdField,
                     public SegmentIdField,
                     public FieldElementIdField,
-                    public FtypeField,
+                    public FEtypeField,
                     public RowCountField,
                     public SizeField,
                     public IdField,
@@ -640,7 +661,7 @@ class SegmentFile : public BaseResource<SegmentFile>,
     static constexpr const char* Name = "SegmentFile";
 
     SegmentFile(ID_TYPE collection_id, ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id,
-                FTYPE_TYPE ftype, SIZE_TYPE row_cnt = 0, SIZE_TYPE size = 0, ID_TYPE id = 0, LSN_TYPE lsn = 0,
+                FTYPE_TYPE fetype, SIZE_TYPE row_cnt = 0, SIZE_TYPE size = 0, ID_TYPE id = 0, LSN_TYPE lsn = 0,
                 State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
                 TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());
 };
@@ -729,7 +750,7 @@ class FieldElement : public BaseResource<FieldElement>,
                      public CollectionIdField,
                      public FieldIdField,
                      public NameField,
-                     public FtypeField,
+                     public FEtypeField,
                      public TypeNameField,
                      public ParamsField,
                      public IdField,
@@ -744,7 +765,7 @@ class FieldElement : public BaseResource<FieldElement>,
     using ScopedMapT = std::map<ID_TYPE, ScopedResource<FieldElement>>;
     using VecT = std::vector<Ptr>;
     static constexpr const char* Name = "FieldElement";
-    FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype,
+    FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE fetype,
                  const std::string& type_name = "", const json& params = JEmpty, ID_TYPE id = 0, LSN_TYPE lsn = 0,
                  State status = PENDING, TS_TYPE created_on = GetMicroSecTimeStamp(),
                  TS_TYPE UpdatedOnField = GetMicroSecTimeStamp());

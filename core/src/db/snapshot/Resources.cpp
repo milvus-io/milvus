@@ -133,13 +133,13 @@ SegmentCommit::ToString() const {
 }
 
 SegmentFile::SegmentFile(ID_TYPE collection_id, ID_TYPE partition_id, ID_TYPE segment_id, ID_TYPE field_element_id,
-                         FTYPE_TYPE ftype, SIZE_TYPE row_cnt, SIZE_TYPE size, ID_TYPE id, LSN_TYPE lsn, State state,
+                         FTYPE_TYPE fetype, SIZE_TYPE row_cnt, SIZE_TYPE size, ID_TYPE id, LSN_TYPE lsn, State state,
                          TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       PartitionIdField(partition_id),
       SegmentIdField(segment_id),
       FieldElementIdField(field_element_id),
-      FtypeField(ftype),
+      FEtypeField(fetype),
       RowCountField(row_cnt),
       SizeField(size),
       IdField(id),
@@ -185,13 +185,13 @@ FieldCommit::FieldCommit(ID_TYPE collection_id, ID_TYPE field_id, const MappingT
       UpdatedOnField(updated_on) {
 }
 
-FieldElement::FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE ftype,
+FieldElement::FieldElement(ID_TYPE collection_id, ID_TYPE field_id, const std::string& name, FTYPE_TYPE fetype,
                            const std::string& type_name, const json& params, ID_TYPE id, LSN_TYPE lsn, State state,
                            TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       FieldIdField(field_id),
       NameField(name),
-      FtypeField(ftype),
+      FEtypeField(fetype),
       TypeNameField(type_name),
       ParamsField(params),
       IdField(id),
