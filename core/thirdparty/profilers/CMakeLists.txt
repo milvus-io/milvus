@@ -49,6 +49,7 @@ macro( build_libunwind )
             ${EP_LOG_OPTIONS} )
 
     ExternalProject_Get_Property( libunwind_ep INSTALL_DIR )
+    file(MAKE_DIRECTORY ${INSTALL_DIR}/include)
     add_library( libunwind SHARED IMPORTED )
     set_target_properties(
         libunwind   PROPERTIES
@@ -86,6 +87,7 @@ macro( build_gperftools )
 
 
     ExternalProject_Get_Property( gperftools_ep INSTALL_DIR )
+    file(MAKE_DIRECTORY ${INSTALL_DIR}/include)
     # libprofiler.a
     add_library( gperftools STATIC IMPORTED )
     set_target_properties( gperftools
