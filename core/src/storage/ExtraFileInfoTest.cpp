@@ -60,10 +60,10 @@ TEST_F(ExtraFileInfoTest, WriteFileTest) {
     WriteSum(fs_ptr, file_path, result_sum);
 
     ASSERT_TRUE(CheckSum(fs_ptr, file_path));
-    ASSERT_TRUE(ReadHeaderValue(fs_ptr, file_path, "test") == "test");
+    ASSERT_EQ(ReadHeaderValue(fs_ptr, file_path, "test"), "test");
 
     ASSERT_TRUE(WriteHeaderValue(fs_ptr, file_path, "github", "gaylab"));
-    ASSERT_TRUE(ReadHeaderValue(fs_ptr, file_path, "github") == "gaylab");
+    ASSERT_EQ(ReadHeaderValue(fs_ptr, file_path, "github"), "gaylab");
     result_sum = CalculateSum(fs_ptr, file_path);
     WriteSum(fs_ptr, file_path, result_sum, true);
     ASSERT_TRUE(CheckMagic(fs_ptr, file_path));

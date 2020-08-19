@@ -17,6 +17,7 @@
 
 #include <boost/filesystem.hpp>
 #include <memory>
+#include <unordered_map>
 
 #include "codecs/VectorCompressFormat.h"
 #include "knowhere/common/BinarySet.h"
@@ -71,7 +72,7 @@ VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::stri
     milvus::TimeRecorder recorder("VectorCompressFormat::Write");
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
-    // TODO:add extra info
+    // TODO: add extra info
     std::unordered_map<std::string, std::string> maps;
     WRITE_MAGIC(fs_ptr, full_file_path)
     WRITE_HEADER(fs_ptr, full_file_path, maps);

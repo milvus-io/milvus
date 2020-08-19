@@ -17,13 +17,13 @@
 
 #include "codecs/DeletedDocsFormat.h"
 
-#include <fcntl.h>
 #include <unistd.h>
 
 #include <experimental/filesystem>
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "storage/ExtraFileInfo.h"
@@ -99,7 +99,7 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     if (!deleted_docs_list.empty()) {
         delete_ids.insert(delete_ids.end(), deleted_docs_list.begin(), deleted_docs_list.end());
     }
-    // TODO:add extra info
+    // TODO: add extra info
     std::unordered_map<std::string, std::string> maps;
     WRITE_MAGIC(fs_ptr, temp_path)
     WRITE_HEADER(fs_ptr, temp_path, maps);

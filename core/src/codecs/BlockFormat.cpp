@@ -17,11 +17,11 @@
 
 #include "codecs/BlockFormat.h"
 
-#include <fcntl.h>
 #include <unistd.h>
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <memory>
+#include <unordered_map>
 
 #include "storage/ExtraFileInfo.h"
 #include "utils/Exception.h"
@@ -122,7 +122,7 @@ BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_
     if (raw == nullptr) {
         return;
     }
-    // TODO:add extra info
+    // TODO: add extra info
     std::unordered_map<std::string, std::string> maps;
     WRITE_MAGIC(fs_ptr, file_path)
     WRITE_HEADER(fs_ptr, file_path, maps);

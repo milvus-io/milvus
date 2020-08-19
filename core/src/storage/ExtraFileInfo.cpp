@@ -11,9 +11,11 @@
 
 #include <iostream>
 #include <regex>
+#include <utility>
+#include <vector>
 
-#include "ExtraFileInfo.h"
 #include "crc32c/crc32c.h"
+#include "storage/ExtraFileInfo.h"
 
 namespace milvus {
 namespace storage {
