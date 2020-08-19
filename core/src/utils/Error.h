@@ -72,7 +72,9 @@ constexpr ErrorCode SERVER_CANNOT_DELETE_FOLDER = ToServerErrorCode(10);
 constexpr ErrorCode SERVER_CANNOT_DELETE_FILE = ToServerErrorCode(11);
 constexpr ErrorCode SERVER_BUILD_INDEX_ERROR = ToServerErrorCode(12);
 constexpr ErrorCode SERVER_CANNOT_OPEN_FILE = ToServerErrorCode(13);
-constexpr ErrorCode SERVER_CANNOT_READ_FILE = ToServerErrorCode(14);
+constexpr ErrorCode SERVER_FILE_MAGIC_BYTES_ERROR = ToServerErrorCode(14);
+constexpr ErrorCode SERVER_FILE_SUM_BYTES_ERROR = ToServerErrorCode(15);
+constexpr ErrorCode SERVER_CANNOT_READ_FILE = ToServerErrorCode(16);
 
 constexpr ErrorCode SERVER_COLLECTION_NOT_EXIST = ToServerErrorCode(100);
 constexpr ErrorCode SERVER_INVALID_COLLECTION_NAME = ToServerErrorCode(101);
