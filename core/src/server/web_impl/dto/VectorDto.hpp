@@ -18,14 +18,14 @@ namespace milvus::server::web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class VectorIdsDto : public ODTO {
-    DTO_INIT(VectorIdsDto, DTO)
+class EntityIdsDto : public ODTO {
+    DTO_INIT(EntityIdsDto, DTO)
 
     DTO_FIELD(List<String>, ids);
 };
 
 #include OATPP_CODEGEN_END(DTO)
 
-using VectorIdsDtoT = oatpp::Object<VectorIdsDto>;
+using EntityIdsDtoT = oatpp::Object<EntityIdsDto>;
 
 } // namespace milvus::server::web
