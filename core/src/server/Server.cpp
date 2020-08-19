@@ -144,13 +144,6 @@ Server::Start() {
     }
 
     try {
-        /* Read config file */
-        Status s = LoadConfig();
-        if (!s.ok()) {
-            std::cerr << "ERROR: Milvus server fail to load config file" << std::endl;
-            return s;
-        }
-
         auto meta_uri = config.general.meta_uri();
         if (meta_uri.length() > 6 && strcasecmp("sqlite", meta_uri.substr(0, 6).c_str()) == 0) {
             std::cout << "WARNING: You are using SQLite as the meta data management, "
@@ -163,7 +156,6 @@ Server::Start() {
         tracing_config_path.empty() ? tracing::TracerUtil::InitGlobal()
                                     : tracing::TracerUtil::InitGlobal(tracing_config_path);
 
-        /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         auto time_zone = config.general.timezone();
 
         if (time_zone.length() == 3) {
@@ -184,44 +176,14 @@ Server::Start() {
         }
         tzset();
 
-        {
-            std::unordered_map<std::string, int64_t> level_to_int{
-                {"debug", 5}, {"info", 4}, {"warning", 3}, {"error", 2}, {"fatal", 1},
-            };
-
-            bool trace_enable = config.logs.trace.enable();
-            bool debug_enable = false;
-            bool info_enable = false;
-            bool warning_enable = false;
-            bool error_enable = false;
-            bool fatal_enable = false;
-            std::string logs_path = config.logs.path();
-            int64_t max_log_file_size = config.logs.max_log_file_size();
-            int64_t delete_exceeds = config.logs.log_rotate_num();
-
-            switch (level_to_int[config.logs.level()]) {
-                case 5:
-                    debug_enable = true;
-                case 4:
-                    info_enable = true;
-                case 3:
-                    warning_enable = true;
-                case 2:
-                    error_enable = true;
-                case 1:
-                    fatal_enable = true;
-                    break;
-                default:
-                    return Status(SERVER_UNEXPECTED_ERROR, "invalid log level");
-            }
-
-            LogMgr::InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable,
-                            logs_path, max_log_file_size, delete_exceeds);
-        }
+        /* log path is defined in Config file, so InitLog must be called after LoadConfig */
+        STATUS_CHECK(LogMgr::InitLog(config.logs.trace.enable(), config.logs.level(), config.logs.path(),
+                                     config.logs.max_log_file_size(), config.logs.log_rotate_num()));
 
         bool cluster_enable = config.cluster.enable();
         auto cluster_role = config.cluster.role();
 
+        Status s;
         if ((not cluster_enable) || cluster_role == ClusterRole::RW) {
             try {
                 // True if a new directory was created, otherwise false.
@@ -322,32 +284,6 @@ Server::Stop() {
     StopService();
 
     std::cerr << "Milvus server exit..." << std::endl;
-}
-
-Status
-Server::LoadConfig() {
-    // Config& config = Config::GetInstance();
-    // Status s = config.LoadConfigFile(config_filename_);
-    // if (!s.ok()) {
-    //     std::cerr << s.message() << std::endl;
-    //     return s;
-    // }
-
-    // config_mgr_ = std::make_shared<ConfigMgr>(config_filename_);
-    // try {
-    //     config_mgr_->Init();
-    //     config_mgr_->Load();
-    // } catch (std::exception &ex) {
-    //     std::cerr << "Load config file failed: " << ex.what() << std::endl;
-    //     return Status(SERVER_UNEXPECTED_ERROR, "LoadConfig failed.");
-    // }
-
-    // s = config.ValidateConfig();
-    // if (!s.ok()) {
-    //     std::cerr << "Config check fail: " << s.message() << std::endl;
-    //     return s;
-    // }
-    return milvus::Status::OK();
 }
 
 Status
