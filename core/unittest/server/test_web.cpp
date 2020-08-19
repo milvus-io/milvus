@@ -424,13 +424,23 @@ CreateCollection(const TestClientP& client_ptr, const TestConnP& connection_ptr,
 }
 
 void
-GenEntities(const int64_t nb, const int64_t dim, nlohmann::json& insert_json, bool is_bin) {
+GenEntities(const int64_t nb, const int64_t dim, nlohmann::json& insert_json, bool is_bin = false,
+            bool auto_id = true) {
     nlohmann::json entities_json;
-    entities_json["int64"] = RandomAttrRecordsJson(nb);
-    if (is_bin) {
-        entities_json["field_vec"] = RandomBinRecordsJson(dim, nb);
-    } else {
-        entities_json["field_vec"] = RandomRecordsJson(dim, nb);
+    std::default_random_engine e;
+    std::uniform_int_distribution<unsigned> u(0, 1000);
+    for (int64_t i = 0; i < nb; i++) {
+        nlohmann::json one_json;
+        one_json["int64"] = u(e);
+        if (is_bin) {
+            one_json["field_vec"] = RandomRawBinRecordJson(dim);
+        } else {
+            one_json["field_vec"] = RandomRawRecordJson(dim);
+        }
+        if (!auto_id) {
+            one_json["__id"] = i;
+        }
+        entities_json.push_back(one_json);
     }
     insert_json["entities"] = entities_json;
 }
@@ -458,14 +468,6 @@ TEST_F(WebControllerTest, OPTIONS) {
 
     response = client_ptr->optionsAdvanced(connection_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
-
-#ifdef MILVUS_GPU_VERSION
-    response = client_ptr->optionsGpuConfig(connection_ptr);
-    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
-#endif
-
-    //    response = client_ptr->optionsIndexes("test", connection_ptr);
-    //    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 
     response = client_ptr->optionsPartitions("collection_name", connection_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
@@ -577,7 +579,7 @@ TEST_F(WebControllerTest, INSERT) {
     const int64_t dim = DIM;
     const int64_t nb = 1000;
     nlohmann::json insert_json;
-    GenEntities(nb, dim, insert_json, false);
+    GenEntities(nb, dim, insert_json);
 
     auto response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
@@ -640,13 +642,7 @@ TEST_F(WebControllerTest, INSERT_IDS) {
     const int64_t dim = DIM;
     const int64_t nb = 20;
     nlohmann::json insert_json;
-    GenEntities(nb, dim, insert_json, false);
-
-    std::vector<int64_t> ids;
-    for (size_t i = 0; i < nb; i++) {
-        ids.emplace_back(i);
-    }
-    insert_json["entities"]["__id"] = ids;
+    GenEntities(nb, dim, insert_json, false, false);
 
     auto response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode()) << response->readBodyToString()->std_str();

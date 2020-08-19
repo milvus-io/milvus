@@ -557,12 +557,12 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_DEFAULT_CORS(GetEntities)
 
-    ENDPOINT("GET", "/collections/{collection_name}/partitions/{partition_tag}/entities", GetEntities,
-             PATH(String, collection_name), PATH(String, partition_tag), QUERIES(QueryParams, query_params),
-             BODY_STRING(String, body)) {
+    ENDPOINT("GET", "/collections/{collection_name}/entities", GetEntities, PATH(String, collection_name),
+             QUERIES(QueryParams, query_params)) {
         auto handler = WebRequestHandler();
 
-        String response;
+
+         String response;
         auto status_dto = handler.GetEntity(collection_name, query_params, response);
         switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:

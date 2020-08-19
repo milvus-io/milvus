@@ -97,6 +97,43 @@ CopyStructuredData(const nlohmann::json& json, std::vector<uint8_t>& raw) {
     memcpy(raw.data(), values.data(), size * sizeof(T));
 }
 
+void
+CopyRowVectorFromJson(const nlohmann::json& json, std::vector<uint8_t>& vectors_data, bool bin) {
+    //    if (!json.is_array()) {
+    //        return Status(ILLEGAL_BODY, "field \"vectors\" must be a array");
+    //    }
+    std::vector<float> float_vector;
+    if (!bin) {
+        for (auto& data : json) {
+            float_vector.emplace_back(data.get<float>());
+        }
+        auto size = float_vector.size() * sizeof(float);
+        vectors_data.resize(size);
+        memcpy(vectors_data.data(), float_vector.data(), size);
+    } else {
+        for (auto& data : json) {
+            vectors_data.emplace_back(data.get<uint8_t>());
+        }
+    }
+}
+
+template <typename T>
+void
+CopyRowStructuredData(const nlohmann::json& entity_json, const std::string& field_name, const int64_t offset,
+                      const int64_t row_num, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
+    T value = entity_json.get<T>();
+    std::vector<uint8_t> temp_data(sizeof(T), 0);
+    memcpy(temp_data.data(), &value, sizeof(T));
+    if (chunk_data.find(field_name) == chunk_data.end()) {
+        std::vector<uint8_t> T_data(row_num * sizeof(T), 0);
+        memcpy(T_data.data(), temp_data.data(), sizeof(T));
+        chunk_data.insert({field_name, T_data});
+    } else {
+        int64_t T_offset = offset * sizeof(T);
+        memcpy(chunk_data.at(field_name).data() + T_offset, temp_data.data(), sizeof(T));
+    }
+}
+
 using FloatJson = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t, float>;
 
 /////////////////////////////////// Private methods ///////////////////////////////////////
@@ -1517,6 +1554,70 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 
     std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
     int64_t row_num;
+
+    auto entities_json = body_json["entities"];
+    if (!entities_json.is_array()) {
+        RETURN_STATUS_DTO(ILLEGAL_ARGUMENT, "Entities is not an array");
+    }
+    row_num = entities_json.size();
+    int64_t offset = 0;
+    std::vector<uint8_t> ids;
+    for (auto& one_entity : entities_json) {
+        for (auto& entity : one_entity.items()) {
+            std::string field_name = entity.key();
+            if (field_name == NAME_ID) {
+                if (ids.empty()) {
+                    ids.resize(row_num * sizeof(int64_t));
+                }
+                int64_t id = entity.value().get<int64_t>();
+                int64_t id_offset = offset * sizeof(int64_t);
+                memcpy(ids.data() + id_offset, &id, sizeof(int64_t));
+                continue;
+            }
+            std::vector<uint8_t> temp_data;
+            switch (field_types.at(field_name)) {
+                case engine::DataType::INT32: {
+                    CopyRowStructuredData<int32_t>(entity.value(), field_name, offset, row_num, chunk_data);
+                    break;
+                }
+                case engine::DataType::INT64: {
+                    CopyRowStructuredData<int64_t>(entity.value(), field_name, offset, row_num, chunk_data);
+                    break;
+                }
+                case engine::DataType::FLOAT: {
+                    CopyRowStructuredData<float>(entity.value(), field_name, offset, row_num, chunk_data);
+                    break;
+                }
+                case engine::DataType::DOUBLE: {
+                    CopyRowStructuredData<double>(entity.value(), field_name, offset, row_num, chunk_data);
+                    break;
+                }
+                case engine::DataType::VECTOR_FLOAT:
+                case engine::DataType::VECTOR_BINARY: {
+                    bool is_bin = !(field_types.at(field_name) == engine::DataType::VECTOR_FLOAT);
+                    CopyRowVectorFromJson(entity.value(), temp_data, is_bin);
+                    auto size = temp_data.size();
+                    if (chunk_data.find(field_name) == chunk_data.end()) {
+                        std::vector<uint8_t> vector_data(row_num * size, 0);
+                        memcpy(vector_data.data(), temp_data.data(), size);
+                        chunk_data.insert({field_name, vector_data});
+                    } else {
+                        int64_t vector_offset = offset * size;
+                        memcpy(chunk_data.at(field_name).data() + vector_offset, temp_data.data(), size);
+                    }
+                    break;
+                }
+                default: {}
+            }
+        }
+        offset++;
+    }
+
+    if (!ids.empty()) {
+        chunk_data.insert({engine::FIELD_UID, ids});
+    }
+
+#if 0
     for (auto& entity : body_json["entities"].items()) {
         std::string field_name = entity.key();
         auto field_value = entity.value();
@@ -1562,6 +1663,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 
         chunk_data.insert(std::make_pair(field_name, temp_data));
     }
+#endif
 
     status = req_handler_.Insert(context_ptr_, collection_name->c_str(), partition_name, row_num, chunk_data);
     if (!status.ok()) {
