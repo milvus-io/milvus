@@ -64,7 +64,7 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto ret_ds = std::make_shared<Dataset>();
         if (index_->metric_type == faiss::METRIC_Hamming) {
             auto pf_dist = (float*)malloc(p_dist_size);
-            int32_t* pi_dist = (int32_t*)p_dist;
+            int32_t* pi_dist = reinterpret_cast<int32_t*>(p_dist);
             for (int i = 0; i < elems; i++) {
                 *(pf_dist + i) = (float)(*(pi_dist + i));
             }

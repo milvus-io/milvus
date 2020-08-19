@@ -111,12 +111,12 @@ void
 NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto idmap = std::make_shared<IDMAP>();
     idmap->Train(dataset_ptr, config);
-    idmap->AddWithoutIds(dataset_ptr, config);
     impl::Graph knng;
     const float* raw_data = idmap->GetRawVectors();
     const int64_t device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
     const int64_t k = config[IndexParams::knng].get<int64_t>();
 #ifdef MILVUS_GPU_VERSION
+    idmap->AddWithoutIds(dataset_ptr, config);
     if (device_id == -1) {
         auto preprocess_index = std::make_shared<IVF>();
         preprocess_index->Train(dataset_ptr, config);
