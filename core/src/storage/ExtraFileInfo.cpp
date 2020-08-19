@@ -102,16 +102,16 @@ CalculateSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, 
 
 void
 WriteSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int result, bool written) {
-    if (!fs_ptr->writer_ptr_->in_open(file_path.c_str())) {
+    if (!fs_ptr->writer_ptr_->InOpen(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
     if (written) {
-        fs_ptr->writer_ptr_->seekp(-SUM_SIZE, std::ios_base::end);
+        fs_ptr->writer_ptr_->Seekp(-SUM_SIZE, std::ios_base::end);
     } else {
-        fs_ptr->writer_ptr_->seekp(0, std::ios_base::end);
+        fs_ptr->writer_ptr_->Seekp(0, std::ios_base::end);
     }
 
     std::string sum = std::to_string(result);
@@ -150,12 +150,12 @@ WriteHeaderValue(const storage::FSHandlerPtr& fs_ptr, const std::string& file_pa
 bool
 WriteHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                   const std::unordered_map<std::string, std::string>& maps) {
-    if (!fs_ptr->writer_ptr_->in_open(file_path.c_str())) {
+    if (!fs_ptr->writer_ptr_->InOpen(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
-    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE);
+    fs_ptr->writer_ptr_->Seekp(MAGIC_SIZE);
 
     std::string kv;
     for (auto& map : maps) {

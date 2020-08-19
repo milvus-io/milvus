@@ -22,7 +22,7 @@ DiskIOWriter::Open(const std::string& name) {
     return fs_.good();
 }
 bool
-DiskIOWriter::in_open(const std::string& name) {
+DiskIOWriter::InOpen(const std::string& name) {
     name_ = name;
     len_ = 0;
     fs_ = std::fstream(name_, std::ios::out | std::ios::binary | std::ios::in);
@@ -45,11 +45,11 @@ DiskIOWriter::Close() {
     fs_.close();
 }
 void
-DiskIOWriter::seekp(int64_t pos) {
+DiskIOWriter::Seekp(int64_t pos) {
     fs_.seekp(pos);
 }
 void
-DiskIOWriter::seekp(int64_t pos, std::ios_base::seekdir seekdir) {
+DiskIOWriter::Seekp(int64_t pos, std::ios_base::seekdir seekdir) {
     fs_.seekp(pos, seekdir);
 }
 

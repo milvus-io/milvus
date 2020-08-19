@@ -23,16 +23,16 @@ class IOWriter {
     Open(const std::string& name) = 0;
 
     virtual bool
-    in_open(const std::string& name) = 0;
+    InOpen(const std::string& name) = 0;
 
     virtual void
     Write(void* ptr, int64_t size) = 0;
 
     virtual void
-    seekp(int64_t pos) = 0;
+    Seekp(int64_t pos) = 0;
 
     virtual void
-    seekp(int64_t pos, std::ios_base::seekdir seekdir) = 0;
+    Seekp(int64_t pos, std::ios_base::seekdir seekdir) = 0;
 
     virtual int64_t
     Length() = 0;

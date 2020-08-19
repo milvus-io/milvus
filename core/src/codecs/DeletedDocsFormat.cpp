@@ -104,11 +104,11 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     WRITE_MAGIC(fs_ptr, temp_path)
     WRITE_HEADER(fs_ptr, temp_path, maps);
 
-    if (!fs_ptr->writer_ptr_->Open(temp_path)) {
+    if (!fs_ptr->writer_ptr_->InOpen(temp_path)) {
         THROW_ERROR(SERVER_CANNOT_CREATE_FILE, "Fail to write file: " + temp_path);
     }
 
-    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE + HEADER_SIZE);
+    fs_ptr->writer_ptr_->Seekp(MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->writer_ptr_->Write(&new_num_bytes, sizeof(size_t));
     fs_ptr->writer_ptr_->Write(delete_ids.data(), new_num_bytes);
     fs_ptr->writer_ptr_->Close();

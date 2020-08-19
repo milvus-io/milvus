@@ -184,11 +184,11 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
     WRITE_HEADER(fs_ptr, full_file_path, maps);
     auto binaryset = index->Serialize(knowhere::Config());
 
-    if (!fs_ptr->writer_ptr_->in_open(full_file_path)) {
+    if (!fs_ptr->writer_ptr_->InOpen(full_file_path)) {
         THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open vector index: " + full_file_path);
     }
 
-    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE + HEADER_SIZE);
+    fs_ptr->writer_ptr_->Seekp(MAGIC_SIZE + HEADER_SIZE);
     for (auto& iter : binaryset.binary_map_) {
         auto meta = iter.first.c_str();
         size_t meta_length = iter.first.length();

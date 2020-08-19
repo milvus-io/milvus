@@ -75,11 +75,11 @@ VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::stri
     std::unordered_map<std::string, std::string> maps;
     WRITE_MAGIC(fs_ptr, full_file_path)
     WRITE_HEADER(fs_ptr, full_file_path, maps);
-    if (!fs_ptr->writer_ptr_->Open(full_file_path)) {
+    if (!fs_ptr->writer_ptr_->InOpen(full_file_path)) {
         THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open vector compress: " + full_file_path);
     }
 
-    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE + HEADER_SIZE);
+    fs_ptr->writer_ptr_->Seekp(MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->writer_ptr_->Write(compress->data.get(), compress->size);
     fs_ptr->writer_ptr_->Close();
     WRITE_SUM(fs_ptr, full_file_path);

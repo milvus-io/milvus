@@ -92,6 +92,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open file: " + file_path);
     }
 
+    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
     size_t total_num_bytes;
     fs_ptr->reader_ptr_->Read(&total_num_bytes, sizeof(size_t));
 
@@ -126,11 +127,11 @@ BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_
     WRITE_MAGIC(fs_ptr, file_path)
     WRITE_HEADER(fs_ptr, file_path, maps);
 
-    if (!fs_ptr->writer_ptr_->Open(file_path)) {
+    if (!fs_ptr->writer_ptr_->InOpen(file_path)) {
         THROW_ERROR(SERVER_CANNOT_CREATE_FILE, "Fail to open file: " + file_path);
     }
 
-    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE + HEADER_SIZE);
+    fs_ptr->writer_ptr_->Seekp(MAGIC_SIZE + HEADER_SIZE);
 
     size_t num_bytes = raw->data_.size();
     fs_ptr->writer_ptr_->Write(&num_bytes, sizeof(size_t));

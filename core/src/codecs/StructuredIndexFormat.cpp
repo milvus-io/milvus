@@ -91,13 +91,13 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
     if (!fs_ptr->reader_ptr_->Open(full_file_path)) {
         THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open structured index: " + full_file_path);
     }
-    int64_t length = fs_ptr->reader_ptr_->Length() - MAGIC_SIZE - HEADER_SIZE - SUM_SIZE;
+    int64_t length = fs_ptr->reader_ptr_->Length() - SUM_SIZE;
     if (length <= 0) {
         THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Invalid structured index length: " + full_file_path);
     }
 
-    size_t rp = 0;
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
+    size_t rp = MAGIC_SIZE + HEADER_SIZE;
+    fs_ptr->reader_ptr_->Seekg(rp);
 
     int32_t data_type = 0;
     fs_ptr->reader_ptr_->Read(&data_type, sizeof(data_type));
@@ -154,10 +154,10 @@ StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const 
 
     auto binaryset = index->Serialize(knowhere::Config());
 
-    if (!fs_ptr->writer_ptr_->Open(full_file_path)) {
+    if (!fs_ptr->writer_ptr_->InOpen(full_file_path)) {
         THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open structured index: " + full_file_path);
     }
-    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE + HEADER_SIZE);
+    fs_ptr->writer_ptr_->Seekp(MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->writer_ptr_->Write(&data_type, sizeof(data_type));
 
     for (auto& iter : binaryset.binary_map_) {

@@ -46,10 +46,10 @@ TEST_F(ExtraFileInfoTest, WriteFileTest) {
     WriteMagic(fs_ptr, file_path);
     WriteHeaderValues(fs_ptr, file_path, record);
 
-    if (!fs_ptr->writer_ptr_->in_open(file_path.c_str())) {
+    if (!fs_ptr->writer_ptr_->InOpen(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
     }
-    fs_ptr->writer_ptr_->seekp(0, std::ios_base::end);
+    fs_ptr->writer_ptr_->Seekp(0, std::ios_base::end);
 
     size_t num_bytes = raw.size();
     fs_ptr->writer_ptr_->Write(&num_bytes, sizeof(size_t));

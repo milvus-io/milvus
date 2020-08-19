@@ -35,12 +35,6 @@ DiskIOReader::Seekg(int64_t pos, std::ios_base::seekdir seekdir) {
     fs_.seekg(pos, seekdir);
 }
 
-std::string
-DiskIOReader::totallyRead() {
-    std::string str((std::istreambuf_iterator<char>(fs_)), std::istreambuf_iterator<char>());
-    return str;
-}
-
 int64_t
 DiskIOReader::Length() {
     /* save current position */
