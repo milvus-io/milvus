@@ -48,12 +48,6 @@ ScheduleReq(const BaseReqPtr& req, std::queue<BaseReqPtr>& queue) {
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-ReqQueue::ReqQueue() {
-}
-
-ReqQueue::~ReqQueue() {
-}
-
 BaseReqPtr
 ReqQueue::TakeReq() {
     return Take();
