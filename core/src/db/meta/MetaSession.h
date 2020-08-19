@@ -31,8 +31,8 @@
 #include "utils/Status.h"
 
 namespace milvus::engine::meta {
-using snapshot::FTYPE_TYPE;
 using snapshot::FETYPE_TYPE;
+using snapshot::FTYPE_TYPE;
 
 class MetaSession {
  public:
