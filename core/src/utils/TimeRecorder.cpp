@@ -9,16 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "utils/TimeRecorder.h"
+#include <utility>
+
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 
-TimeRecorder::TimeRecorder(const std::string& header, int64_t log_level) : header_(header), log_level_(log_level) {
+TimeRecorder::TimeRecorder(std::string hdr, int64_t log_level) : header_(std::move(hdr)), log_level_(log_level) {
     start_ = last_ = stdclock::now();
 }
-
-TimeRecorder::~TimeRecorder() = default;
 
 std::string
 TimeRecorder::GetTimeSpanStr(double span) {
@@ -89,7 +89,7 @@ TimeRecorder::ElapseFromBegin(const std::string& msg) {
     return span;
 }
 
-TimeRecorderAuto::TimeRecorderAuto(const std::string& header, int64_t log_level) : TimeRecorder(header, log_level) {
+TimeRecorderAuto::TimeRecorderAuto(std::string hdr, int64_t log_level) : TimeRecorder(hdr, log_level) {
 }
 
 TimeRecorderAuto::~TimeRecorderAuto() {

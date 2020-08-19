@@ -19,14 +19,14 @@ namespace knowhere {
 
 class KnowhereException : public std::exception {
  public:
-    explicit KnowhereException(const std::string& msg);
+    explicit KnowhereException(std::string msg);
 
     KnowhereException(const std::string& msg, const char* funName, const char* file, int line);
 
     const char*
     what() const noexcept override;
 
-    std::string msg;
+    std::string msg_;
 };
 
 #define KNOHWERE_ERROR_MSG(MSG) printf("%s", KnowhereException(MSG, __PRETTY_FUNCTION__, __FILE__, __LINE__).what())

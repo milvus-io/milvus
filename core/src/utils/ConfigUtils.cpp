@@ -66,16 +66,20 @@ int64_t
 parse_bytes(const std::string& str, std::string& err) {
     try {
         std::string s = str;
-        if (is_number(s))
+        if (is_number(s)) {
             return std::stoll(s);
-        if (s.length() == 0)
+        }
+        if (s.length() == 0) {
             return 0;
+        }
 
         auto last_two = s.substr(s.length() - 2, 2);
         auto last_one = s.substr(s.length() - 1);
-        if (is_alpha(last_two) && is_alpha(last_one))
-            if (last_one == "b" or last_one == "B")
+        if (is_alpha(last_two) && is_alpha(last_one)) {
+            if (last_one == "b" or last_one == "B") {
                 s = s.substr(0, s.length() - 1);
+            }
+        }
         auto& units = BYTE_UNITS;
         auto suffix = str_tolower(s.substr(s.length() - 1));
 
