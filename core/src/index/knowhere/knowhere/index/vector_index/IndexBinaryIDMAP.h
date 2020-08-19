@@ -33,10 +33,10 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     }
 
     BinarySet
-    Serialize(const Config& config = Config()) override;
+    Serialize(const Config&) override;
 
     void
-    Load(const BinarySet& index_binary) override;
+    Load(const BinarySet&) override;
 
     void
     Train(const DatasetPtr&, const Config&) override;

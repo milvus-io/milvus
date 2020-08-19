@@ -30,25 +30,22 @@ Status::Status(StatusCode code, const std::string& msg) {
     state_ = result;
 }
 
-Status::Status() : state_(nullptr) {
-}
-
 Status::~Status() {
     delete state_;
 }
 
-Status::Status(const Status& s) : state_(nullptr) {
+Status::Status(const Status& s) {
     CopyFrom(s);
+}
+
+Status::Status(Status&& s) {
+    MoveFrom(s);
 }
 
 Status&
 Status::operator=(const Status& s) {
     CopyFrom(s);
     return *this;
-}
-
-Status::Status(Status&& s) : state_(nullptr) {
-    MoveFrom(s);
 }
 
 Status&

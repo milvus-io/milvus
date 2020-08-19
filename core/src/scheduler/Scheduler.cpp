@@ -32,10 +32,6 @@ Scheduler::Scheduler(ResourceMgrPtr res_mgr) : running_(false), res_mgr_(std::mo
                                           std::bind(&Scheduler::OnFinishTask, this, std::placeholders::_1)));
 }
 
-Scheduler::~Scheduler() {
-    res_mgr_ = nullptr;
-}
-
 void
 Scheduler::Start() {
     running_ = true;

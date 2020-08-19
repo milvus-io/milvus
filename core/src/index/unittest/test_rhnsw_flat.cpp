@@ -56,7 +56,7 @@ TEST_P(RHNSWFlatTest, HNSW_basic) {
     AssertAnns(result1, nq, k);
 
     // Serialize and Load before Query
-    milvus::knowhere::BinarySet bs = index_->Serialize();
+    milvus::knowhere::BinarySet bs = index_->Serialize(conf);
 
     auto tmp_index = std::make_shared<milvus::knowhere::IndexRHNSWFlat>();
 
@@ -122,7 +122,7 @@ TEST_P(RHNSWFlatTest, HNSW_serialize) {
     {
         index_->Train(base_dataset, conf);
         index_->Add(base_dataset, conf);
-        auto binaryset = index_->Serialize();
+        auto binaryset = index_->Serialize(conf);
         std::string index_type = index_->index_type();
         std::string idx_name = index_type + "_Index";
         std::string dat_name = index_type + "_Data";
