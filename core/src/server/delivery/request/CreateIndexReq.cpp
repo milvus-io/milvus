@@ -94,7 +94,7 @@ CreateIndexReq::OnExecute() {
             if (json_params_.contains(engine::PARAM_INDEX_METRIC_TYPE)) {
                 metric_type = json_params_[engine::PARAM_INDEX_METRIC_TYPE].get<std::string>();
             }
-            status = ValidateIndexMetricType(metric_type);
+            status = ValidateIndexMetricType(metric_type, index_type);
             if (!status.ok()) {
                 return status;
             }
