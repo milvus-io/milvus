@@ -102,6 +102,7 @@ StopSchedulerService() {
     JobMgrInst::GetInstance()->Stop();
     SchedInst::GetInstance()->Stop();
     ResMgrInst::GetInstance()->Stop();
+    OptimizerInst::GetInstance()->Stop();
 }
 
 }  // namespace scheduler
