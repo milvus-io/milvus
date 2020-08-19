@@ -14,9 +14,6 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         MySQLPP
         Prometheus
         SQLite
-        libunwind
-        gperftools
-        Opentracing
         fiu
         AWS
         oatpp)
@@ -37,12 +34,6 @@ macro(build_dependency DEPENDENCY_NAME)
         build_prometheus()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "SQLite")
         build_sqlite()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "libunwind")
-        build_libunwind()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "gperftools")
-        build_gperftools()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "Opentracing")
-        build_opentracing()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "fiu")
         build_fiu()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "oatpp")
@@ -239,27 +230,6 @@ else ()
             "https://www.sqlite.org/2019/sqlite-autoconf-${SQLITE_VERSION}.tar.gz")
 endif ()
 
-if (DEFINED ENV{MILVUS_LIBUNWIND_URL})
-    set(LIBUNWIND_SOURCE_URL "$ENV{MILVUS_LIBUNWIND_URL}")
-else ()
-    set(LIBUNWIND_SOURCE_URL
-            "https://github.com/libunwind/libunwind/releases/download/v${LIBUNWIND_VERSION}/libunwind-${LIBUNWIND_VERSION}.tar.gz")
-endif ()
-
-if (DEFINED ENV{MILVUS_GPERFTOOLS_URL})
-    set(GPERFTOOLS_SOURCE_URL "$ENV{MILVUS_GPERFTOOLS_URL}")
-else ()
-    set(GPERFTOOLS_SOURCE_URL
-            "https://github.com/gperftools/gperftools/releases/download/gperftools-${GPERFTOOLS_VERSION}/gperftools-${GPERFTOOLS_VERSION}.tar.gz")
-endif ()
-
-if (DEFINED ENV{MILVUS_OPENTRACING_URL})
-    set(OPENTRACING_SOURCE_URL "$ENV{MILVUS_OPENTRACING_URL}")
-else ()
-    set(OPENTRACING_SOURCE_URL "https://github.com/opentracing/opentracing-cpp/archive/${OPENTRACING_VERSION}.tar.gz"
-          "https://gitee.com/quicksilver/opentracing-cpp/repository/archive/${OPENTRACING_VERSION}.zip")
-endif ()
-
 if (DEFINED ENV{MILVUS_FIU_URL})
     set(FIU_SOURCE_URL "$ENV{MILVUS_FIU_URL}")
 else ()
@@ -270,8 +240,8 @@ endif ()
 if (DEFINED ENV{MILVUS_OATPP_URL})
     set(OATPP_SOURCE_URL "$ENV{MILVUS_OATPP_URL}")
 else ()
-    # set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
-    set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/${OATPP_VERSION}.zip")
+     set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
+#    set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/${OATPP_VERSION}.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_AWS_URL})
@@ -472,150 +442,6 @@ if (MILVUS_WITH_SQLITE)
     link_directories(SYSTEM ${SQLITE_PREFIX}/lib/)
 endif ()
 
-
-# ----------------------------------------------------------------------
-# libunwind
-
-macro(build_libunwind)
-    message(STATUS "Building libunwind-${LIBUNWIND_VERSION} from source")
-    set(LIBUNWIND_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/libunwind_ep-prefix/src/libunwind_ep/install")
-    set(LIBUNWIND_INCLUDE_DIR "${LIBUNWIND_PREFIX}/include")
-    set(LIBUNWIND_SHARED_LIB "${LIBUNWIND_PREFIX}/lib/libunwind${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    set(LIBUNWIND_CONFIGURE_ARGS "--prefix=${LIBUNWIND_PREFIX}")
-
-    ExternalProject_Add(libunwind_ep
-            URL
-            ${LIBUNWIND_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${LIBUNWIND_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE} install
-            BUILD_BYPRODUCTS
-            ${LIBUNWIND_SHARED_LIB})
-
-    file(MAKE_DIRECTORY "${LIBUNWIND_INCLUDE_DIR}")
-
-    add_library(libunwind SHARED IMPORTED)
-    set_target_properties(libunwind
-            PROPERTIES IMPORTED_LOCATION "${LIBUNWIND_SHARED_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${LIBUNWIND_INCLUDE_DIR}")
-
-    add_dependencies(libunwind libunwind_ep)
-endmacro()
-
-if (MILVUS_WITH_LIBUNWIND)
-    resolve_dependency(libunwind)
-
-    get_target_property(LIBUNWIND_INCLUDE_DIR libunwind INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${LIBUNWIND_INCLUDE_DIR})
-endif ()
-
-# ----------------------------------------------------------------------
-# gperftools
-
-macro(build_gperftools)
-    message(STATUS "Building gperftools-${GPERFTOOLS_VERSION} from source")
-    set(GPERFTOOLS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/gperftools_ep-prefix/src/gperftools_ep")
-    set(GPERFTOOLS_INCLUDE_DIR "${GPERFTOOLS_PREFIX}/include")
-    set(GPERFTOOLS_STATIC_LIB "${GPERFTOOLS_PREFIX}/lib/libprofiler${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(GPERFTOOLS_CONFIGURE_ARGS "--prefix=${GPERFTOOLS_PREFIX}")
-
-    ExternalProject_Add(gperftools_ep
-            URL
-            ${GPERFTOOLS_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${GPERFTOOLS_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE} install
-            BUILD_BYPRODUCTS
-            ${GPERFTOOLS_STATIC_LIB})
-
-    ExternalProject_Add_StepDependencies(gperftools_ep build libunwind_ep)
-
-    file(MAKE_DIRECTORY "${GPERFTOOLS_INCLUDE_DIR}")
-
-    add_library(gperftools STATIC IMPORTED)
-    set_target_properties(gperftools
-            PROPERTIES IMPORTED_LOCATION "${GPERFTOOLS_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${GPERFTOOLS_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES libunwind)
-
-    add_dependencies(gperftools gperftools_ep)
-    add_dependencies(gperftools libunwind_ep)
-endmacro()
-
-if (MILVUS_WITH_GPERFTOOLS)
-    resolve_dependency(gperftools)
-
-    get_target_property(GPERFTOOLS_INCLUDE_DIR gperftools INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${GPERFTOOLS_INCLUDE_DIR})
-    link_directories(SYSTEM ${GPERFTOOLS_PREFIX}/lib)
-endif ()
-
-# ----------------------------------------------------------------------
-# opentracing
-
-macro(build_opentracing)
-    message(STATUS "Building OPENTRACING-${OPENTRACING_VERSION} from source")
-    set(OPENTRACING_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/opentracing_ep-prefix/src/opentracing_ep")
-    set(OPENTRACING_STATIC_LIB "${OPENTRACING_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}opentracing${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(OPENTRACING_MOCK_TRACER_STATIC_LIB "${OPENTRACING_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}opentracing_mocktracer${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(OPENTRACING_INCLUDE_DIR "${OPENTRACING_PREFIX}/include")
-    set(OPENTRACING_CMAKE_ARGS
-            ${EP_COMMON_CMAKE_ARGS}
-            "-DCMAKE_INSTALL_PREFIX=${OPENTRACING_PREFIX}"
-            -DBUILD_SHARED_LIBS=OFF)
-
-    ExternalProject_Add(opentracing_ep
-            URL
-            ${OPENTRACING_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            URL_MD5
-            "e598ba4b81ae8e1ceed8cd8bbf86f2fd"
-            CMAKE_ARGS
-            ${OPENTRACING_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            ${OPENTRACING_STATIC_LIB}
-            ${OPENTRACING_MOCK_TRACER_STATIC_LIB}
-            )
-
-    file(MAKE_DIRECTORY "${OPENTRACING_INCLUDE_DIR}")
-    add_library(opentracing STATIC IMPORTED)
-    set_target_properties(opentracing
-            PROPERTIES IMPORTED_LOCATION "${OPENTRACING_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${OPENTRACING_INCLUDE_DIR}")
-
-    add_library(opentracing_mocktracer STATIC IMPORTED)
-    set_target_properties(opentracing_mocktracer
-            PROPERTIES IMPORTED_LOCATION "${OPENTRACING_MOCK_TRACER_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${OPENTRACING_INCLUDE_DIR}")
-
-    add_dependencies(opentracing opentracing_ep)
-    add_dependencies(opentracing_mocktracer opentracing_ep)
-endmacro()
-
-if (MILVUS_WITH_OPENTRACING)
-    resolve_dependency(Opentracing)
-
-    get_target_property(OPENTRACING_INCLUDE_DIR opentracing INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${OPENTRACING_INCLUDE_DIR})
-endif ()
-
 # ----------------------------------------------------------------------
 # fiu
 macro(build_fiu)
@@ -686,7 +512,7 @@ macro(build_oatpp)
             ${OATPP_SOURCE_URL}
             ${EP_LOG_OPTIONS}
             URL_MD5
-            "ae7143a8014ffed77c5340ac29af29f4"
+            "396350ca4fe5bedab3769e09eee2cc9f"
             CMAKE_ARGS
             ${OATPP_CMAKE_ARGS}
             BUILD_COMMAND

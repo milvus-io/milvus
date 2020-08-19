@@ -23,7 +23,6 @@ constexpr int64_t TB = 1LL << 40;
 
 constexpr int64_t MAX_TABLE_FILE_MEM = 128 * MB;
 
-constexpr int64_t BUILD_INDEX_THRESHOLD = 4096;  // row count threshold when building index
 constexpr int64_t MAX_NAME_LENGTH = 255;
 constexpr int64_t MAX_DIMENSION = 32768;
 constexpr int32_t MAX_SEGMENT_ROW_COUNT = 4 * 1024 * 1024;

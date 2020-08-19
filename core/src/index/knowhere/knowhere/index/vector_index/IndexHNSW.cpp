@@ -66,7 +66,7 @@ IndexHNSW::Load(const BinarySet& index_binary) {
         reader.total = binary->size;
         reader.data_ = binary->data.get();
 
-        hnswlib::SpaceInterface<float>* space;
+        hnswlib::SpaceInterface<float>* space = nullptr;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
         index_->loadIndex(reader);
 

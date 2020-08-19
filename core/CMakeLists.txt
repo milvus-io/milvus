@@ -66,8 +66,6 @@ set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
 set(FETCHCONTENT_QUIET OFF)
 include( ThirdPartyPackages )
 
-
-
 # **************************** Compiler arguments ****************************
 
 if ( MILVUS_GPU_VERSION )
@@ -84,6 +82,9 @@ if ( MILVUS_GPU_VERSION )
 else ()
     message( STATUS "Building Milvus CPU version" )
 endif ()
+
+# TODO: remove after all ut set "FIU_ENABLE"
+set(MILVUS_WITH_FIU "ON")
 
 set_milvus_definition( MILVUS_WITH_PROMETHEUS   "MILVUS_WITH_PROMETHEUS" )
 set_milvus_definition( ENABLE_CPU_PROFILING     "ENABLE_CPU_PROFILING" )

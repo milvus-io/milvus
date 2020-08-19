@@ -54,8 +54,8 @@ set( UNITTEST_LIBS  sqlite
                     libstdc++fs.a
                     pthread
                     gfortran
-                    opentracing
-                    opentracing_mocktracer
+                    opentracing::opentracing
+                    opentracing::mocktracer
                     fiu
                     dl
                     z
@@ -83,4 +83,4 @@ add_subdirectory(db)
 #add_subdirectory(metrics)
 #add_subdirectory(scheduler)
 #add_subdirectory(thirdparty)
-#add_subdirectory(storage)
+add_subdirectory(storage)

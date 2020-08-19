@@ -20,41 +20,41 @@ namespace milvus {
 
         bool
         CheckMagic(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path) {
-            if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+            if (!fs_ptr->reader_ptr_->Open(file_path.c_str())) {
                 std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
                 LOG_ENGINE_ERROR_ << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
             }
 
             char *ch = static_cast<char *>(malloc(MAGIC_SIZE));
-            fs_ptr->reader_ptr_->read(ch, MAGIC_SIZE);
+            fs_ptr->reader_ptr_->Read(ch, MAGIC_SIZE);
             bool result = !strcmp(ch,MAGIC);
 
-            fs_ptr->reader_ptr_->close();
+            fs_ptr->reader_ptr_->Close();
             return result;
         }
 
         void
         WriteMagic(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path) {
-            if (!fs_ptr->writer_ptr_->open(file_path.c_str())) {
+            if (!fs_ptr->writer_ptr_->Open(file_path.c_str())) {
                 std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
                 LOG_ENGINE_ERROR_ << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
             }
-            fs_ptr->writer_ptr_->write((void *) MAGIC, MAGIC_SIZE);
-            fs_ptr->writer_ptr_->close();
+            fs_ptr->writer_ptr_->Write((void *) MAGIC, MAGIC_SIZE);
+            fs_ptr->writer_ptr_->Close();
         }
 
         std::unordered_map<std::string, std::string>
         ReadHeaderValues(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path) {
-            if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+            if (!fs_ptr->reader_ptr_->Open(file_path.c_str())) {
                 std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
                 LOG_ENGINE_ERROR_ << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
             }
-            fs_ptr->reader_ptr_->seekg(MAGIC_SIZE);
+            fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE);
             char *ch = static_cast<char *>(malloc(HEADER_SIZE));
-            fs_ptr->reader_ptr_->read(ch, HEADER_SIZE);
+            fs_ptr->reader_ptr_->Read(ch, HEADER_SIZE);
 
             std::string data(ch);
 
@@ -69,7 +69,7 @@ namespace milvus {
                                               std::sregex_token_iterator());
                 result.insert(std::make_pair(pair[0], pair[1]));
             }
-            fs_ptr->reader_ptr_->close();
+            fs_ptr->reader_ptr_->Close();
 
             return result;
         }
@@ -82,20 +82,20 @@ namespace milvus {
 
         std::uint8_t
         CalculateSum(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path, bool written) {
-            if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+            if (!fs_ptr->reader_ptr_->Open(file_path.c_str())) {
                 std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
                 LOG_ENGINE_ERROR_ << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
             }
 
-            int size = fs_ptr->reader_ptr_->length();
+            int size = fs_ptr->reader_ptr_->Length();
             if(written){
                 size -= SUM_SIZE;
             }
             char* ch = static_cast<char *>(malloc(size));
-            fs_ptr->reader_ptr_->read(ch,size);
+            fs_ptr->reader_ptr_->Read(ch,size);
             std::uint8_t result = crc32c::Crc32c(ch, size);
-            fs_ptr->reader_ptr_->close();
+            fs_ptr->reader_ptr_->Close();
 
             return result;
         }
@@ -116,23 +116,23 @@ namespace milvus {
 
             std::string sum = std::to_string(result);
             sum.resize(SUM_SIZE, '\0');
-            fs_ptr->writer_ptr_->write(sum.data(), SUM_SIZE);
-            fs_ptr->writer_ptr_->close();
+            fs_ptr->writer_ptr_->Write(sum.data(), SUM_SIZE);
+            fs_ptr->writer_ptr_->Close();
         }
 
         bool
         CheckSum(const storage::FSHandlerPtr &fs_ptr, const std::string &file_path) {
             int result = CalculateSum(fs_ptr, file_path,true);
-            if (!fs_ptr->reader_ptr_->open(file_path.c_str())) {
+            if (!fs_ptr->reader_ptr_->Open(file_path.c_str())) {
                 std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
                 LOG_ENGINE_ERROR_ << err_msg;
                 throw Exception(SERVER_WRITE_ERROR, err_msg);
             }
-            fs_ptr->reader_ptr_->seekg(-SUM_SIZE, std::ios_base::end);
+            fs_ptr->reader_ptr_->Seekg(-SUM_SIZE, std::ios_base::end);
             char *record = static_cast<char *>(malloc(SUM_SIZE));
-            fs_ptr->reader_ptr_->read(record, SUM_SIZE);
+            fs_ptr->reader_ptr_->Read(record, SUM_SIZE);
 
-            fs_ptr->reader_ptr_->close();
+            fs_ptr->reader_ptr_->Close();
 
             auto sum = (uint8_t) atoi(record);
             return sum == result;
@@ -165,8 +165,8 @@ namespace milvus {
                 throw "Exceeded the limit of header data size";
             }
 
-            fs_ptr->writer_ptr_->write(kv.data(), HEADER_SIZE);
-            fs_ptr->writer_ptr_->close();
+            fs_ptr->writer_ptr_->Write(kv.data(), HEADER_SIZE);
+            fs_ptr->writer_ptr_->Close();
 
             return true;
         }

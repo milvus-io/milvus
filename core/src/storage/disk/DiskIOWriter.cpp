@@ -15,7 +15,7 @@ namespace milvus {
 namespace storage {
 
 bool
-DiskIOWriter::open(const std::string& name) {
+DiskIOWriter::Open(const std::string& name) {
     name_ = name;
     len_ = 0;
     fs_ = std::fstream(name_, std::ios::out | std::ios::binary);
@@ -30,16 +30,20 @@ DiskIOWriter::in_open(const std::string& name) {
 }
 
 void
-DiskIOWriter::write(void* ptr, int64_t size) {
+DiskIOWriter::Write(void* ptr, int64_t size) {
     fs_.write(reinterpret_cast<char*>(ptr), size);
     len_ += size;
 }
 
 int64_t
-DiskIOWriter::length() {
+DiskIOWriter::Length() {
     return len_;
 }
 
+void
+DiskIOWriter::Close() {
+    fs_.close();
+}
 void
 DiskIOWriter::seekp(int64_t pos) {
     fs_.seekp(pos);
@@ -48,10 +52,7 @@ void
 DiskIOWriter::seekp(int64_t pos, std::ios_base::seekdir seekdir) {
     fs_.seekp(pos, seekdir);
 }
-    void
-DiskIOWriter::close() {
-    fs_.close();
-}
+
 
 }  // namespace storage
 }  // namespace milvus

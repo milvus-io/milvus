@@ -20,25 +20,25 @@ namespace storage {
 class IOReader {
  public:
     virtual bool
-    open(const std::string& name) = 0;
+    Open(const std::string& name) = 0;
 
     virtual void
-    read(void* ptr, int64_t size) = 0;
+    Read(void* ptr, int64_t size) = 0;
 
     virtual void
-    seekg(int64_t pos) = 0;
+    Seekg(int64_t pos) = 0;
 
     virtual void
-    seekg(int64_t pos, std::ios_base::seekdir seekdir) = 0;
+    Seekg(int64_t pos, std::ios_base::seekdir seekdir) = 0;
 
     virtual std::string
     totallyRead() = 0;
 
     virtual int64_t
-    length() = 0;
+    Length() = 0;
 
     virtual void
-    close() = 0;
+    Close() = 0;
 };
 
 using IOReaderPtr = std::shared_ptr<IOReader>;

@@ -49,3 +49,13 @@ endif()
 
 # ****************************** Thirdparty crc32c ***************************************
 add_subdirectory( crc32c )
+
+# ****************************** Thirdparty opentracing ***************************************
+if ( MILVUS_WITH_OPENTRACING )
+    add_subdirectory( opentracing )
+endif()
+
+# ****************************** Thirdparty perftools ***************************************
+if ( ENABLE_CPU_PROFILING )
+    add_subdirectory( profilers )
+endif ()

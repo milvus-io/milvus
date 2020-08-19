@@ -11,219 +11,53 @@
 
 #pragma once
 
-#include <atomic>
-#include <map>
-#include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
+#include "db/DB.h"
+#include "db/IDGenerator.h"
+#include "db/Types.h"
+#include "db/wal/WalOperation.h"
+#include "utils/Status.h"
 
-#include "WalBuffer.h"
-#include "WalDefinations.h"
-#include "WalFileHandler.h"
-#include "WalMetaHandler.h"
-#include "utils/Error.h"
+#include <string>
+#include <vector>
 
 namespace milvus {
 namespace engine {
-namespace wal {
 
 class WalManager {
  public:
-    explicit WalManager(const MXLogConfiguration& config);
-    ~WalManager();
+    WalManager();
 
-    ErrorCode
-    Init();
-
-    /*
-     * Get next recovery
-     * @param record[out]: record
-     * @retval error_code
-     */
-    ErrorCode
-    GetNextRecovery(MXLogRecord& record);
-
-    ErrorCode
-    GetNextEntityRecovery(MXLogRecord& record);
-
-    /*
-     * Get next record
-     * @param record[out]: record
-     * @retval error_code
-     */
-    ErrorCode
-    GetNextRecord(MXLogRecord& record);
-
-    ErrorCode
-    GetNextEntityRecord(MXLogRecord& record);
-
-    /*
-     * Create collection
-     * @param collection_id: collection id
-     * @retval lsn
-     */
-    uint64_t
-    CreateCollection(const std::string& collection_id);
-
-    /*
-     * Create partition
-     * @param collection_id: collection id
-     * @param partition_tag: partition tag
-     * @retval lsn
-     */
-    uint64_t
-    CreatePartition(const std::string& collection_id, const std::string& partition_tag);
-
-    /*
-     * Create hybrid collection
-     * @param collection_id: collection id
-     * @retval lsn
-     */
-    uint64_t
-    CreateHybridCollection(const std::string& collection_id);
-
-    /*
-     * Drop collection
-     * @param collection_id: collection id
-     * @retval none
-     */
-    void
-    DropCollection(const std::string& collection_id);
-
-    /*
-     * Drop partition
-     * @param collection_id: collection id
-     * @param partition_tag: partition tag
-     * @retval none
-     */
-    void
-    DropPartition(const std::string& collection_id, const std::string& partition_tag);
-
-    /*
-     * Collection is flushed (update flushed_lsn)
-     * @param collection_id: collection id
-     * @param lsn: flushed lsn
-     */
-    void
-    CollectionFlushed(const std::string& collection_id, uint64_t lsn);
-
-    /*
-     * Partition is flushed (update flushed_lsn)
-     * @param collection_id: collection id
-     * @param partition_tag: partition_tag
-     * @param lsn: flushed lsn
-     */
-    void
-    PartitionFlushed(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn);
-
-    /*
-     * Collection is updated (update wal_lsn)
-     * @param collection_id: collection id
-     * @param partition_tag: partition_tag
-     * @param lsn: flushed lsn
-     */
-    void
-    CollectionUpdated(const std::string& collection_id, uint64_t lsn);
-
-    /*
-     * Partition is updated (update wal_lsn)
-     * @param collection_id: collection id
-     * @param partition_tag: partition_tag
-     * @param lsn: flushed lsn
-     */
-    void
-    PartitionUpdated(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn);
-
-    /*
-     * Insert
-     * @param collection_id: collection id
-     * @param collection_id: partition tag
-     * @param vector_ids: vector ids
-     * @param vectors: vectors
-     */
-    template <typename T>
-    bool
-    Insert(const std::string& collection_id, const std::string& partition_tag, const IDNumbers& vector_ids,
-           const std::vector<T>& vectors);
-
-    /*
-     * Insert
-     * @param collection_id: collection id
-     * @param partition_tag: partition tag
-     * @param vector_ids: vector ids
-     * @param vectors: vectors
-     * @param attrs: attributes
-     */
-    template <typename T>
-    bool
-    InsertEntities(const std::string& collection_id, const std::string& partition_tag,
-                   const milvus::engine::IDNumbers& entity_ids, const std::vector<T>& vectors,
-                   const std::unordered_map<std::string, uint64_t>& attr_nbytes,
-                   const std::unordered_map<std::string, std::vector<uint8_t>>& attrs);
-
-    /*
-     * Insert
-     * @param collection_id: collection id
-     * @param vector_ids: vector ids
-     */
-    bool
-    DeleteById(const std::string& collection_id, const IDNumbers& vector_ids);
-
-    /*
-     * Get flush lsn
-     * @param collection_id: collection id (empty means all tables)
-     * @retval if there is something not flushed, return lsn;
-     *         else, return 0
-     */
-    uint64_t
-    Flush(const std::string& collection_id = "");
+    static WalManager&
+    GetInstance();
 
     void
-    RemoveOldFiles(uint64_t flushed_lsn);
+    SetWalPath(const std::string& path) {
+        wal_path_ = path;
+    }
+
+    Status
+    RecordOperation(const WalOperationPtr& operation, const DBPtr& db);
+
+    Status
+    OperationDone(id_t op_id);
 
  private:
-    WalManager
-    operator=(WalManager&);
+    Status
+    RecordInsertOperation(const InsertEntityOperationPtr& operation, const DBPtr& db);
 
-    MXLogConfiguration mxlog_config_;
+    Status
+    RecordDeleteOperation(const DeleteEntityOperationPtr& operation, const DBPtr& db);
 
-    MXLogBufferPtr p_buffer_;
-    MXLogMetaHandlerPtr p_meta_handler_;
+    Status
+    SplitChunk(const DataChunkPtr& chunk, std::vector<DataChunkPtr>& chunks);
 
-    struct TableLsn {
-        uint64_t flush_lsn;
-        uint64_t wal_lsn;
-    };
-    std::mutex mutex_;
-    std::map<std::string, std::map<std::string, TableLsn>> collections_;
-    std::atomic<uint64_t> last_applied_lsn_;
+ private:
+    SafeIDGenerator id_gen_;
 
-    // if multi-thread call Flush(), use list
-    struct FlushInfo {
-        std::string collection_id_;
-        uint64_t lsn_ = 0;
-
-        bool
-        IsValid() {
-            return (lsn_ != 0);
-        }
-        void
-        Clear() {
-            lsn_ = 0;
-        }
-    };
-    FlushInfo flush_info_;
+    std::string wal_path_;
+    int64_t wal_buffer_size_ = 0;
+    int64_t insert_buffer_size_ = 0;
 };
 
-extern template bool
-WalManager::Insert<float>(const std::string& collection_id, const std::string& partition_tag,
-                          const IDNumbers& vector_ids, const std::vector<float>& vectors);
-
-extern template bool
-WalManager::Insert<uint8_t>(const std::string& collection_id, const std::string& partition_tag,
-                            const IDNumbers& vector_ids, const std::vector<uint8_t>& vectors);
-
-}  // namespace wal
 }  // namespace engine
 }  // namespace milvus

@@ -15,7 +15,7 @@
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #include <faiss/index_io.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <string>
 
 #include "knowhere/common/Exception.h"

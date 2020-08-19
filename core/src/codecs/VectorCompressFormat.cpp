@@ -42,27 +42,23 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
     milvus::TimeRecorder recorder("VectorCompressFormat::Read");
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
-
     CHECK_MAGIC_VALID(fs_ptr,full_file_path);
     CHECK_SUM_VALID(fs_ptr,full_file_path);
-
-    if (!fs_ptr->reader_ptr_->open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
-        return;
+    if (!fs_ptr->reader_ptr_->Open(full_file_path)) {
+        THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open vector compress file: " + full_file_path);
     }
 
-    int64_t length = fs_ptr->reader_ptr_->length()-MAGIC_SIZE-HEADER_SIZE-SUM_SIZE;
+    int64_t length = fs_ptr->reader_ptr_->Length()-MAGIC_SIZE-HEADER_SIZE-SUM_SIZE;
     if (length <= 0) {
-        LOG_ENGINE_ERROR_ << "Invalid vector compress length: " << full_file_path;
-        return;
+        THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Invalid vector compress length: " + full_file_path);
     }
 
     compress->data = std::shared_ptr<uint8_t[]>(new uint8_t[length]);
     compress->size = length;
 
-    fs_ptr->reader_ptr_->seekg(MAGIC_SIZE+HEADER_SIZE);
-    fs_ptr->reader_ptr_->read(compress->data.get(), length);
-    fs_ptr->reader_ptr_->close();
+    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE+HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(compress->data.get(), length);
+    fs_ptr->reader_ptr_->Close();
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
@@ -79,14 +75,13 @@ VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::stri
     std::unordered_map<std::string,std::string> maps;
     WRITE_MAGIC(fs_ptr,full_file_path)
     WRITE_HEADER(fs_ptr,full_file_path, maps);
-    if (!fs_ptr->writer_ptr_->in_open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
-        return;
+    if (!fs_ptr->writer_ptr_->Open(full_file_path)) {
+        THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open vector compress: " + full_file_path);
     }
 
     fs_ptr->writer_ptr_->seekp(MAGIC_SIZE+HEADER_SIZE);
-    fs_ptr->writer_ptr_->write(compress->data.get(), compress->size);
-    fs_ptr->writer_ptr_->close();
+    fs_ptr->writer_ptr_->Write(compress->data.get(), compress->size);
+    fs_ptr->writer_ptr_->Close();
     WRITE_SUM(fs_ptr,full_file_path);
 
     double span = recorder.RecordSection("End");

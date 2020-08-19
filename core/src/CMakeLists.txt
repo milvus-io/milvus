@@ -48,11 +48,11 @@ add_subdirectory( storage )
 add_subdirectory( cache )
 add_subdirectory( codecs )
 add_subdirectory( segment )
+add_subdirectory( tracing )
 
 add_subdirectory( utils )
 add_subdirectory( metrics )
 add_subdirectory( config )
-add_subdirectory( tracing )
 add_subdirectory( query )
 add_subdirectory( db ) # target milvus_engine
 add_subdirectory( log )
@@ -62,12 +62,12 @@ set(link_lib
         milvus_engine
         config
         metrics
-        tracing
         log
         oatpp
         query
         utils
         )
+
 
 if (MILVUS_WITH_PROMETHEUS)
     set(link_lib

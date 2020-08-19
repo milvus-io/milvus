@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include "config/ServerConfig.h"
 #include "db/Utils.h"
@@ -222,6 +222,7 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
         one_json["id"] = id_array[i];
         json_res.push_back(one_json);
     }
+    return Status::OK();
 }
 
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////
@@ -835,14 +836,14 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
 }
 
 ////////////////////////////////// Router methods ////////////////////////////////////////////
-StatusDto::ObjectWrapper
-WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
-    auto system_info = SystemInfo::GetInstance();
+StatusDtoT
+WebRequestHandler::GetDevices(DevicesDtoT& devices_dto) {
+    auto& system_info = SystemInfo::GetInstance();
 
     devices_dto->cpu = devices_dto->cpu->createShared();
     devices_dto->cpu->memory = system_info.GetPhysicalMemory() >> 30;
 
-    devices_dto->gpus = devices_dto->gpus->createShared();
+    devices_dto->gpus = devices_dto->gpus.createShared();
 
 #ifdef MILVUS_GPU_VERSION
     size_t count = system_info.num_device();
@@ -855,15 +856,15 @@ WebRequestHandler::GetDevices(DevicesDto::ObjectWrapper& devices_dto) {
     for (size_t i = 0; i < count; i++) {
         auto device_dto = DeviceInfoDto::createShared();
         device_dto->memory = device_mems.at(i) >> 30;
-        devices_dto->gpus->put("GPU" + OString(std::to_string(i).c_str()), device_dto);
+        devices_dto->gpus->emplace_back("GPU" + OString(std::to_string(i).c_str()), device_dto);
     }
 #endif
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 
-StatusDto::ObjectWrapper
-WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_config) {
+StatusDtoT
+WebRequestHandler::GetAdvancedConfig(AdvancedConfigDtoT& advanced_config) {
     //    std::string reply;
     //    std::string cache_cmd_prefix = "get_config " + std::string(CONFIG_CACHE) + ".";
     //
@@ -902,8 +903,8 @@ WebRequestHandler::GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& advanced_
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 
-StatusDto::ObjectWrapper
-WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& advanced_config) {
+StatusDtoT
+WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDtoT& advanced_config) {
     //    if (nullptr == advanced_config->cpu_cache_capacity.get()) {
     //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'cpu_cache_capacity\' miss.");
     //    }
@@ -964,8 +965,8 @@ WebRequestHandler::SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& adv
 
 #ifdef MILVUS_GPU_VERSION
 
-StatusDto::ObjectWrapper
-WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
+StatusDtoT
+WebRequestHandler::GetGpuConfig(GPUConfigDtoT& gpu_config_dto) {
     //    std::string reply;
     //    std::string gpu_cmd_prefix = "get_config " + std::string(CONFIG_GPU_RESOURCE) + ".";
     //
@@ -1018,8 +1019,8 @@ WebRequestHandler::GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto) {
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
 
-StatusDto::ObjectWrapper
-WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto) {
+StatusDtoT
+WebRequestHandler::SetGpuConfig(const GPUConfigDtoT& gpu_config_dto) {
     //    // Step 1: Check config param
     //    if (nullptr == gpu_config_dto->enable.get()) {
     //        RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'enable\' miss")
@@ -1109,7 +1110,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dt
  *
  * Collection {
  */
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     auto json_str = nlohmann::json::parse(body->c_str());
     std::string collection_name = json_str["collection_name"];
@@ -1141,7 +1142,7 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& result) {
     int64_t offset = 0;
     auto status = ParseQueryInteger(query_params, "offset", offset);
@@ -1202,7 +1203,7 @@ WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& re
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::GetCollection(const OString& collection_name, const OQueryParams& query_params, OString& result) {
     if (nullptr == collection_name.get()) {
         RETURN_STATUS_DTO(PATH_PARAM_LOSS, "Path param \'collection_name\' is required!");
@@ -1227,7 +1228,7 @@ WebRequestHandler::GetCollection(const OString& collection_name, const OQueryPar
     ASSIGN_RETURN_STATUS_DTO(status);
 }
 
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::DropCollection(const OString& collection_name) {
     auto status = req_handler_.DropCollection(context_ptr_, collection_name->std_str());
 
@@ -1239,7 +1240,7 @@ WebRequestHandler::DropCollection(const OString& collection_name) {
  * Index {
  */
 
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::CreateIndex(const OString& collection_name, const OString& field_name, const OString& body) {
     try {
         auto request_json = nlohmann::json::parse(body->std_str());
@@ -1259,14 +1260,14 @@ WebRequestHandler::CreateIndex(const OString& collection_name, const OString& fi
     ASSIGN_RETURN_STATUS_DTO(Status::OK())
 }
 
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::DropIndex(const OString& collection_name, const OString& field_name) {
     auto status = req_handler_.DropIndex(context_ptr_, collection_name->std_str(), field_name->std_str(), "");
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-StatusDto::ObjectWrapper
-WebRequestHandler::CreatePartition(const OString& collection_name, const PartitionRequestDto::ObjectWrapper& param) {
+StatusDtoT
+WebRequestHandler::CreatePartition(const OString& collection_name, const PartitionRequestDtoT& param) {
     if (nullptr == param->partition_tag.get()) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'partition_tag\' is required")
     }
@@ -1277,9 +1278,9 @@ WebRequestHandler::CreatePartition(const OString& collection_name, const Partiti
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
-                                  PartitionListDto::ObjectWrapper& partition_list_dto) {
+                                  PartitionListDtoT& partition_list_dto) {
     int64_t offset = 0;
     auto status = ParseQueryInteger(query_params, "offset", offset);
     if (!status.ok()) {
@@ -1322,20 +1323,20 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
     }
 
     partition_list_dto->count = partition_names.size();
-    partition_list_dto->partitions = partition_list_dto->partitions->createShared();
+    partition_list_dto->partitions = partition_list_dto->partitions.createShared();
 
     if (offset < (int64_t)(partition_names.size())) {
         for (int64_t i = offset; i < page_size + offset; i++) {
             auto partition_dto = PartitionFieldsDto::createShared();
             partition_dto->partition_tag = partition_names.at(i).c_str();
-            partition_list_dto->partitions->pushBack(partition_dto);
+            partition_list_dto->partitions->push_back(partition_dto);
         }
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::DropPartition(const OString& collection_name, const OString& body) {
     std::string tag;
     try {
@@ -1355,7 +1356,7 @@ WebRequestHandler::DropPartition(const OString& collection_name, const OString& 
  *
  * Segment {
  */
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryParams& query_params, OString& response) {
     int64_t offset = 0;
     auto status = ParseQueryInteger(query_params, "offset", offset);
@@ -1429,7 +1430,7 @@ WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryPara
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::GetSegmentInfo(const OString& collection_name, const OString& segment_name, const OString& info,
                                   const OQueryParams& query_params, OString& result) {
     int64_t offset = 0;
@@ -1471,9 +1472,9 @@ WebRequestHandler::GetSegmentInfo(const OString& collection_name, const OString&
  *
  * Vector
  */
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::server::web::OString& body,
-                                VectorIdsDto::ObjectWrapper& ids_dto) {
+                                VectorIdsDtoT& ids_dto) {
     if (nullptr == body.get() || body->getSize() == 0) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Request payload is required.")
     }
@@ -1547,14 +1548,14 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
         int64_t count = pair->second.size() / 8;
         int64_t* pdata = reinterpret_cast<int64_t*>(pair->second.data());
         for (int64_t i = 0; i < count; ++i) {
-            ids_dto->ids->pushBack(std::to_string(pdata[i]).c_str());
+            ids_dto->ids->push_back(std::to_string(pdata[i]).c_str());
         }
     }
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name,
                              const milvus::server::web::OQueryParams& query_params,
                              milvus::server::web::OString& response) {
@@ -1600,7 +1601,7 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
     ASSIGN_RETURN_STATUS_DTO(status);
 }
 
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::EntityOp(const OString& collection_name, const OString& payload, OString& response) {
     auto status = Status::OK();
     std::string result_str;
@@ -1634,7 +1635,7 @@ WebRequestHandler::EntityOp(const OString& collection_name, const OString& paylo
  *
  * System {
  */
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::SystemInfo(const OString& cmd, const OQueryParams& query_params, OString& response_str) {
     std::string info = cmd->std_str();
 
@@ -1663,7 +1664,7 @@ WebRequestHandler::SystemInfo(const OString& cmd, const OQueryParams& query_para
     ASSIGN_RETURN_STATUS_DTO(status);
 }
 
-StatusDto::ObjectWrapper
+StatusDtoT
 WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString& response_str) {
     if (nullptr == body_str.get() || body_str->getSize() == 0) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Payload is empty.");

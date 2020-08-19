@@ -13,15 +13,13 @@
 
 #include "server/web_impl/dto/Dto.h"
 
-namespace milvus {
-namespace server {
-namespace web {
+namespace milvus::server::web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class StatusDto: public oatpp::data::mapping::type::Object {
+class StatusDto: public ODTO {
 
-    DTO_INIT(StatusDto, Object)
+    DTO_INIT(StatusDto, DTO)
 
     DTO_FIELD(String, message) = "Success";
     DTO_FIELD(Int64, code) = 0L;
@@ -29,6 +27,7 @@ class StatusDto: public oatpp::data::mapping::type::Object {
 
 #include OATPP_CODEGEN_END(DTO)
 
-} // namespace web
-} // namespace server
-} // namespace milvus
+using StatusDtoT = oatpp::Object<StatusDto>;
+
+} // namespace milvus::server::web
+

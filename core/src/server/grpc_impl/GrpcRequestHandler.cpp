@@ -11,7 +11,7 @@
 
 #include "server/grpc_impl/GrpcRequestHandler.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -275,7 +275,7 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
         if (data == nullptr || data->data_.empty())
             continue;
 
-        auto single_size = data->data_.size() / id_size;
+        auto single_size = (id_size != 0) ? (data->data_.size() / id_size) : 0;
 
         auto field_value = response->add_fields();
         auto vector_record = field_value->mutable_vector_record();
@@ -315,7 +315,6 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
             if (type == engine::DataType::INT32) {
                 // add int32 data
                 int32_t int32_value;
-                auto int32_size = single_size * sizeof(int8_t) / sizeof(int32_t);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
                     memcpy(&int32_value, data->data_.data() + offset, single_size);
@@ -324,7 +323,6 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
             } else if (type == engine::DataType::INT64) {
                 // add int64 data
                 int64_t int64_value;
-                auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
                     memcpy(&int64_value, data->data_.data() + offset, single_size);
@@ -333,7 +331,6 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
             } else if (type == engine::DataType::DOUBLE) {
                 // add double data
                 double double_value;
-                auto int32_size = single_size * sizeof(int8_t) / sizeof(double);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
                     memcpy(&double_value, data->data_.data() + offset, single_size);
@@ -342,7 +339,6 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
             } else if (type == engine::DataType::FLOAT) {
                 // add float data
                 float float_value;
-                auto float_size = single_size * sizeof(int8_t) / sizeof(float);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
                     memcpy(&float_value, data->data_.data() + offset, single_size);

@@ -11,7 +11,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include "easyloggingpp/easylogging++.h"
 

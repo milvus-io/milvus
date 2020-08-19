@@ -23,8 +23,9 @@ FetchContent_Declare(
     yaml-cpp
     URL         ${YAMLCPP_SOURCE_URL}
     URL_MD5     "b45bf1089a382e81f6b661062c10d0c2"
-    SOURCE_DIR  ${CMAKE_CURRENT_BINARY_DIR}/yaml-src
-    BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/yaml-build
+    DOWNLOAD_DIR    ${MILVUS_BINARY_DIR}/3rdparty_download/download
+    SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/yaml-src
+    BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/yaml-build
     )
 
 set( YAML_CPP_BUILD_TESTS CACHE BOOL OFF FORCE )

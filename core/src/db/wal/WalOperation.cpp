@@ -9,35 +9,22 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
-
-#include "db/DBProxy.h"
-
-#include <memory>
-#include <string>
-#include <vector>
+#include "db/wal/WalOperation.h"
 
 namespace milvus {
 namespace engine {
 
-class WriteAheadLog : public DBProxy {
- public:
-    WriteAheadLog(const DBPtr& db, const DBOptions& options);
+///////////////////////////////////////////////////////////////////////////////////////////////////
+WalOperation::WalOperation(WalOperationType type) : type_(type) {
+}
 
-    Status
-    Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) override;
+///////////////////////////////////////////////////////////////////////////////////////////////////
+InsertEntityOperation::InsertEntityOperation() : WalOperation(WalOperationType::INSERT_ENTITY) {
+}
 
-    Status
-    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids) override;
-
-    Status
-    Flush(const std::string& collection_name) override;
-
-    Status
-    Flush() override;
-
- private:
-};
+///////////////////////////////////////////////////////////////////////////////////////////////////
+DeleteEntityOperation::DeleteEntityOperation() : WalOperation(WalOperationType::DELETE_ENTITY) {
+}
 
 }  // namespace engine
 }  // namespace milvus

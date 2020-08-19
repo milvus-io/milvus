@@ -66,6 +66,10 @@ def ivf():
     return ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_SQ8_HYBRID", "IVF_PQ"]
 
 
+def binary_metrics():
+    return ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
+
+
 def l2(x, y):
     return np.linalg.norm(np.array(x) - np.array(y))
 
@@ -342,14 +346,6 @@ def gen_invalid_range():
     return range
 
 
-def gen_invalid_ranges():
-    ranges = [
-        {"GT": nb, "LT": 0},
-        {"GT": "0", "LT": "1000"}
-    ]
-    return ranges
-
-
 def gen_valid_ranges():
     ranges = [
         {"GT": 0, "LT": nb//2},
@@ -430,25 +426,28 @@ def remove_vector_field(entities):
 
 
 def update_field_name(entities, old_name, new_name):
-    for item in entities:
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
         if item["field"] == old_name:
             item["field"] = new_name
-    return entities
+    return tmp_entities
 
 
 def update_field_type(entities, old_name, new_name):
-    for item in entities:
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
         if item["field"] == old_name:
             item["type"] = new_name
-    return entities
+    return tmp_entities
 
 
 def update_field_value(entities, old_type, new_value):
-    for item in entities:
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
         if item["type"] == old_type:
-            for i in item["values"]:
-                item["values"][i] = new_value
-    return entities
+            for index, value in enumerate(item["values"]):
+                item["values"][index] = new_value
+    return tmp_entities
 
 
 def add_vector_field(nb, dimension=dimension):

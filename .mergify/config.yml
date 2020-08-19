@@ -9,6 +9,7 @@ pull_request_rules:
         - "status-success=continuous-integration/jenkins/pr-merge"
         - "status-success=AMD64 Ubuntu 18.04"
         - "status-success=AMD64 CentOS 7"
+        - "status-success=Codacy/PR Quality Review"
       actions:
         merge:
           method: squash

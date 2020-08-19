@@ -15,7 +15,7 @@
 #include "utils/Log.h"
 
 #include <dirent.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <sys/sysinfo.h>
 #include <sys/times.h>
 #include <unistd.h>

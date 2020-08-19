@@ -15,23 +15,23 @@ namespace milvus {
 namespace storage {
 
 bool
-DiskIOReader::open(const std::string& name) {
+DiskIOReader::Open(const std::string& name) {
     name_ = name;
     fs_ = std::fstream(name_, std::ios::in | std::ios::binary);
-    return fs_.good();
+    return fs_.is_open();
 }
 
 void
-DiskIOReader::read(void* ptr, int64_t size) {
+DiskIOReader::Read(void* ptr, int64_t size) {
     fs_.read(reinterpret_cast<char*>(ptr), size);
 }
 
 void
-DiskIOReader::seekg(int64_t pos) {
+DiskIOReader::Seekg(int64_t pos) {
     fs_.seekg(pos);
 }
 void
-DiskIOReader::seekg(int64_t pos, std::ios_base::seekdir seekdir) {
+DiskIOReader::Seekg(int64_t pos, std::ios_base::seekdir seekdir) {
     fs_.seekg(pos, seekdir);
 }
 
@@ -43,15 +43,21 @@ DiskIOReader::totallyRead() {
 }
 
 int64_t
-DiskIOReader::length() {
+DiskIOReader::Length() {
+    /* save current position */
+    int64_t cur = fs_.tellg();
+
+    /* move position to end of file */
     fs_.seekg(0, fs_.end);
     int64_t len = fs_.tellg();
-    fs_.seekg(0, fs_.beg);
+
+    /* restore position */
+    fs_.seekg(cur, fs_.beg);
     return len;
 }
 
 void
-DiskIOReader::close() {
+DiskIOReader::Close() {
     fs_.close();
 }
 

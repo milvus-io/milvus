@@ -20,13 +20,13 @@ namespace storage {
 class IOWriter {
  public:
     virtual bool
-    open(const std::string& name) = 0;
+    Open(const std::string& name) = 0;
 
     virtual bool
     in_open(const std::string& name) = 0;
 
     virtual void
-    write(void* ptr, int64_t size) = 0;
+    Write(void* ptr, int64_t size) = 0;
 
     virtual void
     seekp(int64_t pos) = 0;
@@ -35,10 +35,10 @@ class IOWriter {
     seekp(int64_t pos, std::ios_base::seekdir seekdir) = 0;
 
     virtual int64_t
-    length() = 0;
+    Length() = 0;
 
     virtual void
-    close() = 0;
+    Close() = 0;
 };
 
 using IOWriterPtr = std::shared_ptr<IOWriter>;

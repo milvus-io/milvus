@@ -16,7 +16,8 @@
 #ifdef MILVUS_GPU_VERSION
 #include <faiss/gpu/GpuCloner.h>
 #endif
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
+#include <string>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/IndexType.h"
@@ -105,6 +106,10 @@ GPUIDMAP::GetRawIds() {
 void
 GPUIDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
     ResScope rs(res_, gpu_id_);
+
+    // assign the metric type
+    auto flat_index = dynamic_cast<faiss::IndexIDMap*>(index_.get())->index;
+    flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     index_->search(n, (float*)data, k, distances, labels, bitset_);
 }
 
