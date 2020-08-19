@@ -1029,9 +1029,8 @@ class TestSearchDSL(object):
     def get_invalid_term(self, request):
         return request.param
 
-    # TODO
     @pytest.mark.level(2)
-    def _test_query_term_wrong_format(self, connect, collection, get_invalid_term):
+    def test_query_term_wrong_format(self, connect, collection, get_invalid_term):
         '''
         method: build query with wrong format term
         expected: Exception raised
@@ -1548,9 +1547,8 @@ class TestSearchInvalid(object):
     def get_search_params(self, request):
         yield request.param
 
-    # TODO: This case can all pass, but it's too slow
     @pytest.mark.level(2)
-    def _test_search_with_invalid_params(self, connect, collection, get_simple_index, get_search_params):
+    def test_search_with_invalid_params(self, connect, collection, get_simple_index, get_search_params):
         '''
         target: test search fuction, with the wrong nprobe
         method: search with nprobe
@@ -1560,8 +1558,6 @@ class TestSearchInvalid(object):
         index_type = get_simple_index["index_type"]
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
-        if search_params["index_type"] != index_type:
-            pytest.skip("Skip case")
         query, vecs = gen_query_vectors(field_name, entities, top_k, 1, search_params=search_params["search_params"])
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
