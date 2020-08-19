@@ -67,7 +67,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     size_t total_num_bytes;
     fs_ptr->reader_ptr_->Read(&total_num_bytes, sizeof(size_t));
 
-    offset += sizeof(size_t);  // Beginning of file is num_bytes
+    offset += MAGIC_SIZE + HEADER_SIZE + sizeof(size_t);  // Beginning of file is num_bytes
     if (offset + num_bytes > total_num_bytes) {
         THROW_ERROR(SERVER_INVALID_ARGUMENT, "Invalid argument to read: " + file_path);
     }
@@ -108,7 +108,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     raw->data_.resize(total_bytes);
     int64_t poz = 0;
     for (auto& range : read_ranges) {
-        int64_t offset = range.offset_ + sizeof(size_t);
+        int64_t offset = MAGIC_SIZE + HEADER_SIZE + sizeof(size_t) + range.offset_;
         fs_ptr->reader_ptr_->Seekg(offset);
         fs_ptr->reader_ptr_->Read(raw->data_.data() + poz, range.num_bytes_);
         poz += range.num_bytes_;
