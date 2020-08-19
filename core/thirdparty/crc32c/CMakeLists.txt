@@ -15,12 +15,12 @@ if ( DEFINED ENV{MILVUS_CRC32C_URL} )
     set( CRC32C_SOURCE_URL "$ENV{MILVUS_CRC32C_URL}" )
 endif()
 set( CRC32C_SOURCE_URL
-        "https://github.com/godchen0212/crc32c/archive/${CRC32C_VERSION}.zip")
+        "https://github.com/google/crc32c/archive/${CRC32C_VERSION}.zip")
 message( STATUS "Building crc32c-master from source" )
 FetchContent_Declare(
         crc32c
         URL         ${CRC32C_SOURCE_URL}
-        URL_MD5     "aaec5b4c57740ef038fa7ac455feb108"
+        URL_MD5     "d24bd57ca2d9fb051aa589818c0e2c10"
         SOURCE_DIR  ${CMAKE_CURRENT_BINARY_DIR}/crc32c-src
         BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/crc32c-build
 )
@@ -31,6 +31,7 @@ if ( NOT crc32c_POPULATED )
     FetchContent_Populate( crc32c )
     set (CRC32C_BUILD_TESTS CACHE BOOL OFF FORCE)
     set (CRC32C_BUILD_BENCHMARKS CACHE BOOL OFF FORCE)
+    set (CRC32C_USE_GLOG CACHE BOOL OFF FORCE)
     add_subdirectory( ${crc32c_SOURCE_DIR}
             ${crc32c_BINARY_DIR}
             EXCLUDE_FROM_ALL )
