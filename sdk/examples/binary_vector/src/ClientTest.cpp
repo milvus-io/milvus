@@ -86,10 +86,11 @@ TestProcess(std::shared_ptr<milvus::Connection> connection, const milvus::Mappin
             {  // generate vectors
                 milvus_sdk::TimeRecorder rc("Build entities No." + std::to_string(i));
                 BuildBinaryVectors(begin_index, begin_index + BATCH_ENTITY_COUNT, entity_array, entity_ids, DIMENSION);
+                entity_ids.clear();
             }
 
             if (search_entity_array.size() < NQ) {
-                search_entity_array.push_back(std::make_pair(entity_ids[SEARCH_TARGET], entity_array[SEARCH_TARGET]));
+                search_entity_array.push_back(std::make_pair(entity_ids[0], entity_array[0]));
             }
 
             std::vector<int64_t> int64_data(BATCH_ENTITY_COUNT);
@@ -114,12 +115,29 @@ TestProcess(std::shared_ptr<milvus::Connection> connection, const milvus::Mappin
     }
 
     {  // search vectors
+        // std::string metric_type = "HAMMING";
+        std::string metric_type = "JACCARD";
+        // std::string metric_type = "TANIMOTO";
+
+        nlohmann::json dsl_json, vector_param_json;
+        milvus_sdk::Utils::GenDSLJson(dsl_json, vector_param_json, metric_type);
+
+        std::vector<milvus::VectorData> temp_entity_array;
+        for (auto& pair : search_entity_array) {
+            temp_entity_array.push_back(pair.second);
+        }
+
+        milvus::VectorParam vector_param = {vector_param_json.dump(), temp_entity_array};
+
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
-        milvus_sdk::Utils::DoSearch(connection, mapping.collection_name, partition_tags, TOP_K, NPROBE,
-                                    search_entity_array, topk_query_result);
-    }
+        auto status = connection->Search(mapping.collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
 
+        std::cout << metric_type << " Search function call result: " << std::endl;
+        milvus_sdk::Utils::PrintTopKQueryResult(topk_query_result);
+        std::cout << metric_type << " Search function call status: " << status.message() << std::endl;
+    }
+/*
     {  // wait unit build index finish
         milvus_sdk::TimeRecorder rc("Create index");
         std::cout << "Wait until create all index done" << std::endl;
@@ -134,7 +152,7 @@ TestProcess(std::shared_ptr<milvus::Connection> connection, const milvus::Mappin
         milvus_sdk::Utils::DoSearch(connection, mapping.collection_name, partition_tags, TOP_K, NPROBE,
                                     search_entity_array, topk_query_result);
     }
-
+*/
     {  // drop collection
         stat = connection->DropCollection(mapping.collection_name);
         std::cout << "DropCollection function call status: " << stat.message() << std::endl;
@@ -157,27 +175,27 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {
         milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
+        milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
+
         field_ptr1->field_name = "field_1";
         field_ptr1->field_type = milvus::DataType::INT64;
         JSON index_param_1;
         index_param_1["name"] = "index_1";
         field_ptr1->index_params = index_param_1.dump();
 
-        milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
-        field_ptr2->field_type = milvus::DataType::VECTOR_BINARY;
         field_ptr2->field_name = "field_vec";
+        field_ptr2->field_type = milvus::DataType::VECTOR_BINARY;
         JSON index_param_2;
-        index_param_2["name"] = "index_3";
+        index_param_2["name"] = "index_vec";
         field_ptr2->index_params = index_param_2.dump();
         JSON extra_params;
-        extra_params["dimension"] = 128;
-        extra_params["metric_type"] = "TANIMOTO";
+        extra_params["dim"] = DIMENSION;
         field_ptr2->extra_params = extra_params.dump();
 
         milvus::Mapping mapping = {"collection_1", {field_ptr1, field_ptr2}};
 
-        JSON json_params = {{"index_type", "IVF_FLAT"}, {"nlist", 1024}};
-        milvus::IndexParam index_param = {mapping.collection_name, "field_2", "index_3", json_params.dump()};
+        JSON json_params = {{"index_type", "BIN_IVF_FLAT"}, {"nlist", 1024}};
+        milvus::IndexParam index_param = {mapping.collection_name, "field_vec", json_params.dump()};
 
         TestProcess(connection, mapping, index_param);
     }
