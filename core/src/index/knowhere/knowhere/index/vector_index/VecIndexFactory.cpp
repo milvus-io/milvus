@@ -47,11 +47,13 @@ namespace knowhere {
 
 VecIndexPtr
 VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
+#ifdef MILVUS_GPU_VERSION
+    auto gpu_device = -1;  // TODO: remove hardcode here, get from invoker
+#endif
     if (type == IndexEnum::INDEX_FAISS_IDMAP) {
         return std::make_shared<knowhere::IDMAP>();
     } else if (type == IndexEnum::INDEX_FAISS_IVFFLAT) {
 #ifdef MILVUS_GPU_VERSION
-        auto gpu_device = -1;  // TODO: remove hardcode here, get from invoker
         if (mode == IndexMode::MODE_GPU) {
             return std::make_shared<knowhere::GPUIVF_NM>(gpu_device);
         }

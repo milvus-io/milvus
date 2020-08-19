@@ -54,7 +54,8 @@ GPUIVF_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
 void
 GPUIVF_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (res_.lock()) {
+    auto spt = res_.lock();
+    if (spt != nullptr) {
         ResScope rs(res_, gpu_id_);
         IVF::Add(dataset_ptr, config);
     } else {
@@ -71,7 +72,8 @@ VecIndexPtr
 GPUIVF_NM::CopyGpuToCpu(const Config& config) {
     std::lock_guard<std::mutex> lk(mutex_);
 
-    if (std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
+    auto device_idx = td::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
+    if (device_idx != nullptr) {
         faiss::Index* device_index = index_.get();
         faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu_without_codes(device_index);
 
