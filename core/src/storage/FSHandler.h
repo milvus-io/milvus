@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <iostream>
 #include <memory>
 
 #include "storage/IOReader.h"
