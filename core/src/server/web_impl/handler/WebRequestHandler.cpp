@@ -1516,6 +1516,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     }
 
     std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
+    int64_t row_num;
     for (auto& entity : body_json["entities"].items()) {
         std::string field_name = entity.key();
         auto field_value = entity.value();
