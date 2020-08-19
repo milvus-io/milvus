@@ -18,9 +18,9 @@
 # The checks defined here will be run and will display by default as warnings.
 Checks: 'clang-diagnostic-*,clang-analyzer-*,-clang-analyzer-alpha*,google-*,modernize-*,-modernize-use-trailing-return-type'
 
-# produce HeaderFilterRegex from cpp/build-support/lint_exclusions.txt with:
-# echo -n '^('; sed -e 's/*/\.*/g' cpp/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
-HeaderFilterRegex: '^(.*core/cmake-build-debug.*|.*core/cmake-build-release.*|.*core/cmake_build.*)$'
+# produce HeaderFilterRegex from core/build-support/lint_exclusions.txt with:
+# echo -n '^('; sed -e 's/*/\.*/g' core/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
+HeaderFilterRegex: '^(.*cmake-build-debug.*|.*cmake-build-release.*|.*cmake_build.*|.*thirdparty.*|.*src/grpc.*|.*milvus/include.*|.*unittest.*)$'
 AnalyzeTemporaryDtors: true
 CheckOptions:
   - key:             google-readability-braces-around-statements.ShortStatementLines
