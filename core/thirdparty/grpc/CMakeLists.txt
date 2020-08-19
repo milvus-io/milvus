@@ -16,7 +16,6 @@ if ( DEFINED ENV{MILVUS_GRPC_URL} )
 else()
     set( GRPC_SOURCE_URL
          "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip"
-         # "https://github.com/XuanYang-cn/grpc-milvus/archive/D_boringssl.zip"
          )
 endif()
 
