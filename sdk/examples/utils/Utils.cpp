@@ -256,33 +256,6 @@ Utils::CheckSearchResult(const std::vector<std::pair<int64_t, milvus::VectorData
 }
 
 void
-Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
-                const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
-                std::vector<std::pair<int64_t, milvus::VectorData>> entity_array,
-                milvus::TopKQueryResult& topk_query_result) {
-    /*
-        topk_query_result.clear();
-
-        nlohmann::json dsl_json, vector_param_json;
-        GenDSLJson(dsl_json, vector_param_json);
-
-        std::vector<milvus::VectorData> temp_entity_array;
-        for (auto& pair : entity_array) {
-            temp_entity_array.push_back(pair.second);
-        }
-        milvus::VectorParam vector_param = {vector_param_json.dump(), temp_entity_array};
-
-        JSON json_params = {{"nprobe", nprobe}};
-        milvus_sdk::TimeRecorder rc("Search");
-
-        auto status = conn->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
-
-        PrintTopKQueryResult(topk_query_result);
-        //    PrintSearchResult(entity_array, topk_query_result);
-    */
-}
-
-void
 Utils::ConstructVectors(int64_t from, int64_t to, std::vector<milvus::VectorData>& query_vector,
                         std::vector<int64_t>& search_ids, int64_t dimension) {
     if (to <= from) {
@@ -398,6 +371,31 @@ Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, c
 }
 
 void
+Utils::GenBinaryDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type) {
+    uint64_t row_num = 10000;
+    std::vector<int64_t> term_value;
+    term_value.resize(row_num);
+    for (uint64_t i = 0; i < row_num; ++i) {
+        term_value[i] = i;
+    }
+
+    nlohmann::json bool_json, vector_json;
+    std::string placeholder = "placeholder_1";
+    vector_json["vector"] = placeholder;
+    bool_json["must"].push_back(vector_json);
+
+    dsl_json["bool"] = bool_json;
+
+    nlohmann::json query_vector_json, vector_extra_params;
+    int64_t topk = 10;
+    query_vector_json["topk"] = topk;
+    query_vector_json["metric_type"] = metric_type;
+    vector_extra_params["nprobe"] = 32;
+    query_vector_json["params"] = vector_extra_params;
+    vector_param_json[placeholder]["field_vec"] = query_vector_json;
+}
+
+void
 Utils::PrintTopKQueryResult(milvus::TopKQueryResult& topk_query_result) {
     for (size_t i = 0; i < topk_query_result.size(); i++) {
         auto field_value = topk_query_result[i].field_value;
@@ -433,6 +431,7 @@ Utils::PrintTopKQueryResult(milvus::TopKQueryResult& topk_query_result) {
             std::cout << topk_query_result[i].ids[j] << "  ---------  " << topk_query_result[i].distances[j]
                       << std::endl;
         }
+        std::cout << std::endl;
     }
 }
 
