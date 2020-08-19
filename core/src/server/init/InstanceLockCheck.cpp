@@ -11,10 +11,9 @@
 
 #include "server/init/InstanceLockCheck.h"
 
-#include <errno.h>
 #include <fcntl.h>
-#include <string.h>
 #include <unistd.h>
+#include <string>
 
 #include <fiu/fiu-local.h>
 

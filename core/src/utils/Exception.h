@@ -15,6 +15,7 @@
 
 #include <exception>
 #include <string>
+#include <utility>
 
 namespace milvus {
 
@@ -24,7 +25,7 @@ namespace milvus {
 
 class Exception : public std::exception {
  public:
-    Exception(ErrorCode code, const std::string& message) : code_(code), message_(message) {
+    Exception(ErrorCode code, std::string msg) : code_(code), message_(std::move(msg)) {
     }
 
     ErrorCode

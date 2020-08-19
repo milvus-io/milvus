@@ -16,7 +16,11 @@
 # under the License.
 
 # The checks defined here will be run and will display by default as warnings.
-Checks: 'clang-diagnostic-*,clang-analyzer-*,-clang-analyzer-alpha*,google-*,modernize-*,-modernize-use-trailing-return-type'
+Checks: >
+    -*, clang-diagnostic-*, -clang-diagnostic-error,
+    clang-analyzer-*, -clang-analyzer-alpha*,
+    google-*, -google-runtime-references, -google-readability-todo,
+    modernize-*, -modernize-pass-by-value
 
 # produce HeaderFilterRegex from core/build-support/lint_exclusions.txt with:
 # echo -n '^?!('; sed -e 's/*/\.*/g' core/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
