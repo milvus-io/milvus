@@ -17,12 +17,12 @@
 #include <fiu-control.h>
 #include <fiu-local.h>
 #include <gtest/gtest.h>
+#include <src/server/delivery/ReqScheduler.h>
 #include <boost/filesystem.hpp>
 #include <oatpp/core/macro/component.hpp>
 #include <oatpp/network/client/SimpleTCPConnectionProvider.hpp>
 #include <oatpp/web/client/ApiClient.hpp>
 #include <oatpp/web/client/HttpRequestExecutor.hpp>
-#include <src/server/delivery/ReqScheduler.h>
 
 #include "config/ConfigMgr.h"
 #include "db/snapshot/EventExecutor.h"
@@ -308,8 +308,8 @@ using TestConnP = std::shared_ptr<oatpp::web::client::RequestExecutor::Connectio
 
 class WebControllerTest : public ::testing::Test {
  public:
-    void
-    SetUp() override {
+    static void
+    SetUpTestCase() {
         mkdir(CONTROLLER_TEST_CONFIG_DIR, S_IRWXU);
         // Load basic config
         std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
@@ -342,6 +342,20 @@ class WebControllerTest : public ::testing::Test {
         milvus::server::web::WebServer::GetInstance().Start();
 
         sleep(3);
+    }
+
+    void
+    SetUp() override {
+        mkdir(CONTROLLER_TEST_CONFIG_DIR, S_IRWXU);
+        // Load basic config
+        std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
+        std::fstream fs(config_path.c_str(), std::ios_base::out);
+        fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+        fs.flush();
+        fs.close();
+
+        //        milvus::ConfigMgr::GetInstance().Init();
+        milvus::ConfigMgr::GetInstance().Load(config_path);
 
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
         OATPP_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, objectMapper);
@@ -353,26 +367,22 @@ class WebControllerTest : public ::testing::Test {
         connection_ptr = client_ptr->getConnection();
     }
 
-    void
-    TearDown() override {
+    static void
+    TearDownTestCase() {
         milvus::server::web::WebServer::GetInstance().Stop();
 
-//        milvus::server::DBWrapper::GetInstance().StopService();
+        milvus::server::DBWrapper::GetInstance().StopService();
         milvus::scheduler::JobMgrInst::GetInstance()->Stop();
         milvus::scheduler::SchedInst::GetInstance()->Stop();
         milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Clear();
-//        milvus::server::ReqScheduler::GetInstance().Stop();
 
-        // TODO: Temp to delay some time. OperationExecutor should wait all resources be destructed before stop
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-
-        milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
-        milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
         boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
-//        std::experimental::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
-    };
+    }
+
+    void
+    TearDown() override{};
 
  protected:
     std::shared_ptr<oatpp::data::mapping::ObjectMapper> object_mapper;
@@ -519,7 +529,7 @@ TEST_F(WebControllerTest, SHOW_COLLECTIONS) {
     auto response = client_ptr->showCollections("1", "1", connection_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto json_response = nlohmann::json::parse(response->readBodyToString()->std_str());
-    ASSERT_EQ(json_response["count"].get<int64_t>(), 0);
+    ASSERT_GE(json_response["count"].get<int64_t>(), 0);
 
     // test query collection empty
     response = client_ptr->showCollections("0", "0", connection_ptr);
