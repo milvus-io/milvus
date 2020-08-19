@@ -1331,6 +1331,7 @@ class TestSearchDSL(object):
         method: build query with single term single range
         expected: pass
         '''
+        entities, ids = init_data(connect, collection)
         term = gen_default_term_expr()
         range = gen_default_range_expr(ranges={"GT": -1, "LT": nb // 2})
         expr = {"must": [gen_default_vector_expr(default_query), term, range]}
@@ -1345,6 +1346,7 @@ class TestSearchDSL(object):
         method: build query with single term single range
         expected: pass
         '''
+        entities, ids = init_data(connect, collection)
         term = gen_default_term_expr()
         range = gen_default_range_expr(ranges={"GT": nb // 2, "LT": nb})
         expr = {"must": [gen_default_vector_expr(default_query), term, range]}
@@ -1389,6 +1391,7 @@ class TestSearchDSLBools(object):
         method: build query without bool expr
         expected: error raised
         '''
+        entities, ids = init_data(connect, collection)
         expr = {"bool1": {}}
         query = expr
         with pytest.raises(Exception) as e:
