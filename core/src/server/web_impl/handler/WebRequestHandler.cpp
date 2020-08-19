@@ -1516,22 +1516,6 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     }
 
     std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
-    auto entities_json = body_json["entities"];
-    if (!entities_json.is_array()) {
-        RETURN_STATUS_DTO(ILLEGAL_ARGUMENT, "Entities is not an array");
-    }
-    int64_t row_num = entities_json.size();
-    for (auto& one_entity : entities_json) {
-        for (auto& entity : one_entity.items()) {
-            std::string field_name = entity.key();
-            switch (field_types.at(field_name)) {
-                case engine::DataType::INT32: {
-
-                }
-            }
-        }
-    }
-
     for (auto& entity : body_json["entities"].items()) {
         std::string field_name = entity.key();
         auto field_value = entity.value();
