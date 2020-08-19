@@ -15,14 +15,15 @@ if ( DEFINED ENV{MILVUS_GRPC_URL} )
     set( GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}" )
 else()
     set( GRPC_SOURCE_URL
-         "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip" )
+         "https://github.com/milvus-io/grpc-milvus/archive/${GRPC_VERSION}.zip"
+         )
 endif()
 
 message( STATUS "Building GRPC-${GRPC_VERSION} from source" )
 FetchContent_Declare(
     grpc
     URL         ${GRPC_SOURCE_URL}
-    URL_MD5     "478215c151a144c2d8625b49ff1b70aa"
+    URL_MD5     "f11a28bebdc14e7790dab64743a96836"
     DOWNLOAD_DIR ${MILVUS_BINARY_DIR}/3rdparty_download/download
     SOURCE_DIR  ${CMAKE_CURRENT_BINARY_DIR}/grpc-src
     BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/grpc-build )
