@@ -248,7 +248,7 @@ class FtypeField {
  public:
     static constexpr const char* Name = "ftype";
 
-    explicit FtypeField(FTYPE_TYPE type) : ftype_(type) {
+    explicit FtypeField(FTYPE_TYPE ftype) : ftype_(ftype) {
     }
 
     FTYPE_TYPE
@@ -257,8 +257,8 @@ class FtypeField {
     }
 
     void
-    SetFtype(FTYPE_TYPE type) {
-        ftype_ = type;
+    SetFtype(FTYPE_TYPE ftype) {
+        ftype_ = ftype;
     }
 
  protected:
@@ -267,23 +267,23 @@ class FtypeField {
 
 class FEtypeField {
  public:
-    static constexpr const char* Name = "field_element_type";
+    static constexpr const char* Name = "fetype";
 
-    explicit FEtypeField(FTYPE_TYPE type) : ftype_(type) {
+    explicit FEtypeField(FTYPE_TYPE fetype) : fetype_(fetype) {
     }
 
     FTYPE_TYPE
-    GetFtype() const {
-        return ftype_;
+    GetFEtype() const {
+        return fetype_;
     }
 
     void
-    SetFtype(FTYPE_TYPE type) {
-        ftype_ = type;
+    SetFEtype(FTYPE_TYPE fetype) {
+        fetype_ = fetype;
     }
 
  protected:
-    FTYPE_TYPE ftype_;
+    FTYPE_TYPE fetype_;
 };
 
 class FieldIdField {

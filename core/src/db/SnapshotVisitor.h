@@ -113,7 +113,7 @@ class SegmentFieldVisitor {
     GetElementVisitor(const FieldElementType elem_type) const {
         for (auto& kv : elements_map_) {
             auto& ev = kv.second;
-            if (ev->GetElement()->GetFtype() == elem_type) {
+            if (ev->GetElement()->GetFEtype() == elem_type) {
                 return ev;
             }
         }
