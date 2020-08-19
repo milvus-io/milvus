@@ -227,16 +227,16 @@ class TestClient : public oatpp::web::client::ApiClient {
 
     API_CALL("PUT", "/config/advanced", setAdvanced, BODY_DTO(milvus::server::web::AdvancedConfigDtoT, body))
 
-#ifdef MILVUS_GPU_VERSION
-
-    API_CALL("OPTIONS", "config/gpu_resources", optionsGpuConfig)
-
-    API_CALL("GET", "/config/gpu_resources", getGPUConfig)
-
-    API_CALL("PUT", "/config/gpu_resources", setGPUConfig,
-             BODY_DTO(milvus::server::web::GPUConfigDto::ObjectWrapper, body))
-
-#endif
+    //#ifdef MILVUS_GPU_VERSION
+    //
+    //    API_CALL("OPTIONS", "config/gpu_resources", optionsGpuConfig)
+    //
+    //    API_CALL("GET", "/config/gpu_resources", getGPUConfig)
+    //
+    //    API_CALL("PUT", "/config/gpu_resources", setGPUConfig,
+    //             BODY_DTO(milvus::server::web::GPUConfigDto::ObjectWrapper, body))
+    //
+    //#endif
 
     API_CALL("OPTIONS", "/collections", optionsCollections)
 
@@ -327,7 +327,7 @@ class WebControllerTest : public ::testing::Test {
         res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
 
         auto default_conn = milvus::scheduler::Connection("IO", 500.0);
-        auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
+        //        auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
         res_mgr->Connect("disk", "cpu", default_conn);
         res_mgr->Start();
         milvus::scheduler::SchedInst::GetInstance()->Start();
@@ -501,7 +501,7 @@ TEST_F(WebControllerTest, CREATE_COLLECTION) {
 
     auto response = client_ptr->createCollection(mapping_str.c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDtoT>(object_mapper.get());
+    //    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDtoT>(object_mapper.get());
 }
 
 TEST_F(WebControllerTest, GET_COLLECTION_INFO) {
