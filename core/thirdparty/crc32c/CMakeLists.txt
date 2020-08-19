@@ -20,7 +20,7 @@ message( STATUS "Building crc32c-master from source" )
 FetchContent_Declare(
         crc32c
         URL         ${CRC32C_SOURCE_URL}
-#        URL_MD5     "b45bf1089a382e81f6b661062c10d0c2"
+        URL_MD5     "aaec5b4c57740ef038fa7ac455feb108"
         SOURCE_DIR  ${CMAKE_CURRENT_BINARY_DIR}/crc32c-src
         BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/crc32c-build
 )

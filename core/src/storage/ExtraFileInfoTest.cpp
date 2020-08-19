@@ -34,12 +34,12 @@ class ExtraFileInfoTest : public testing::Test {
 TEST_F(ExtraFileInfoTest, WriteFileTest) {
     std::string raw = "helloworldhelloworld";
 
-    std::string directory = "/home/godchen/";
+    std::string directory = "/tmp";
     storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
     storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
     storage::OperationPtr operation_ptr = std::make_shared<storage::DiskOperation>(directory);
     const storage::FSHandlerPtr fs_ptr = std::make_shared<storage::FSHandler>(reader_ptr, writer_ptr, operation_ptr);
-    std::string file_path = "/home/godchen/test.txt";
+    std::string file_path = "/tmp/test.txt";
 
     auto record = std::unordered_map<std::string, std::string>();
     record.insert(std::make_pair("test", "test"));
@@ -62,8 +62,8 @@ TEST_F(ExtraFileInfoTest, WriteFileTest) {
     ASSERT_TRUE(CheckSum(fs_ptr, file_path));
     ASSERT_EQ(ReadHeaderValue(fs_ptr, file_path, "test"), "test");
 
-    ASSERT_TRUE(WriteHeaderValue(fs_ptr, file_path, "github", "gaylab"));
-    ASSERT_EQ(ReadHeaderValue(fs_ptr, file_path, "github"), "gaylab");
+    ASSERT_TRUE(WriteHeaderValue(fs_ptr, file_path, "github", "github"));
+    ASSERT_EQ(ReadHeaderValue(fs_ptr, file_path, "github"), "github");
     result_sum = CalculateSum(fs_ptr, file_path);
     WriteSum(fs_ptr, file_path, result_sum, true);
     ASSERT_TRUE(CheckMagic(fs_ptr, file_path));
