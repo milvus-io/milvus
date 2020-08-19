@@ -768,8 +768,8 @@ def gen_binary_index():
     return index_params
 
 
-def get_search_param(index_type):
-    search_params = {"metric_type": "L2"}
+def get_search_param(index_type, metric_type="L2"):
+    search_params = {"metric_type": metric_type}
     if index_type in ivf() or index_type in binary_support():
         search_params.update({"nprobe": 64})
     elif index_type == "HNSW":

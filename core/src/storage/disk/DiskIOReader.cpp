@@ -30,6 +30,10 @@ void
 DiskIOReader::Seekg(int64_t pos) {
     fs_.seekg(pos);
 }
+void
+DiskIOReader::Seekg(int64_t pos, std::ios_base::seekdir seekdir) {
+    fs_.seekg(pos, seekdir);
+}
 
 int64_t
 DiskIOReader::Length() {
