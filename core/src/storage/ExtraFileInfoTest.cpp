@@ -16,60 +16,59 @@
 #include "gtest/gtest.h"
 
 #include "ExtraFileInfo.h"
+#include "crc32c/crc32c.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
-#include "crc32c/crc32c.h"
 
 INITIALIZE_EASYLOGGINGPP
 
-namespace milvus{
-    namespace storage{
+namespace milvus {
+namespace storage {
 
 /* ExtraFileInfoTest */
 class ExtraFileInfoTest : public testing::Test {
-protected:
+ protected:
 };
 
 TEST_F(ExtraFileInfoTest, WriteFileTest) {
-            std::string raw = "helloworldhelloworld";
+    std::string raw = "helloworldhelloworld";
 
-            std::string directory = "/home/godchen/";
-            storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
-            storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
-            storage::OperationPtr operation_ptr = std::make_shared<storage::DiskOperation>(directory);
-            const storage::FSHandlerPtr fs_ptr = std::make_shared<storage::FSHandler>(reader_ptr, writer_ptr,
-                                                                                      operation_ptr);
-            std::string file_path = "/home/godchen/test.txt";
+    std::string directory = "/home/godchen/";
+    storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
+    storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
+    storage::OperationPtr operation_ptr = std::make_shared<storage::DiskOperation>(directory);
+    const storage::FSHandlerPtr fs_ptr = std::make_shared<storage::FSHandler>(reader_ptr, writer_ptr, operation_ptr);
+    std::string file_path = "/home/godchen/test.txt";
 
-            auto record = std::unordered_map<std::string, std::string>();
-            record.insert(std::make_pair("test", "test"));
-            WriteMagic(fs_ptr, file_path);
-            WriteHeaderValues(fs_ptr, file_path, record);
+    auto record = std::unordered_map<std::string, std::string>();
+    record.insert(std::make_pair("test", "test"));
+    WriteMagic(fs_ptr, file_path);
+    WriteHeaderValues(fs_ptr, file_path, record);
 
-            if (!fs_ptr->writer_ptr_->in_open(file_path.c_str())) {
-                std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
-            }
-            fs_ptr->writer_ptr_->seekp(0, std::ios_base::end);
+    if (!fs_ptr->writer_ptr_->in_open(file_path.c_str())) {
+        std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+    }
+    fs_ptr->writer_ptr_->seekp(0, std::ios_base::end);
 
-            size_t num_bytes = raw.size();
-            fs_ptr->writer_ptr_->write(&num_bytes, sizeof(size_t));
-            fs_ptr->writer_ptr_->write((void *) (raw.data()), num_bytes);
-            fs_ptr->writer_ptr_->close();
+    size_t num_bytes = raw.size();
+    fs_ptr->writer_ptr_->Write(&num_bytes, sizeof(size_t));
+    fs_ptr->writer_ptr_->Write((void*)(raw.data()), num_bytes);
+    fs_ptr->writer_ptr_->Close();
 
-            int result_sum = CalculateSum(fs_ptr, file_path);
-            WriteSum(fs_ptr, file_path, result_sum);
+    int result_sum = CalculateSum(fs_ptr, file_path);
+    WriteSum(fs_ptr, file_path, result_sum);
 
-            ASSERT_TRUE(CheckSum(fs_ptr, file_path));
-            ASSERT_TRUE(ReadHeaderValue(fs_ptr, file_path, "test") == "test");
+    ASSERT_TRUE(CheckSum(fs_ptr, file_path));
+    ASSERT_TRUE(ReadHeaderValue(fs_ptr, file_path, "test") == "test");
 
-            ASSERT_TRUE(WriteHeaderValue(fs_ptr, file_path, "github", "gaylab"));
-            ASSERT_TRUE(ReadHeaderValue(fs_ptr, file_path, "github") == "gaylab");
-            result_sum = CalculateSum(fs_ptr, file_path);
-            WriteSum(fs_ptr, file_path, result_sum, true);
-            ASSERT_TRUE(CheckMagic(fs_ptr, file_path));
-            ASSERT_TRUE(CheckSum(fs_ptr, file_path));
-        }
+    ASSERT_TRUE(WriteHeaderValue(fs_ptr, file_path, "github", "gaylab"));
+    ASSERT_TRUE(ReadHeaderValue(fs_ptr, file_path, "github") == "gaylab");
+    result_sum = CalculateSum(fs_ptr, file_path);
+    WriteSum(fs_ptr, file_path, result_sum, true);
+    ASSERT_TRUE(CheckMagic(fs_ptr, file_path));
+    ASSERT_TRUE(CheckSum(fs_ptr, file_path));
 }
+}  // namespace storage
 
-}
+}  // namespace milvus

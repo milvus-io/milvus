@@ -37,8 +37,7 @@ DiskIOReader::Seekg(int64_t pos, std::ios_base::seekdir seekdir) {
 
 std::string
 DiskIOReader::totallyRead() {
-    std::string str((std::istreambuf_iterator<char>(fs_)),
-                    std::istreambuf_iterator<char>());
+    std::string str((std::istreambuf_iterator<char>(fs_)), std::istreambuf_iterator<char>());
     return str;
 }
 

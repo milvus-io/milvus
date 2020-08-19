@@ -17,9 +17,8 @@
 
 #pragma once
 
-#include <memory>
 #include <iostream>
-
+#include <memory>
 
 #include "storage/IOReader.h"
 #include "storage/IOWriter.h"

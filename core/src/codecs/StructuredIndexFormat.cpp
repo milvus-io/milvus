@@ -27,10 +27,10 @@
 #include "db/Types.h"
 #include "knowhere/index/structured_index/StructuredIndexSort.h"
 
+#include "storage/ExtraFileInfo.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "storage/ExtraFileInfo.h"
 
 namespace milvus {
 namespace codec {
@@ -86,22 +86,22 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
     knowhere::BinarySet load_data_list;
 
     std::string full_file_path = file_path + STRUCTURED_INDEX_POSTFIX;
-    CHECK_MAGIC_VALID(fs_ptr,full_file_path);
-    CHECK_SUM_VALID(fs_ptr,full_file_path);
+    CHECK_MAGIC_VALID(fs_ptr, full_file_path);
+    CHECK_SUM_VALID(fs_ptr, full_file_path);
     if (!fs_ptr->reader_ptr_->Open(full_file_path)) {
         THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open structured index: " + full_file_path);
     }
-    int64_t length = fs_ptr->reader_ptr_->Length()-MAGIC_SIZE-HEADER_SIZE-SUM_SIZE;
+    int64_t length = fs_ptr->reader_ptr_->Length() - MAGIC_SIZE - HEADER_SIZE - SUM_SIZE;
     if (length <= 0) {
         THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Invalid structured index length: " + full_file_path);
     }
 
     size_t rp = 0;
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE+HEADER_SIZE);
+    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
 
     int32_t data_type = 0;
     fs_ptr->reader_ptr_->Read(&data_type, sizeof(data_type));
-    rp += sizeof(data_type)+MAGIC_SIZE+HEADER_SIZE;
+    rp += sizeof(data_type) + MAGIC_SIZE + HEADER_SIZE;
     fs_ptr->reader_ptr_->Seekg(rp);
 
     LOG_ENGINE_DEBUG_ << "Start to read_index(" << full_file_path << ") length: " << length << " bytes";
@@ -148,16 +148,16 @@ StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const 
 
     std::string full_file_path = file_path + STRUCTURED_INDEX_POSTFIX;
     // TODO:add extra info
-    std::unordered_map<std::string,std::string> maps;
-    WRITE_MAGIC(fs_ptr,full_file_path)
-    WRITE_HEADER(fs_ptr,full_file_path, maps);
+    std::unordered_map<std::string, std::string> maps;
+    WRITE_MAGIC(fs_ptr, full_file_path)
+    WRITE_HEADER(fs_ptr, full_file_path, maps);
 
     auto binaryset = index->Serialize(knowhere::Config());
 
     if (!fs_ptr->writer_ptr_->Open(full_file_path)) {
         THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open structured index: " + full_file_path);
     }
-    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE+HEADER_SIZE);
+    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->writer_ptr_->Write(&data_type, sizeof(data_type));
 
     for (auto& iter : binaryset.binary_map_) {
@@ -173,7 +173,7 @@ StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const 
     }
 
     fs_ptr->writer_ptr_->Close();
-    WRITE_SUM(fs_ptr,full_file_path);
+    WRITE_SUM(fs_ptr, full_file_path);
 
     double span = recorder.RecordSection("End");
     double rate = fs_ptr->writer_ptr_->Length() * 1000000.0 / span / 1024 / 1024;

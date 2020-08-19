@@ -25,7 +25,7 @@ bool
 DiskIOWriter::in_open(const std::string& name) {
     name_ = name;
     len_ = 0;
-    fs_ = std::fstream(name_, std::ios::out | std::ios::binary|std::ios::in);
+    fs_ = std::fstream(name_, std::ios::out | std::ios::binary | std::ios::in);
     return fs_.good();
 }
 
@@ -52,7 +52,6 @@ void
 DiskIOWriter::seekp(int64_t pos, std::ios_base::seekdir seekdir) {
     fs_.seekp(pos, seekdir);
 }
-
 
 }  // namespace storage
 }  // namespace milvus

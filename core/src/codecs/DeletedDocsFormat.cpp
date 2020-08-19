@@ -26,9 +26,9 @@
 #include <string>
 #include <vector>
 
+#include "storage/ExtraFileInfo.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
-#include "storage/ExtraFileInfo.h"
 
 namespace milvus {
 namespace codec {
@@ -46,13 +46,13 @@ DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& 
                         segment::DeletedDocsPtr& deleted_docs) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
 
-    CHECK_MAGIC_VALID(fs_ptr,full_file_path);
-    CHECK_SUM_VALID(fs_ptr,full_file_path);
+    CHECK_MAGIC_VALID(fs_ptr, full_file_path);
+    CHECK_SUM_VALID(fs_ptr, full_file_path);
     if (!fs_ptr->reader_ptr_->Open(full_file_path)) {
         THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open deleted docs file: " + full_file_path);
     }
 
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE+HEADER_SIZE);
+    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
     size_t num_bytes;
     fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t));
 
@@ -100,19 +100,19 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
         delete_ids.insert(delete_ids.end(), deleted_docs_list.begin(), deleted_docs_list.end());
     }
     // TODO:add extra info
-    std::unordered_map<std::string,std::string> maps;
-    WRITE_MAGIC(fs_ptr,temp_path)
-    WRITE_HEADER(fs_ptr,temp_path, maps);
+    std::unordered_map<std::string, std::string> maps;
+    WRITE_MAGIC(fs_ptr, temp_path)
+    WRITE_HEADER(fs_ptr, temp_path, maps);
 
     if (!fs_ptr->writer_ptr_->Open(temp_path)) {
         THROW_ERROR(SERVER_CANNOT_CREATE_FILE, "Fail to write file: " + temp_path);
     }
 
-    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE+HEADER_SIZE);
+    fs_ptr->writer_ptr_->seekp(MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->writer_ptr_->Write(&new_num_bytes, sizeof(size_t));
     fs_ptr->writer_ptr_->Write(delete_ids.data(), new_num_bytes);
     fs_ptr->writer_ptr_->Close();
-    WRITE_SUM(fs_ptr,temp_path);
+    WRITE_SUM(fs_ptr, temp_path);
 
     // Move temp file to delete file
     std::experimental::filesystem::rename(temp_path, full_file_path);
@@ -121,13 +121,13 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
 void
 DeletedDocsFormat::ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, size_t& size) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
-    CHECK_MAGIC_VALID(fs_ptr,full_file_path);
-    CHECK_SUM_VALID(fs_ptr,full_file_path);
+    CHECK_MAGIC_VALID(fs_ptr, full_file_path);
+    CHECK_SUM_VALID(fs_ptr, full_file_path);
     if (!fs_ptr->writer_ptr_->Open(full_file_path)) {
         THROW_ERROR(SERVER_CANNOT_CREATE_FILE, "Fail to open deleted docs file: " + full_file_path);
     }
 
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE+HEADER_SIZE);
+    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
     size_t num_bytes;
     fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t));
 

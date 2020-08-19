@@ -14,11 +14,12 @@
 if ( DEFINED ENV{MILVUS_CRC32C_URL} )
     set( CRC32C_SOURCE_URL "$ENV{MILVUS_CRC32C_URL}" )
 endif()
-
+set( CRC32C_SOURCE_URL
+        "https://github.com/godchen0212/crc32c/archive/${CRC32C_VERSION}.zip")
 message( STATUS "Building crc32c-master from source" )
 FetchContent_Declare(
         crc32c
-#        URL         ${CRC32C_SOURCE_URL}
+        URL         ${CRC32C_SOURCE_URL}
 #        URL_MD5     "b45bf1089a382e81f6b661062c10d0c2"
         SOURCE_DIR  ${CMAKE_CURRENT_BINARY_DIR}/crc32c-src
         BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/crc32c-build
