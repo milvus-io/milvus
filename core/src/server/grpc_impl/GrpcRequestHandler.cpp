@@ -726,7 +726,7 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
         const auto& field = request->fields(i);
 
         FieldSchema field_schema;
-        field_schema.field_type_ = (engine::DataType)field.type();
+        field_schema.field_type_ = static_cast<engine::DataType>(field.type());
 
         // Currently only one extra_param
         if (field.extra_params_size() != 0) {
