@@ -138,8 +138,6 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   echo "clang-format check passed!"
 
   # clang-tidy check
-  # check rules referenced from:
-  # https://github.com/apache/incubator-mxnet/blob/master/.clang-tidy
 #  make check-clang-tidy
 #  if [ $? -ne 0 ]; then
 #      echo "ERROR! clang-tidy check failed"
