@@ -20,6 +20,7 @@
 #include <string>
 
 #include "db/DB.h"
+#include "db/DBFactory.h"
 #include "db/meta/MetaAdapter.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Context.h"
@@ -391,11 +392,26 @@ class SchedulerTest : public BaseTest {
     TearDown() override;
 };
 
+///////////////////////////////////////////////////////////////////////////////
 class EventTest : public BaseTest {
  protected:
     StorePtr store_;
 
  protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+class WalTest : public ::testing::Test {
+ protected:
+    std::shared_ptr<DB> db_;
+
+    milvus::engine::DBOptions
+    GetOptions();
+
     void
     SetUp() override;
     void

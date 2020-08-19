@@ -40,7 +40,7 @@ class MemCollection {
     Add(int64_t partition_id, const VectorSourcePtr& source);
 
     Status
-    Delete(const std::vector<id_t>& ids);
+    Delete(const std::vector<idx_t>& ids);
 
     Status
     EraseMem(int64_t partition_id);

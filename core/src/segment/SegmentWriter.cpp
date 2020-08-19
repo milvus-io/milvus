@@ -359,7 +359,7 @@ SegmentWriter::RowCount() {
 }
 
 Status
-SegmentWriter::LoadUids(std::vector<engine::id_t>& uids) {
+SegmentWriter::LoadUids(std::vector<engine::idx_t>& uids) {
     engine::BinaryDataPtr raw;
     auto status = segment_ptr_->GetFixedFieldData(engine::FIELD_UID, raw);
     if (!status.ok()) {
@@ -371,14 +371,14 @@ SegmentWriter::LoadUids(std::vector<engine::id_t>& uids) {
         return Status(DB_ERROR, "Invalid id field");
     }
 
-    if (raw->data_.size() % sizeof(engine::id_t) != 0) {
+    if (raw->data_.size() % sizeof(engine::idx_t) != 0) {
         std::string err_msg = "Failed to load uids: illegal file size";
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
     uids.clear();
-    uids.resize(raw->data_.size() / sizeof(engine::id_t));
+    uids.resize(raw->data_.size() / sizeof(engine::idx_t));
     memcpy(uids.data(), raw->data_.data(), raw->data_.size());
 
     return Status::OK();

@@ -150,7 +150,7 @@ MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id
 }
 
 Status
-MemManagerImpl::DeleteEntities(int64_t collection_id, const std::vector<id_t>& entity_ids, uint64_t lsn) {
+MemManagerImpl::DeleteEntities(int64_t collection_id, const std::vector<idx_t>& entity_ids, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
     MemCollectionPtr mem = GetMemByCollection(collection_id);
 

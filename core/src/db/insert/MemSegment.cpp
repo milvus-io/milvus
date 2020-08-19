@@ -197,12 +197,12 @@ MemSegment::Add(const VectorSourcePtr& source) {
 }
 
 Status
-MemSegment::Delete(const std::vector<id_t>& ids) {
+MemSegment::Delete(const std::vector<idx_t>& ids) {
     engine::SegmentPtr segment_ptr;
     segment_writer_ptr_->GetSegment(segment_ptr);
 
     // Check wither the doc_id is present, if yes, delete it's corresponding buffer
-    std::vector<id_t> uids;
+    std::vector<idx_t> uids;
     segment_writer_ptr_->LoadUids(uids);
 
     std::vector<offset_t> offsets;
