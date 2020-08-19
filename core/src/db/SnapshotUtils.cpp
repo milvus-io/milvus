@@ -153,7 +153,7 @@ IsVectorField(const engine::snapshot::FieldPtr& field) {
         return false;
     }
 
-    engine::DataType ftype = static_cast<engine::DataType>(field->GetFtype());
+    engine::DataType ftype = field->GetFtype();
     return IsVectorField(ftype);
 }
 

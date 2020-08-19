@@ -66,7 +66,7 @@ GetCollectionInfoReq::OnExecute() {
             }
 
             auto field_name = field->GetName();
-            field_schema.field_type_ = (engine::DataType)field->GetFtype();
+            field_schema.field_type_ = field->GetFtype();
             field_schema.field_params_ = field->GetParams();
 
             collection_schema_.fields_.insert(std::make_pair(field_name, field_schema));

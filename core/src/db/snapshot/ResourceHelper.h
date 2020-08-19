@@ -135,7 +135,7 @@ CreateResPtr<SchemaCommit>() {
 template <>
 inline Field::Ptr
 CreateResPtr<Field>() {
-    return std::make_shared<Field>("", 0, 0);
+    return std::make_shared<Field>("", 0, DataType::NONE);
 }
 
 template <>

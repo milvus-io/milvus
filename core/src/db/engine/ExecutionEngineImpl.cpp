@@ -319,11 +319,11 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
                 return Status(SERVER_INVALID_DSL_PARAMETER, "Field: " + name + " is not existed");
             }
             auto field = field_visitor->GetField();
-            if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
-                field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
+            if (field->GetFtype() == engine::DataType::VECTOR_FLOAT ||
+                field->GetFtype() == engine::DataType::VECTOR_BINARY) {
                 STATUS_CHECK(segment_ptr->GetVectorIndex(name, vec_index));
             } else {
-                attr_type.insert(std::make_pair(name, (engine::DataType)field->GetFtype()));
+                attr_type.insert(std::make_pair(name, field->GetFtype()));
             }
         }
 
