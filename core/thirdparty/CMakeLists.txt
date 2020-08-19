@@ -33,7 +33,6 @@ else()
 endif()
 message( STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}" )
 
-
 # ----------------------------------------------------------------------
 # Find pthreads
 
