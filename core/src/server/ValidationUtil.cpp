@@ -351,7 +351,7 @@ ValidateSegmentRowCount(int64_t segment_row_count) {
 }
 
 Status
-ValidateIndexMetricType(const std::string& metric_type) {
+ValidateIndexMetricType(const std::string& metric_type, const std::string& index_type) {
     static std::set<std::string> s_valid_metric = {
         milvus::knowhere::Metric::L2,
         milvus::knowhere::Metric::IP,
@@ -361,12 +361,32 @@ ValidateIndexMetricType(const std::string& metric_type) {
         milvus::knowhere::Metric::SUBSTRUCTURE,
         milvus::knowhere::Metric::SUPERSTRUCTURE,
     };
-    if (s_valid_metric.find(metric_type) == s_valid_metric.end()) {
-        std::string msg =
-            "Invalid index metric type: " + metric_type + ". " + "Make sure the metric type is in MetricType list.";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
+
+    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
+        index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+        if (s_valid_metric.find(metric_type) == s_valid_metric.end()) {
+            std::string msg =
+                "Invalid index metric type: " + metric_type + ". " + "Make sure the metric type is in MetricType list.";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
+        }
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
+        // binary
+        if (metric_type != knowhere::Metric::HAMMING && metric_type != knowhere::Metric::JACCARD &&
+            metric_type != knowhere::Metric::TANIMOTO) {
+            std::string msg = "Index metric type " + metric_type + " does not match index type " + index_type;
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    } else {
+        // float
+        if (metric_type != knowhere::Metric::L2 && metric_type != knowhere::Metric::IP) {
+            std::string msg = "Index metric type " + metric_type + " does not match index type " + index_type;
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
     }
+
     return Status::OK();
 }
 

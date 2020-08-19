@@ -94,7 +94,12 @@ BuildIndexTask::OnExecute() {
         return Status(DB_ERROR, "execution engine is null");
     }
 
-    auto status = execution_engine_->BuildIndex();
+    Status status;
+    try {
+        status = execution_engine_->BuildIndex();
+    } catch (std::exception& e) {
+        status = Status(DB_ERROR, e.what());
+    }
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to build index: " << status.ToString();
         execution_engine_ = nullptr;
