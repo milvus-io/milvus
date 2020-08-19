@@ -32,5 +32,10 @@ Optimizer::Run(const TaskPtr& task) {
     return false;
 }
 
+void
+Optimizer::Stop() {
+    pass_list_ = std::vector<PassPtr>();
+}
+
 }  // namespace scheduler
 }  // namespace milvus

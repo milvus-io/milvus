@@ -38,6 +38,9 @@ class Optimizer {
     bool
     Run(const TaskPtr& task);
 
+    void
+    Stop();
+
  private:
     std::vector<PassPtr> pass_list_;
 };
