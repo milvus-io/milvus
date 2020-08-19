@@ -21,6 +21,7 @@ entity = gen_entities(1)
 entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)
 raw_vectors, binary_entities = gen_binary_entities(nb)
+default_fields = gen_default_fields()
 
 
 class TestCreateBase:
@@ -38,21 +39,33 @@ class TestCreateBase:
         '''
         connect.create_partition(collection, tag)
 
-    @pytest.mark.level(3)
-    def _test_create_partition_limit(self, connect, collection, args):
+    @pytest.mark.level(2)
+    def test_create_partition_limit(self, connect, collection, args):
         '''
         target: test create partitions, check status returned
         method: call function: create_partition for 4097 times
-        expected: status not ok
+        expected: exception raised
         '''
+        threads_num = 16
+        threads = []
         if args["handler"] == "HTTP":
             pytest.skip("skip in http mode")
 
-        for i in range(4096):
-            tag_tmp = gen_unique_str()
-            connect.create_partition(collection, tag_tmp)
+        def create(connect, threads_num):
+            for i in range(4096 // threads_num):
+                tag_tmp = gen_unique_str()
+                connect.create_partition(collection, tag_tmp)
+
+        for i in range(threads_num):
+            m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
+            t = threading.Thread(target=create, args=(m, threads_num, ))
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join()
+        tag_tmp = gen_unique_str()
         with pytest.raises(Exception) as e:
-            connect.create_partition(collection, tag)
+            connect.create_partition(collection, tag_tmp)
 
     def test_create_partition_repeat(self, connect, collection):
         '''
@@ -147,7 +160,8 @@ class TestCreateBase:
         res = connect.count_entities(id_collection)
         assert res == nb * 2
 
-    def _test_create_partition_insert_same_tags_two_collections(self, connect, collection):
+    @pytest.mark.level(2)
+    def test_create_partition_insert_same_tags_two_collections(self, connect, collection):
         '''
         target: test create two partitions, and insert vectors with the same tag to each collection, check status returned
         method: call function: create_partition
@@ -156,16 +170,13 @@ class TestCreateBase:
         connect.create_partition(collection, tag)
         collection_new = gen_unique_str()
         connect.create_collection(collection_new, default_fields)
-        connect.create_collection(param)
         connect.create_partition(collection_new, tag)
-        ids = [i for i in range(nb)]
-        status, ids = connect.insert(collection, entities, ids, partition_tag=tag)
-        ids = [(i+nb) for i in range(nq)]
-        status, ids = connect.insert(collection_new, entities, ids, partition_tag=tag)
+        ids = connect.insert(collection, entities, partition_tag=tag)
+        ids = connect.insert(collection_new, entities, partition_tag=tag)
         connect.flush([collection, collection_new])
-        status, res = connect.count_entities(collection)
+        res = connect.count_entities(collection)
         assert res == nb
-        status, res = connect.count_entities(collection_new)
+        res = connect.count_entities(collection_new)
         assert res == nb
 
 
