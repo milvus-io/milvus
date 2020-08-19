@@ -23,6 +23,7 @@ FetchContent_Declare(
     grpc
     URL         ${GRPC_SOURCE_URL}
     URL_MD5     "478215c151a144c2d8625b49ff1b70aa"
+    DOWNLOAD_DIR ${MILVUS_BINARY_DIR}/3rdparty_download/download
     SOURCE_DIR  ${CMAKE_CURRENT_BINARY_DIR}/grpc-src
     BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/grpc-build )
 

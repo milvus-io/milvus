@@ -68,6 +68,7 @@ set(link_lib
         utils
         )
 
+
 if (MILVUS_WITH_PROMETHEUS)
     set(link_lib
             ${link_lib}

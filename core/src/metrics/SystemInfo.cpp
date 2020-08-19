@@ -41,13 +41,13 @@ SystemInfo::Init() {
     // initialize CPU information
     try {
         struct tms time_sample;
-        char line[128];
         last_cpu_ = times(&time_sample);
         last_sys_cpu_ = time_sample.tms_stime;
         last_user_cpu_ = time_sample.tms_utime;
         num_processors_ = 0;
         FILE* file = fopen("/proc/cpuinfo", "r");
         if (file) {
+            char line[128];
             while (fgets(line, 128, file) != nullptr) {
                 if (strncmp(line, "processor", 9) == 0) {
                     num_processors_++;
@@ -202,7 +202,7 @@ SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
                 return total_time_array;
             }
 
-            sscanf(buffer, "cpu  %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu", &user, &nice, &system,
+            sscanf(buffer, "cpu  %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld", &user, &nice, &system,
                    &idle, &iowait, &irq, &softirq, &steal, &guest, &guestnice);
 
             work_time_array.push_back(user + nice + system);

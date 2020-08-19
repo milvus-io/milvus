@@ -265,6 +265,5 @@ endif ()
 target_link_libraries(test_structured_index_sort ${depend_libs} ${unittest_libs} ${basic_libs})
 install(TARGETS test_structured_index_sort DESTINATION unittest)
 
-#add_subdirectory(faiss_ori)
 #add_subdirectory(faiss_benchmark)
 #add_subdirectory(metric_alg_benchmark)
