@@ -29,8 +29,8 @@ set( FETCHCONTENT_QUIET     OFF )
 # ----------------------------------------------------------------------
 # Find pthreads
 
-set( THREADS_PREFER_PTHREAD_FLAG ON )
-find_package( Threads REQUIRED )
+ set( THREADS_PREFER_PTHREAD_FLAG ON )
+ find_package( Threads REQUIRED )
 
 # ****************************** Thirdparty googletest ***************************************
 if ( MILVUS_BUILD_TESTS )
@@ -55,4 +55,9 @@ endif()
 # ****************************** Thirdparty perftools ***************************************
 if ( ENABLE_CPU_PROFILING )
     add_subdirectory( profilers )
+endif ()
+
+# ****************************** Thirdparty mysqlpp ***************************************
+if ( MILVUS_WITH_MYSQLPP )
+    add_subdirectory( mysqlpp )
 endif ()

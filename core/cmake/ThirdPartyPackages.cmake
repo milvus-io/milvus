@@ -11,7 +11,7 @@
 
 set(MILVUS_THIRDPARTY_DEPENDENCIES
 
-        MySQLPP
+        # MySQLPP
         Prometheus
         SQLite
         fiu
@@ -210,11 +210,11 @@ foreach (_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
 endforeach ()
 
 
-if (DEFINED ENV{MILVUS_MYSQLPP_URL})
-    set(MYSQLPP_SOURCE_URL "$ENV{MILVUS_MYSQLPP_URL}")
-else ()
-    set(MYSQLPP_SOURCE_URL "https://tangentsoft.com/mysqlpp/releases/mysql++-${MYSQLPP_VERSION}.tar.gz")
-endif ()
+# if (DEFINED ENV{MILVUS_MYSQLPP_URL})
+#     set(MYSQLPP_SOURCE_URL "$ENV{MILVUS_MYSQLPP_URL}")
+# else ()
+#     set(MYSQLPP_SOURCE_URL "https://tangentsoft.com/mysqlpp/releases/mysql++-${MYSQLPP_VERSION}.tar.gz")
+# endif ()
 
 if (DEFINED ENV{MILVUS_PROMETHEUS_URL})
     set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
@@ -254,56 +254,56 @@ endif ()
 # ----------------------------------------------------------------------
 # MySQL++
 
-macro(build_mysqlpp)
-    message(STATUS "Building MySQL++-${MYSQLPP_VERSION} from source")
-    set(MYSQLPP_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep")
-    set(MYSQLPP_INCLUDE_DIR "${MYSQLPP_PREFIX}/include")
-    set(MYSQLPP_SHARED_LIB
-            "${MYSQLPP_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}")
-
-    set(MYSQLPP_CONFIGURE_ARGS
-            "--prefix=${MYSQLPP_PREFIX}"
-            "--enable-thread-check"
-            "CFLAGS=${EP_C_FLAGS}"
-            "CXXFLAGS=${EP_CXX_FLAGS}"
-            "LDFLAGS=-pthread")
-
-    ExternalProject_Add(mysqlpp_ep
-            URL
-            ${MYSQLPP_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            URL_MD5
-            "cda38b5ecc0117de91f7c42292dd1e79"
-            CONFIGURE_COMMAND
-            "./configure"
-            ${MYSQLPP_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            BUILD_BYPRODUCTS
-            ${MYSQLPP_SHARED_LIB})
-
-    file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
-    add_library(mysqlpp SHARED IMPORTED)
-    set_target_properties(
-            mysqlpp
-            PROPERTIES
-            IMPORTED_LOCATION "${MYSQLPP_SHARED_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${MYSQLPP_INCLUDE_DIR}")
-
-    add_dependencies(mysqlpp mysqlpp_ep)
-
-endmacro()
-
-if (MILVUS_WITH_MYSQLPP)
-
-    resolve_dependency(MySQLPP)
-    get_target_property(MYSQLPP_INCLUDE_DIR mysqlpp INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM "${MYSQLPP_INCLUDE_DIR}")
-    link_directories(SYSTEM ${MYSQLPP_PREFIX}/lib)
-endif ()
-
+# macro(build_mysqlpp)
+#     message(STATUS "Building MySQL++-${MYSQLPP_VERSION} from source")
+#     set(MYSQLPP_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep")
+#     set(MYSQLPP_INCLUDE_DIR "${MYSQLPP_PREFIX}/include")
+#     set(MYSQLPP_SHARED_LIB
+#             "${MYSQLPP_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}")
+#
+#     set(MYSQLPP_CONFIGURE_ARGS
+#             "--prefix=${MYSQLPP_PREFIX}"
+#             "--enable-thread-check"
+#             "CFLAGS=${EP_C_FLAGS}"
+#             "CXXFLAGS=${EP_CXX_FLAGS}"
+#             "LDFLAGS=-pthread")
+#
+#     ExternalProject_Add(mysqlpp_ep
+#             URL
+#             ${MYSQLPP_SOURCE_URL}
+#             ${EP_LOG_OPTIONS}
+#             URL_MD5
+#             "cda38b5ecc0117de91f7c42292dd1e79"
+#             CONFIGURE_COMMAND
+#             "./configure"
+#             ${MYSQLPP_CONFIGURE_ARGS}
+#             BUILD_COMMAND
+#             ${MAKE} ${MAKE_BUILD_ARGS}
+#             BUILD_IN_SOURCE
+#             1
+#             BUILD_BYPRODUCTS
+#             ${MYSQLPP_SHARED_LIB})
+#
+#     file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
+#     add_library(mysqlpp SHARED IMPORTED)
+#     set_target_properties(
+#             mysqlpp
+#             PROPERTIES
+#             IMPORTED_LOCATION "${MYSQLPP_SHARED_LIB}"
+#             INTERFACE_INCLUDE_DIRECTORIES "${MYSQLPP_INCLUDE_DIR}")
+#
+#     add_dependencies(mysqlpp mysqlpp_ep)
+#
+# endmacro()
+#
+# if (MILVUS_WITH_MYSQLPP)
+#
+#     resolve_dependency(MySQLPP)
+#     get_target_property(MYSQLPP_INCLUDE_DIR mysqlpp INTERFACE_INCLUDE_DIRECTORIES)
+#     include_directories(SYSTEM "${MYSQLPP_INCLUDE_DIR}")
+#     link_directories(SYSTEM ${MYSQLPP_PREFIX}/lib)
+# endif ()
+#
 # ----------------------------------------------------------------------
 # Prometheus
 
