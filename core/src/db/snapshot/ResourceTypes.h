@@ -23,8 +23,8 @@ namespace snapshot {
 
 using ID_TYPE = int64_t;
 using NUM_TYPE = int64_t;
-using FTYPE_TYPE = enum DataType;
-using FETYPE_TYPE = int64_t;
+using FTYPE_TYPE = DataType;
+using FETYPE_TYPE = FieldElementType;
 using TS_TYPE = int64_t;
 using LSN_TYPE = int64_t;
 using SIZE_TYPE = uint64_t;
