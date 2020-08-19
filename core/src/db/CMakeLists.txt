@@ -136,8 +136,8 @@ target_link_libraries( milvus_engine
                PUBLIC  knowhere
                        segment
                        cache
-                       storage
                        codecs
+                       storage
                        tracing
                        ${THIRD_PARTY_LIBS}
                        ${ENGINE_LIBS}

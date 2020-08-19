@@ -67,12 +67,12 @@ class TestLoadBase:
         for metric_type in binary_metrics():
             logging.getLogger().info(metric_type)
             get_binary_index["metric_type"] = metric_type
-            if metric_type in structure_metrics():
+            if get_binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in structure_metrics():
                 with pytest.raises(Exception) as e:
                     connect.create_index(binary_collection, binary_field_name, get_binary_index)
             else:
                 connect.create_index(binary_collection, binary_field_name, get_binary_index)
-                connect.load_collection(binary_collection)
+            connect.load_collection(binary_collection)
 
     def load_empty_collection(self, connect, collection):
         '''

@@ -676,9 +676,10 @@ Updates the index type and nlist of a collection.
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
-  "index_type": string,
+  "index_type": "IVF_FLAT",
+  "metric_type": "IP",
   "params": {
-      ......
+      "nlist": 1024
   }
 }
 </code></pre> </td></tr>

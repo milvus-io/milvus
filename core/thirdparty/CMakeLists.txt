@@ -47,6 +47,9 @@ if ( MILVUS_WITH_YAMLCPP )
     add_subdirectory( yaml-cpp )
 endif()
 
+# ****************************** Thirdparty crc32c ***************************************
+add_subdirectory( crc32c )
+
 # ****************************** Thirdparty opentracing ***************************************
 if ( MILVUS_WITH_OPENTRACING )
     add_subdirectory( opentracing )
