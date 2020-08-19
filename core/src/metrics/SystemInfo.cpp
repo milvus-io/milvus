@@ -202,7 +202,7 @@ SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
                 return total_time_array;
             }
 
-            sscanf(buffer, "cpu  %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu", &user, &nice, &system,
+            sscanf(buffer, "cpu  %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld", &user, &nice, &system,
                    &idle, &iowait, &irq, &softirq, &steal, &guest, &guestnice);
 
             work_time_array.push_back(user + nice + system);
