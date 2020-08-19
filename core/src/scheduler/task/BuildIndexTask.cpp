@@ -97,7 +97,7 @@ BuildIndexTask::OnExecute() {
     Status status;
     try {
         status = execution_engine_->BuildIndex();
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         status = Status(DB_ERROR, e.what());
     }
     if (!status.ok()) {
