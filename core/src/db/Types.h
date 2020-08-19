@@ -79,7 +79,7 @@ enum class DataType {
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-enum FieldElementType {
+enum class FieldElementType {
     FET_NONE = 0,
     FET_RAW = 1,
     FET_BLOOM_FILTER = 2,
