@@ -109,16 +109,9 @@ if ( MILVUS_GPU_VERSION )
     target_sources( milvus_engine PUBLIC ${WRAPPER_GPU_FILES} )
 endif ()
 
-# cannot be enabled together with ENABLE_CPU_PROFILING
-if ( ENABLE_MEM_PROFILING )
-    list( APPEND THIRD_PARTY_LIBS tcmalloc )
-endif ()
-
 if ( ENABLE_CPU_PROFILING )
     list( APPEND THIRD_PARTY_LIBS
-                 PUBLIC  gperftools
-                         libunwind
-                         )
+                 PUBLIC  gperftools )
 endif ()
 
 if ( MILVUS_WITH_PROMETHEUS )

@@ -15,7 +15,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -45,13 +45,13 @@ DropIndexReq::OnExecute() {
         TimeRecorderAuto rc(hdr);
 
         bool exist = false;
-        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
         if (!exist) {
             return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
         // step 2: drop index
-        status = DBWrapper::DB()->DropIndex(collection_name_, field_name_);
+        auto status = DBWrapper::DB()->DropIndex(collection_name_, field_name_);
         fiu_do_on("DropIndexReq.OnExecute.drop_index_fail", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;

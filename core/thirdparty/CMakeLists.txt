@@ -51,3 +51,8 @@ endif()
 if ( MILVUS_WITH_OPENTRACING )
     add_subdirectory( opentracing )
 endif()
+
+# ****************************** Thirdparty perftools ***************************************
+if ( ENABLE_CPU_PROFILING )
+    add_subdirectory( profilers )
+endif ()

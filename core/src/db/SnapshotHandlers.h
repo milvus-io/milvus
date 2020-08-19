@@ -47,6 +47,7 @@ struct SegmentsToIndexCollector : public snapshot::SegmentCommitIterator {
 
     std::string field_name_;
     snapshot::IDS_TYPE& segment_ids_;
+    int64_t build_index_threshold_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

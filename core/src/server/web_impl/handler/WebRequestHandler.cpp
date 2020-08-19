@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include "config/ServerConfig.h"
 #include "db/Utils.h"
@@ -222,6 +222,7 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
         one_json["id"] = id_array[i];
         json_res.push_back(one_json);
     }
+    return Status::OK();
 }
 
 ///////////////////////// WebRequestHandler methods ///////////////////////////////////////

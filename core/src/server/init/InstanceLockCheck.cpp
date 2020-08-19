@@ -16,7 +16,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include "utils/Log.h"
 

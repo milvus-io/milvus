@@ -9,10 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <libgen.h>
 #include <cctype>
 #include <string>
+#include <unordered_map>
 
 #include <boost/filesystem.hpp>
 
@@ -124,8 +125,34 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level) {
 }
 
 Status
-LogMgr::InitLog(bool trace_enable, bool debug_enable, bool info_enable, bool warning_enable, bool error_enable,
-                bool fatal_enable, const std::string& logs_path, int64_t max_log_file_size, int64_t delete_exceeds) {
+LogMgr::InitLog(bool trace_enable, const std::string& level, const std::string& logs_path, int64_t max_log_file_size,
+                int64_t delete_exceeds) {
+    std::unordered_map<std::string, int64_t> level_to_int{
+        {"debug", 5}, {"info", 4}, {"warning", 3}, {"error", 2}, {"fatal", 1},
+    };
+
+    bool debug_enable = false;
+    bool info_enable = false;
+    bool warning_enable = false;
+    bool error_enable = false;
+    bool fatal_enable = false;
+
+    switch (level_to_int[level]) {
+        case 5:
+            debug_enable = true;
+        case 4:
+            info_enable = true;
+        case 3:
+            warning_enable = true;
+        case 2:
+            error_enable = true;
+        case 1:
+            fatal_enable = true;
+            break;
+        default:
+            return Status(SERVER_UNEXPECTED_ERROR, "invalid log level");
+    }
+
     el::Configurations defaultConf;
     defaultConf.setToDefault();
     defaultConf.setGlobally(el::ConfigurationType::Format, "[%datetime][%level]%msg");

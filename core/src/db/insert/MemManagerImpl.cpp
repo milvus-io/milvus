@@ -11,7 +11,7 @@
 
 #include "db/insert/MemManagerImpl.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <thread>
 
 #include "VectorSource.h"
@@ -131,6 +131,8 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
 
                 break;
             }
+            default:
+                break;
         }
     }
 

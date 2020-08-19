@@ -18,7 +18,7 @@
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 namespace milvus {
 namespace scheduler {
@@ -50,15 +50,14 @@ FaissIVFPQPass::Run(const TaskPtr& task) {
 
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPQPass: gpu disable, specify cpu to search!", "search", 0);
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFPQPass: gpu disable, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_task->nq() < (uint64_t)threshold_) {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPQPass: nq < gpu_search_threshold, specify cpu to search!",
-                                    "search", 0);
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFPQPass: nq < gpu_search_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPQPass: nq >= gpu_search_threshold, specify gpu %d to search!",
-                                    "search", 0, search_gpus_[idx_]);
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFPQPass: nq >= gpu_search_threshold, specify gpu %d to search!",
+                                    search_gpus_[idx_]);
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[idx_]);
         idx_ = (idx_ + 1) % search_gpus_.size();
     }
