@@ -28,6 +28,7 @@ constexpr int64_t MAX_DIMENSION = 32768;
 constexpr int32_t MAX_SEGMENT_ROW_COUNT = 4 * 1024 * 1024;
 constexpr int64_t DEFAULT_SEGMENT_ROW_COUNT = 100000;  // default row count per segment when creating collection
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * MB;
+constexpr int64_t MAX_WAL_FILE_SIZE = 256 * MB;
 
 }  // namespace engine
 }  // namespace milvus

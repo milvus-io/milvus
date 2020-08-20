@@ -75,7 +75,7 @@ MemCollection::Add(int64_t partition_id, const milvus::engine::VectorSourcePtr& 
 }
 
 Status
-MemCollection::Delete(const std::vector<id_t>& ids) {
+MemCollection::Delete(const std::vector<idx_t>& ids) {
     // Locate which collection file the doc id lands in
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -182,7 +182,7 @@ MemCollection::ApplyDeletes() {
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
 
         // Step 1: Check delete_id in mem
-        std::vector<id_t> delete_ids;
+        std::vector<idx_t> delete_ids;
         {
             segment::IdBloomFilterPtr pre_bloom_filter;
             STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
@@ -197,11 +197,11 @@ MemCollection::ApplyDeletes() {
             }
         }
 
-        std::vector<engine::id_t> uids;
+        std::vector<engine::idx_t> uids;
         STATUS_CHECK(segment_reader->LoadUids(uids));
 
         std::sort(delete_ids.begin(), delete_ids.end());
-        std::set<id_t> ids_to_check(delete_ids.begin(), delete_ids.end());
+        std::set<idx_t> ids_to_check(delete_ids.begin(), delete_ids.end());
 
         // Step 2: Mark previous deleted docs file and bloom filter file stale
         auto& field_visitors_map = seg_visitor->GetFieldVisitors();

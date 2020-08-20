@@ -87,7 +87,7 @@ class DBImpl : public DB, public ConfigObserver {
 
     Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
-           id_t op_id) override;
+           idx_t op_id) override;
 
     Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
@@ -95,7 +95,7 @@ class DBImpl : public DB, public ConfigObserver {
                   DataChunkPtr& data_chunk) override;
 
     Status
-    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id) override;
+    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) override;
 
     Status
     Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) override;
