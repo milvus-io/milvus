@@ -1679,6 +1679,10 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
         if (dsl_json.empty()) {
             return Status{SERVER_INVALID_ARGUMENT, "Query dsl is null"};
         }
+        auto status = Status::OK();
+        if (vector_params.empty()) {
+            return Status(SERVER_INVALID_DSL_PARAMETER, "DSL must include vector query");
+        }
         for (const auto& vector_param : vector_params) {
             const std::string& vector_string = vector_param.json();
             milvus::json vector_json = json::parse(vector_string);
@@ -1716,11 +1720,16 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
         if (dsl_json.contains("bool")) {
             auto boolean_query_json = dsl_json["bool"];
             JSON_NULL_CHECK(boolean_query_json);
-            STATUS_CHECK(ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr));
+            status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr);
+            if (!status.ok()) {
+                return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool");
+            }
+        } else {
+            return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool query");
         }
         return Status::OK();
     } catch (std::exception& e) {
-        return Status{SERVER_INVALID_DSL_PARAMETER, e.what()};
+        return Status(SERVER_INVALID_DSL_PARAMETER, e.what());
     }
 }
 
