@@ -93,7 +93,7 @@ class WalFile {
 
     inline int64_t
     ReadStr(std::string& str, int64_t length) {
-        if (file_ == nullptr) {
+        if (file_ == nullptr || length <= 0) {
             return 0;
         }
 
@@ -120,11 +120,11 @@ class WalFile {
         return file_path_;
     }
 
-    idx_t
-    ReadLastOpId();
+    Status
+    ReadLastOpId(idx_t& op_id);
 
     void inline SeekForward(int64_t offset) {
-        if (file_ == nullptr) {
+        if (file_ == nullptr || mode_ != OpenMode::READ) {
             return;
         }
 

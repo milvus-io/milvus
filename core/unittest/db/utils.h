@@ -83,12 +83,17 @@ using IterateSegmentFileHandler = milvus::engine::snapshot::IterateHandler<Segme
 using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
 using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
 using SegmentFileIterator = milvus::engine::snapshot::SegmentFileIterator;
-using DB = milvus::engine::DB;
-using Status = milvus::Status;
 using Store = milvus::engine::snapshot::Store;
-
 using StorePtr = milvus::engine::snapshot::Store::Ptr;
 using MetaAdapterPtr = milvus::engine::meta::MetaAdapterPtr;
+
+using DB = milvus::engine::DB;
+using Status = milvus::Status;
+using idx_t = milvus::engine::idx_t;
+using IDNumbers = milvus::engine::IDNumbers;
+using DataChunk = milvus::engine::DataChunk;
+using DataChunkPtr = milvus::engine::DataChunkPtr;
+using BinaryData = milvus::engine::BinaryData;
 
 inline int
 RandomInt(int start, int end) {

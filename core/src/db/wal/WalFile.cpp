@@ -13,6 +13,8 @@
 #include "db/Constants.h"
 #include "db/Types.h"
 
+#include <limits>
+
 namespace milvus {
 namespace engine {
 
@@ -61,10 +63,11 @@ WalFile::ExceedMaxSize(int64_t append_size) {
     return (file_size_ + append_size) > MAX_WAL_FILE_SIZE;
 }
 
-idx_t
-WalFile::ReadLastOpId() {
-    if (file_ == nullptr) {
-        return 0;
+Status
+WalFile::ReadLastOpId(idx_t& op_id) {
+    op_id = std::numeric_limits<idx_t>::max();
+    if (file_ == nullptr || mode_ != OpenMode::READ) {
+        return Status(DB_ERROR, "File not opened or not read mode");
     }
 
     // current position
@@ -79,11 +82,14 @@ WalFile::ReadLastOpId() {
     int64_t offset = end_poz - sizeof(last_id);
     fseek(file_, offset, SEEK_SET);
 
-    fread(&last_id, 1, sizeof(last_id), file_);
+    int64_t bytes = fread(&last_id, 1, sizeof(last_id), file_);
+    if (bytes == sizeof(op_id)) {
+        op_id = last_id;
+    }
 
     // back to current postiion
     fseek(file_, cur_poz, SEEK_SET);
-    return last_id;
+    return Status::OK();
 }
 
 }  // namespace engine

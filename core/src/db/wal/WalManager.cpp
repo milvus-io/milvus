@@ -19,7 +19,6 @@
 #include <memory>
 #include <utility>
 
-#include <boost/filesystem.hpp>
 #include <experimental/filesystem>
 
 namespace milvus {
@@ -161,7 +160,8 @@ WalManager::Recovery(const DBPtr& db) {
         for (auto& pair : id_files) {
             WalFilePtr file = std::make_shared<WalFile>();
             file->OpenFile(pair.second.c_str(), WalFile::READ);
-            idx_t last_id = file->ReadLastOpId();
+            idx_t last_id = 0;
+            file->ReadLastOpId(last_id);
             if (last_id <= max_op_id) {
                 file->CloseFile();
                 std::experimental::filesystem::remove(pair.second);
@@ -171,6 +171,7 @@ WalManager::Recovery(const DBPtr& db) {
             Status status = Status::OK();
             while (status.ok()) {
                 WalOperationPtr operation;
+                operation->collection_name_ = collection_name;
                 status = WalOperationCodec::IterateOperation(file, operation, max_op_id);
                 PerformOperation(operation, db);
             }
@@ -300,10 +301,10 @@ WalManager::RecordDeleteOperation(const DeleteEntityOperationPtr& operation, con
 
 std::string
 WalManager::ConstructFilePath(const std::string& collection_name, const std::string& file_name) {
-    boost::filesystem::path full_path(wal_path_);
-    boost::filesystem::create_directory(full_path);
+    std::experimental::filesystem::path full_path(wal_path_);
+    std::experimental::filesystem::create_directory(full_path);
     full_path.append(collection_name);
-    boost::filesystem::create_directory(full_path);
+    std::experimental::filesystem::create_directory(full_path);
     full_path.append(file_name);
 
     std::string path(full_path.c_str());
@@ -387,7 +388,8 @@ WalManager::CleanupThread(std::string collection_name) {
         // the last wal file need to be deleted?
         WalFile file;
         file.OpenFile(max_file.c_str(), WalFile::READ);
-        idx_t last_id = file.ReadLastOpId();
+        idx_t last_id = 0;
+        file.ReadLastOpId(last_id);
         if (last_id <= max_op) {
             file.CloseFile();
             std::experimental::filesystem::remove(max_file);
