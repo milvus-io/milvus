@@ -34,6 +34,8 @@ using WalOperation = milvus::engine::WalOperation;
 using WalOperationPtr = milvus::engine::WalOperationPtr;
 using WalOperationType = milvus::engine::WalOperationType;
 using WalOperationCodec = milvus::engine::WalOperationCodec;
+using InsertEntityOperation = milvus::engine::InsertEntityOperation;
+using DeleteEntityOperation = milvus::engine::DeleteEntityOperation;
 using WalProxy = milvus::engine::WalProxy;
 
 void CreateChunk(DataChunkPtr& chunk, int64_t row_count, int64_t& chunk_size) {
@@ -71,11 +73,16 @@ void CreateChunk(DataChunkPtr& chunk, int64_t row_count, int64_t& chunk_size) {
 
 class DummyDB : public DBProxy {
  public:
+    DummyDB(const DBOptions& options)
+    : DBProxy(nullptr, options) {
+    }
+
     Status
     Insert(const std::string& collection_name,
            const std::string& partition_name,
            DataChunkPtr& data_chunk,
            idx_t op_id) override {
+        insert_count_++;
         WalManager::GetInstance().OperationDone(collection_name, op_id);
         return Status::OK();
     }
@@ -84,11 +91,20 @@ class DummyDB : public DBProxy {
     DeleteEntityByID(const std::string& collection_name,
                      const IDNumbers& entity_ids,
                      idx_t op_id) override {
+        delete_count_++;
         WalManager::GetInstance().OperationDone(collection_name, op_id);
         return Status::OK();
     }
 
+    int64_t InsertCount() const { return insert_count_; }
+    int64_t DeleteCount() const { return delete_count_; }
+
+ private:
+    int64_t insert_count_ = 0;
+    int64_t delete_count_ = 0;
 };
+
+using DummyDBPtr = std::shared_ptr<DummyDB>;
 
 } // namespace
 
@@ -257,27 +273,171 @@ TEST_F(WalTest, WalProxyTest) {
     std::string collection_name = "col_1";
     std::string partition_name = "part_1";
 
-    // write over more than 400MB data
+    // write over more than 400MB data, 2 wal files
     for (int64_t i = 1; i <= 1000; i++) {
-        idx_t op_id = i;
         if (i % 10 == 0) {
             IDNumbers ids = {1, 2, 3};
-            auto status = db_->DeleteEntityByID(collection_name, ids, op_id);
+            auto status = db_->DeleteEntityByID(collection_name, ids, 0);
             ASSERT_TRUE(status.ok());
         } else {
             DataChunkPtr chunk;
             int64_t chunk_size = 0;
             CreateChunk(chunk, 1000, chunk_size);
 
-            auto status = db_->Insert(collection_name, partition_name, chunk, op_id);
+            auto status = db_->Insert(collection_name, partition_name, chunk, 0);
             ASSERT_TRUE(status.ok());
+        }
+    }
+
+    // find out the wal files
+    DBOptions opt = GetOptions();
+    std::experimental::filesystem::path collection_path = opt.meta_.path_;
+    collection_path.append(collection_name);
+
+    using DirectoryIterator = std::experimental::filesystem::recursive_directory_iterator;
+    std::set<idx_t> op_ids;
+    {
+        DirectoryIterator file_iter(collection_path);
+        DirectoryIterator end_iter;
+        for (; file_iter != end_iter; ++file_iter) {
+            auto file_path = (*file_iter).path();
+            std::string file_name = file_path.filename().c_str();
+            if (file_name == milvus::engine::WAL_MAX_OP_FILE_NAME) {
+                continue;
+            }
+
+            // read all operation ids
+            auto file = std::make_shared<WalFile>();
+            auto status = file->OpenFile(file_path, WalFile::READ);
+            ASSERT_TRUE(status.ok());
+
+            Status iter_status;
+            while (iter_status.ok()) {
+                WalOperationPtr operation;
+                iter_status = WalOperationCodec::IterateOperation(file, operation, 0);
+                if (operation != nullptr) {
+                    op_ids.insert(operation->ID());
+                }
+            }
+        }
+    }
+
+    // notify operation done, the wal files will be removed after all operations done
+    for (auto id : op_ids) {
+        auto status = WalManager::GetInstance().OperationDone(collection_name, id);
+        ASSERT_TRUE(status.ok());
+    }
+
+    // wait cleanup thread finish
+    WalManager::GetInstance().Stop();
+
+    // check the wal files
+    {
+        DirectoryIterator file_iter(collection_path);
+        DirectoryIterator end_iter;
+        for (; file_iter != end_iter; ++file_iter) {
+            auto file_path = (*file_iter).path();
+            std::string file_name = file_path.filename().c_str();
+            if (file_name == milvus::engine::WAL_MAX_OP_FILE_NAME) {
+                continue;
+            }
+
+            // wal file not deleted?
+            ASSERT_TRUE(false);
         }
     }
 }
 
 TEST(WalManagerTest, WalManagerTest) {
-    std::string path = "/tmp/milvus_wal/test_file";
+    std::string collection_name = "collection";
 
-//    WalManager::GetInstance().Start(options_);
-//    WalManager::GetInstance().Recovery(db_);
+    // construct mock db
+    DBOptions options;
+    options.meta_.path_ = "/tmp/milvus_wal";
+    options.wal_enable_ = true;
+    std::experimental::filesystem::remove_all(options.meta_.path_);
+    DummyDBPtr db_1 = std::make_shared<DummyDB>(options);
+
+    // prepare wal manager
+    WalManager::GetInstance().Stop();
+    WalManager::GetInstance().Start(options);
+
+    // write over more than 400MB data, 2 wal files
+    int64_t insert_count = 0;
+    int64_t delete_count = 0;
+    for (int64_t i = 1; i <= 1000; i++) {
+        if (i % 100 == 0) {
+            auto status =  WalManager::GetInstance().DropCollection(collection_name);
+            ASSERT_TRUE(status.ok());
+        } else if (i % 10 == 0) {
+            IDNumbers ids = {1, 2, 3};
+
+            auto op = std::make_shared<DeleteEntityOperation>();
+            op->collection_name_ = collection_name;
+            op->entity_ids_ = ids;
+
+            auto status =  WalManager::GetInstance().RecordOperation(op, db_1);
+            ASSERT_TRUE(status.ok());
+
+            delete_count++;
+        } else {
+            DataChunkPtr chunk;
+            int64_t chunk_size = 0;
+            CreateChunk(chunk, 1000, chunk_size);
+
+            auto op = std::make_shared<InsertEntityOperation>();
+            op->collection_name_ = collection_name;
+            op->partition_name = "";
+            op->data_chunk_ = chunk;
+
+            auto status =  WalManager::GetInstance().RecordOperation(op, db_1);
+            ASSERT_TRUE(status.ok());
+
+            insert_count++;
+        }
+    }
+
+    ASSERT_EQ(db_1->InsertCount(), insert_count);
+    ASSERT_EQ(db_1->DeleteCount(), delete_count);
+
+
+    // test recovery
+    insert_count = 0;
+    delete_count = 0;
+    for (int64_t i = 1; i <= 1000; i++) {
+        if (i % 10 == 0) {
+            IDNumbers ids = {1, 2, 3};
+
+            auto op = std::make_shared<DeleteEntityOperation>();
+            op->collection_name_ = collection_name;
+            op->entity_ids_ = ids;
+
+            auto status =  WalManager::GetInstance().RecordOperation(op, nullptr);
+            ASSERT_TRUE(status.ok());
+
+            delete_count++;
+        } else {
+            DataChunkPtr chunk;
+            int64_t chunk_size = 0;
+            CreateChunk(chunk, 1000, chunk_size);
+
+            auto op = std::make_shared<InsertEntityOperation>();
+            op->collection_name_ = collection_name;
+            op->partition_name = "";
+            op->data_chunk_ = chunk;
+
+            auto status =  WalManager::GetInstance().RecordOperation(op, nullptr);
+            ASSERT_TRUE(status.ok());
+
+            insert_count++;
+        }
+    }
+
+    DummyDBPtr db_2 = std::make_shared<DummyDB>(options);
+    WalManager::GetInstance().Recovery(db_2);
+    ASSERT_EQ(db_2->InsertCount(), insert_count);
+    ASSERT_EQ(db_2->DeleteCount(), delete_count);
+
+    WalManager::GetInstance().Stop();
+    std::experimental::filesystem::remove_all(options.meta_.path_);
 }

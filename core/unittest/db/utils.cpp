@@ -81,7 +81,7 @@ BaseTest::InitLog() {
 }
 
 void
-BaseTest::SnapshotStart(bool mock_store, milvus::engine::DBOptions options) {
+BaseTest::SnapshotStart(bool mock_store, DBOptions options) {
     auto store = Store::Build(options.meta_.backend_uri_, options.meta_.path_,
             milvus::codec::Codec::instance().GetSuffixSet());
 
@@ -136,7 +136,7 @@ BaseTest::TearDown() {
 void
 SnapshotTest::SetUp() {
     BaseTest::SetUp();
-    milvus::engine::DBOptions options;
+    DBOptions options;
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
@@ -150,11 +150,11 @@ SnapshotTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-milvus::engine::DBOptions
+DBOptions
 DBTest::GetOptions() {
     milvus::cache::CpuCacheMgr::GetInstance().SetCapacity(256 * milvus::engine::MB);
 
-    auto options = milvus::engine::DBOptions();
+    auto options = DBOptions();
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
@@ -216,7 +216,7 @@ DBTest::TearDown() {
 void
 SegmentTest::SetUp() {
     BaseTest::SetUp();
-    milvus::engine::DBOptions options;
+    DBOptions options;
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
@@ -251,7 +251,7 @@ MetaTest::TearDown() {
 void
 SchedulerTest::SetUp() {
     BaseTest::SetUp();
-    milvus::engine::DBOptions options;
+    DBOptions options;
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
@@ -303,9 +303,9 @@ EventTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-milvus::engine::DBOptions
+DBOptions
 WalTest::GetOptions() {
-    milvus::engine::DBOptions options;
+    DBOptions options;
     options.meta_.path_ = "/tmp/milvus_wal";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = true;
