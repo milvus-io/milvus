@@ -123,7 +123,7 @@ BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_
     }
     // TODO: add extra info
     std::unordered_map<std::string, std::string> maps;
-    WRITE_MAGIC(fs_ptr, file_path)
+    WRITE_MAGIC(fs_ptr, file_path);
     WRITE_HEADER(fs_ptr, file_path, maps);
 
     if (!fs_ptr->writer_ptr_->InOpen(file_path)) {

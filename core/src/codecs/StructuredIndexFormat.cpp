@@ -148,7 +148,7 @@ StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const 
     std::string full_file_path = file_path + STRUCTURED_INDEX_POSTFIX;
     // TODO: add extra info
     std::unordered_map<std::string, std::string> maps;
-    WRITE_MAGIC(fs_ptr, full_file_path)
+    WRITE_MAGIC(fs_ptr, full_file_path);
     WRITE_HEADER(fs_ptr, full_file_path, maps);
 
     auto binaryset = index->Serialize(knowhere::Config());
