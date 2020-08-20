@@ -1683,6 +1683,9 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             return Status{SERVER_INVALID_ARGUMENT, "Query dsl is null"};
         }
         auto status = Status::OK();
+        if (vector_params.empty()) {
+            return Status(SERVER_INVALID_DSL_PARAMETER, "DSL must include vector query");
+        }
         for (const auto& vector_param : vector_params) {
             const std::string& vector_string = vector_param.json();
             nlohmann::json vector_json = json::parse(vector_string);
@@ -1725,12 +1728,14 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             JSON_NULL_CHECK(boolean_query_json);
             status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr);
             if (!status.ok()) {
-                return status;
+                return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool");
             }
+        } else {
+            return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool query");
         }
         return status;
     } catch (std::exception& e) {
-        return Status{SERVER_INVALID_DSL_PARAMETER, e.what()};
+        return Status(SERVER_INVALID_DSL_PARAMETER, e.what());
     }
 }
 
