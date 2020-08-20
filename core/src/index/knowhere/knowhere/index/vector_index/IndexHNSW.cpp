@@ -131,7 +131,7 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 #pragma omp parallel for
     for (int i = 1; i < rows; ++i) {
         faiss::BuilderSuspend::check_wait();
-        index_->addPoint(((float*)p_data + Dim() * i), p_ids[i]);
+        index_->addPoint((reinterpret_cast<const float*>(p_data) + Dim() * i), p_ids[i]);
     }
 }
 
@@ -157,7 +157,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
         std::vector<P> ret;
-        const float* single_query = (float*)p_data + i * Dim();
+        const float* single_query = reinterpret_cast<const float*>(p_data) + i * Dim();
 
         // if (normalize) {
         //     std::vector<float> norm_vector(Dim());
@@ -166,7 +166,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         // } else {
         //     ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
         // }
-        ret = index_->searchKnn((float*)single_query, k, compare, blacklist);
+        ret = index_->searchKnn(single_query, k, compare, blacklist);
 
         while (ret.size() < k) {
             ret.emplace_back(std::make_pair(-1, -1));
@@ -207,7 +207,7 @@ IndexHNSW::Dim() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    return (*(size_t*)index_->dist_func_param_);
+    return (*static_cast<size_t*>(index_->dist_func_param_));
 }
 
 void

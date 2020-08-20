@@ -75,7 +75,7 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
     GET_TENSOR_DATA(dataset_ptr)
 
-    index_->add(rows, (float*)p_data);
+    index_->add(rows, reinterpret_cast<const float*>(p_data));
 }
 
 DatasetPtr
@@ -99,7 +99,7 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 
     real_index->hnsw.efSearch = (config[IndexParams::ef]);
-    real_index->search(rows, (float*)p_data, k, p_dist, p_id, blacklist);
+    real_index->search(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, blacklist);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

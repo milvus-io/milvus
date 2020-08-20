@@ -53,7 +53,7 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_id = static_cast<int64_t*>(malloc(p_id_size));
     auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
-    QueryImpl(rows, (uint8_t*)p_data, k, p_dist, p_id, config);
+    QueryImpl(rows, reinterpret_cast<const uint8_t*>(p_data), k, p_dist, p_id, config);
 
     auto ret_ds = std::make_shared<Dataset>();
     if (index_->metric_type == faiss::METRIC_Hamming) {
@@ -137,7 +137,7 @@ BinaryIDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     std::lock_guard<std::mutex> lk(mutex_);
     GET_TENSOR_DATA_ID(dataset_ptr)
 
-    index_->add_with_ids(rows, (uint8_t*)p_data, p_ids);
+    index_->add_with_ids(rows, reinterpret_cast<const uint8_t*>(p_data), p_ids);
 }
 
 void

@@ -98,7 +98,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     for (int i = 0; i < rows; ++i) {
-        index_->add_item(p_ids[i], (const float*)p_data + dim * i);
+        index_->add_item(p_ids[i], static_cast<const float*>(p_data) + dim * i);
     }
 
     index_->build(config[IndexParams::n_trees].get<int64_t>());
@@ -124,7 +124,8 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         result.reserve(k);
         std::vector<float> distances;
         distances.reserve(k);
-        index_->get_nns_by_vector(static_cast<const float*>(p_data) + i * dim, k, search_k, &result, &distances, blacklist);
+        index_->get_nns_by_vector(static_cast<const float*>(p_data) + i * dim, k, search_k, &result, &distances,
+                                  blacklist);
 
         int64_t result_num = result.size();
         auto local_p_id = p_id + k * i;
