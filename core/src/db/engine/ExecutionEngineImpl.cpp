@@ -80,8 +80,8 @@ ExecutionEngineImpl::CreateVecIndex(const std::string& index_name) {
 
     knowhere::VecIndexPtr index = vec_index_factory.CreateVecIndex(index_name, mode);
     if (index == nullptr) {
-        std::string err_msg = "Invalid index type: " + index_name + " mode: " +
-                              std::to_string(static_cast<int32_t>(mode));
+        std::string err_msg =
+            "Invalid index type: " + index_name + " mode: " + std::to_string(static_cast<int32_t>(mode));
         LOG_ENGINE_ERROR_ << err_msg;
     }
     return index;
