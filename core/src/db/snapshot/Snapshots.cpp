@@ -32,9 +32,7 @@ Snapshots::DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn) {
 Status
 Snapshots::DropCollection(const std::string& name, const LSN_TYPE& lsn) {
     ScopedSnapshotT ss;
-    auto status = GetSnapshot(ss, name);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(GetSnapshot(ss, name));
     return DoDropCollection(ss, lsn);
 }
 
@@ -56,25 +54,15 @@ Snapshots::DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn) {
 Status
 Snapshots::DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_id, const LSN_TYPE& lsn) {
     ScopedSnapshotT ss;
-    auto status = GetSnapshot(ss, collection_id);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(GetSnapshot(ss, collection_id));
 
     PartitionContext context;
     context.id = partition_id;
     context.lsn = lsn;
 
     auto op = std::make_shared<DropPartitionOperation>(context, ss);
-    status = op->Push();
-    if (!status.ok()) {
-        return status;
-    }
-
-    status = op->GetSnapshot(ss);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(op->Push());
+    STATUS_CHECK(op->GetSnapshot(ss));
 
     return op->GetStatus();
 }
@@ -82,31 +70,22 @@ Snapshots::DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_
 Status
 Snapshots::LoadSnapshot(StorePtr store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) {
     SnapshotHolderPtr holder;
-    auto status = LoadHolder(store, collection_id, holder);
-    if (!status.ok())
-        return status;
-    status = holder->Load(store, ss, id, scoped);
-    return status;
+    STATUS_CHECK(LoadHolder(store, collection_id, holder));
+    return holder->Load(store, ss, id, scoped);
 }
 
 Status
 Snapshots::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) const {
     SnapshotHolderPtr holder;
-    auto status = GetHolder(collection_id, holder);
-    if (!status.ok())
-        return status;
-    status = holder->Get(ss, id, scoped);
-    return status;
+    STATUS_CHECK(GetHolder(collection_id, holder));
+    return holder->Get(ss, id, scoped);
 }
 
 Status
 Snapshots::GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id, bool scoped) const {
     SnapshotHolderPtr holder;
-    auto status = GetHolder(name, holder);
-    if (!status.ok())
-        return status;
-    status = holder->Get(ss, id, scoped);
-    return status;
+    STATUS_CHECK(GetHolder(name, holder));
+    return holder->Get(ss, id, scoped);
 }
 
 Status

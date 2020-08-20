@@ -80,7 +80,8 @@ ExecutionEngineImpl::CreateVecIndex(const std::string& index_name) {
 
     knowhere::VecIndexPtr index = vec_index_factory.CreateVecIndex(index_name, mode);
     if (index == nullptr) {
-        std::string err_msg = "Invalid index type: " + index_name + " mode: " + std::to_string((int)mode);
+        std::string err_msg =
+            "Invalid index type: " + index_name + " mode: " + std::to_string(static_cast<int32_t>(mode));
         LOG_ENGINE_ERROR_ << err_msg;
     }
     return index;
@@ -228,8 +229,8 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 void
 MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<idx_t>& uids, int64_t nq, int64_t k,
                  float* distances, int64_t* labels) {
-    int64_t* res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
-    float* res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
+    auto res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
+    auto res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
 
     memcpy(distances, res_dist, sizeof(float) * nq * k);
 
@@ -319,11 +320,11 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
                 return Status(SERVER_INVALID_DSL_PARAMETER, "Field: " + name + " is not existed");
             }
             auto field = field_visitor->GetField();
-            if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
-                field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
+            if (field->GetFtype() == static_cast<snapshot::FTYPE_TYPE>(engine::DataType::VECTOR_FLOAT) ||
+                field->GetFtype() == static_cast<snapshot::FTYPE_TYPE>(engine::DataType::VECTOR_BINARY)) {
                 STATUS_CHECK(segment_ptr->GetVectorIndex(name, vec_index));
             } else {
-                attr_type.insert(std::make_pair(name, (engine::DataType)field->GetFtype()));
+                attr_type.insert(std::make_pair(name, static_cast<engine::DataType>(field->GetFtype())));
             }
         }
 

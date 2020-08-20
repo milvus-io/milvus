@@ -26,8 +26,9 @@ BuildIndexPass::Init() {
 
 bool
 BuildIndexPass::Run(const TaskPtr& task) {
-    if (task->Type() != TaskType::BuildIndexTask)
+    if (task->Type() != TaskType::BuildIndexTask) {
         return false;
+    }
 
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
