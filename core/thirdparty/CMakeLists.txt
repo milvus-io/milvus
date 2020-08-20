@@ -71,3 +71,8 @@ endif ()
 if ( MILVUS_WITH_MYSQLPP )
     add_subdirectory( mysqlpp )
 endif ()
+
+# ****************************** Thirdparty sqlite ***************************************
+if ( MILVUS_WITH_SQLITE )
+    add_subdirectory( sqlite )
+endif ()

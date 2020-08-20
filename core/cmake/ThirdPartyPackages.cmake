@@ -12,7 +12,6 @@
 set(MILVUS_THIRDPARTY_DEPENDENCIES
 
         Prometheus
-        SQLite
         fiu
         AWS
         oatpp)
@@ -327,56 +326,6 @@ if (MILVUS_WITH_PROMETHEUS)
     link_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/)
     include_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/include)
 
-endif ()
-
-# ----------------------------------------------------------------------
-# SQLite
-
-macro(build_sqlite)
-    message(STATUS "Building SQLITE-${SQLITE_VERSION} from source")
-    set(SQLITE_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/sqlite_ep-prefix/src/sqlite_ep")
-    set(SQLITE_INCLUDE_DIR "${SQLITE_PREFIX}/include")
-    set(SQLITE_STATIC_LIB
-            "${SQLITE_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}sqlite3${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
-    set(SQLITE_CONFIGURE_ARGS
-            "--prefix=${SQLITE_PREFIX}"
-            "CC=${CMAKE_C_COMPILER}"
-            "CXX=${CMAKE_CXX_COMPILER}"
-            "CFLAGS=${EP_C_FLAGS}"
-            "CXXFLAGS=${EP_CXX_FLAGS}")
-
-    ExternalProject_Add(sqlite_ep
-            URL
-            ${SQLITE_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            URL_MD5
-            "3c68eb400f8354605736cd55400e1572"
-            CONFIGURE_COMMAND
-            "./configure"
-            ${SQLITE_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            BUILD_BYPRODUCTS
-            "${SQLITE_STATIC_LIB}")
-
-    file(MAKE_DIRECTORY "${SQLITE_INCLUDE_DIR}")
-    add_library(sqlite STATIC IMPORTED)
-    set_target_properties(
-            sqlite
-            PROPERTIES IMPORTED_LOCATION "${SQLITE_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${SQLITE_INCLUDE_DIR}")
-
-    add_dependencies(sqlite sqlite_ep)
-endmacro()
-
-if (MILVUS_WITH_SQLITE)
-    resolve_dependency(SQLite)
-    include_directories(SYSTEM "${SQLITE_INCLUDE_DIR}")
-    link_directories(SYSTEM ${SQLITE_PREFIX}/lib/)
 endif ()
 
 # ----------------------------------------------------------------------
