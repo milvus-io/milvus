@@ -133,7 +133,7 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
     ivf_index->nprobe = params->nprobe;
 
     stdclock::time_point before = stdclock::now();
-    auto* i_distances = reinterpret_cast<int32_t*>(distances);
+    auto i_distances = reinterpret_cast<int32_t*>(distances);
     index_->search(n, data, k, i_distances, labels, bitset_);
 
     stdclock::time_point after = stdclock::now();

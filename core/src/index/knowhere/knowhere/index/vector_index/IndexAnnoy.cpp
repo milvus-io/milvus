@@ -40,7 +40,7 @@ IndexAnnoy::Serialize(const Config& config) {
     std::shared_ptr<uint8_t[]> dim_data(new uint8_t[sizeof(uint64_t)]);
     memcpy(dim_data.get(), &dim, sizeof(uint64_t));
 
-    auto index_length = index_->get_index_length();
+    size_t index_length = index_->get_index_length();
     std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_length]);
     memcpy(index_data.get(), index_->get_index(), static_cast<size_t>(index_length));
 
