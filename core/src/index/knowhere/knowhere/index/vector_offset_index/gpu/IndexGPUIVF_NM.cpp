@@ -55,7 +55,7 @@ GPUIVF_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 void
 GPUIVF_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     auto spt = res_.lock();
-    if (spt) {
+    if (spt != nullptr) {
         ResScope rs(res_, gpu_id_);
         IVF::Add(dataset_ptr, config);
     } else {

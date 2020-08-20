@@ -89,7 +89,7 @@ IndexRHNSWFlat::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         auto idx = new faiss::IndexRHNSWFlat(int(dim), config[IndexParams::M], metric_type);
         idx->hnsw.efConstruction = config[IndexParams::efConstruction];
         index_ = std::shared_ptr<faiss::Index>(idx);
-        index_->train(rows, (float*)p_data);
+        index_->train(rows, reinterpret_cast<const float*>(p_data));
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }

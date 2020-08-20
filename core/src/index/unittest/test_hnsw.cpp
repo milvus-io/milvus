@@ -66,7 +66,7 @@ TEST_P(HNSWTest, HNSW_basic) {
     EXPECT_EQ(index_->Dim(), dim);
 
     // Serialize and Load before Query
-    milvus::knowhere::BinarySet bs = index_->Serialize();
+    milvus::knowhere::BinarySet bs = index_->Serialize(conf);
 
     int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
     int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
@@ -96,7 +96,7 @@ TEST_P(HNSWTest, HNSW_delete) {
     }
 
     // Serialize and Load before Query
-    milvus::knowhere::BinarySet bs = index_->Serialize();
+    milvus::knowhere::BinarySet bs = index_->Serialize(conf);
 
     int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
     int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
