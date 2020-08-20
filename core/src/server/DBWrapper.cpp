@@ -90,7 +90,7 @@ DBWrapper::StartService() {
     s = CommonUtil::CreateDirectory(opt.meta_.path_);
     if (!s.ok()) {
         std::cerr << "Error: Failed to create database primary path: " << path
-                  << ". Possible reason: db_config.primary_path is wrong in server_config.yaml or not available."
+                  << ". Possible reason: db_config.primary_path is wrong in milvus.yaml or not available."
                   << std::endl;
         kill(0, SIGUSR1);
     }
