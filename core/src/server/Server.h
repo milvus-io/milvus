@@ -44,6 +44,9 @@ class Server {
     StopService();
 
  private:
+    static std::string
+    RunningMode(bool cluster_enable, ClusterRole cluster_role);
+
     static void
     LogConfigInFile(const std::string& path);
 

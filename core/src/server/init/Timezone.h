@@ -9,33 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "scheduler/selector/Optimizer.h"
+#pragma once
 
-namespace milvus {
-namespace scheduler {
+#include <string>
 
-void
-Optimizer::Init() {
-    for (auto& pass : pass_list_) {
-        pass->Init();
-    }
-}
+#include "utils/Status.h"
 
-bool
-Optimizer::Run(const TaskPtr& task) {
-    for (auto& pass : pass_list_) {
-        if (pass->Run(task)) {
-            return true;
-        }
-    }
+namespace milvus::server {
 
-    return false;
-}
-
-void
-Optimizer::Stop() {
-    pass_list_ = std::vector<PassPtr>();
-}
-
-}  // namespace scheduler
-}  // namespace milvus
+class Timezone {
+ public:
+    static Status
+    SetTimezone(std::string timezone);
+};
+}  // namespace milvus::server
