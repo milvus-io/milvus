@@ -122,13 +122,15 @@ class Operations : public std::enable_shared_from_this<Operations> {
 
     virtual Status
     operator()(StorePtr store);
-    virtual Status
+
+    Status
     Push(bool sync = true);
 
     virtual Status
     PreCheck();
 
-    virtual const Status& ApplyToStore(StorePtr);
+    virtual const Status&
+    ApplyToStore(StorePtr);
 
     const Status&
     WaitToFinish();

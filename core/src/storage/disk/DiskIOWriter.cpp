@@ -30,8 +30,8 @@ DiskIOWriter::InOpen(const std::string& name) {
 }
 
 void
-DiskIOWriter::Write(void* ptr, int64_t size) {
-    fs_.write(reinterpret_cast<char*>(ptr), size);
+DiskIOWriter::Write(const void* ptr, int64_t size) {
+    fs_.write(reinterpret_cast<const char*>(ptr), size);
     len_ += size;
 }
 

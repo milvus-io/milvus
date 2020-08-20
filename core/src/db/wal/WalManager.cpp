@@ -10,17 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/wal/WalManager.h"
-#include "config/ServerConfig.h"
 #include "db/Utils.h"
 
 namespace milvus {
 namespace engine {
-
-WalManager::WalManager() {
-    wal_path_ = config.wal.path();
-    wal_buffer_size_ = config.wal.buffer_size();
-    insert_buffer_size_ = config.cache.insert_buffer_size();
-}
 
 WalManager&
 WalManager::GetInstance() {

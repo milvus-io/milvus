@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "config/ServerConfig.h"
 #include "db/DB.h"
 #include "db/IDGenerator.h"
 #include "db/Types.h"
@@ -25,7 +26,7 @@ namespace engine {
 
 class WalManager {
  public:
-    WalManager();
+    WalManager() = default;
 
     static WalManager&
     GetInstance();
@@ -54,9 +55,9 @@ class WalManager {
  private:
     SafeIDGenerator id_gen_;
 
-    std::string wal_path_;
-    int64_t wal_buffer_size_ = 0;
-    int64_t insert_buffer_size_ = 0;
+    std::string wal_path_ = config.wal.path();
+    int64_t wal_buffer_size_ = config.wal.buffer_size();
+    int64_t insert_buffer_size_ = config.cache.insert_buffer_size();
 };
 
 }  // namespace engine

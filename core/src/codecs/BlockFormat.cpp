@@ -135,7 +135,7 @@ BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_
 
     size_t num_bytes = raw->data_.size();
     fs_ptr->writer_ptr_->Write(&num_bytes, sizeof(size_t));
-    fs_ptr->writer_ptr_->Write((void*)(raw->data_.data()), num_bytes);
+    fs_ptr->writer_ptr_->Write(raw->data_.data(), num_bytes);
     fs_ptr->writer_ptr_->Close();
 
     WRITE_SUM(fs_ptr, file_path);

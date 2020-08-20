@@ -40,7 +40,7 @@ class DiskIOWriter : public IOWriter {
     InOpen(const std::string& name) override;
 
     void
-    Write(void* ptr, int64_t size) override;
+    Write(const void* ptr, int64_t size) override;
 
     void
     Seekp(int64_t pos) override;
