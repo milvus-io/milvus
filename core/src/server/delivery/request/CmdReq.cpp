@@ -57,10 +57,9 @@ CmdReq::OnExecute() {
         sys_info_inst.GetSysInfoJsonStr(result_);
     } else if (cmd_ == "build_commit_id") {
         result_ = LAST_COMMIT_ID;
-    } else if (cmd_ == "get_milvus_config"){
+    } else if (cmd_ == "get_milvus_config") {
         result_ = ConfigMgr::GetInstance().JsonDump();
-    }
-    else if (cmd_.substr(0, 3) == "get") {
+    } else if (cmd_.substr(0, 3) == "get") {
         try {
             auto words = split(cmd_, ' ');
             if (words.size() == 2) {
