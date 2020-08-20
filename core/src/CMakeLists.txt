@@ -65,28 +65,11 @@ set(link_lib
         oatpp
         query
         utils
-        log
-        )
+        log )
 
 
-if (MILVUS_WITH_PROMETHEUS)
-    set(link_lib
-            ${link_lib}
-            # dependency prometheus
-            prometheus-cpp-push
-            prometheus-cpp-pull
-            prometheus-cpp-core
-            )
-endif ()
 
-set(link_lib
-        ${link_lib}
-        curl
-        )
-
-target_link_libraries( server
-                PUBLIC ${link_lib}
-                       )
+target_link_libraries( server PUBLIC ${link_lib} )
 
 # **************************** Get&Print Include Directories ****************************
 get_property( dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES )
