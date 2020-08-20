@@ -76,7 +76,7 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
         size_t data_size = iter->second->data_.size();
 
         snapshot::FieldPtr field = ss->GetField(name);
-        DataType ftype = static_cast<DataType>(field->GetFtype());
+        auto ftype = static_cast<DataType>(field->GetFtype());
         std::string err_msg = "Illegal data size for chunk field: ";
         switch (ftype) {
             case DataType::BOOL:
