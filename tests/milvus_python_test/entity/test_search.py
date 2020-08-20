@@ -553,9 +553,11 @@ class TestSearchBase:
         res = connect.search(collection, query)
         tmp_epsilon = epsilon
         # TODO:
-        if index_type in ["ANNOY", "IVF_PQ"]:
+        if index_type not in ["FLAT"]:
             tmp_epsilon = 0.1
         assert abs(np.sqrt(res[0]._distances[0]) - min_distance) <= tmp_epsilon
+        assert res[0]._distances[0] <= res[0]._distances[1]
+        assert res[1]._distances[0] <= res[1]._distances[1]
 
     @pytest.mark.level(2)
     def test_search_distance_ip(self, connect, collection):
@@ -600,9 +602,11 @@ class TestSearchBase:
         res = connect.search(collection, query)
         tmp_epsilon = epsilon
         # TODO:
-        if index_type in ["ANNOY", "IVF_PQ"]:
+        if index_type not in ["FLAT"]:
             tmp_epsilon = 0.1
         assert abs(res[0]._distances[0] - max_distance) <= tmp_epsilon
+        assert res[0]._distances[0] >= res[0]._distances[1]
+        assert res[1]._distances[0] >= res[1]._distances[1]
 
     def test_search_distance_jaccard_flat_index(self, connect, binary_collection):
         '''
