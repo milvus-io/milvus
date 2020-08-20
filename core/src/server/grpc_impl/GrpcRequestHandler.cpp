@@ -26,6 +26,7 @@
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
 
+
 namespace milvus {
 namespace server {
 namespace grpc {

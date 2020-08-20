@@ -13,6 +13,7 @@
 #include <cstring>
 #include <limits>
 #include <unordered_map>
+#include <nlohmann/json.hpp>
 
 #include "config/ConfigMgr.h"
 #include "config/ServerConfig.h"
@@ -245,6 +246,16 @@ ConfigMgr::Dump() const {
     }
     return ss.str();
 }
+std::string
+ConfigMgr::JsonDump() const {
+    nlohmann::json j;
+    for (auto& kv : config_list_) {
+        auto& config = kv.second;
+        j[config->name_] = config->Get();
+    }
+    return j.dump();
+}
+
 
 void
 ConfigMgr::Attach(const std::string& name, ConfigObserver* observer) {
