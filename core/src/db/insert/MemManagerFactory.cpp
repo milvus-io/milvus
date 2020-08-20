@@ -11,15 +11,8 @@
 
 #include "db/insert/MemManagerFactory.h"
 #include "MemManagerImpl.h"
-#include "utils/Exception.h"
-#include "utils/Log.h"
 
-#include <cstdlib>
-#include <ctime>
 #include <memory>
-#include <regex>
-#include <sstream>
-#include <string>
 
 namespace milvus {
 namespace engine {

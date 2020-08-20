@@ -158,7 +158,7 @@ install(TARGETS test_binaryivf DESTINATION unittest)
 
 ################################################################################
 #<NSG-TEST>
-add_definitions(-std=c++11 -O3 -lboost -march=native -Wall -DINFO)
+add_definitions(-std=c++11 -O3 -march=native -Werror -DINFO)
 
 find_package(OpenMP REQUIRED)
 if (OpenMP_FOUND)

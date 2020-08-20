@@ -391,6 +391,28 @@ ValidateIndexMetricType(const std::string& metric_type, const std::string& index
 }
 
 Status
+ValidateSearchMetricType(const std::string& metric_type, bool is_binary) {
+    if (is_binary) {
+        // binary
+        if (metric_type == knowhere::Metric::L2 || metric_type == knowhere::Metric::IP) {
+            std::string msg = "Cannot search binary entities with index metric type " + metric_type;
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    } else {
+        // float
+        if (metric_type == knowhere::Metric::HAMMING || metric_type == knowhere::Metric::JACCARD ||
+            metric_type == knowhere::Metric::TANIMOTO) {
+            std::string msg = "Cannot search float entities with index metric type " + metric_type;
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
 ValidateSearchTopk(int64_t top_k) {
     if (top_k <= 0 || top_k > QUERY_MAX_TOPK) {
         std::string msg =

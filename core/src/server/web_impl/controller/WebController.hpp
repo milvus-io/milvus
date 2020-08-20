@@ -561,8 +561,7 @@ class WebController : public oatpp::web::server::api::ApiController {
              QUERIES(QueryParams, query_params)) {
         auto handler = WebRequestHandler();
 
-
-         String response;
+        String response;
         auto status_dto = handler.GetEntity(collection_name, query_params, response);
         switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:
@@ -658,7 +657,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_DEFAULT_CORS(EntityOp)
 
-    ENDPOINT("PUT", "/hybrid_collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
+    ENDPOINT("PUT", "/collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
              BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/hybrid_collections/" + collection_name->std_str() +
                         "/vectors\'");

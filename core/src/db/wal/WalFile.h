@@ -24,8 +24,8 @@ namespace engine {
 
 class WalFile {
  public:
-    WalFile();
-    ~WalFile();
+    WalFile() = default;
+    virtual ~WalFile();
 
     bool
     IsOpened() const {
@@ -60,7 +60,7 @@ class WalFile {
     }
 
     inline int64_t
-    Write(void* data, int64_t length) {
+    Write(const void* data, int64_t length) {
         if (file_ == nullptr) {
             return 0;
         }
