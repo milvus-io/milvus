@@ -178,8 +178,11 @@ ConfigMgr::ConfigMgr() {
                              &config.engine.omp_thread_num.value, 0, nullptr, nullptr)},
         {"engine.simd_type", CreateEnumConfig("engine.simd_type", false, &SimdMap, &config.engine.simd_type.value,
                                               SimdType::AUTO, nullptr, nullptr)},
+
+        {"system.lock.enable",
+         CreateBoolConfig("system.lock.enable", false, &config.system.lock.enable.value, true, nullptr, nullptr)},
     };
-}
+}  // namespace milvus
 
 void
 ConfigMgr::Init() {

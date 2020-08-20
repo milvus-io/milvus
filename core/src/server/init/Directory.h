@@ -20,10 +20,13 @@ namespace milvus::server {
 class Directory {
  public:
     static Status
-    Initialize(const std::string& storage_path, const std::string& wal_path);
+    Initialize(const std::string& storage_path, const std::string& wal_path, const std::string& log_path);
 
     static Status
     Lock(const std::string& storage_path, const std::string& wal_path);
+
+    static Status
+    Access(const std::string& storage_path, const std::string& wal_path, const std::string& log_path);
 
  private:
     static void
@@ -31,6 +34,9 @@ class Directory {
 
     static void
     lock(const std::string& path);
+
+    static void
+    access_check(const std::string& path);
 };
 
 }  // namespace milvus::server
