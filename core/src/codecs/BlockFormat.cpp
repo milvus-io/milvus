@@ -26,7 +26,6 @@
 #include "storage/ExtraFileInfo.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
-#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace codec {
@@ -124,7 +123,7 @@ BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_
     }
     // TODO: add extra info
     std::unordered_map<std::string, std::string> maps;
-    WRITE_MAGIC(fs_ptr, file_path)
+    WRITE_MAGIC(fs_ptr, file_path);
     WRITE_HEADER(fs_ptr, file_path, maps);
 
     if (!fs_ptr->writer_ptr_->InOpen(file_path)) {
@@ -135,7 +134,7 @@ BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_
 
     size_t num_bytes = raw->data_.size();
     fs_ptr->writer_ptr_->Write(&num_bytes, sizeof(size_t));
-    fs_ptr->writer_ptr_->Write((void*)(raw->data_.data()), num_bytes);
+    fs_ptr->writer_ptr_->Write(raw->data_.data(), num_bytes);
     fs_ptr->writer_ptr_->Close();
 
     WRITE_SUM(fs_ptr, file_path);

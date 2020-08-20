@@ -20,16 +20,17 @@ endif()
 message( STATUS "Building crc32c-master from source" )
 FetchContent_Declare(
         crc32c
-        URL         ${CRC32C_SOURCE_URL}
-        URL_MD5     "d24bd57ca2d9fb051aa589818c0e2c10"
-        SOURCE_DIR  ${CMAKE_CURRENT_BINARY_DIR}/crc32c-src
-        BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/crc32c-build
-)
+        URL             ${CRC32C_SOURCE_URL}
+        URL_MD5         "d24bd57ca2d9fb051aa589818c0e2c10"
+        SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/crc32c-src
+        BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/crc32c-build
+        DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )
 
 FetchContent_GetProperties( crc32c )
 if ( NOT crc32c_POPULATED )
 
     FetchContent_Populate( crc32c )
+
     set( CRC32C_BUILD_TESTS         CACHE BOOL OFF FORCE )
     set( CRC32C_BUILD_BENCHMARKS    CACHE BOOL OFF FORCE )
     set( CRC32C_USE_GLOG            CACHE BOOL OFF FORCE )

@@ -181,7 +181,7 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
     std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
     // TODO: add extra info
     std::unordered_map<std::string, std::string> maps;
-    WRITE_MAGIC(fs_ptr, full_file_path)
+    WRITE_MAGIC(fs_ptr, full_file_path);
     WRITE_HEADER(fs_ptr, full_file_path, maps);
     auto binaryset = index->Serialize(knowhere::Config());
 
@@ -194,12 +194,12 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
         auto meta = iter.first.c_str();
         size_t meta_length = iter.first.length();
         fs_ptr->writer_ptr_->Write(&meta_length, sizeof(meta_length));
-        fs_ptr->writer_ptr_->Write((void*)meta, meta_length);
+        fs_ptr->writer_ptr_->Write(const_cast<char*>(meta), meta_length);
 
         auto binary = iter.second;
         int64_t binary_length = binary->size;
         fs_ptr->writer_ptr_->Write(&binary_length, sizeof(binary_length));
-        fs_ptr->writer_ptr_->Write((void*)binary->data.get(), binary_length);
+        fs_ptr->writer_ptr_->Write(binary->data.get(), binary_length);
     }
     fs_ptr->writer_ptr_->Close();
 

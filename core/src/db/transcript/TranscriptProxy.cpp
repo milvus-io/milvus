@@ -137,7 +137,7 @@ TranscriptProxy::DescribeIndex(const std::string& collection_name, const std::st
 
 Status
 TranscriptProxy::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
-                        id_t op_id) {
+                        idx_t op_id) {
     return db_->Insert(collection_name, partition_name, data_chunk);
 }
 
@@ -149,7 +149,8 @@ TranscriptProxy::GetEntityByID(const std::string& collection_name, const IDNumbe
 }
 
 Status
-TranscriptProxy::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id) {
+TranscriptProxy::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids,
+                                  idx_t op_id) {
     return db_->DeleteEntityByID(collection_name, entity_ids);
 }
 

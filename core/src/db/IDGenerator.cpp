@@ -25,7 +25,7 @@ IDGenerator::~IDGenerator() = default;
 
 constexpr size_t SimpleIDGenerator::MAX_IDS_PER_MICRO;
 
-id_t
+idx_t
 SimpleIDGenerator::GetNextIDNumber() {
     auto now = std::chrono::system_clock::now();
     auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
@@ -61,7 +61,7 @@ SimpleIDGenerator::GetNextIDNumbers(size_t n, IDNumbers& ids) {
     return Status::OK();
 }
 
-id_t
+idx_t
 SafeIDGenerator::GetNextIDNumber() {
     auto now = std::chrono::system_clock::now();
     auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();

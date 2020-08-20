@@ -17,6 +17,12 @@
 #include "crc32c/crc32c.h"
 #include "storage/ExtraFileInfo.h"
 
+const char* MAGIC = "Milvus";
+const int MAGIC_SIZE = 6;
+const int SINGLE_KV_DATA_SIZE = 64;
+const int HEADER_SIZE = 4096;
+const int SUM_SIZE = 16;
+
 namespace milvus {
 namespace storage {
 
