@@ -246,6 +246,7 @@ ConfigMgr::Dump() const {
     }
     return ss.str();
 }
+
 std::string
 ConfigMgr::JsonDump() const {
     nlohmann::json j;
@@ -255,7 +256,6 @@ ConfigMgr::JsonDump() const {
     }
     return j.dump();
 }
-
 
 void
 ConfigMgr::Attach(const std::string& name, ConfigObserver* observer) {
