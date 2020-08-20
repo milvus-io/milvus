@@ -37,5 +37,7 @@ class TraceContext {
     std::unique_ptr<opentracing::Span> span_;
 };
 
+using TraceContextPtr = std::shared_ptr<TraceContext>;
+
 }  // namespace tracing
 }  // namespace milvus

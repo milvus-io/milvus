@@ -213,7 +213,7 @@ class WebRequestHandler {
      * Vector
      */
     StatusDtoT
-    InsertEntity(const OString& collection_name, const OString& body, VectorIdsDtoT& ids_dto);
+    InsertEntity(const OString& collection_name, const OString& body, EntityIdsDtoT& ids_dto);
 
     StatusDtoT
     GetEntity(const OString& collection_name, const OQueryParams& query_params, OString& response);

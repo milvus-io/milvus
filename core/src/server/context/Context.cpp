@@ -9,21 +9,23 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <utility>
+
 #include "server/context/Context.h"
 
 namespace milvus {
 namespace server {
 
-Context::Context(const std::string& req_id) : req_id_(req_id) {
+Context::Context(std::string req_id) : req_id_(std::move(req_id)) {
 }
 
-const std::shared_ptr<tracing::TraceContext>&
+const tracing::TraceContextPtr&
 Context::GetTraceContext() const {
     return trace_context_;
 }
 
 void
-Context::SetTraceContext(const std::shared_ptr<tracing::TraceContext>& trace_context) {
+Context::SetTraceContext(const tracing::TraceContextPtr& trace_context) {
     trace_context_ = trace_context;
 }
 std::shared_ptr<Context>

@@ -43,7 +43,7 @@ WriteMagic(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path) {
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
-    fs_ptr->writer_ptr_->Write((void*)MAGIC, MAGIC_SIZE);
+    fs_ptr->writer_ptr_->Write((void*)(MAGIC), MAGIC_SIZE);
     fs_ptr->writer_ptr_->Close();
 }
 
@@ -136,7 +136,7 @@ CheckSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path) {
 
     fs_ptr->reader_ptr_->Close();
 
-    auto sum = (uint8_t)atoi(record);
+    auto sum = static_cast<uint8_t>(atoi(record));
     return sum == result;
 }
 

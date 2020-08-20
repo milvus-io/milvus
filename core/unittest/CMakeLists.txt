@@ -38,6 +38,7 @@ set( SCHEDULER_FILES  ${SCHEDULER_MAIN_FILES}
                       ${SCHEDULER_SELECTOR_FILES}
                       ${SCHEDULER_RESOURCE_FILES}
                       ${SCHEDULER_TASK_FILES}
+
                       )
 
 set( ENTRY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp )
@@ -80,6 +81,7 @@ if ( MILVUS_WITH_AWS )
 endif ()
 
 add_subdirectory(db)
+add_subdirectory(server)
 #add_subdirectory(metrics)
 #add_subdirectory(scheduler)
 #add_subdirectory(thirdparty)

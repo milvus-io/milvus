@@ -157,7 +157,7 @@ SystemInfo::MemoryPercent() {
         Init();
     }
 
-    double mem_used = static_cast<double>(GetProcessUsedMemory() * 100);
+    auto mem_used = static_cast<double>(GetProcessUsedMemory() * 100);
     return mem_used / static_cast<double>(total_ram_);
 }
 
@@ -184,7 +184,7 @@ SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
     try {
         FILE* file = fopen("/proc/stat", "r");
         fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = NULL);
-        if (file == NULL) {
+        if (file == nullptr) {
             LOG_SERVER_ERROR_ << "Failed to read /proc/stat";
             return total_time_array;
         }
@@ -196,7 +196,7 @@ SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
             char buffer[1024];
             char* ret = fgets(buffer, sizeof(buffer) - 1, file);
             fiu_do_on("SystemInfo.getTotalCpuTime.read_proc", ret = NULL);
-            if (ret == NULL) {
+            if (ret == nullptr) {
                 LOG_SERVER_ERROR_ << "Could not read stat file";
                 fclose(file);
                 return total_time_array;
@@ -248,8 +248,9 @@ std::vector<int64_t>
 SystemInfo::GPUMemoryTotal() {
     // get GPU usage percent
     fiu_do_on("SystemInfo.GPUMemoryTotal.mock", initialized_ = false);
-    if (!initialized_)
+    if (!initialized_) {
         Init();
+    }
     std::vector<int64_t> result;
 
 #ifdef MILVUS_GPU_VERSION
@@ -268,8 +269,9 @@ SystemInfo::GPUMemoryTotal() {
 std::vector<int64_t>
 SystemInfo::GPUTemperature() {
     fiu_do_on("SystemInfo.GPUTemperature.mock", initialized_ = false);
-    if (!initialized_)
+    if (!initialized_) {
         Init();
+    }
     std::vector<int64_t> result;
 
 #ifdef MILVUS_GPU_VERSION
@@ -297,8 +299,8 @@ SystemInfo::CPUTemperature() {
             return result;
         }
 
-        struct dirent* ptr = NULL;
-        while ((ptr = readdir(dir)) != NULL) {
+        struct dirent* ptr = nullptr;
+        while ((ptr = readdir(dir)) != nullptr) {
             std::string filename(path);
             filename.append(ptr->d_name);
 
@@ -335,8 +337,9 @@ std::vector<int64_t>
 SystemInfo::GPUMemoryUsed() {
     // get GPU memory used
     fiu_do_on("SystemInfo.GPUMemoryUsed.mock", initialized_ = false);
-    if (!initialized_)
+    if (!initialized_) {
         Init();
+    }
 
     std::vector<int64_t> result;
 

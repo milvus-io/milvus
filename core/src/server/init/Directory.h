@@ -12,16 +12,25 @@
 #pragma once
 
 #include <string>
+
 #include "utils/Status.h"
 
-namespace milvus {
-namespace server {
+namespace milvus::server {
 
-class InstanceLockCheck {
+class Directory {
  public:
     static Status
-    Check(const std::string& path);
-};  // InstanceLockCheck
+    Initialize(const std::string& storage_path, const std::string& wal_path);
 
-}  // namespace server
-}  // namespace milvus
+    static Status
+    Lock(const std::string& storage_path, const std::string& wal_path);
+
+ private:
+    static void
+    init(const std::string& path);
+
+    static void
+    lock(const std::string& path);
+};
+
+}  // namespace milvus::server
