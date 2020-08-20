@@ -21,12 +21,11 @@
 
 namespace milvus::server {
 Status
-Directory::Initialize(const std::string& storage_path, const std::string& wal_path) {
+Directory::Initialize(const std::string& storage_path, const std::string& wal_path, const std::string& log_path) {
     try {
         init(storage_path);
-        if (not wal_path.empty()) {
-            init(wal_path);
-        }
+        init(wal_path);
+        init(log_path);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -37,9 +36,19 @@ Status
 Directory::Lock(const std::string& storage_path, const std::string& wal_path) {
     try {
         lock(storage_path);
-        if (not wal_path.empty()) {
-            lock(wal_path);
-        }
+        lock(wal_path);
+    } catch (std::exception& ex) {
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
+    return Status::OK();
+}
+
+Status
+Directory::Access(const std::string& storage_path, const std::string& wal_path, const std::string& log_path) {
+    try {
+        access_check(storage_path);
+        access_check(log_path);
+        access_check(wal_path);
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -48,6 +57,9 @@ Directory::Lock(const std::string& storage_path, const std::string& wal_path) {
 
 void
 Directory::init(const std::string& path) {
+    if (path.empty()) {
+        return;
+    }
     try {
         // Returns True if a new directory was created, otherwise false.
         boost::filesystem::create_directories(path);
@@ -62,11 +74,14 @@ Directory::init(const std::string& path) {
 
 void
 Directory::lock(const std::string& path) {
+    if (path.empty()) {
+        return;
+    }
     std::string lock_path = path + "/lock";
     auto fd = open(lock_path.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0640);
     fiu_do_on("Directory.lock.fd", fd = -1);
     if (fd < 0) {
-        std::string msg = "Cannot lock file: " + lock_path + ", reason: ";
+        std::string msg = "Cannot lock file: " + lock_path + ", error(" + std::to_string(errno) + "): ";
         if (errno == EROFS) {
             // Not using locking for read-only lock file
             msg += "Lock file is read-only.";
@@ -86,7 +101,7 @@ Directory::lock(const std::string& path) {
     auto fcl = fcntl(fd, F_SETLK, &fl);
     fiu_do_on("Directory.lock.fcntl", fcl = -1);
     if (fcl == -1) {
-        std::string msg = "Cannot lock file: " + lock_path + ", reason: ";
+        std::string msg = "Cannot lock file: " + lock_path + ", error(" + std::to_string(errno) + "): ";
         if (errno == EACCES || errno == EAGAIN) {
             msg += "Permission denied.";
         } else if (errno == ENOLCK) {
@@ -96,6 +111,20 @@ Directory::lock(const std::string& path) {
             msg += std::string(strerror(errno)) + ".";
         }
         close(fd);
+        throw std::runtime_error(msg);
+    }
+}
+
+void
+Directory::access_check(const std::string& path) {
+    if (path.empty()) {
+        return;
+    }
+    int ret = access(path.c_str(), F_OK | R_OK | W_OK);
+    fiu_do_on("Directory.access_check.path_access_fail", ret = -1);
+    if (0 != ret) {
+        std::string msg = "Cannot access path: " + path + ", error(" + std::to_string(errno) +
+                          "): " + std::string(strerror(errno)) + ".";
         throw std::runtime_error(msg);
     }
 }

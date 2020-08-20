@@ -27,7 +27,6 @@
 #include "server/init/CpuChecker.h"
 #include "server/init/Directory.h"
 #include "server/init/GpuChecker.h"
-#include "server/init/StorageChecker.h"
 #include "server/init/Timezone.h"
 #include "server/web_impl/WebServer.h"
 #include "src/version.h"
@@ -38,8 +37,7 @@
 #include "utils/SignalHandler.h"
 #include "utils/TimeRecorder.h"
 
-namespace milvus {
-namespace server {
+namespace milvus::server {
 
 Server&
 Server::GetInstance() {
@@ -164,17 +162,20 @@ Server::Start() {
                                      config.logs.max_log_file_size(), config.logs.log_rotate_num()));
 
         auto wal_path = config.wal.enable() ? config.wal.path() : "";
-        STATUS_CHECK(Directory::Initialize(config.storage.path(), wal_path));
+        STATUS_CHECK(Directory::Initialize(config.storage.path(), wal_path, config.logs.path()));
 
-        /* TODO: add a invisible config */
-        if (true) {
-            bool cluster_enable = config.cluster.enable();
-            auto cluster_role = config.cluster.role();
+        std::cout << "Running on "
+                  << RunningMode(config.cluster.enable(), static_cast<ClusterRole>(config.cluster.role())) << " mode."
+                  << std::endl;
+        auto is_read_only = config.cluster.enable() && config.cluster.role() == ClusterRole::RO;
 
-            std::cout << "Running on " + RunningMode(cluster_enable, (ClusterRole)cluster_role) + " mode." << std::endl;
+        /* Only read-only mode do NOT lock directories */
+        if (is_read_only) {
+            STATUS_CHECK(Directory::Access("", "", config.logs.path()));
+        } else {
+            STATUS_CHECK(Directory::Access(config.storage.path(), config.wal.path(), config.logs.path()));
 
-            /* Only read-only mode do not lock directories */
-            if ((not cluster_enable) || cluster_role == ClusterRole::RW) {
+            if (config.system.lock.enable()) {
                 STATUS_CHECK(Directory::Lock(config.storage.path(), wal_path));
             }
         }
@@ -186,7 +187,6 @@ Server::Start() {
 #else
         LOG_SERVER_INFO_ << "CPU edition";
 #endif
-        STATUS_CHECK(StorageChecker::CheckStoragePermission());
         STATUS_CHECK(CpuChecker::CheckCpuInstructionSet());
 #ifdef MILVUS_GPU_VERSION
         STATUS_CHECK(GpuChecker::CheckGpuEnvironment());
@@ -332,5 +332,4 @@ Server::LogCpuInfo() {
     LOG_SERVER_INFO_ << "\n\n" << std::string(15, '*') << "CPU" << std::string(15, '*') << "\n\n" << sub_str;
 }
 
-}  // namespace server
-}  // namespace milvus
+}  // namespace milvus::server

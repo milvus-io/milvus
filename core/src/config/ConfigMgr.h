@@ -24,8 +24,7 @@ namespace milvus {
 
 class ConfigObserver {
  public:
-    virtual ~ConfigObserver() {
-    }
+    virtual ~ConfigObserver() = default;
 
     virtual void
     ConfigUpdate(const std::string& name) = 0;
