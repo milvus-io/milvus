@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef EXTRA_FILE_INFO_H
-#define EXTRA_FILE_INFO_H
+#ifndef MILVUS_STORAGE_EXTRAFILEINFO_H_
+#define MILVUS_STORAGE_EXTRAFILEINFO_H_
 
 #include <cstdio>
 #include <cstring>
@@ -100,4 +100,4 @@ WriteHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 
 }  // namespace storage
 }  // namespace milvus
-#endif  // end of EXTRA_FILE_INFO_H
+#endif  // end of MILVUS_STORAGE_EXTRAFILEINFO_H_
