@@ -69,7 +69,8 @@ class Utils {
     DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
              const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
              const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
-             milvus::TopKQueryResult& topk_query_result);
+             milvus::TopKQueryResult& topk_query_result,
+             milvus::MetricType metric_type = milvus::MetricType::INVALID);
 
     static std::vector<milvus::LeafQueryPtr>
     GenLeafQuery();

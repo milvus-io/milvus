@@ -202,7 +202,7 @@ void
 Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
                 const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
                 const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
-                milvus::TopKQueryResult& topk_query_result) {
+                milvus::TopKQueryResult& topk_query_result, milvus::MetricType metric_type) {
     topk_query_result.clear();
 
     std::vector<milvus::Entity> temp_entity_array;
@@ -213,6 +213,10 @@ Utils::DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& col
     {
         BLOCK_SPLITER
         JSON json_params = {{"nprobe", nprobe}};
+        if (metric_type != milvus::MetricType::INVALID) {
+            json_params["metric_type"] = metric_type;
+        }
+
         milvus_sdk::TimeRecorder rc("Search");
         milvus::Status stat =
             conn->Search(collection_name,
