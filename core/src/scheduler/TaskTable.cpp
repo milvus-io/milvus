@@ -13,6 +13,7 @@
 #include "Utils.h"
 #include "event/TaskTableUpdatedEvent.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/task/FinishedTask.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -146,6 +147,11 @@ TaskTableItem::Dump() const {
     return ret;
 }
 
+void
+TaskTableItem::SetFinished(const TaskPtr& t) {
+    task = t;
+}
+
 std::vector<uint64_t>
 TaskTable::PickToLoad(uint64_t limit) {
 #if 1
@@ -162,6 +168,7 @@ TaskTable::PickToLoad(uint64_t limit) {
             break;
         if (not cross && table_[index]->IsFinish()) {
             table_.set_front(index);
+            table_[index]->SetFinished(FinishedTask::Create());
         } else if (table_[index]->state == TaskTableItemState::LOADED) {
             cross = true;
             ++loaded_count;
@@ -248,6 +255,7 @@ TaskTable::PickToExecute(uint64_t limit) {
 
         if (not cross && table_[index]->IsFinish()) {
             table_.set_front(index);
+            table_[index]->SetFinished(FinishedTask::Create());
         } else if (table_[index]->state == TaskTableItemState::LOADED) {
             cross = true;
             indexes.push_back(index);

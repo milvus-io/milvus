@@ -18,9 +18,13 @@ CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 GPU_VERSION="OFF" #defaults to CPU version
 WITH_PROMETHEUS="ON"
 CUDA_ARCH="DEFAULT"
+CUSTOM_THIRDPARTY_PATH=""
 
-while getopts "p:d:t:s:ulrcghzme" arg; do
+while getopts "p:d:t:s:f:ulrcghzme" arg; do
   case $arg in
+  f)
+    CUSTOM_THIRDPARTY_PATH=$OPTARG
+    ;;
   p)
     INSTALL_PREFIX=$OPTARG
     ;;
@@ -61,6 +65,7 @@ while getopts "p:d:t:s:ulrcghzme" arg; do
     echo "
 
 parameter:
+-f: custom paths of thirdparty downloaded files(default: NULL)
 -p: install prefix(default: $(pwd)/milvus)
 -d: db data path(default: /tmp/milvus)
 -t: build type(default: Debug)
@@ -75,7 +80,7 @@ parameter:
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH}[-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f\${CUSTOM_THIRDPARTY_PATH} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h]
                 "
     exit 0
     ;;
@@ -115,6 +120,7 @@ CMAKE_CMD="cmake \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
+-DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
