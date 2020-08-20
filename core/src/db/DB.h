@@ -51,7 +51,7 @@ class DB {
     CreateCollection(const snapshot::CreateCollectionContext& context) = 0;
 
     virtual Status
-    DropCollection(const std::string& name) = 0;
+    DropCollection(const std::string& collection_name) = 0;
 
     virtual Status
     HasCollection(const std::string& collection_name, bool& has_or_not) = 0;

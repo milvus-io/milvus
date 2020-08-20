@@ -31,6 +31,9 @@ class WalProxy : public DBProxy {
     Stop() override;
 
     Status
+    DropCollection(const std::string& collection_name) override;
+
+    Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
            idx_t op_id) override;
 
