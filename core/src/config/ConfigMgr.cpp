@@ -223,7 +223,7 @@ ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
             throw ConfigStatus(SetReturn::IMMUTABLE, "Config " + name + " is not modifiable");
         }
     } catch (ConfigStatus& cs) {
-        throw cs;
+        throw;
     } catch (...) {
         throw "Config " + name + " not found.";
     }

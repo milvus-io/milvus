@@ -36,7 +36,7 @@ class S3IOWriter : public IOWriter {
     Open(const std::string& name) override;
 
     void
-    Write(void* ptr, int64_t size) override;
+    Write(const void* ptr, int64_t size) override;
 
     int64_t
     Length() override;
