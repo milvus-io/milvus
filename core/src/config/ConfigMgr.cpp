@@ -182,7 +182,7 @@ ConfigMgr::ConfigMgr() {
         {"system.lock.enable",
          CreateBoolConfig("system.lock.enable", false, &config.system.lock.enable.value, true, nullptr, nullptr)},
     };
-}  // namespace milvus
+}
 
 void
 ConfigMgr::Init() {

@@ -37,8 +37,7 @@
 #include "utils/SignalHandler.h"
 #include "utils/TimeRecorder.h"
 
-namespace milvus {
-namespace server {
+namespace milvus::server {
 
 Server&
 Server::GetInstance() {
@@ -333,5 +332,4 @@ Server::LogCpuInfo() {
     LOG_SERVER_INFO_ << "\n\n" << std::string(15, '*') << "CPU" << std::string(15, '*') << "\n\n" << sub_str;
 }
 
-}  // namespace server
-}  // namespace milvus
+}  // namespace milvus::server
