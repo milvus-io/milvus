@@ -12,8 +12,8 @@
 #include "db/IDGenerator.h"
 #include "utils/Log.h"
 
-#include <assert.h>
 #include <fiu/fiu-local.h>
+#include <cassert>
 #include <chrono>
 #include <iostream>
 #include <string>

@@ -14,9 +14,8 @@
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
-#include <stdlib.h>
-#include <time.h>
 #include <cstdlib>
+#include <ctime>
 #include <memory>
 #include <regex>
 #include <sstream>

@@ -197,15 +197,17 @@ Snapshots::LoadHolder(StorePtr store, const ID_TYPE& collection_id, SnapshotHold
             return status;
     }
     status = LoadNoLock(store, collection_id, holder);
-    if (!status.ok())
+    if (!status.ok()) {
         return status;
+    }
 
     std::unique_lock<std::shared_timed_mutex> lock(mutex_);
     holders_[collection_id] = holder;
     ScopedSnapshotT ss;
     status = holder->Load(store, ss);
-    if (!status.ok())
+    if (!status.ok()) {
         return status;
+    }
     name_id_map_[ss->GetName()] = collection_id;
     return status;
 }

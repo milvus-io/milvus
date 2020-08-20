@@ -100,7 +100,7 @@ Segment::ToString() const {
     ss << "id=" << GetID() << ", ";
     ss << "partition_id=" << GetPartitionId() << ", ";
     ss << "collection_id=" << GetCollectionId() << ", ";
-    ss << "num=" << (NUM_TYPE)GetNum() << ", ";
+    ss << "num=" << GetNum() << ", ";
     ss << "state=" << GetState() << ", ";
     return ss.str();
 }

@@ -41,11 +41,13 @@ SnapshotHolder::Load(StorePtr store, ScopedSnapshotT& ss, ID_TYPE id, bool scope
     if (id > max_id_) {
         CollectionCommitPtr cc;
         status = LoadNoLock(id, cc, store);
-        if (!status.ok())
+        if (!status.ok()) {
             return status;
+        }
         status = Add(store, id);
-        if (!status.ok())
+        if (!status.ok()) {
             return status;
+        }
     }
 
     std::unique_lock<std::mutex> lock(mutex_);

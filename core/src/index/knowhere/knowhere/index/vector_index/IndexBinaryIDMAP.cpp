@@ -46,21 +46,21 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
     GET_TENSOR_DATA(dataset_ptr)
 
-    int64_t k = config[meta::TOPK].get<int64_t>();
+    auto k = config[meta::TOPK].get<int64_t>();
     auto elems = rows * k;
     size_t p_id_size = sizeof(int64_t) * elems;
     size_t p_dist_size = sizeof(float) * elems;
-    auto p_id = (int64_t*)malloc(p_id_size);
-    auto p_dist = (float*)malloc(p_dist_size);
+    auto p_id = static_cast<int64_t*>(malloc(p_id_size));
+    auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
     QueryImpl(rows, (uint8_t*)p_data, k, p_dist, p_id, config);
 
     auto ret_ds = std::make_shared<Dataset>();
     if (index_->metric_type == faiss::METRIC_Hamming) {
-        auto pf_dist = (float*)malloc(p_dist_size);
-        int32_t* pi_dist = reinterpret_cast<int32_t*>(p_dist);
+        auto pf_dist = static_cast<float*>(malloc(p_dist_size));
+        auto pi_dist = reinterpret_cast<int32_t*>(p_dist);
         for (int i = 0; i < elems; i++) {
-            *(pf_dist + i) = (float)(*(pi_dist + i));
+            *(pf_dist + i) = static_cast<float>(*(pi_dist + i));
         }
         ret_ds->Set(meta::IDS, p_id);
         ret_ds->Set(meta::DISTANCE, pf_dist);
@@ -147,7 +147,7 @@ BinaryIDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     constexpr faiss::MetricType metric_type = faiss::METRIC_Tanimoto;
 
     const char* desc = "BFlat";
-    int64_t dim = config[meta::DIM].get<int64_t>();
+    auto dim = config[meta::DIM].get<int64_t>();
     auto index = faiss::index_binary_factory(dim, desc, metric_type);
     index_.reset(index);
 }
@@ -187,7 +187,7 @@ BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) 
         new_ids[i] = i;
     }
 
-    index_->add_with_ids(rows, (uint8_t*)p_data, new_ids.data());
+    index_->add_with_ids(rows, reinterpret_cast<const uint8_t*>(p_data), new_ids.data());
 }
 
 #if 0
@@ -220,8 +220,8 @@ BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distanc
     auto bin_flat_index = dynamic_cast<faiss::IndexBinaryIDMap*>(index_.get())->index;
     bin_flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
 
-    int32_t* pdistances = (int32_t*)distances;
-    index_->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
+    auto pdistances = reinterpret_cast<int32_t*>(distances);
+    index_->search(n, data, k, pdistances, labels, bitset_);
 }
 
 }  // namespace knowhere

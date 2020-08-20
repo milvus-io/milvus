@@ -51,22 +51,22 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA(dataset_ptr)
 
     try {
-        int64_t k = config[meta::TOPK].get<int64_t>();
+        auto k = config[meta::TOPK].get<int64_t>();
         auto elems = rows * k;
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
-        auto p_id = (int64_t*)malloc(p_id_size);
-        auto p_dist = (float*)malloc(p_dist_size);
+        auto p_id = static_cast<int64_t*>(malloc(p_id_size));
+        auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
-        QueryImpl(rows, (uint8_t*)p_data, k, p_dist, p_id, config);
+        QueryImpl(rows, reinterpret_cast<const uint8_t*>(p_data), k, p_dist, p_id, config);
 
         auto ret_ds = std::make_shared<Dataset>();
         if (index_->metric_type == faiss::METRIC_Hamming) {
-            auto pf_dist = (float*)malloc(p_dist_size);
-            int32_t* pi_dist = reinterpret_cast<int32_t*>(p_dist);
+            auto pf_dist = static_cast<float*>(malloc(p_dist_size));
+            auto* pi_dist = reinterpret_cast<int32_t*>(p_dist);
             for (int i = 0; i < elems; i++) {
-                *(pf_dist + i) = (float)(*(pi_dist + i));
+                *(pf_dist + i) = static_cast<float>(*(pi_dist + i));
             }
             ret_ds->Set(meta::IDS, p_id);
             ret_ds->Set(meta::DISTANCE, pf_dist);
@@ -167,8 +167,8 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::IndexBinary* coarse_quantizer = new faiss::IndexBinaryFlat(dim, metric_type);
     auto index = std::make_shared<faiss::IndexBinaryIVF>(coarse_quantizer, dim, nlist, metric_type);
-    index->train(rows, (uint8_t*)p_data);
-    index->add_with_ids(rows, (uint8_t*)p_data, p_ids);
+    index->train(rows, reinterpret_cast<const uint8_t*>(p_data));
+    index->add_with_ids(rows, static_cast<const uint8_t*>(p_data), p_ids);
     index_ = index;
 }
 
@@ -215,11 +215,11 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
     ivf_index->nprobe = params->nprobe;
-    int32_t* pdistances = (int32_t*)distances;
+    auto* pdistances = reinterpret_cast<int32_t*>(distances);
     stdclock::time_point before = stdclock::now();
 
     // todo: remove static cast (zhiru)
-    static_cast<faiss::IndexBinary*>(index_.get())->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
+    static_cast<faiss::IndexBinary*>(index_.get())->search(n, data, k, pdistances, labels, bitset_);
 
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();

@@ -79,8 +79,8 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 void
 IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
-        int64_t dim = dataset_ptr->Get<int64_t>(meta::DIM);
-        int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+        auto dim = dataset_ptr->Get<int64_t>(meta::DIM);
+        auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
 
         hnswlib::SpaceInterface<float>* space;
         std::string metric_type = config[Metric::TYPE];
@@ -145,8 +145,8 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     size_t k = config[meta::TOPK].get<int64_t>();
     size_t id_size = sizeof(int64_t) * k;
     size_t dist_size = sizeof(float) * k;
-    auto p_id = (int64_t*)malloc(id_size * rows);
-    auto p_dist = (float*)malloc(dist_size * rows);
+    auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
+    auto p_dist = static_cast<float*>(malloc(dist_size * rows));
 
     index_->setEf(config[IndexParams::ef]);
 
