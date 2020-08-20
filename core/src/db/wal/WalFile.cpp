@@ -18,9 +18,6 @@
 namespace milvus {
 namespace engine {
 
-WalFile::WalFile() {
-}
-
 WalFile::~WalFile() {
     CloseFile();
 }

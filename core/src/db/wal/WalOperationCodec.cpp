@@ -58,7 +58,7 @@ WalOperationCodec::WriteInsertOperation(const WalFilePtr& file, const std::strin
         int32_t part_name_length = partition_name.size();
         total_bytes += file->Write<int32_t>(&part_name_length);
         if (part_name_length > 0) {
-            total_bytes += file->Write((void*)partition_name.data(), part_name_length);
+            total_bytes += file->Write(partition_name.data(), part_name_length);
         }
 
         // write fixed data
@@ -71,11 +71,11 @@ WalOperationCodec::WriteInsertOperation(const WalFilePtr& file, const std::strin
 
             int32_t field_name_length = pair.first.size();
             total_bytes += file->Write<int32_t>(&field_name_length);
-            total_bytes += file->Write((void*)pair.first.data(), field_name_length);
+            total_bytes += file->Write(pair.first.data(), field_name_length);
 
             int64_t data_size = pair.second->data_.size();
             total_bytes += file->Write<int64_t>(&data_size);
-            total_bytes += file->Write((void*)pair.second->data_.data(), data_size);
+            total_bytes += file->Write(pair.second->data_.data(), data_size);
         }
 
         // TODO: write variable data
@@ -132,7 +132,7 @@ WalOperationCodec::WriteDeleteOperation(const WalFilePtr& file, const IDNumbers&
         int64_t id_count = entity_ids.size();
         total_bytes += file->Write<int64_t>(&id_count);
 
-        total_bytes += file->Write((void*)entity_ids.data(), id_count * sizeof(idx_t));
+        total_bytes += file->Write(entity_ids.data(), id_count * sizeof(idx_t));
 
         // write operation id again
         // Note: makesure operation id is written at end, so that wal cleanup thread know which file can be deleted

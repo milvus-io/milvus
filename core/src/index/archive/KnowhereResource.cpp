@@ -63,8 +63,9 @@ KnowhereResource::Initialize() {
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = config.gpu.enable();
     fiu_do_on("KnowhereResource.Initialize.disable_gpu", enable_gpu = false);
-    if (not enable_gpu)
+    if (!enable_gpu) {
         return Status::OK();
+    }
 
     struct GpuResourceSetting {
         int64_t pinned_memory = 256 * M_BYTE;

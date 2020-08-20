@@ -114,8 +114,9 @@ PartitionCommitOperation::DoExecute(StorePtr store) {
         row_cnt = resource_->GetRowCount();
         size = resource_->GetSize();
         auto erase_sc = [&](SegmentCommitPtr& sc) {
-            if (!sc)
+            if (!sc) {
                 return;
+            }
             auto prev_sc = GetStartedSS()->GetSegmentCommitBySegmentId(sc->GetSegmentId());
             if (prev_sc) {
                 resource_->GetMappings().erase(prev_sc->GetID());
