@@ -63,7 +63,7 @@ GetReqGroup(ReqType type) {
 
     auto iter = s_map_type_group.find(type);
     if (iter == s_map_type_group.end()) {
-        LOG_SERVER_ERROR_ << "Unsupported request type: " << (int32_t)type;
+        LOG_SERVER_ERROR_ << "Unsupported request type: " << static_cast<int32_t>(type);
         throw Exception(SERVER_NOT_IMPLEMENT, "request group undefined");
     }
     return iter->second;

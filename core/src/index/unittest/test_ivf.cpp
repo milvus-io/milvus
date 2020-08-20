@@ -196,7 +196,7 @@ TEST_P(IVFTest, ivf_serialize) {
         // serialize index
         index_->Train(base_dataset, conf_);
         index_->Add(base_dataset, conf_);
-        auto binaryset = index_->Serialize();
+        auto binaryset = index_->Serialize(conf_);
         auto bin = binaryset.GetByName("IVF");
 
         std::string filename = "/tmp/ivf_test_serialize.bin";
@@ -340,7 +340,7 @@ TEST_P(IVFTest, invalid_gpu_source) {
 
     fiu_init(0);
     fiu_enable("GPUIVF.SerializeImpl.throw_exception", 1, nullptr, 0);
-    ASSERT_ANY_THROW(index_->Serialize());
+    ASSERT_ANY_THROW(index_->Serialize(conf_));
     fiu_disable("GPUIVF.SerializeImpl.throw_exception");
 
     fiu_enable("GPUIVF.search_impl.invald_index", 1, nullptr, 0);
