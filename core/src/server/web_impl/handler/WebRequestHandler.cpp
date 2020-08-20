@@ -249,7 +249,7 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
                     auto vector_size = single_size * sizeof(int8_t) / sizeof(float);
                     float_vector.resize(vector_size);
                     int64_t offset = vector_size * i;
-                    memcpy(float_vector.data(), data->data_.data() + offset, vector_size);
+                    memcpy(float_vector.data(), data->data_.data() + offset, vector_size * sizeof(float));
                     entity_json[name] = float_vector;
                     break;
                 }
@@ -301,6 +301,31 @@ WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohman
     }
 
     return status;
+}
+
+Status
+WebRequestHandler::GetPageEntities(const std::string& collection_name, const int64_t page_size, const int64_t offset,
+                                   nlohmann::json& json_out) {
+    //    engine::IDNumbers entity_ids;
+    //    std::string collection_info;
+    //    STATUS_CHECK(req_handler_.GetCollectionStats(context_ptr_, collection_name, collection_info));
+    //    nlohmann::json json_info = nlohmann::json::parse(collection_info);
+    //
+    //    if (json_info.contains("partitions")) {
+    //        return Status(SERVER_UNEXPECTED_ERROR, "Collection info does not include partitions");
+    //    }
+    //    if (json_info["partitions"].is_array()) {
+    //        return Status(SERVER_UNEXPECTED_ERROR, "Collection info partition json is not an array");
+    //    }
+    //    int64_t entity_num = 0;
+    //    for (auto& json_partition : json_info["partitions"]) {
+    //        for (auto& json_segment : json_partition["segments"]) {
+    //            entity_num += json_segment["row_count"].get<int64_t>();
+    //            if (offset <= entity_num) {
+    //                auto ids_begin =
+    //            }
+    //        }
+    //    }
 }
 
 Status
@@ -878,10 +903,7 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
         }
     }
 
-    std::vector<uint8_t> id_data = data_chunk->fixed_fields_[engine::FIELD_UID]->data_;
-    std::vector<int64_t> id_array(valid_size);
-    memcpy(id_array.data(), id_data.data(), valid_size * sizeof(int64_t));
-    CopyData2Json(data_chunk, field_mappings, id_array, json_out);
+    CopyData2Json(data_chunk, field_mappings, ids, json_out);
     return Status::OK();
 }
 
@@ -1723,6 +1745,7 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         } else {
             json["entities"] = entity_result_json;
         }
+        response = json.dump().c_str();
     } catch (std::exception& e) {
         RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, e.what());
     }
