@@ -32,7 +32,7 @@ timeout(time: 120, unit: 'MINUTES') {
         if (isTimeTriggeredBuild) {
             sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=2 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME} >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_dev_test.log"
         } else {
-            sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=1 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME} >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_dev_test.log"
+            sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=1 -n 4 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME} >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_dev_test.log"
         }
     }
 
