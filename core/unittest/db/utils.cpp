@@ -38,6 +38,7 @@
 #include "db/meta/backend/MockEngine.h"
 #include "db/meta/backend/MySqlEngine.h"
 #include "db/meta/backend/SqliteEngine.h"
+#include "db/wal/WalProxy.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
 #include "utils/CommonUtil.h"
@@ -289,6 +290,7 @@ SchedulerTest::TearDown() {
     BaseTest::TearDown();
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 EventTest::SetUp() {
     auto uri = "mock://:@:/";
@@ -298,6 +300,30 @@ EventTest::SetUp() {
 
 void
 EventTest::TearDown() {
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+milvus::engine::DBOptions
+WalTest::GetOptions() {
+    milvus::engine::DBOptions options;
+    options.meta_.path_ = "/tmp/milvus_wal";
+    options.meta_.backend_uri_ = "mock://:@:/";
+    options.wal_enable_ = true;
+    return options;
+}
+
+void
+WalTest::SetUp() {
+    milvus::engine::DBPtr db = std::make_shared<milvus::engine::DBProxy>(nullptr, GetOptions());
+    db_ = std::make_shared<milvus::engine::WalProxy>(db, GetOptions());
+    db_->Start();
+}
+
+void
+WalTest::TearDown() {
+    db_->Stop();
+    db_ = nullptr;
+    std::experimental::filesystem::remove_all(GetOptions().meta_.path_);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
