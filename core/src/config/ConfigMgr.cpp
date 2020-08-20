@@ -12,8 +12,8 @@
 #include <yaml-cpp/yaml.h>
 #include <cstring>
 #include <limits>
-#include <unordered_map>
 #include <nlohmann/json.hpp>
+#include <unordered_map>
 
 #include "config/ConfigMgr.h"
 #include "config/ServerConfig.h"
