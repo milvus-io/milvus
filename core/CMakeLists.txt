@@ -232,8 +232,8 @@ if ( MILVUS_GPU_VERSION )
 else ()
     set( GPU_ENABLE "false" )
 endif ()
-configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template
-                ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml @ONLY)
+configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/conf/milvus.template
+                ${CMAKE_CURRENT_SOURCE_DIR}/conf/milvus.yaml @ONLY)
 
 install(DIRECTORY scripts/
         DESTINATION scripts
@@ -247,7 +247,7 @@ install(DIRECTORY scripts/migration
         GROUP_EXECUTE GROUP_READ
         WORLD_EXECUTE WORLD_READ)
 install(FILES
-        conf/server_config.yaml
+        conf/milvus.yaml
         DESTINATION
         conf)
 
