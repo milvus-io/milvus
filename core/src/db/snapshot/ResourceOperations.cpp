@@ -75,12 +75,10 @@ PartitionOperation::PreCheck() {
 
 Status
 PartitionOperation::DoExecute(StorePtr store) {
-    auto status = CheckStale();
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(CheckStale());
     resource_ = std::make_shared<Partition>(context_.name, GetStartedSS()->GetCollection()->GetID());
     AddStep(*resource_, nullptr, false);
-    return status;
+    return Status::OK();
 }
 
 PartitionCommitOperation::PartitionCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)

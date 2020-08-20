@@ -124,7 +124,7 @@ MemSegment::GetSingleEntitySize(int64_t& single_size) {
     std::vector<std::string> field_names = ss->GetFieldNames();
     for (auto& name : field_names) {
         snapshot::FieldPtr field = ss->GetField(name);
-        DataType ftype = static_cast<DataType>(field->GetFtype());
+        auto ftype = static_cast<DataType>(field->GetFtype());
         switch (ftype) {
             case DataType::BOOL:
                 single_size += sizeof(bool);
