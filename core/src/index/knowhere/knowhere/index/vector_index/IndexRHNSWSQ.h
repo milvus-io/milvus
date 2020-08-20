@@ -34,7 +34,7 @@ class IndexRHNSWSQ : public IndexRHNSW {
     IndexRHNSWSQ(int d, faiss::QuantizerType qtype, int M, MetricType metric = Metric::L2);
 
     BinarySet
-    Serialize(const Config& config = Config()) override;
+    Serialize(const Config& config) override;
 
     void
     Load(const BinarySet& index_binary) override;

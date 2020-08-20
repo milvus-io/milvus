@@ -245,8 +245,8 @@ ValidateDbURI(const std::string& uri) {
     std::string hostRegex = "(.*)";
     std::string portRegex = "(.*)";
     std::string dbNameRegex = "(.*)";
-    std::string uriRegexStr = dialectRegex + "\\:\\/\\/" + usernameRegex + "\\:" + passwordRegex + "\\@" + hostRegex +
-                              "\\:" + portRegex + "\\/" + dbNameRegex;
+    std::string uriRegexStr = dialectRegex + R"(\:\/\/)" + usernameRegex + R"(\:)" + passwordRegex + R"(\@)" +
+                              hostRegex + R"(\:)" + portRegex + R"(\/)" + dbNameRegex;
     std::regex uriRegex(uriRegexStr);
     std::smatch pieces_match;
 
@@ -296,7 +296,7 @@ ValidateStoragePath(const std::string& path) {
     // and path must start with '/'.
     // examples below are invalid
     // '/a//a', '/a--/a', '/-a/a', '/a@#/a', 'aaa/sfs'
-    std::string path_pattern = "^\\/(\\w+-?\\/?)+$";
+    std::string path_pattern = R"(^\/(\w+-?\/?)+$)";
     std::regex regex(path_pattern);
 
     return std::regex_match(path, regex) ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid file path");

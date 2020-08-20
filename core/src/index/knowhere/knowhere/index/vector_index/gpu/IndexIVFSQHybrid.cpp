@@ -67,9 +67,7 @@ IVFSQHybrid::CopyGpuToCpu(const Config& config) {
     faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
 
     if (auto* ivf_index = dynamic_cast<faiss::IndexIVF*>(host_index)) {
-        if (ivf_index != nullptr) {
-            ivf_index->to_readonly();
-        }
+        ivf_index->to_readonly();
         ivf_index->backup_quantizer();
     }
 

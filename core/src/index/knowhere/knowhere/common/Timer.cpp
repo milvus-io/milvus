@@ -42,22 +42,9 @@ TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
     str_log += ")";
 
     switch (log_level_) {
-        case 0: {
+        case 0:
             std::cout << str_log << std::endl;
             break;
-        }
-        case 1: {
-            LOG_KNOWHERE_DEBUG_ << str_log;
-            break;
-        }
-        // case 2: {
-        //     LOG_KNOWHERE_TRACE_ << str_log;
-        //     break;
-        // }
-        // case 3: {
-        //     LOG_KNOWHERE_WARNING_ << str_log;
-        //     break;
-        // }
         default:
             LOG_KNOWHERE_DEBUG_ << str_log;
             break;
