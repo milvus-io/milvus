@@ -68,6 +68,8 @@ class ConfigMgr {
 
     std::string
     Dump() const;
+    std::string
+    JsonDump() const;
 
  public:
     // Shared pointer should not be used here
