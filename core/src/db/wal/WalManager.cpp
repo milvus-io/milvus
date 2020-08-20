@@ -26,7 +26,8 @@ namespace engine {
 
 const char* MAX_OP_ID_FILE_NAME = "max_op";
 
-WalManager::WalManager() : cleanup_thread_pool_(1, 1) = default;
+WalManager::WalManager() : cleanup_thread_pool_(1, 1) {
+}
 
 WalManager&
 WalManager::GetInstance() {

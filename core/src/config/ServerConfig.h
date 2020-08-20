@@ -148,6 +148,12 @@ struct ServerConfig {
         Integer max_log_file_size{0};
         Integer log_rotate_num{0};
     } logs;
+
+    struct System {
+        struct Lock {
+            Bool enable{false};
+        } lock;
+    } system;
 };
 
 extern ServerConfig config;
