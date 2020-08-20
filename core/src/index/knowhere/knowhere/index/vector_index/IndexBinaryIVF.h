@@ -36,7 +36,7 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     }
 
     BinarySet
-    Serialize(const Config& config = Config()) override;
+    Serialize(const Config& config) override;
 
     void
     BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override {

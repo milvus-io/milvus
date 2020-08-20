@@ -681,6 +681,8 @@ class TestSearchBase:
         res = connect.search(binary_collection, query)
         assert res[0][0].distance <= epsilon
         assert res[0][0].id == ids[0]
+        import pdb
+        pdb.set_trace()
         assert res[1][0].distance <= epsilon
         assert res[1][0].id == ids[1]
 

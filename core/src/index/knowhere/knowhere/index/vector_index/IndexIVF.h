@@ -36,7 +36,7 @@ class IVF : public VecIndex, public FaissBaseIndex {
     }
 
     BinarySet
-    Serialize(const Config& config = Config()) override;
+    Serialize(const Config&) override;
 
     void
     Load(const BinarySet&) override;

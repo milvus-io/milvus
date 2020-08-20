@@ -255,8 +255,9 @@ ConfigMgr::Attach(const std::string& name, ConfigObserver* observer) {
 void
 ConfigMgr::Detach(const std::string& name, ConfigObserver* observer) {
     std::lock_guard<std::mutex> lock(observer_mutex_);
-    if (observers_.find(name) == observers_.end())
+    if (observers_.find(name) == observers_.end()) {
         return;
+    }
     auto& ob_list = observers_[name];
     ob_list.remove(observer);
 }
@@ -264,8 +265,9 @@ ConfigMgr::Detach(const std::string& name, ConfigObserver* observer) {
 void
 ConfigMgr::Notify(const std::string& name) {
     std::lock_guard<std::mutex> lock(observer_mutex_);
-    if (observers_.find(name) == observers_.end())
+    if (observers_.find(name) == observers_.end()) {
         return;
+    }
     auto& ob_list = observers_[name];
     for (auto& ob : ob_list) {
         ob->ConfigUpdate(name);

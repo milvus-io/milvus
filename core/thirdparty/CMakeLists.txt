@@ -59,3 +59,8 @@ endif()
 if ( ENABLE_CPU_PROFILING )
     add_subdirectory( profilers )
 endif ()
+
+# ****************************** Thirdparty mysqlpp ***************************************
+if ( MILVUS_WITH_MYSQLPP )
+    add_subdirectory( mysqlpp )
+endif ()

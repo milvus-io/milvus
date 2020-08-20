@@ -170,7 +170,7 @@ TEST_P(AnnoyTest, annoy_serialize) {
     {
         // serialize index
         index_->BuildAll(base_dataset, conf);
-        auto binaryset = index_->Serialize();
+        auto binaryset = index_->Serialize(milvus::knowhere::Config());
 
         auto bin_data = binaryset.GetByName("annoy_index_data");
         std::string filename1 = "/tmp/annoy_test_data_serialize.bin";
