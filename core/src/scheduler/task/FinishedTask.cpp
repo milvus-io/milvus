@@ -9,18 +9,26 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/insert/MemManagerFactory.h"
-#include "MemManagerImpl.h"
+#include "scheduler/task/FinishedTask.h"
 
-#include <memory>
+namespace milvus::scheduler {
 
-namespace milvus {
-namespace engine {
-
-MemManagerPtr
-MemManagerFactory::Build(const DBOptions& options) {
-    return std::make_shared<MemManagerImpl>(options);
+std::shared_ptr<FinishedTask>
+FinishedTask::Create() {
+    return std::make_shared<FinishedTask>();
 }
 
-}  // namespace engine
-}  // namespace milvus
+FinishedTask::FinishedTask() : Task(TaskType::SearchTask, nullptr) {
+}
+
+Status
+FinishedTask::OnLoad(LoadType type, uint8_t device_id) {
+    return Status::OK();
+}
+
+Status
+FinishedTask::OnExecute() {
+    return Status::OK();
+}
+
+}  // namespace milvus::scheduler

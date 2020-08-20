@@ -94,6 +94,10 @@ struct TaskTableItem : public interface::dumpable {
 
     json
     Dump() const override;
+
+ public:
+    void
+    SetFinished(const TaskPtr& t);
 };
 
 class TaskTable : public interface::dumpable {

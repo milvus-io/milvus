@@ -37,22 +37,17 @@ SnapshotHolder::~SnapshotHolder() {
 
 Status
 SnapshotHolder::Load(StorePtr store, ScopedSnapshotT& ss, ID_TYPE id, bool scoped) {
-    Status status;
     if (id > max_id_) {
         CollectionCommitPtr cc;
-        status = LoadNoLock(id, cc, store);
-        if (!status.ok())
-            return status;
-        status = Add(store, id);
-        if (!status.ok())
-            return status;
+        STATUS_CHECK(LoadNoLock(id, cc, store));
+        STATUS_CHECK(Add(store, id));
     }
 
     std::unique_lock<std::mutex> lock(mutex_);
     if (id == 0 || id == max_id_) {
         auto raw = active_.at(max_id_);
         ss = ScopedSnapshotT(raw, scoped);
-        return status;
+        return Status::OK();
     }
     if (id < min_id_) {
         std::stringstream emsg;
@@ -71,7 +66,7 @@ SnapshotHolder::Load(StorePtr store, ScopedSnapshotT& ss, ID_TYPE id, bool scope
         return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
     ss = ScopedSnapshotT(it->second, scoped);
-    return status;
+    return Status::OK();
 }
 
 Status

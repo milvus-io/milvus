@@ -122,7 +122,8 @@ class Operations : public std::enable_shared_from_this<Operations> {
 
     virtual Status
     operator()(StorePtr store);
-    virtual Status
+
+    Status
     Push(bool sync = true);
 
     virtual Status

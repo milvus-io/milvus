@@ -11,16 +11,25 @@
 
 #pragma once
 
-#include "utils/Status.h"
+#include "scheduler/task/Task.h"
 
-namespace milvus {
-namespace server {
+#include <memory>
 
-class StorageChecker {
+namespace milvus::scheduler {
+
+class FinishedTask : public Task {
  public:
-    static Status
-    CheckStoragePermission();
+    static std::shared_ptr<FinishedTask>
+    Create();
+
+ public:
+    FinishedTask();
+
+    Status
+    OnLoad(LoadType type, uint8_t device_id) override;
+
+    Status
+    OnExecute() override;
 };
 
-}  // namespace server
-}  // namespace milvus
+}  // namespace milvus::scheduler

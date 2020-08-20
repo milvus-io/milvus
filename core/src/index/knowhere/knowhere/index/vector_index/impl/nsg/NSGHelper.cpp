@@ -29,7 +29,7 @@ InsertIntoPool(Neighbor* addr, unsigned K, Neighbor nn) {
     int left = 0, right = K - 1;
     if (addr[left].distance > nn.distance) {
         //>> Fix: memmove overflow, dump when vector<Neighbor> deconstruct
-        memmove((char*)&addr[left + 1], &addr[left], (K - 1) * sizeof(Neighbor));
+        memmove(&addr[left + 1], &addr[left], (K - 1) * sizeof(Neighbor));
         addr[left] = nn;
         return left;
     }
@@ -39,29 +39,33 @@ InsertIntoPool(Neighbor* addr, unsigned K, Neighbor nn) {
     }
     while (left < right - 1) {
         int mid = (left + right) / 2;
-        if (addr[mid].distance > nn.distance)
+        if (addr[mid].distance > nn.distance) {
             right = mid;
-        else
+        } else {
             left = mid;
+        }
     }
     // check equal ID
 
     while (left > 0) {
-        if (addr[left].distance < nn.distance)  // pos is right
+        if (addr[left].distance < nn.distance) {  // pos is right
             break;
-        if (addr[left].id == nn.id)
+        }
+        if (addr[left].id == nn.id) {
             return K + 1;
+        }
         left--;
     }
-    if (addr[left].id == nn.id || addr[right].id == nn.id)
+    if (addr[left].id == nn.id || addr[right].id == nn.id) {
         return K + 1;
+    }
 
     //>> Fix: memmove overflow, dump when vector<Neighbor> deconstruct
-    memmove((char*)&addr[right + 1], &addr[right], (K - 1 - right) * sizeof(Neighbor));
+    memmove(&addr[right + 1], &addr[right], (K - 1 - right) * sizeof(Neighbor));
     addr[right] = nn;
     return right;
 }
 
-};  // namespace impl
+}  // namespace impl
 }  // namespace knowhere
 }  // namespace milvus

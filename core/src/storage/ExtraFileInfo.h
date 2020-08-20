@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#ifndef EXTRA_FILE_INFO_H
-#define EXTRA_FILE_INFO_H
+#pragma once
 
 #include <cstdio>
 #include <cstring>
@@ -29,11 +28,11 @@
 
 #include "storage/FSHandler.h"
 
-#define MAGIC "Milvus"
-#define MAGIC_SIZE 6
-#define SINGLE_KV_DATA_SIZE 64
-#define HEADER_SIZE 4096
-#define SUM_SIZE 16
+extern const char* MAGIC;
+extern const int MAGIC_SIZE;
+extern const int SINGLE_KV_DATA_SIZE;
+extern const int HEADER_SIZE;
+extern const int SUM_SIZE;
 
 namespace milvus {
 namespace storage {
@@ -100,4 +99,3 @@ WriteHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 
 }  // namespace storage
 }  // namespace milvus
-#endif  // end of EXTRA_FILE_INFO_H
