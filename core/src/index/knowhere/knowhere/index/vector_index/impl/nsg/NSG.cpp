@@ -611,9 +611,8 @@ NsgIndex::SelectEdge(float* data, unsigned& cursor, std::vector<Neighbor>& sort_
     while (result.size() < out_degree && cursor < search_deepth && (++cursor) < pool.size()) {
         auto& p = pool[cursor];
         bool should_link = true;
-        for (size_t t = 0; t < result.size(); ++t) {
-            float dist = distance_->Compare(data + dimension * result[t].id, data + dimension * p.id, dimension);
-
+        for (auto& t : result) {
+            float dist = distance_->Compare(data + dimension * t.id, data + dimension * p.id, dimension);
             if (dist < p.distance) {
                 should_link = false;
                 break;
@@ -654,9 +653,9 @@ NsgIndex::DFS(size_t root, boost::dynamic_bitset<>& has_linked, int64_t& linked_
     while (!s.empty()) {
         size_t next = ntotal + 1;
 
-        for (unsigned i = 0; i < nsg[start].size(); i++) {
-            if (has_linked[nsg[start][i]] == false) {  // if not link
-                next = nsg[start][i];
+        for (auto i : nsg[start]) {
+            if (has_linked[i] == false) {  // if not link
+                next = i;
                 break;
             }
         }
@@ -696,9 +695,9 @@ NsgIndex::FindUnconnectedNode(float* data, boost::dynamic_bitset<>& has_linked, 
     std::sort(pool.begin(), pool.end());
 
     size_t found = 0;
-    for (size_t i = 0; i < pool.size(); i++) {  // find nearest neighbor and add unlinked-node as its neighbor
-        if (has_linked[pool[i].id]) {
-            root = pool[i].id;
+    for (auto node : pool) {  // find nearest neighbor and add unlinked-node as its neighbor
+        if (has_linked[node.id]) {
+            root = node.id;
             found = 1;
             break;
         }
@@ -870,13 +869,13 @@ NsgIndex::Search(const float* query, float* data, const unsigned& nq, const unsi
     bool is_ip = (metric_type == Metric_Type::Metric_Type_IP);
     for (unsigned int i = 0; i < nq; ++i) {
         unsigned int pos = 0;
-        for (unsigned int j = 0; j < resset[i].size(); ++j) {
+        for (auto node : resset[i]) {
             if (pos >= k) {
                 break;  // already top k
             }
-            if (!bitset || !bitset->test((faiss::ConcurrentBitset::id_type_t)resset[i][j].id)) {
-                ids[i * k + pos] = ids_[resset[i][j].id];
-                dist[i * k + pos] = is_ip ? -resset[i][j].distance : resset[i][j].distance;
+            if (!bitset || !bitset->test(node.id)) {
+                ids[i * k + pos] = ids_[node.id];
+                dist[i * k + pos] = is_ip ? -node.distance : node.distance;
                 ++pos;
             }
         }
@@ -901,11 +900,11 @@ NsgIndex::GetSize() {
     ret += ntotal * dimension * sizeof(float);
     ret += ntotal * sizeof(int64_t);
     ret += sizeof(*distance_);
-    for (size_t i = 0; i < nsg.size(); ++i) {
-        ret += nsg[i].size() * sizeof(node_t);
+    for (auto& v : nsg) {
+        ret += v.size() * sizeof(node_t);
     }
-    for (size_t i = 0; i < knng.size(); ++i) {
-        ret += knng[i].size() * sizeof(node_t);
+    for (auto& v : knng) {
+        ret += v.size() * sizeof(node_t);
     }
     return ret;
 }
