@@ -306,26 +306,47 @@ WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohman
 Status
 WebRequestHandler::GetPageEntities(const std::string& collection_name, const int64_t page_size, const int64_t offset,
                                    nlohmann::json& json_out) {
-    //    engine::IDNumbers entity_ids;
-    //    std::string collection_info;
-    //    STATUS_CHECK(req_handler_.GetCollectionStats(context_ptr_, collection_name, collection_info));
-    //    nlohmann::json json_info = nlohmann::json::parse(collection_info);
-    //
-    //    if (json_info.contains("partitions")) {
-    //        return Status(SERVER_UNEXPECTED_ERROR, "Collection info does not include partitions");
-    //    }
-    //    if (json_info["partitions"].is_array()) {
-    //        return Status(SERVER_UNEXPECTED_ERROR, "Collection info partition json is not an array");
-    //    }
-    //    int64_t entity_num = 0;
-    //    for (auto& json_partition : json_info["partitions"]) {
-    //        for (auto& json_segment : json_partition["segments"]) {
-    //            entity_num += json_segment["row_count"].get<int64_t>();
-    //            if (offset <= entity_num) {
-    //                auto ids_begin =
-    //            }
-    //        }
-    //    }
+    std::string collection_info;
+    STATUS_CHECK(req_handler_.GetCollectionStats(context_ptr_, collection_name, collection_info));
+    nlohmann::json json_info = nlohmann::json::parse(collection_info);
+
+    if (!json_info.contains("partitions")) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Collection info does not include partitions");
+    }
+    if (!json_info["partitions"].is_array()) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Collection info partition json is not an array");
+    }
+    int64_t entity_num = offset;
+    std::vector<int64_t> segment_ids;
+    for (auto& json_partition : json_info["partitions"]) {
+        for (auto& json_segment : json_partition["segments"]) {
+            auto row_count = json_segment["row_count"].get<int64_t>();
+            if (entity_num >= row_count) {
+                entity_num -= row_count;
+            }
+            segment_ids.emplace_back(json_segment["id"].get<int64_t>());
+        }
+    }
+    int64_t real_offset = entity_num;
+    int64_t real_page_size = page_size;
+
+    engine::IDNumbers entity_ids;
+    for (const auto seg_id : segment_ids) {
+        engine::IDNumbers temp_ids;
+        STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, collection_name, seg_id, temp_ids));
+        auto ids_begin = real_offset;
+        auto ids_end = std::min(temp_ids.size(), (size_t)(real_offset + real_page_size));
+        auto new_ids = std::vector<int64_t>(temp_ids.begin() + ids_begin, temp_ids.begin() + ids_end);
+        auto cur_size = entity_ids.size();
+        auto new_size = new_ids.size();
+        entity_ids.resize(cur_size + new_size);
+        memcpy(entity_ids.data() + cur_size, new_ids.data(), new_size * sizeof(int64_t));
+
+        real_page_size -= (ids_end - ids_begin);
+        real_offset = 0;
+    }
+    std::vector<std::string> field_names;
+    STATUS_CHECK(GetEntityByIDs(collection_name, entity_ids, field_names, json_out));
 }
 
 Status
@@ -753,6 +774,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         auto boolean_query_json = query_json["bool"];
         auto boolean_query = std::make_shared<query::BooleanQuery>();
         query_ptr_ = std::make_shared<query::Query>();
+        query_ptr_->collection_id = collection_name;
 
         status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr_);
         if (!status.ok()) {
@@ -1712,6 +1734,15 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
                              milvus::server::web::OString& response) {
     auto status = Status::OK();
     try {
+        if (query_params.get("offset") && query_params.get("page_size")) {
+            nlohmann::json json_out;
+            auto offset = std::stoi(query_params.get("offset")->std_str(), nullptr);
+            auto page_size = std::stoi(query_params.get("page_size")->std_str(), nullptr);
+            status = GetPageEntities(collection_name->std_str(), page_size, offset, json_out);
+            response = json_out.dump().c_str();
+            ASSIGN_RETURN_STATUS_DTO(status);
+        }
+
         auto query_ids = query_params.get("ids");
         if (query_ids == nullptr || query_ids.get() == nullptr) {
             RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param ids is required.");

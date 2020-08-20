@@ -288,6 +288,9 @@ class TestClient : public oatpp::web::client::ApiClient {
              PATH(String, collection_name, "collection_name"))
 
     API_CALL("GET", "/collections/{collection_name}/entities", getEntity,
+             PATH(String, collection_name, "collection_name"), QUERY(String, offset), QUERY(String, page_size))
+
+    API_CALL("GET", "/collections/{collection_name}/entities", getEntityByID,
              PATH(String, collection_name, "collection_name"), QUERY(String, ids))
 
     API_CALL("POST", "/collections/{collection_name}/entities", insert,
@@ -653,7 +656,7 @@ TEST_F(WebControllerTest, INSERT_IDS) {
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 }
 
-TEST_F(WebControllerTest, GET_ENTITY) {
+TEST_F(WebControllerTest, GET_ENTITY_BY_ID) {
     auto collection_name = "test_insert_collection_test" + RandomName();
     nlohmann::json mapping_json;
     CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
@@ -678,11 +681,35 @@ TEST_F(WebControllerTest, GET_ENTITY) {
 
     std::string query_ids;
     milvus::StringHelpFunctions::MergeStringWithDelimeter(ids, ",", query_ids);
-    response = client_ptr->getEntity(collection_name.c_str(), query_ids.c_str(), connection_ptr);
+    response = client_ptr->getEntityByID(collection_name.c_str(), query_ids.c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
     response = client_ptr->dropCollection(collection_name.c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
+    auto collection_name = "test_insert_collection_test" + RandomName();
+    nlohmann::json mapping_json;
+    CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
+
+    const int64_t dim = DIM;
+    const int64_t nb = 20;
+    nlohmann::json insert_json;
+    GenEntities(nb, dim, insert_json);
+
+    auto response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
+    ASSERT_EQ(nb, result_dto->ids->size());
+
+    auto status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
+    ASSERT_TRUE(status.ok());
+
+    std::string offset = "10";
+    std::string page_size = "10";
+    response = client_ptr->getEntity(collection_name.c_str(), offset.c_str(), page_size.c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 
 TEST_F(WebControllerTest, INDEX) {

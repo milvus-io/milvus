@@ -657,7 +657,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_DEFAULT_CORS(EntityOp)
 
-    ENDPOINT("PUT", "/hybrid_collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
+    ENDPOINT("PUT", "/collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
              BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/hybrid_collections/" + collection_name->std_str() +
                         "/vectors\'");
