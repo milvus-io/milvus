@@ -53,7 +53,7 @@ TEST_F(ExtraFileInfoTest, WriteFileTest) {
 
     size_t num_bytes = raw.size();
     fs_ptr->writer_ptr_->Write(&num_bytes, sizeof(size_t));
-    fs_ptr->writer_ptr_->Write((void*)(raw.data()), num_bytes);
+    fs_ptr->writer_ptr_->Write(raw.data(), num_bytes);
     fs_ptr->writer_ptr_->Close();
 
     int result_sum = CalculateSum(fs_ptr, file_path);

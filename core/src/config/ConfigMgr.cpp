@@ -12,6 +12,7 @@
 #include <yaml-cpp/yaml.h>
 #include <cstring>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <unordered_map>
 
 #include "config/ConfigMgr.h"
@@ -244,6 +245,16 @@ ConfigMgr::Dump() const {
         ss << config->name_ << ": " << config->Get() << std::endl;
     }
     return ss.str();
+}
+
+std::string
+ConfigMgr::JsonDump() const {
+    nlohmann::json j;
+    for (auto& kv : config_list_) {
+        auto& config = kv.second;
+        j[config->name_] = config->Get();
+    }
+    return j.dump();
 }
 
 void
