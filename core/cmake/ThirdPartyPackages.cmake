@@ -213,13 +213,6 @@ else ()
         "https://github.com/milvus-io/prometheus-cpp/archive/${PROMETHEUS_VERSION}.zip")
 endif ()
 
-if (DEFINED ENV{MILVUS_SQLITE_URL})
-    set(SQLITE_SOURCE_URL "$ENV{MILVUS_SQLITE_URL}")
-else ()
-    set(SQLITE_SOURCE_URL
-            "https://www.sqlite.org/2019/sqlite-autoconf-${SQLITE_VERSION}.tar.gz")
-endif ()
-
 if (DEFINED ENV{MILVUS_FIU_URL})
     set(FIU_SOURCE_URL "$ENV{MILVUS_FIU_URL}")
 else ()
