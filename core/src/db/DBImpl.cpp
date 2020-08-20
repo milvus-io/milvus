@@ -413,7 +413,7 @@ DBImpl::DescribeIndex(const std::string& collection_name, const std::string& fie
 
 Status
 DBImpl::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
-               id_t op_id) {
+               idx_t op_id) {
     CHECK_INITIALIZED;
 
     if (data_chunk == nullptr) {
@@ -510,7 +510,7 @@ DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_ar
 }
 
 Status
-DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id) {
+DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;

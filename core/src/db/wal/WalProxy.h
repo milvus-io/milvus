@@ -25,17 +25,17 @@ class WalProxy : public DBProxy {
     WalProxy(const DBPtr& db, const DBOptions& options);
 
     Status
+    Start() override;
+
+    Status
+    Stop() override;
+
+    Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
-           id_t op_id) override;
+           idx_t op_id) override;
 
     Status
-    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id) override;
-
-    Status
-    Flush(const std::string& collection_name) override;
-
-    Status
-    Flush() override;
+    DeleteEntityByID(const std::string& collection_name, const IDNumbers& entity_ids, idx_t op_id) override;
 
  private:
 };

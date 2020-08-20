@@ -13,6 +13,7 @@
 
 #include <string>
 
+#include "db/wal/WalFile.h"
 #include "db/wal/WalOperation.h"
 #include "utils/Status.h"
 
@@ -22,10 +23,14 @@ namespace engine {
 class WalOperationCodec {
  public:
     static Status
-    SerializeOperation(const std::string& path, const InsertEntityOperationPtr& operation);
+    WriteInsertOperation(const WalFilePtr& file, const std::string& partition_name, const DataChunkPtr& chunk,
+                         idx_t op_id);
 
     static Status
-    SerializeOperation(const std::string& path, const DeleteEntityOperationPtr& operation);
+    WriteDeleteOperation(const WalFilePtr& file, const IDNumbers& entity_ids, idx_t op_id);
+
+    static Status
+    IterateOperation(const WalFilePtr& file, WalOperationPtr& operation, idx_t from_op_id);
 };
 
 }  // namespace engine

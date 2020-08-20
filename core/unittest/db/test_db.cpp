@@ -776,7 +776,7 @@ TEST_F(DBTest, CompactTest) {
         if (delete_count < 0) {
             return;
         }
-        std::vector<milvus::engine::id_t> delete_ids;
+        std::vector<milvus::engine::idx_t> delete_ids;
         for (auto i = from; i < to; ++i) {
             delete_ids.push_back(batch_entity_ids[i]);
         }

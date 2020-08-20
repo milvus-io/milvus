@@ -218,7 +218,7 @@ SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, c
 }
 
 Status
-SegmentReader::LoadUids(std::vector<engine::id_t>& uids) {
+SegmentReader::LoadUids(std::vector<engine::idx_t>& uids) {
     engine::BinaryDataPtr raw;
     auto status = LoadField(engine::FIELD_UID, raw);
     if (!status.ok()) {
@@ -230,14 +230,14 @@ SegmentReader::LoadUids(std::vector<engine::id_t>& uids) {
         return Status(DB_ERROR, "Failed to load id field");
     }
 
-    if (raw->data_.size() % sizeof(engine::id_t) != 0) {
+    if (raw->data_.size() % sizeof(engine::idx_t) != 0) {
         std::string err_msg = "Failed to load uids: illegal file size";
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
     uids.clear();
-    uids.resize(raw->data_.size() / sizeof(engine::id_t));
+    uids.resize(raw->data_.size() / sizeof(engine::idx_t));
     memcpy(uids.data(), raw->data_.data(), raw->data_.size());
 
     return Status::OK();
