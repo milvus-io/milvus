@@ -71,3 +71,8 @@ endif ()
 if ( MILVUS_WITH_MYSQLPP )
     add_subdirectory( mysqlpp )
 endif ()
+
+# ****************************** Thirdparty prometheus ***************************************
+if (MILVUS_WITH_PROMETHEUS)
+    add_subdirectory( prometheus )
+endif ()
