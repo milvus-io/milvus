@@ -15,8 +15,7 @@
 #include "config/ConfigMgr.h"
 #include "utils/Status.h"
 
-namespace milvus {
-namespace server {
+namespace milvus::server {
 
 class Server {
  public:
@@ -61,5 +60,4 @@ class Server {
     // ConfigMgrPtr config_mgr_;
 };  // Server
 
-}  // namespace server
-}  // namespace milvus
+}  // namespace milvus::server
