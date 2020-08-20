@@ -41,9 +41,9 @@ DBProxy::CreateCollection(const snapshot::CreateCollectionContext& context) {
 }
 
 Status
-DBProxy::DropCollection(const std::string& name) {
+DBProxy::DropCollection(const std::string& collection_name) {
     DB_CHECK
-    return db_->DropCollection(name);
+    return db_->DropCollection(collection_name);
 }
 
 Status
