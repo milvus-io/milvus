@@ -141,7 +141,7 @@ GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids) {
     }
 
     if (!pair->second->data_.empty()) {
-        ids.resize(pair->second->data_.size() / sizeof(engine::id_t));
+        ids.resize(pair->second->data_.size() / sizeof(engine::idx_t));
         memcpy((void*)(ids.data()), pair->second->data_.data(), pair->second->data_.size());
     }
 }

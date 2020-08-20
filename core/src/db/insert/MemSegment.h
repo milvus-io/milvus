@@ -39,7 +39,7 @@ class MemSegment {
     Add(const VectorSourcePtr& source);
 
     Status
-    Delete(const std::vector<id_t>& ids);
+    Delete(const std::vector<idx_t>& ids);
 
     int64_t
     GetCurrentMem();
