@@ -689,11 +689,11 @@ class TestIndexInvalid(object):
     def get_index(self, request):
         yield request.param
 
-    @pytest.mark.level(1)
+    @pytest.mark.level(2)
     def test_create_index_with_invalid_index_params(self, connect, collection, get_index):
         logging.getLogger().info(get_index)
         with pytest.raises(Exception) as e:
-            connect.create_index(collection, field_name, get_simple_index)
+            connect.create_index(collection, field_name, get_index)
 
 
 class TestIndexAsync:

@@ -39,6 +39,7 @@ class TestListCollections:
             collection_name = gen_unique_str(collection_id)
             connect.create_collection(collection_name, default_fields)
             assert collection_name in connect.list_collections()
+            connect.drop_collection(collection_name)
 
     @pytest.mark.level(2)
     def test_list_collections_without_connection(self, dis_connect):

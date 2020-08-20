@@ -6,7 +6,7 @@ from time import sleep
 from multiprocessing import Process
 from utils import *
 
-uniq_id = "drop_collection"
+collection_id = "drop_collection"
 default_fields = gen_default_fields() 
 
 
@@ -44,7 +44,7 @@ class TestDropCollection:
             assert the exception raised returned by drp_collection method
         expected: False
         '''
-        collection_name = gen_unique_str(uniq_id)
+        collection_name = gen_unique_str(collection_id)
         with pytest.raises(Exception) as e:
             connect.drop_collection(collection_name)
 

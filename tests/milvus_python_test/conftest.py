@@ -132,8 +132,7 @@ def collection(request, connect):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collection_names = connect.list_collections()
-        for collection_name in collection_names:
+        if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
@@ -151,8 +150,7 @@ def id_collection(request, connect):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collection_names = connect.list_collections()
-        for collection_name in collection_names:
+        if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
@@ -169,8 +167,7 @@ def binary_collection(request, connect):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collection_names = connect.list_collections()
-        for collection_name in collection_names:
+        if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
@@ -188,8 +185,7 @@ def binary_id_collection(request, connect):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collection_names = connect.list_collections()
-        for collection_name in collection_names:
+        if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)

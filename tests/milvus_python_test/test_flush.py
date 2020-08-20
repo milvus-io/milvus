@@ -68,7 +68,7 @@ class TestFlushBase:
         method: flush, with collection not existed
         expected: error raised
         '''
-        collection_new = gen_unique_str("test_flush_1")
+        collection_new = gen_unique_str(collection_id)
         with pytest.raises(Exception) as e:
             connect.flush([collection_new])
 
@@ -77,14 +77,20 @@ class TestFlushBase:
         method: flush collection with no vectors
         expected: no error raised
         '''
+        connect.flush([collection])
+
+    def test_flush_collection(self, connect, collection):
+        '''
+        method: flush collection with vectors, delete
+        expected: no error raised
+        '''
         ids = connect.insert(collection, entities)
         assert len(ids) == nb
         status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
+        connect.flush([collection])
         res = connect.count_entities(collection)
         assert 0 == res
-        # with pytest.raises(Exception) as e:
-        #     connect.flush([collection])
 
     def test_add_partition_flush(self, connect, id_collection):
         '''
