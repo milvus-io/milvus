@@ -12,14 +12,15 @@
 #include "db/wal/WalOperationCodec.h"
 #include "utils/Log.h"
 
+#include <memory>
+#include <utility>
+
 namespace milvus {
 namespace engine {
 
 Status
-WalOperationCodec::WriteInsertOperation(const WalFilePtr& file,
-                                        const std::string& partition_name,
-                                        const DataChunkPtr& chunk,
-                                        idx_t op_id) {
+WalOperationCodec::WriteInsertOperation(const WalFilePtr& file, const std::string& partition_name,
+                                        const DataChunkPtr& chunk, idx_t op_id) {
     if (file == nullptr || !file->IsOpened() || chunk == nullptr) {
         return Status(DB_ERROR, "Invalid input for write insert operation");
     }
@@ -27,20 +28,20 @@ WalOperationCodec::WriteInsertOperation(const WalFilePtr& file,
     try {
         // calculate total bytes, it must equal to total_bytes
         int64_t calculate_total_bytes = 0;
-        calculate_total_bytes += sizeof(int32_t); // operation type
-        calculate_total_bytes += sizeof(idx_t); // operation id
-        calculate_total_bytes += sizeof(int64_t); // calculated total bytes
-        calculate_total_bytes += sizeof(int8_t); // partition name length
-        calculate_total_bytes += partition_name.size(); // partition name
-        calculate_total_bytes += sizeof(int32_t); // fixed field count
+        calculate_total_bytes += sizeof(int32_t);        // operation type
+        calculate_total_bytes += sizeof(idx_t);          // operation id
+        calculate_total_bytes += sizeof(int64_t);        // calculated total bytes
+        calculate_total_bytes += sizeof(int8_t);         // partition name length
+        calculate_total_bytes += partition_name.size();  // partition name
+        calculate_total_bytes += sizeof(int32_t);        // fixed field count
         for (auto& pair : chunk->fixed_fields_) {
-            calculate_total_bytes += sizeof(int8_t); // field name length
-            calculate_total_bytes += pair.first.size(); // field name
+            calculate_total_bytes += sizeof(int8_t);     // field name length
+            calculate_total_bytes += pair.first.size();  // field name
 
-            calculate_total_bytes += sizeof(int64_t); // data size
-            calculate_total_bytes += pair.second->data_.size(); // data
+            calculate_total_bytes += sizeof(int64_t);            // data size
+            calculate_total_bytes += pair.second->data_.size();  // data
         }
-        calculate_total_bytes += sizeof(idx_t); // operation id again
+        calculate_total_bytes += sizeof(idx_t);  // operation id again
 
         int64_t total_bytes = 0;
         // write operation type
@@ -87,7 +88,8 @@ WalOperationCodec::WriteInsertOperation(const WalFilePtr& file,
         file->Flush();
 
         if (total_bytes != calculate_total_bytes) {
-            LOG_ENGINE_ERROR_ << "wal serialize(insert) bytes " << total_bytes << " not equal " << calculate_total_bytes;
+            LOG_ENGINE_ERROR_ << "wal serialize(insert) bytes " << total_bytes << " not equal "
+                              << calculate_total_bytes;
         } else {
             LOG_ENGINE_DEBUG_ << "Wal serialize(insert) " << total_bytes << " bytes";
         }
@@ -108,12 +110,12 @@ WalOperationCodec::WriteDeleteOperation(const WalFilePtr& file, const IDNumbers&
     try {
         // calculate total bytes, it must equal to total_bytes
         int64_t calculate_total_bytes = 0;
-        calculate_total_bytes += sizeof(int32_t); // operation type
-        calculate_total_bytes += sizeof(idx_t); // operation id
-        calculate_total_bytes += sizeof(int64_t); // calculated total bytes
-        calculate_total_bytes += sizeof(int64_t); // id count
-        calculate_total_bytes += entity_ids.size() * sizeof(idx_t); // ids
-        calculate_total_bytes += sizeof(idx_t); // operation id again
+        calculate_total_bytes += sizeof(int32_t);                    // operation type
+        calculate_total_bytes += sizeof(idx_t);                      // operation id
+        calculate_total_bytes += sizeof(int64_t);                    // calculated total bytes
+        calculate_total_bytes += sizeof(int64_t);                    // id count
+        calculate_total_bytes += entity_ids.size() * sizeof(idx_t);  // ids
+        calculate_total_bytes += sizeof(idx_t);                      // operation id again
 
         int64_t total_bytes = 0;
         // write operation type
@@ -140,7 +142,8 @@ WalOperationCodec::WriteDeleteOperation(const WalFilePtr& file, const IDNumbers&
         file->Flush();
 
         if (total_bytes != calculate_total_bytes) {
-            LOG_ENGINE_ERROR_ << "wal serialize(delete) bytes " << total_bytes << " not equal " << calculate_total_bytes;
+            LOG_ENGINE_ERROR_ << "wal serialize(delete) bytes " << total_bytes << " not equal "
+                              << calculate_total_bytes;
         } else {
             LOG_ENGINE_DEBUG_ << "Wal serialize(delete) " << total_bytes << " bytes";
         }
@@ -206,7 +209,7 @@ WalOperationCodec::IterateOperation(const WalFilePtr& file, WalOperationPtr& ope
             delete[] buf;
         }
 
-        //read fixed data
+        // read fixed data
         int64_t field_count = 0;
         read_bytes = file->Read<int64_t>(&field_count);
         if (read_bytes <= 0) {

@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include "utils/Status.h"
 #include "db/Types.h"
+#include "utils/Status.h"
 
 #include <map>
 #include <memory>
@@ -28,7 +28,9 @@ class WalFile {
     ~WalFile();
 
     bool
-    IsOpened() const { return file_ != nullptr; }
+    IsOpened() const {
+        return file_ != nullptr;
+    }
 
     enum OpenMode {
         NA = 0,
@@ -45,8 +47,9 @@ class WalFile {
     bool
     ExceedMaxSize(int64_t append_size);
 
-    template<typename T>
-    inline int64_t Write(T* value) {
+    template <typename T>
+    inline int64_t
+    Write(T* value) {
         if (file_ == nullptr) {
             return 0;
         }
@@ -56,7 +59,8 @@ class WalFile {
         return bytes;
     }
 
-    inline int64_t Write(void* data, int64_t length) {
+    inline int64_t
+    Write(void* data, int64_t length) {
         if (file_ == nullptr) {
             return 0;
         }
@@ -66,8 +70,9 @@ class WalFile {
         return bytes;
     }
 
-    template<typename T>
-    inline int64_t Read(T* value) {
+    template <typename T>
+    inline int64_t
+    Read(T* value) {
         if (file_ == nullptr) {
             return 0;
         }
@@ -76,7 +81,8 @@ class WalFile {
         return bytes;
     }
 
-    inline int64_t Read(void* data, int64_t length) {
+    inline int64_t
+    Read(void* data, int64_t length) {
         if (file_ == nullptr) {
             return 0;
         }
@@ -85,7 +91,8 @@ class WalFile {
         return bytes;
     }
 
-    inline int64_t ReadStr(std::string& str, int64_t length) {
+    inline int64_t
+    ReadStr(std::string& str, int64_t length) {
         if (file_ == nullptr) {
             return 0;
         }
@@ -97,19 +104,26 @@ class WalFile {
         return bytes;
     }
 
-    inline void Flush() {
+    inline void
+    Flush() {
         if (file_ && mode_ != OpenMode::READ) {
             fflush(file_);
         }
     }
 
-    int64_t Size() const { return file_size_; }
-    std::string Path() const { return file_path_; }
+    int64_t
+    Size() const {
+        return file_size_;
+    }
+    std::string
+    Path() const {
+        return file_path_;
+    }
 
-    idx_t ReadLastOpId();
+    idx_t
+    ReadLastOpId();
 
-    void
-    inline SeekForward(int64_t offset) {
+    void inline SeekForward(int64_t offset) {
         if (file_ == nullptr) {
             return;
         }

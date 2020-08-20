@@ -10,9 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/wal/WalManager.h"
-#include "db/wal/WalOperationCodec.h"
 #include "db/Utils.h"
+#include "db/wal/WalOperationCodec.h"
 #include "utils/CommonUtil.h"
+
+#include <limits>
+#include <map>
+#include <memory>
+#include <utility>
 
 #include <boost/filesystem.hpp>
 #include <experimental/filesystem>
@@ -22,8 +27,7 @@ namespace engine {
 
 const char* MAX_OP_ID_FILE_NAME = "max_op";
 
-WalManager::WalManager()
-    : cleanup_thread_pool_(1, 1) {
+WalManager::WalManager() : cleanup_thread_pool_(1, 1) {
 }
 
 WalManager&
@@ -76,7 +80,8 @@ WalManager::RecordOperation(const WalOperationPtr& operation, const DBPtr& db) {
             status = RecordDeleteOperation(op, db);
             break;
         }
-        default:break;
+        default:
+            break;
     }
 
     if (!status.ok()) {
@@ -160,7 +165,7 @@ WalManager::Recovery(const DBPtr& db) {
             if (last_id <= max_op_id) {
                 file->CloseFile();
                 std::experimental::filesystem::remove(pair.second);
-                continue; // skip and delete this file since all its operations already done
+                continue;  // skip and delete this file since all its operations already done
             }
 
             Status status = Status::OK();
@@ -186,7 +191,7 @@ WalManager::ReadMaxOpId() {
             std::string collection_name = path.filename().c_str();
             path.append(MAX_OP_ID_FILE_NAME);
             if (!std::experimental::filesystem::is_regular_file(path)) {
-                continue; // ignore?
+                continue;  // ignore?
             }
 
             WalFile file;
@@ -250,15 +255,15 @@ WalManager::RecordInsertOperation(const InsertEntityOperationPtr& operation, con
 
 Status
 WalManager::SplitChunk(const DataChunkPtr& chunk, std::vector<DataChunkPtr>& chunks) {
-//    int64_t chunk_size = utils::GetSizeOfChunk(chunk);
-//    if (chunk_size > insert_buffer_size_) {
-//        int64_t batch = chunk_size / insert_buffer_size_;
-//        int64_t batch_count = chunk->count_ / batch;
-//        for (int64_t i = 0; i <= batch; ++i) {
-//        }
-//    } else {
-//        chunks.push_back(chunk);
-//    }
+    //    int64_t chunk_size = utils::GetSizeOfChunk(chunk);
+    //    if (chunk_size > insert_buffer_size_) {
+    //        int64_t batch = chunk_size / insert_buffer_size_;
+    //        int64_t batch_count = chunk->count_ / batch;
+    //        for (int64_t i = 0; i <= batch; ++i) {
+    //        }
+    //    } else {
+    //        chunks.push_back(chunk);
+    //    }
     chunks.push_back(chunk);
 
     return Status::OK();
@@ -303,7 +308,6 @@ WalManager::ConstructFilePath(const std::string& collection_name, const std::str
 
     std::string path(full_path.c_str());
     return path;
-
 }
 
 void
@@ -312,18 +316,16 @@ WalManager::StartCleanupThread(const std::string& collection_name) {
     std::lock_guard<std::mutex> lck(cleanup_thread_mutex_);
     if (cleanup_thread_results_.empty()) {
         // start a new cleanup thread
-        cleanup_thread_results_.push_back(cleanup_thread_pool_.enqueue(&WalManager::CleanupThread,
-                                                                       this,
-                                                                       collection_name));
+        cleanup_thread_results_.push_back(
+            cleanup_thread_pool_.enqueue(&WalManager::CleanupThread, this, collection_name));
     } else {
         std::chrono::milliseconds span(1);
         if (cleanup_thread_results_.back().wait_for(span) == std::future_status::ready) {
             cleanup_thread_results_.pop_back();
 
             // start a new cleanup thread
-            cleanup_thread_results_.push_back(cleanup_thread_pool_.enqueue(&WalManager::CleanupThread,
-                                                                           this,
-                                                                           collection_name));
+            cleanup_thread_results_.push_back(
+                cleanup_thread_pool_.enqueue(&WalManager::CleanupThread, this, collection_name));
         }
     }
 }

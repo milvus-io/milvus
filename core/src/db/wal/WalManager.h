@@ -14,8 +14,8 @@
 #include "db/DB.h"
 #include "db/IDGenerator.h"
 #include "db/Types.h"
-#include "db/wal/WalOperation.h"
 #include "db/wal/WalFile.h"
+#include "db/wal/WalOperation.h"
 #include "utils/Status.h"
 #include "utils/ThreadPool.h"
 
@@ -83,11 +83,11 @@ class WalManager {
     int64_t insert_buffer_size_ = 0;
 
     using WalFileMap = std::unordered_map<std::string, WalFilePtr>;
-    WalFileMap file_map_; // mapping collection name to file
+    WalFileMap file_map_;  // mapping collection name to file
     std::mutex file_map_mutex_;
 
     using MaxOpIdMap = std::unordered_map<std::string, id_t>;
-    MaxOpIdMap max_op_id_map_; // mapping collection name to max operation id
+    MaxOpIdMap max_op_id_map_;  // mapping collection name to max operation id
     std::mutex max_op_mutex_;
 
     ThreadPool cleanup_thread_pool_;

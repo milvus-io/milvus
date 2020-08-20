@@ -13,8 +13,8 @@
 
 #include <string>
 
-#include "db/wal/WalOperation.h"
 #include "db/wal/WalFile.h"
+#include "db/wal/WalOperation.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -23,7 +23,8 @@ namespace engine {
 class WalOperationCodec {
  public:
     static Status
-    WriteInsertOperation(const WalFilePtr& file, const std::string& partition_name, const DataChunkPtr& chunk, idx_t op_id);
+    WriteInsertOperation(const WalFilePtr& file, const std::string& partition_name, const DataChunkPtr& chunk,
+                         idx_t op_id);
 
     static Status
     WriteDeleteOperation(const WalFilePtr& file, const IDNumbers& entity_ids, idx_t op_id);

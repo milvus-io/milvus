@@ -149,7 +149,8 @@ TranscriptProxy::GetEntityByID(const std::string& collection_name, const IDNumbe
 }
 
 Status
-TranscriptProxy::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) {
+TranscriptProxy::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids,
+                                  idx_t op_id) {
     return db_->DeleteEntityByID(collection_name, entity_ids);
 }
 

@@ -26,16 +26,39 @@
 TEST_F(WalTest, WalFileTest) {
     std::string path = "/tmp/milvus_wal/file_test";
     milvus::engine::idx_t last_id = 12345;
+
+    {
+        milvus::engine::WalFile file;
+        ASSERT_FALSE(file.IsOpened());
+        ASSERT_EQ(file.Size(), 0);
+
+        int64_t k = 0;
+        int64_t bytes = file.Write<int64_t>(&k);
+        ASSERT_EQ(bytes, 0);
+
+        bytes = file.Read<int64_t>(&k);
+        ASSERT_EQ(bytes, 0);
+
+        auto status = file.CloseFile();
+        ASSERT_TRUE(status.ok());
+    }
+
     {
         milvus::engine::WalFile file;
         auto status = file.OpenFile(path, milvus::engine::WalFile::APPEND_WRITE);
         ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(file.IsOpened());
+
+        int64_t max_size = milvus::engine::MAX_WAL_FILE_SIZE;
+        ASSERT_FALSE(file.ExceedMaxSize(max_size));
 
         int64_t total_bytes = 0;
         int8_t len = path.size();
         int64_t bytes = file.Write<int8_t>(&len);
         ASSERT_EQ(bytes, sizeof(int8_t));
         total_bytes += bytes;
+
+        ASSERT_TRUE(file.ExceedMaxSize(max_size));
 
         bytes = file.Write(path.data(), len);
         ASSERT_EQ(bytes, len);
@@ -52,6 +75,8 @@ TEST_F(WalTest, WalFileTest) {
         ASSERT_EQ(file_path, path);
 
         file.Flush();
+        file.CloseFile();
+        ASSERT_FALSE(file.IsOpened());
     }
 
     {
@@ -78,6 +103,16 @@ TEST_F(WalTest, WalFileTest) {
     }
 }
 
-TEST_F(WalTest, InsertTest) {
+TEST_F(WalTest, WalFileCodecTest) {
+    std::string path = "/tmp/milvus_wal/file_test";
+
+    {
+        milvus::engine::WalFile file;
+        auto status = file.OpenFile(path, milvus::engine::WalFile::APPEND_WRITE);
+        ASSERT_TRUE(status.ok());
+    }
+}
+
+TEST_F(WalTest, WalManagerTest) {
 
 }
