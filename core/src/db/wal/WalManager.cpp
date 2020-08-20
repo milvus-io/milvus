@@ -481,6 +481,19 @@ WalManager::CleanupThread() {
             file.ReadLastOpId(last_id);
             if (last_id <= max_op) {
                 file.CloseFile();
+
+                // makesure wal file is closed
+                {
+                    std::lock_guard<std::mutex> lock(file_map_mutex_);
+                    WalFilePtr file = file_map_[target_collection];
+                    if (file) {
+                        if (file->Path() == pair.second) {
+                            file->CloseFile();
+                            file_map_.erase(target_collection);
+                        }
+                    }
+                }
+
                 std::experimental::filesystem::remove(pair.second);
             }
         }

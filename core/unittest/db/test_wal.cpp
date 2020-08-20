@@ -348,14 +348,13 @@ TEST_F(WalTest, WalProxyTest) {
     }
 }
 
-TEST(WalManagerTest, WalManagerTest) {
+TEST_F(WalTest, WalManagerTest) {
     std::string collection_name = "collection";
 
     // construct mock db
     DBOptions options;
     options.meta_.path_ = "/tmp/milvus_wal";
     options.wal_enable_ = true;
-    std::experimental::filesystem::remove_all(options.meta_.path_);
     DummyDBPtr db_1 = std::make_shared<DummyDB>(options);
 
     // prepare wal manager
@@ -437,7 +436,4 @@ TEST(WalManagerTest, WalManagerTest) {
     WalManager::GetInstance().Recovery(db_2);
     ASSERT_EQ(db_2->InsertCount(), insert_count);
     ASSERT_EQ(db_2->DeleteCount(), delete_count);
-
-    WalManager::GetInstance().Stop();
-    std::experimental::filesystem::remove_all(options.meta_.path_);
 }
