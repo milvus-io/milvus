@@ -50,7 +50,7 @@ class SegmentReader {
                        engine::DataChunkPtr& data_chunk);
 
     Status
-    LoadUids(std::vector<engine::id_t>& uids);
+    LoadUids(std::vector<engine::idx_t>& uids);
 
     Status
     LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr, bool flat = false);

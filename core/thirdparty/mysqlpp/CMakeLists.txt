@@ -19,18 +19,18 @@ endif ()
 macro( build_mysqlpp )
     message( STATUS "Building MySQL++-${MYSQLPP_VERSION} from source" )
 
+    set( MYSQLPP_CXX_FLAGS "-O3 -fPIC -Wno-deprecated -Wno-format-truncation -fopenmp" )
     ExternalProject_Add(
-        mysqlpp_ep
+            mysqlpp_ep
             PREFIX              ${CMAKE_BINARY_DIR}/3rdparty_download/mysqlpp-subbuild
-            DOWNLOAD_DIR        ${CMAKE_BINARY_DIR}/3rdparty_download/download
+            DOWNLOAD_DIR        ${THIRDPARTY_DOWNLOAD_PATH}
             INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}
             URL                 ${MYSQLPP_SOURCE_URL}
             URL_MD5             "cda38b5ecc0117de91f7c42292dd1e79"
             CONFIGURE_COMMAND   <SOURCE_DIR>/configure
                                     "--prefix=<INSTALL_DIR>"
                                     "--enable-thread-check"
-                                    "CFLAGS=${EP_C_FLAGS}"
-                                    "CXXFLAGS=${EP_CXX_FLAGS}"
+                                    "CXXFLAGS=${MYSQLPP_CXX_FLAGS}"
                                     "LDFLAGS=-pthread"
                                     "cc=${CCACHE_FOUND} ${CMAKE_C_COMPILER}"
                                     "cxx=${CCACHE_FOUND} ${CMAKE_CXX_COMPILER}"

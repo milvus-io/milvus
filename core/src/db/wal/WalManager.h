@@ -11,13 +11,19 @@
 
 #pragma once
 
+#include "config/ServerConfig.h"
 #include "db/DB.h"
 #include "db/IDGenerator.h"
 #include "db/Types.h"
+#include "db/wal/WalFile.h"
 #include "db/wal/WalOperation.h"
 #include "utils/Status.h"
+#include "utils/ThreadPool.h"
 
+#include <list>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace milvus {
@@ -30,18 +36,25 @@ class WalManager {
     static WalManager&
     GetInstance();
 
-    void
-    SetWalPath(const std::string& path) {
-        wal_path_ = path;
-    }
+    Status
+    Start(const DBOptions& options);
+
+    Status
+    Stop();
 
     Status
     RecordOperation(const WalOperationPtr& operation, const DBPtr& db);
 
     Status
-    OperationDone(id_t op_id);
+    OperationDone(const std::string& collection_name, idx_t op_id);
+
+    Status
+    Recovery(const DBPtr& db);
 
  private:
+    Status
+    ReadMaxOpId();
+
     Status
     RecordInsertOperation(const InsertEntityOperationPtr& operation, const DBPtr& db);
 
@@ -51,12 +64,36 @@ class WalManager {
     Status
     SplitChunk(const DataChunkPtr& chunk, std::vector<DataChunkPtr>& chunks);
 
+    std::string
+    ConstructFilePath(const std::string& collection_name, const std::string& file_name);
+
+    void
+    StartCleanupThread(const std::string& collection_name);
+
+    void
+    CleanupThread(std::string collection_name);
+
+    Status
+    PerformOperation(const WalOperationPtr& operation, const DBPtr& db);
+
  private:
     SafeIDGenerator id_gen_;
 
+    bool enable_ = false;
     std::string wal_path_;
-    int64_t wal_buffer_size_ = 0;
     int64_t insert_buffer_size_ = 0;
+
+    using WalFileMap = std::unordered_map<std::string, WalFilePtr>;
+    WalFileMap file_map_;  // mapping collection name to file
+    std::mutex file_map_mutex_;
+
+    using MaxOpIdMap = std::unordered_map<std::string, id_t>;
+    MaxOpIdMap max_op_id_map_;  // mapping collection name to max operation id
+    std::mutex max_op_mutex_;
+
+    ThreadPool cleanup_thread_pool_;
+    std::mutex cleanup_thread_mutex_;
+    std::list<std::future<void>> cleanup_thread_results_;
 };
 
 }  // namespace engine
