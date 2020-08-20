@@ -34,7 +34,7 @@ macro( build_libunwind )
     ExternalProject_Add(
         libunwind_ep
             PREFIX          ${MILVUS_BINARY_DIR}/3rdparty_download/libunwind-subbuild
-            DOWNLOAD_DIR    ${MILVUS_BINARY_DIR}/3rdparty_download/download
+            DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH}
             INSTALL_DIR     ${CMAKE_CURRENT_BINARY_DIR}/libunwind
             URL             ${LIBUNWIND_SOURCE_URL}
             URL_MD5         a04f69d66d8e16f8bf3ab72a69112cd6
