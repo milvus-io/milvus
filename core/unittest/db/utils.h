@@ -88,6 +88,7 @@ using StorePtr = milvus::engine::snapshot::Store::Ptr;
 using MetaAdapterPtr = milvus::engine::meta::MetaAdapterPtr;
 
 using DB = milvus::engine::DB;
+using DBOptions = milvus::engine::DBOptions;
 using Status = milvus::Status;
 using idx_t = milvus::engine::idx_t;
 using IDNumbers = milvus::engine::IDNumbers;
@@ -327,7 +328,7 @@ class BaseTest : public ::testing::Test {
     void
     InitLog();
     void
-    SnapshotStart(bool mock_store, milvus::engine::DBOptions);
+    SnapshotStart(bool mock_store, DBOptions);
     void
     SnapshotStop();
 
@@ -351,7 +352,7 @@ class DBTest : public BaseTest {
  protected:
     std::shared_ptr<DB> db_;
 
-    milvus::engine::DBOptions
+    DBOptions
     GetOptions();
 
     void
@@ -414,7 +415,7 @@ class WalTest : public ::testing::Test {
  protected:
     std::shared_ptr<DB> db_;
 
-    milvus::engine::DBOptions
+    DBOptions
     GetOptions();
 
     void
