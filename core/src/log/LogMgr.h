@@ -11,11 +11,13 @@
 
 #pragma once
 
+#include "config/ServerConfig.h"
 #include "easyloggingpp/easylogging++.h"
 #include "utils/Status.h"
 
 #include <sstream>
 #include <string>
+#include <unordered_map>
 
 namespace milvus {
 
@@ -24,6 +26,58 @@ class LogMgr {
     static Status
     InitLog(bool trace_enable, const std::string& level, const std::string& logs_path, int64_t max_log_file_size,
             int64_t delete_exceeds);
+
+    static void
+    RolloutHandler(const char* filename, std::size_t size, el::Level level);
+
+ private:
+    explicit LogMgr(std::string log_path);
+
+    LogMgr&
+    Default();
+
+    /* Non-const for fiu to injecting error */
+    LogMgr&
+    Level(std::unordered_map<std::string, bool>& enables);
+
+    LogMgr&
+    To();
+
+    LogMgr&
+    Rotate(int64_t max_log_file_size, int64_t log_rotate_num);
+
+    void
+    Setup();
+
+ private:
+    static void
+    rename_and_delete(const std::string& filename, int64_t idx);
+
+    static std::unordered_map<std::string, bool>
+    parse_level(const std::string& level);
+
+    static void
+    set_level(el::Configurations& default_conf, el::Level level, bool enable, const std::string& log_path);
+
+ private:
+    el::Configurations el_config_;
+    std::string logs_path_;
+
+ private:
+    static int trace_idx;
+    static int global_idx;
+    static int debug_idx;
+    static int info_idx;
+    static int warning_idx;
+    static int error_idx;
+    static int fatal_idx;
+    static int64_t logs_delete_exceeds;
+    static bool enable_log_delete;
+
+    const int64_t MAX_LOG_FILE_SIZE_MIN = 536870912;  /* 512 MB */
+    const int64_t MAX_LOG_FILE_SIZE_MAX = 4294967296; /* 4 GB */
+    const int64_t LOG_ROTATE_NUM_MIN = 0;
+    const int64_t LOG_ROTATE_NUM_MAX = 1024;
 };
 
 }  // namespace milvus
