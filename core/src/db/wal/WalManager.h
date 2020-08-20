@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "config/ServerConfig.h"
 #include "db/DB.h"
 #include "db/IDGenerator.h"
 #include "db/Types.h"

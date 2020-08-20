@@ -182,9 +182,9 @@ DBTest::SetUp() {
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
 
     auto default_conn = milvus::scheduler::Connection("IO", 500.0);
-    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
     res_mgr->Connect("disk", "cpu", default_conn);
 #ifdef MILVUS_GPU_VERSION
+    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("0", "GPU", 0));
     res_mgr->Connect("cpu", "0", PCIE);
 #endif
@@ -264,9 +264,9 @@ SchedulerTest::SetUp() {
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
 
     auto default_conn = milvus::scheduler::Connection("IO", 500.0);
-    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
     res_mgr->Connect("disk", "cpu", default_conn);
 #ifdef MILVUS_GPU_VERSION
+    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("0", "GPU", 0));
     res_mgr->Connect("cpu", "0", PCIE);
 #endif

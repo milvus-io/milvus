@@ -163,7 +163,7 @@ StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const 
         auto meta = iter.first.c_str();
         size_t meta_length = iter.first.length();
         fs_ptr->writer_ptr_->Write(&meta_length, sizeof(meta_length));
-        fs_ptr->writer_ptr_->Write(const_cast<char*>(meta), meta_length);
+        fs_ptr->writer_ptr_->Write(meta, meta_length);
 
         auto binary = iter.second;
         int64_t binary_length = binary->size;
