@@ -13,7 +13,6 @@
 #include "utils/Log.h"
 
 #include <execinfo.h>
-#include <signal.h>
 #include <string>
 
 namespace milvus {

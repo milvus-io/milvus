@@ -34,7 +34,7 @@ class IndexRHNSWPQ : public IndexRHNSW {
     IndexRHNSWPQ(int d, int pq_m, int M);
 
     BinarySet
-    Serialize(const Config& config = Config()) override;
+    Serialize(const Config& config) override;
 
     void
     Load(const BinarySet& index_binary) override;

@@ -31,42 +31,36 @@ TimeRecorder::GetTimeSpanStr(double span) {
 void
 TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
     std::string str_log;
-    if (!header_.empty())
+    if (!header_.empty()) {
         str_log += header_ + ": ";
+    }
     str_log += msg;
     str_log += " (";
     str_log += TimeRecorder::GetTimeSpanStr(span);
     str_log += ")";
 
     switch (log_level_) {
-        case 0: {
+        case 0:
             LOG_SERVER_TRACE_ << str_log;
             break;
-        }
-        case 1: {
+        case 1:
             LOG_SERVER_DEBUG_ << str_log;
             break;
-        }
-        case 2: {
+        case 2:
             LOG_SERVER_INFO_ << str_log;
             break;
-        }
-        case 3: {
+        case 3:
             LOG_SERVER_WARNING_ << str_log;
             break;
-        }
-        case 4: {
+        case 4:
             LOG_SERVER_ERROR_ << str_log;
             break;
-        }
-        case 5: {
+        case 5:
             LOG_SERVER_FATAL_ << str_log;
             break;
-        }
-        default: {
+        default:
             LOG_SERVER_INFO_ << str_log;
             break;
-        }
     }
 }
 

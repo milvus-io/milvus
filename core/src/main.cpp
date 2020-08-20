@@ -39,10 +39,10 @@ print_help(const std::string& app_name) {
 void
 print_banner() {
     std::cout << std::endl;
-    std::cout << "    __  _________ _   ____  ______    " << std::endl;
-    std::cout << "   /  |/  /  _/ /| | / / / / / __/    " << std::endl;
-    std::cout << "  / /|_/ // // /_| |/ / /_/ /\\ \\    " << std::endl;
-    std::cout << " /_/  /_/___/____/___/\\____/___/     " << std::endl;
+    std::cout << R"(    __  _________ _   ____  ______  )" << std::endl;
+    std::cout << R"(   /  |/  /  _/ /| | / / / / / __/  )" << std::endl;
+    std::cout << R"(  / /|_/ // // /_| |/ / /_/ /\ \    )" << std::endl;
+    std::cout << R"( /_/  /_/___/____/___/\____/___/    )" << std::endl;
     std::cout << std::endl;
     std::cout << "Welcome to use Milvus!" << std::endl;
     std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME << ", with "
