@@ -73,7 +73,7 @@ class MemCollection {
 
     std::mutex mutex_;
 
-    std::set<id_t> doc_ids_to_delete_;
+    std::set<idx_t> doc_ids_to_delete_;
 
     std::atomic<uint64_t> lsn_;
 };  // SSMemCollection
