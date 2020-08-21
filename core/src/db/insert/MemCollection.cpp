@@ -106,7 +106,7 @@ MemCollection::EraseMem(int64_t partition_id) {
 }
 
 Status
-MemCollection::Serialize(uint64_t wal_lsn) {
+MemCollection::Serialize() {
     TimeRecorder recorder("MemCollection::Serialize collection " + std::to_string(collection_id_));
 
     if (!doc_ids_to_delete_.empty()) {
@@ -132,7 +132,7 @@ MemCollection::Serialize(uint64_t wal_lsn) {
     for (auto& partition_segments : mem_segments_) {
         MemSegmentList& segments = partition_segments.second;
         for (auto& segment : segments) {
-            auto status = segment->Serialize(wal_lsn);
+            auto status = segment->Serialize();
             if (!status.ok()) {
                 return status;
             }
@@ -171,7 +171,6 @@ MemCollection::ApplyDeletes() {
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_));
 
     snapshot::OperationContext context;
-    context.lsn = lsn_;
     auto segments_op = std::make_shared<snapshot::CompoundSegmentsOperation>(context, ss);
 
     int64_t segment_iterated = 0;
@@ -306,16 +305,6 @@ MemCollection::ApplyDeletes() {
 
     fiu_do_on("MemCollection.ApplyDeletes.RandomSleep", sleep(1));
     return segments_op->Push();
-}
-
-uint64_t
-MemCollection::GetLSN() {
-    return lsn_;
-}
-
-void
-MemCollection::SetLSN(uint64_t lsn) {
-    lsn_ = lsn;
 }
 
 }  // namespace engine

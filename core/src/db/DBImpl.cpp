@@ -206,7 +206,8 @@ DBImpl::DropCollection(const std::string& collection_name) {
     auto& snapshots = snapshot::Snapshots::GetInstance();
     STATUS_CHECK(snapshots.GetSnapshot(ss, collection_name));
 
-    mem_mgr_->EraseMem(ss->GetCollectionId());  // not allow insert
+    // erase insert buffer of this collection
+    mem_mgr_->EraseMem(ss->GetCollectionId());
 
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
@@ -291,8 +292,11 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    // SS TODO: Is below step needed? Or How to implement it?
-    /* mem_mgr_->EraseMem(partition_name); */
+    // erase insert buffer of this partition
+    auto partition = ss->GetPartition(partition_name);
+    if (partition != nullptr) {
+        mem_mgr_->EraseMem(ss->GetCollectionId(), partition->GetID());
+    }
 
     snapshot::PartitionContext context;
     context.name = partition_name;
