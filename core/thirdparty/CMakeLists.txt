@@ -85,4 +85,9 @@ endif ()
 # ****************************** Thirdparty oatpp ***************************************
 if ( MILVUS_WITH_OATPP )
     add_subdirectory( oatpp )
+endif()
+
+# ****************************** Thirdparty aws ***************************************
+if (MILVUS_WITH_AWS)
+    add_subdirectory( aws )
 endif ()
