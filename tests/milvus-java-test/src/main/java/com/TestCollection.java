@@ -4,20 +4,42 @@ package com;
 import com.alibaba.fastjson.JSONObject;
 import io.milvus.client.*;
 import org.testng.Assert;
-import org.testng.annotations.Test;
+import org.testng.annotations.*;
 
 import java.util.List;
 import java.util.Map;
 
 public class TestCollection {
-    int segment_row_count = 5000;
+    int segmentRowCount = 5000;
     int dimension = 128;
 
+    @BeforeClass
+    public MilvusClient setUp() throws ConnectFailedException {
+        MilvusClient client = new MilvusGrpcClient();
+        ConnectParam connectParam = new ConnectParam.Builder()
+                .withHost("192.168.1.6")
+                .withPort(19530)
+                .build();
+        client.connect(connectParam);
+        return client;
+    }
+    @AfterClass
+    public void tearDown() throws ConnectFailedException {
+        MilvusClient client = setUp();
+        List<String> collectionNames = client.listCollections().getCollectionNames();
+//        collectionNames.forEach(collection -> {client.dropCollection(collection);});
+        for(String collection: collectionNames){
+            System.out.print(collection+" ");
+            client.dropCollection(collection);
+        }
+        System.out.println("After Test");
+    }
+
     @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
-    public void test_create_collection(MilvusClient client, String collectionName){
+    public void testCreateCollection(MilvusClient client, String collectionName){
         CollectionMapping collectionSchema = new CollectionMapping.Builder(collectionName)
                 .withFields(Utils.genDefaultFields(dimension,false))
-                .withParamsInJson(String.format("{\"segment_row_count\": %s}",segment_row_count))
+                .withParamsInJson(String.format("{\"segment_row_count\": %s}",segmentRowCount))
                 .build();
         Response res = client.createCollection(collectionSchema);
         assert(res.ok());
@@ -25,33 +47,33 @@ public class TestCollection {
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_create_collection_disconnect(MilvusClient client, String collectionName){
+    public void testCreateCollectionDisconnect(MilvusClient client, String collectionName){
         CollectionMapping collectionSchema = new CollectionMapping.Builder(collectionName)
                 .withFields(Utils.genDefaultFields(dimension,false))
-                .withParamsInJson(String.format("{\"segment_row_count\": %s}",segment_row_count))
+                .withParamsInJson(String.format("{\"segment_row_count\": %s}",segmentRowCount))
                 .build();
         Response res = client.createCollection(collectionSchema);
         assert(!res.ok());
     }
 
     @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
-    public void test_create_collection_repeatably(MilvusClient client, String collectionName){
+    public void testCreateCollectionRepeatably(MilvusClient client, String collectionName){
         CollectionMapping collectionSchema = new CollectionMapping.Builder(collectionName)
                 .withFields(Utils.genDefaultFields(dimension,false))
-                .withParamsInJson(String.format("{\"segment_row_count\": %s}",segment_row_count))
+                .withParamsInJson(String.format("{\"segment_row_count\": %s}",segmentRowCount))
                 .build();
         Response res = client.createCollection(collectionSchema);
         Assert.assertEquals(res.ok(), true);
-        Response res_new = client.createCollection(collectionSchema);
-        Assert.assertEquals(res_new.ok(), false);
+        Response resNew = client.createCollection(collectionSchema);
+        Assert.assertEquals(resNew.ok(), false);
     }
 
     @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
-    public void test_create_collection_wrong_params(MilvusClient client, String collectionName){
+    public void testCreateCollectionWrongParams(MilvusClient client, String collectionName){
         Integer dim = 0;
         CollectionMapping collectionSchema = new CollectionMapping.Builder(collectionName)
                 .withFields(Utils.genDefaultFields(dim,false))
-                .withParamsInJson(String.format("{\"segment_row_count\": %s}",segment_row_count))
+                .withParamsInJson(String.format("{\"segment_row_count\": %s}",segmentRowCount))
                 .build();
         Response res = client.createCollection(collectionSchema);
         System.out.println(res.toString());
@@ -59,14 +81,14 @@ public class TestCollection {
     }
 
     @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
-    public void test_show_collections(MilvusClient client, String collectionName){
+    public void testShowCollections(MilvusClient client, String collectionName){
         Integer collectionNum = 10;
         ListCollectionsResponse res = null;
         for (int i = 0; i < collectionNum; ++i) {
             String collectionNameNew = collectionName+"_"+Integer.toString(i);
             CollectionMapping collectionSchema = new CollectionMapping.Builder(collectionNameNew)
                     .withFields(Utils.genDefaultFields(dimension,false))
-                    .withParamsInJson(String.format("{\"segment_row_count\": %s}",segment_row_count))
+                    .withParamsInJson(String.format("{\"segment_row_count\": %s}",segmentRowCount))
                     .build();
             client.createCollection(collectionSchema);
             List<String> collectionNames = client.listCollections().getCollectionNames();
@@ -75,13 +97,13 @@ public class TestCollection {
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_show_collections_without_connect(MilvusClient client, String collectionName){
+    public void testShowCollectionsWithoutConnect(MilvusClient client, String collectionName){
         ListCollectionsResponse res = client.listCollections();
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_drop_collection(MilvusClient client, String collectionName) throws InterruptedException {
+    public void testDropCollection(MilvusClient client, String collectionName) throws InterruptedException {
         Response res = client.dropCollection(collectionName);
         assert(res.ok());
         Thread.currentThread().sleep(1000);
@@ -90,7 +112,7 @@ public class TestCollection {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_drop_collection_not_existed(MilvusClient client, String collectionName) {
+    public void testDropCollectionNotExisted(MilvusClient client, String collectionName) {
         Response res = client.dropCollection(collectionName+"_");
         assert(!res.ok());
         List<String> collectionNames = client.listCollections().getCollectionNames();
@@ -98,56 +120,56 @@ public class TestCollection {
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_drop_collection_without_connect(MilvusClient client, String collectionName) {
+    public void testDropCollectionWithoutConnect(MilvusClient client, String collectionName) {
         Response res = client.dropCollection(collectionName);
         assert(!res.ok());
     }
 
     // TODO
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_describe_collection(MilvusClient client, String collectionName) {
+    public void testDescribeCollection(MilvusClient client, String collectionName) {
         GetCollectionInfoResponse res = client.getCollectionInfo(collectionName);
         assert(res.getResponse().ok());
         CollectionMapping collectionSchema = res.getCollectionMapping().get();
         List<Map<String,Object>> fields = (List<Map<String, Object>>) collectionSchema.getFields();
+        int dim = 0;
         for(Map<String,Object> field: fields){
-            if (field.containsValue("float_vector"))
+            if ("float_vector".equals(field.get("field"))) {
+                JSONObject jsonObject = JSONObject.parseObject(field.get("params").toString());
+                String dimParams = jsonObject.getString("params");
+                dim = Utils.getParam(dimParams,"dim");
+            }
+            continue;
         }
-        String param = (String) fields.get(fields.size()-1).get("params");
-        System.out.println("param: "+param);
-        String str_segment_row_count = collectionSchema.getParamsInJson();
-        System.out.println("segment: "+Utils.getParam(str_segment_row_count,"segment_row_count"));
-        Assert.assertEquals(Utils.getParam(param,"dim"), dimension);
+        String segmentParams = collectionSchema.getParamsInJson();
+        Assert.assertEquals(dim, dimension);
         Assert.assertEquals(collectionSchema.getCollectionName(), collectionName);
-        Assert.assertEquals(Utils.getParam(str_segment_row_count,"segment_row_count"), segment_row_count);
-//        Assert.assertEquals(collectionSchema.getMetricType().name(), collectionName.substring(0,2));
+        Assert.assertEquals(Utils.getParam(segmentParams,"segment_row_count"), segmentRowCount);
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_describe_collection_without_connect(MilvusClient client, String collectionName) {
+    public void testDescribeCollectionWithoutConnect(MilvusClient client, String collectionName) {
         GetCollectionInfoResponse res = client.getCollectionInfo(collectionName);
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_has_collection_not_existed(MilvusClient client, String collectionName) {
+    public void testHasCollectionNotExisted(MilvusClient client, String collectionName) {
         HasCollectionResponse res = client.hasCollection(collectionName+"_");
         assert(res.getResponse().ok());
         Assert.assertFalse(res.hasCollection());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_has_collection_without_connect(MilvusClient client, String collectionName) {
+    public void testHasCollectionWithoutConnect(MilvusClient client, String collectionName) {
         HasCollectionResponse res = client.hasCollection(collectionName);
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_has_collection(MilvusClient client, String collectionName) {
+    public void testHasCollection(MilvusClient client, String collectionName) {
         HasCollectionResponse res = client.hasCollection(collectionName);
         assert(res.getResponse().ok());
         Assert.assertTrue(res.hasCollection());
     }
-
-
 }

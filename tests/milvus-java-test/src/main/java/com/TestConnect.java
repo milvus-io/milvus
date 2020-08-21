@@ -7,7 +7,7 @@ import org.testng.annotations.Test;
 
 public class TestConnect {
     @Test(dataProvider = "DefaultConnectArgs", dataProviderClass = MainClass.class)
-    public void test_connect(String host, int port) throws ConnectFailedException {
+    public void testConnect(String host, int port) throws ConnectFailedException {
         System.out.println("Host: "+host+", Port: "+port);
         MilvusClient client = new MilvusGrpcClient();
         ConnectParam connectParam = new ConnectParam.Builder()
@@ -20,7 +20,7 @@ public class TestConnect {
     }
 
     @Test(dataProvider = "DefaultConnectArgs", dataProviderClass = MainClass.class)
-    public void test_connect_repeat(String host, int port) {
+    public void testConnectRepeat(String host, int port) {
         MilvusGrpcClient client = new MilvusGrpcClient();
 
         Response res = null;
@@ -39,7 +39,7 @@ public class TestConnect {
     }
 
     @Test(dataProvider="InvalidConnectArgs")
-    public void test_connect_invalid_connect_args(String ip, int port) {
+    public void testConnectInvalidConnect_args(String ip, int port) {
         MilvusClient client = new MilvusGrpcClient();
         Response res = null;
         try {
@@ -56,7 +56,7 @@ public class TestConnect {
     }
 
     @DataProvider(name="InvalidConnectArgs")
-    public Object[][] generate_invalid_connect_args() {
+    public Object[][] generateInvalidConnectArgs() {
         int port = 19530;
         return new Object[][]{
                 {"1.1.1.1", port},
@@ -70,12 +70,12 @@ public class TestConnect {
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_disconnect(MilvusClient client, String collectionName){
+    public void testDisconnect(MilvusClient client, String collectionName){
 //        assert(!client.isConnected());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_disconnect_repeatably(MilvusClient client, String collectionName){
+    public void testDisconnectRepeatably(MilvusClient client, String collectionName){
         Response res = null;
         try {
             res = client.disconnect();

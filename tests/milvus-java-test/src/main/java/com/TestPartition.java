@@ -13,7 +13,7 @@ public class TestPartition {
 
     // create partition
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_partition(MilvusClient client, String collectionName) {
+    public void testCreatePartition(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         Response createpResponse = client.createPartition(collectionName, tag);
         assert (createpResponse.ok());
@@ -25,7 +25,7 @@ public class TestPartition {
 
     // create partition, tag name existed
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_partition_tag_name_existed(MilvusClient client, String collectionName) {
+    public void testCreatePartitionTagNameExisted(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         Response createpResponse = client.createPartition(collectionName, tag);
         assert (createpResponse.ok());
@@ -36,7 +36,7 @@ public class TestPartition {
     // ----------------------------- has partition cases in ---------------------------------
     // has partition, tag name not existed
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_has_partition_tag_name_not_existed(MilvusClient client, String collectionName) {
+    public void testHasPartitionTagNameNotExisted(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         Response createpResponse = client.createPartition(collectionName, tag);
         assert (createpResponse.ok());
@@ -48,7 +48,7 @@ public class TestPartition {
 
     // has partition, tag name existed
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_has_partition_tag_name_existed(MilvusClient client, String collectionName) {
+    public void testHasPartitionTagNameExisted(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         Response createpResponse = client.createPartition(collectionName, tag);
         assert (createpResponse.ok());
@@ -61,7 +61,7 @@ public class TestPartition {
 
     // drop a partition created before, drop by partition name
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_drop_partition(MilvusClient client, String collectionName) {
+    public void testDropPartition(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         Response createpResponseNew = client.createPartition(collectionName, tag);
         assert (createpResponseNew.ok());
@@ -75,7 +75,7 @@ public class TestPartition {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_drop_partition_default(MilvusClient client, String collectionName) {
+    public void testDropPartitionDefault(MilvusClient client, String collectionName) {
         String tag = "_default";
         Response createpResponseNew = client.createPartition(collectionName, tag);
         assert (!createpResponseNew.ok());
@@ -88,7 +88,7 @@ public class TestPartition {
 
     // drop a partition repeat created before, drop by partition name
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_drop_partition_repeat(MilvusClient client, String collectionName) throws InterruptedException {
+    public void testDropPartitionRepeat(MilvusClient client, String collectionName) throws InterruptedException {
         String tag = RandomStringUtils.randomAlphabetic(10);
         Response createpResponse = client.createPartition(collectionName, tag);
         assert (createpResponse.ok());
@@ -101,7 +101,7 @@ public class TestPartition {
 
     // drop a partition not created before
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_drop_partition_not_existed(MilvusClient client, String collectionName) {
+    public void testDropPartitionNotExisted(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         Response createpResponse = client.createPartition(collectionName, tag);
         assert (createpResponse.ok());
@@ -112,7 +112,7 @@ public class TestPartition {
 
     // drop a partition not created before
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_drop_partition_tag_not_existed(MilvusClient client, String collectionName) {
+    public void testDropPartitionTagNotExisted(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         Response createpResponse = client.createPartition(collectionName, tag);
         assert(createpResponse.ok());
@@ -125,7 +125,7 @@ public class TestPartition {
 
     // create partition, then show partitions
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_show_partitions(MilvusClient client, String collectionName) {
+    public void testShowPartitions(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         Response createpResponse = client.createPartition(collectionName, tag);
         assert (createpResponse.ok());
@@ -136,7 +136,7 @@ public class TestPartition {
 
     // create multi partition, then show partitions
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_show_partitions_multi(MilvusClient client, String collectionName) {
+    public void testShowPartitionsMulti(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         Response createpResponse = client.createPartition(collectionName, tag);
         assert (createpResponse.ok());

@@ -7,25 +7,29 @@
 //import java.util.ArrayList;
 //import java.util.Collections;
 //import java.util.List;
+//import java.util.Map;
 //
-//public class TestGetVectorByID {
+//public class TestGetEntityByID {
 //    int dimension = 128;
 //    int nb = 8000;
 //    public List<Long> get_ids = Utils.toListIds(1111);
-//    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
-//    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
+////    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
+////    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
+//    List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension,nb,false);
+//    List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultEntities(dimension,nb,true);
 //
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
 //    public void test_get_vector_by_id_valid(MilvusClient client, String collectionName) {
 //        int get_length = 100;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultEntities).build();
 //        InsertResponse resInsert = client.insert(insertParam);
-//        List<Long> ids = resInsert.getVectorIds();
+//        List<Long> ids = resInsert.getEntityIds();
 //        client.flush(collectionName);
 //        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, get_length));
 //        assert (res.getResponse().ok());
 //        for (int i = 0; i < get_length; i++) {
-//            assert (res.getFloatVectors().get(i).equals(vectors.get(i)));
+//            List<Map<String,Object>> fields = res.getFieldsMap();
+//            assert (res.getFieldsMap().get(i).equals(vectors.get(i)));
 //        }
 //    }
 //
