@@ -11,10 +11,14 @@
 
 #pragma once
 
+#include <condition_variable>
+#include <iostream>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <thread>
 
+#include "db/SimpleWaitNotify.h"
 #include "db/snapshot/MetaEvent.h"
 #include "utils/BlockingQueue.h"
 
@@ -24,7 +28,10 @@ namespace snapshot {
 
 using EventPtr = std::shared_ptr<MetaEvent>;
 using ThreadPtr = std::shared_ptr<std::thread>;
-using EventQueue = BlockingQueue<EventPtr>;
+using EventQueue = std::queue<EventPtr>;
+
+constexpr size_t EVENT_QUEUE_SIZE = 4096;
+constexpr size_t EVENT_TIMINT_INTERVAL = 5;
 
 class EventExecutor {
  public:
@@ -62,18 +69,26 @@ class EventExecutor {
 
     void
     Start() {
-        if (thread_ptr_ == nullptr) {
-            thread_ptr_ = std::make_shared<std::thread>(&EventExecutor::ThreadMain, this);
+        if (timing_thread_ptr_ == nullptr) {
+            timing_thread_ptr_ = std::make_shared<std::thread>(&EventExecutor::TimingThread, this);
+        }
+
+        if (gc_thread_ptr_ == nullptr) {
+            gc_thread_ptr_ = std::make_shared<std::thread>(&EventExecutor::GCThread, this);
         }
     }
 
     void
     Stop() {
-        if (thread_ptr_ != nullptr) {
-            Enqueue(nullptr);
-            thread_ptr_->join();
-            thread_ptr_ = nullptr;
-            std::cout << "EventExecutor Stopped" << std::endl;
+        initialized_.store(false);
+        timing_.Notify();
+        if (timing_thread_ptr_ != nullptr) {
+            timing_thread_ptr_->join();
+            timing_thread_ptr_ = nullptr;
+        }
+        if (gc_thread_ptr_ != nullptr) {
+            gc_thread_ptr_->join();
+            gc_thread_ptr_ = nullptr;
         }
     }
 
@@ -89,24 +104,70 @@ class EventExecutor {
     }
 
     void
-    ThreadMain() {
+    GCThread() {
         Status status;
         while (true) {
-            EventPtr evt = queue_.Take();
-            if (evt == nullptr) {
-                break;
+            auto front = cache_queues_.Take();
+
+            while (front != nullptr && !front->empty()) {
+                EventPtr event_front(front->front());
+                front->pop();
+                if (event_front == nullptr) {
+                    continue;
+                }
+
+                /* std::cout << std::this_thread::get_id() << " Dequeue Event " << std::endl; */
+                status = event_front->Process(store_);
+                if (!status.ok()) {
+                    LOG_ENGINE_ERROR_ << "EventExecutor Handle Event Error: " << status.ToString();
+                }
             }
-            /* std::cout << std::this_thread::get_id() << " Dequeue Event " << std::endl; */
-            status = evt->Process(store_);
-            if (!status.ok()) {
-                std::cout << "EventExecutor Handle Event Error: " << status.ToString() << std::endl;
+
+            if (!initialized_.load() && cache_queues_.Empty()) {
+                    break;
+            }
+        }
+    }
+
+    void
+    TimingThread() {
+        while (true) {
+            timing_.Wait_For(std::chrono::seconds(EVENT_TIMINT_INTERVAL));
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (queue_ != nullptr && !queue_->empty()) {
+                cache_queues_.Put(queue_);
+                queue_ = nullptr;
+            }
+
+            if (!initialized_.load()) {
+                cache_queues_.Put(nullptr);
+                break;
             }
         }
     }
 
     void
     Enqueue(const EventPtr& evt) {
-        queue_.Put(evt);
+        if (!initialized_.load()) {
+            LOG_ENGINE_WARNING_ << "GcEvent exit" << std::endl;
+        }
+
+        bool need_notify = false;
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (queue_ == nullptr) {
+                queue_ = std::make_shared<EventQueue>();
+            }
+
+            queue_->push(evt);
+            if (queue_->size() >= EVENT_QUEUE_SIZE) {
+                need_notify = true;
+            }
+        }
+
+        if (!initialized_.load() || need_notify) {
+            timing_.Notify();
+        }
         if (evt != nullptr) {
             /* std::cout << std::this_thread::get_id() << " Enqueue Event " << std::endl; */
         }
@@ -114,8 +175,12 @@ class EventExecutor {
 
     EventExecutor(const EventExecutor&) = delete;
 
-    ThreadPtr thread_ptr_ = nullptr;
-    EventQueue queue_;
+    ThreadPtr timing_thread_ptr_ = nullptr;
+    ThreadPtr gc_thread_ptr_ = nullptr;
+    SimpleWaitNotify timing_;
+    std::mutex mutex_;
+    std::shared_ptr<EventQueue> queue_;
+    BlockingQueue<std::shared_ptr<EventQueue>> cache_queues_;
     std::atomic_bool initialized_ = false;
     StorePtr store_;
 };
