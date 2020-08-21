@@ -26,6 +26,6 @@ COPY --from=openblas /usr/lib/libopenblas*.so* /var/lib/milvus/lib/
 
 WORKDIR /var/lib/milvus
 
-CMD [ "/var/lib/milvus/bin/milvus_server", "-c", "/var/lib/milvus/conf/server_config.yaml" ]
+CMD [ "/var/lib/milvus/bin/milvus_server", "-c", "/var/lib/milvus/conf/milvus.yaml" ]
 
 EXPOSE 19530

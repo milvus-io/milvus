@@ -68,8 +68,8 @@ TranscriptProxy::CreateCollection(const snapshot::CreateCollectionContext& conte
 }
 
 Status
-TranscriptProxy::DropCollection(const std::string& name) {
-    return db_->DropCollection(name);
+TranscriptProxy::DropCollection(const std::string& collection_name) {
+    return db_->DropCollection(collection_name);
 }
 
 Status

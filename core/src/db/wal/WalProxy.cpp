@@ -53,6 +53,12 @@ WalProxy::Stop() {
 }
 
 Status
+WalProxy::DropCollection(const std::string& collection_name) {
+    WalManager::GetInstance().DropCollection(collection_name);
+    return db_->DropCollection(collection_name);
+}
+
+Status
 WalProxy::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
                  idx_t op_id) {
     // write operation into disk

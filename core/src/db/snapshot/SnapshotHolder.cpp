@@ -152,8 +152,9 @@ SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
         }
 
         active_[id] = ss;
-        if (active_.size() <= num_versions_)
+        if (active_.size() <= num_versions_) {
             return status;
+        }
 
         auto oldest_it = active_.find(min_id_);
         oldest_ss = oldest_it->second;

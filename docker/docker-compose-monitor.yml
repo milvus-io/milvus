@@ -49,7 +49,7 @@ services:
         environment:
             WEB_APP: host.docker.internal
         volumes:
-            - ../core/conf/server_config.yaml:/var/lib/milvus/conf/server_config.yaml
+            - ../core/conf/milvus.yaml:/var/lib/milvus/conf/milvus.yaml
             - ../core/conf/log_config.conf:/var/lib/milvus/conf/log_config.conf
         ports:
             - "8080:8080"

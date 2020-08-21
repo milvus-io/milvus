@@ -29,6 +29,10 @@
 namespace milvus {
 namespace engine {
 
+extern const char* WAL_DATA_FOLDER;
+extern const char* WAL_MAX_OP_FILE_NAME;
+extern const char* WAL_DEL_FILE_NAME;
+
 class WalManager {
  public:
     WalManager();
@@ -43,6 +47,9 @@ class WalManager {
     Stop();
 
     Status
+    DropCollection(const std::string& collection_name);
+
+    Status
     RecordOperation(const WalOperationPtr& operation, const DBPtr& db);
 
     Status
@@ -53,7 +60,7 @@ class WalManager {
 
  private:
     Status
-    ReadMaxOpId();
+    Init();
 
     Status
     RecordInsertOperation(const InsertEntityOperationPtr& operation, const DBPtr& db);
@@ -68,10 +75,19 @@ class WalManager {
     ConstructFilePath(const std::string& collection_name, const std::string& file_name);
 
     void
-    StartCleanupThread(const std::string& collection_name);
+    AddCleanupTask(const std::string& collection_name);
 
     void
-    CleanupThread(std::string collection_name);
+    TakeCleanupTask(std::string& collection_name);
+
+    void
+    StartCleanupThread();
+
+    void
+    WaitCleanupFinish();
+
+    void
+    CleanupThread();
 
     Status
     PerformOperation(const WalOperationPtr& operation, const DBPtr& db);
@@ -87,13 +103,16 @@ class WalManager {
     WalFileMap file_map_;  // mapping collection name to file
     std::mutex file_map_mutex_;
 
-    using MaxOpIdMap = std::unordered_map<std::string, id_t>;
+    using MaxOpIdMap = std::unordered_map<std::string, idx_t>;
     MaxOpIdMap max_op_id_map_;  // mapping collection name to max operation id
     std::mutex max_op_mutex_;
 
     ThreadPool cleanup_thread_pool_;
     std::mutex cleanup_thread_mutex_;
     std::list<std::future<void>> cleanup_thread_results_;
+
+    std::list<std::string> cleanup_tasks_;  // cleanup target collections
+    std::mutex cleanup_task_mutex_;
 };
 
 }  // namespace engine

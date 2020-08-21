@@ -80,12 +80,6 @@ set( BOOST_LIB  libboost_system.a
                 libboost_serialization.a
                 )
 
-set( PROMETHEUS_LIB prometheus-cpp-push
-                    prometheus-cpp-pull
-                    prometheus-cpp-core
-                    curl
-                    )
-
 set( THIRD_PARTY_LIBS   sqlite
                         yaml-cpp # log
                         mysqlpp
@@ -112,10 +106,6 @@ endif ()
 if ( ENABLE_CPU_PROFILING )
     list( APPEND THIRD_PARTY_LIBS
                  PUBLIC  gperftools )
-endif ()
-
-if ( MILVUS_WITH_PROMETHEUS )
-    list( APPEND THIRD_PARTY_LIBS ${PROMETHEUS_LIB} )
 endif ()
 
 if ( MILVS_WITH_AWS )
