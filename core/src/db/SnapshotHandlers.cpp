@@ -43,13 +43,12 @@ SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss,
                                                    snapshot::IDS_TYPE& segment_ids)
     : BaseT(ss), field_name_(field_name), segment_ids_(segment_ids) {
     build_index_threshold_ = config.engine.build_index_threshold();
-    LOG_ENGINE_DEBUG_ << "Build index threshold is " << build_index_threshold_;
 }
 
 Status
 SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
     if (segment_commit->GetRowCount() < build_index_threshold_) {
-        LOG_ENGINE_DEBUG_ << "Segment is too small, not to build index, row count " << segment_commit->GetRowCount();
+        // LOG_ENGINE_DEBUG_ << "Segment is too small, not to build index, row count " << segment_commit->GetRowCount();
         return Status::OK();
     }
 
