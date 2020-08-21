@@ -324,11 +324,11 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                                query::QueryPtr& query_ptr);
 
     Status
-    ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
+    ProcessBooleanQueryJson(const milvus::json& query_json, query::BooleanQueryPtr& boolean_query,
                             query::QueryPtr& query_ptr);
 
     Status
-    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query, std::string& field_name);
+    ProcessLeafQueryJson(const milvus::json& query_json, query::BooleanQueryPtr& query, std::string& field_name);
 
  private:
     ReqHandler req_handler_;

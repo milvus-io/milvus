@@ -92,7 +92,7 @@ GetSnapshotIndex(const std::string& collection_name, const std::string& field_na
     auto field_elements = ss->GetFieldElementsByField(field_name);
     if (IsVectorField(field)) {
         for (auto& field_element : field_elements) {
-            if (field_element->GetFEtype() == milvus::engine::FieldElementType::FET_INDEX) {
+            if (field_element->GetFtype() == static_cast<snapshot::FTYPE_TYPE>(engine::FieldElementType::FET_INDEX)) {
                 index_info.index_name_ = field_element->GetName();
                 index_info.index_type_ = field_element->GetTypeName();
                 auto json = field_element->GetParams();
@@ -107,7 +107,7 @@ GetSnapshotIndex(const std::string& collection_name, const std::string& field_na
         }
     } else {
         for (auto& field_element : field_elements) {
-            if (field_element->GetFEtype() == milvus::engine::FieldElementType::FET_INDEX) {
+            if (field_element->GetFtype() == static_cast<snapshot::FTYPE_TYPE>(engine::FieldElementType::FET_INDEX)) {
                 index_info.index_name_ = field_element->GetName();
                 index_info.index_type_ = field_element->GetTypeName();
             }
@@ -153,7 +153,7 @@ IsVectorField(const engine::snapshot::FieldPtr& field) {
         return false;
     }
 
-    engine::DataType ftype = field->GetFtype();
+    auto ftype = static_cast<engine::DataType>(field->GetFtype());
     return IsVectorField(ftype);
 }
 

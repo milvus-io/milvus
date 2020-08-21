@@ -48,11 +48,11 @@ extern const char* DEFAULT_STRUCTURED_INDEX;
 extern const char* DEFAULT_PARTITON_TAG;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-using id_t = int64_t;
+using idx_t = int64_t;
 using offset_t = int32_t;
 using date_t = int32_t;
 
-using IDNumbers = std::vector<id_t>;
+using IDNumbers = std::vector<idx_t>;
 
 using VectorDistance = faiss::Index::distance_t;
 using VectorDistances = std::vector<VectorDistance>;

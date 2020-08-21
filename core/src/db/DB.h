@@ -51,7 +51,7 @@ class DB {
     CreateCollection(const snapshot::CreateCollectionContext& context) = 0;
 
     virtual Status
-    DropCollection(const std::string& name) = 0;
+    DropCollection(const std::string& collection_name) = 0;
 
     virtual Status
     HasCollection(const std::string& collection_name, bool& has_or_not) = 0;
@@ -94,7 +94,7 @@ class DB {
     // op_id is for wal machinery, this id will be used in MemManager
     virtual Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
-           id_t op_id = 0) = 0;
+           idx_t op_id = 0) = 0;
 
     virtual Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
@@ -103,7 +103,7 @@ class DB {
 
     // op_id is for wal machinery, this id will be used in MemManager
     virtual Status
-    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id = 0) = 0;
+    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id = 0) = 0;
 
     virtual Status
     ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) = 0;

@@ -49,7 +49,7 @@ FaissFlatPass::Run(const TaskPtr& task) {
     if (!gpu_enable_) {
         LOG_SERVER_DEBUG_ << LogOut("FaissFlatPass: gpu disable, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_task->nq() < (int64_t)threshold_) {
+    } else if (search_task->nq() < threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("FaissFlatPass: nq < gpu_search_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {

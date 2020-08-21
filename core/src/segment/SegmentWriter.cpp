@@ -179,7 +179,7 @@ SegmentWriter::WriteBloomFilter() {
             segment::IdBloomFilterPtr bloom_filter_ptr;
             ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
 
-            int64_t* uids = (int64_t*)(uid_data->data_.data());
+            auto uids = reinterpret_cast<int64_t*>(uid_data->data_.data());
             int64_t row_count = segment_ptr_->GetRowCount();
             for (int64_t i = 0; i < row_count; i++) {
                 bloom_filter_ptr->Add(uids[i]);
@@ -359,7 +359,7 @@ SegmentWriter::RowCount() {
 }
 
 Status
-SegmentWriter::LoadUids(std::vector<engine::id_t>& uids) {
+SegmentWriter::LoadUids(std::vector<engine::idx_t>& uids) {
     engine::BinaryDataPtr raw;
     auto status = segment_ptr_->GetFixedFieldData(engine::FIELD_UID, raw);
     if (!status.ok()) {
@@ -371,14 +371,14 @@ SegmentWriter::LoadUids(std::vector<engine::id_t>& uids) {
         return Status(DB_ERROR, "Invalid id field");
     }
 
-    if (raw->data_.size() % sizeof(engine::id_t) != 0) {
+    if (raw->data_.size() % sizeof(engine::idx_t) != 0) {
         std::string err_msg = "Failed to load uids: illegal file size";
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
     uids.clear();
-    uids.resize(raw->data_.size() / sizeof(engine::id_t));
+    uids.resize(raw->data_.size() / sizeof(engine::idx_t));
     memcpy(uids.data(), raw->data_.data(), raw->data_.size());
 
     return Status::OK();

@@ -197,16 +197,17 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 }
 
 Status
-DBImpl::DropCollection(const std::string& name) {
+DBImpl::DropCollection(const std::string& collection_name) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << name;
+    LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << collection_name;
 
     snapshot::ScopedSnapshotT ss;
     auto& snapshots = snapshot::Snapshots::GetInstance();
-    STATUS_CHECK(snapshots.GetSnapshot(ss, name));
+    STATUS_CHECK(snapshots.GetSnapshot(ss, collection_name));
 
-    mem_mgr_->EraseMem(ss->GetCollectionId());  // not allow insert
+    // erase insert buffer of this collection
+    mem_mgr_->EraseMem(ss->GetCollectionId());
 
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
@@ -291,8 +292,11 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    // SS TODO: Is below step needed? Or How to implement it?
-    /* mem_mgr_->EraseMem(partition_name); */
+    // erase insert buffer of this partition
+    auto partition = ss->GetPartition(partition_name);
+    if (partition != nullptr) {
+        mem_mgr_->EraseMem(ss->GetCollectionId(), partition->GetID());
+    }
 
     snapshot::PartitionContext context;
     context.name = partition_name;
@@ -413,7 +417,7 @@ DBImpl::DescribeIndex(const std::string& collection_name, const std::string& fie
 
 Status
 DBImpl::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
-               id_t op_id) {
+               idx_t op_id) {
     CHECK_INITIALIZED;
 
     if (data_chunk == nullptr) {
@@ -510,7 +514,7 @@ DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_ar
 }
 
 Status
-DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id) {
+DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;

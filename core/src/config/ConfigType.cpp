@@ -54,13 +54,14 @@ boundary_check(T val, T lower_bound, T upper_bound) {
 
 bool
 parse_bool(const std::string& str, std::string& err) {
-    if (!strcasecmp(str.c_str(), "true"))
+    if (!strcasecmp(str.c_str(), "true")) {
         return true;
-    else if (!strcasecmp(str.c_str(), "false"))
+    } else if (!strcasecmp(str.c_str(), "false")) {
         return false;
-    else
+    } else {
         err = "The specified value must be true or false";
-    return false;
+        return false;
+    }
 }
 
 std::string
@@ -80,16 +81,20 @@ parse_bytes(const std::string& str, std::string& err) {
         }
 
         std::string s = str;
-        if (is_number(s))
+        if (is_number(s)) {
             return std::stoll(s);
-        if (s.length() == 0)
+        }
+        if (s.length() == 0) {
             return 0;
+        }
 
         auto last_two = s.substr(s.length() - 2, 2);
         auto last_one = s.substr(s.length() - 1);
-        if (is_alpha(last_two) && is_alpha(last_one))
-            if (last_one == "b" or last_one == "B")
+        if (is_alpha(last_two) && is_alpha(last_one)) {
+            if (last_one == "b" or last_one == "B") {
                 s = s.substr(0, s.length() - 1);
+            }
+        }
         auto& units = BYTE_UNITS;
         auto suffix = str_tolower(s.substr(s.length() - 1));
 
@@ -171,11 +176,13 @@ BoolConfig::Set(const std::string& val, bool update) {
 
         std::string err;
         bool value = parse_bool(val, err);
-        if (not err.empty())
+        if (not err.empty()) {
             return ConfigStatus(SetReturn::INVALID, err);
+        }
 
-        if (is_valid_fn_ && not is_valid_fn_(value, err))
+        if (is_valid_fn_ && not is_valid_fn_(value, err)) {
             return ConfigStatus(SetReturn::INVALID, err);
+        }
 
         bool prev = *config_;
         *config_ = value;
@@ -227,8 +234,9 @@ StringConfig::Set(const std::string& val, bool update) {
         }
 
         std::string err;
-        if (is_valid_fn_ && not is_valid_fn_(val, err))
+        if (is_valid_fn_ && not is_valid_fn_(val, err)) {
             return ConfigStatus(SetReturn::INVALID, err);
+        }
 
         std::string prev = *config_;
         *config_ = val;
@@ -369,8 +377,9 @@ IntegerConfig::Set(const std::string& val, bool update) {
         }
 
         std::string err;
-        if (is_valid_fn_ && not is_valid_fn_(value, err))
+        if (is_valid_fn_ && not is_valid_fn_(value, err)) {
             return ConfigStatus(SetReturn::INVALID, err);
+        }
 
         int64_t prev = *config_;
         *config_ = value;
@@ -432,8 +441,9 @@ FloatingConfig::Set(const std::string& val, bool update) {
         }
 
         std::string err;
-        if (is_valid_fn_ && not is_valid_fn_(value, err))
+        if (is_valid_fn_ && not is_valid_fn_(value, err)) {
             return ConfigStatus(SetReturn::INVALID, err);
+        }
 
         double prev = *config_;
         *config_ = value;

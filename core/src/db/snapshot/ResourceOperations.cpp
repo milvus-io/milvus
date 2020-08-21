@@ -75,12 +75,10 @@ PartitionOperation::PreCheck() {
 
 Status
 PartitionOperation::DoExecute(StorePtr store) {
-    auto status = CheckStale();
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(CheckStale());
     resource_ = std::make_shared<Partition>(context_.name, GetStartedSS()->GetCollection()->GetID());
     AddStep(*resource_, nullptr, false);
-    return status;
+    return Status::OK();
 }
 
 PartitionCommitOperation::PartitionCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
@@ -114,8 +112,9 @@ PartitionCommitOperation::DoExecute(StorePtr store) {
         row_cnt = resource_->GetRowCount();
         size = resource_->GetSize();
         auto erase_sc = [&](SegmentCommitPtr& sc) {
-            if (!sc)
+            if (!sc) {
                 return;
+            }
             auto prev_sc = GetStartedSS()->GetSegmentCommitBySegmentId(sc->GetSegmentId());
             if (prev_sc) {
                 resource_->GetMappings().erase(prev_sc->GetID());

@@ -39,7 +39,7 @@ class MemSegment {
     Add(const VectorSourcePtr& source);
 
     Status
-    Delete(const std::vector<id_t>& ids);
+    Delete(const std::vector<idx_t>& ids);
 
     int64_t
     GetCurrentMem();
@@ -51,7 +51,7 @@ class MemSegment {
     IsFull();
 
     Status
-    Serialize(uint64_t wal_lsn);
+    Serialize();
 
     int64_t
     GetSegmentId() const;
@@ -69,9 +69,8 @@ class MemSegment {
     DBOptions options_;
     int64_t current_mem_;
 
-    //    ExecutionEnginePtr execution_engine_;
     segment::SegmentWriterPtr segment_writer_ptr_;
-};  // SSMemTableFile
+};
 
 using MemSegmentPtr = std::shared_ptr<MemSegment>;
 

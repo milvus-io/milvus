@@ -22,6 +22,7 @@
 
 #include "cache/DataObj.h"
 #include "dablooms/dablooms.h"
+#include "db/Types.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -37,13 +38,13 @@ class IdBloomFilter : public cache::DataObj {
     GetBloomFilter();
 
     bool
-    Check(id_t uid);
+    Check(engine::idx_t uid);
 
     Status
-    Add(id_t uid);
+    Add(engine::idx_t uid);
 
     Status
-    Remove(id_t uid);
+    Remove(engine::idx_t uid);
 
     int64_t
     Size() override;

@@ -13,6 +13,7 @@
 #include "Utils.h"
 #include "event/TaskTableUpdatedEvent.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/task/FinishedTask.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -139,11 +140,16 @@ json
 TaskTableItem::Dump() const {
     json ret{
         {"id", id},
-        {"task", (int64_t)task.get()},
+        {"task", reinterpret_cast<int64_t>(task.get())},
         {"state", ToString(state)},
         {"timestamp", timestamp.Dump()},
     };
     return ret;
+}
+
+void
+TaskTableItem::SetFinished(const TaskPtr& t) {
+    task = t;
 }
 
 std::vector<uint64_t>
@@ -156,17 +162,21 @@ TaskTable::PickToLoad(uint64_t limit) {
     uint64_t available_begin = table_.front() + 1;
     for (uint64_t i = 0, loaded_count = 0, pick_count = 0; i < table_.size() && pick_count < limit; ++i) {
         auto index = available_begin + i;
-        if (not table_[index])
+        if (table_[index] == nullptr) {
             break;
-        if (index % table_.capacity() == table_.rear())
+        }
+        if (index % table_.capacity() == table_.rear()) {
             break;
+        }
         if (not cross && table_[index]->IsFinish()) {
             table_.set_front(index);
+            table_[index]->SetFinished(FinishedTask::Create());
         } else if (table_[index]->state == TaskTableItemState::LOADED) {
             cross = true;
             ++loaded_count;
-            if (loaded_count > 2)
+            if (loaded_count > 2) {
                 return std::vector<uint64_t>();
+            }
         } else if (table_[index]->state == TaskTableItemState::START) {
             auto task = table_[index]->task;
 
@@ -248,6 +258,7 @@ TaskTable::PickToExecute(uint64_t limit) {
 
         if (not cross && table_[index]->IsFinish()) {
             table_.set_front(index);
+            table_[index]->SetFinished(FinishedTask::Create());
         } else if (table_[index]->state == TaskTableItemState::LOADED) {
             cross = true;
             indexes.push_back(index);

@@ -116,8 +116,9 @@ Resource::pick_task_load() {
     auto indexes = task_table_.PickToLoad(10);
     for (auto index : indexes) {
         // try to set one task loading, then return
-        if (task_table_.Load(index))
+        if (task_table_.Load(index)) {
             return task_table_.at(index);
+        }
         // else try next
     }
     return nullptr;
