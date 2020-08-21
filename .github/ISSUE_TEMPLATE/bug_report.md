@@ -18,11 +18,24 @@ Follow this [guide](http://matthewrocklin.com/blog/work/2018/02/28/minimal-bug-r
 **Expected behavior**
 A clear and concise description of what you expected to happen.
 
+**Method of installation**
+- [ ] Docker/cpu
+- [ ] Docker/gpu
+- [ ] Build from source
+
 **Environment details**
-- Hardware/Softward conditions (OS, CPU, GPU, Memory)
-- Method of installation (Docker, or from source)
-- Milvus version (v0.3.1, or v0.4.0)
-- Milvus configuration (Settings you made in `server_config.yaml`)
+- Hardware/Softwars conditions (OS, CPU, GPU, Memory)
+
+
+- Milvus version (master or released version)
+
+
+**Configuration file**
+Settings you made in `server_config.yaml` or `milvus.yaml`
+
+```yaml
+paste-file-content-here
+```
 
 **Screenshots**
 If applicable, add screenshots to help explain your problem.
