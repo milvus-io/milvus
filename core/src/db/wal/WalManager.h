@@ -29,6 +29,7 @@
 namespace milvus {
 namespace engine {
 
+extern const char* WAL_DATA_FOLDER;
 extern const char* WAL_MAX_OP_FILE_NAME;
 extern const char* WAL_DEL_FILE_NAME;
 
