@@ -96,6 +96,8 @@ PartitionCommitOperation::GetPrevResource() const {
         return GetStartedSS()->GetPartitionCommitByPartitionId(context_.new_segment_commit->GetPartitionId());
     } else if (context_.new_segment_commits.size() > 0) {
         return GetStartedSS()->GetPartitionCommitByPartitionId(context_.new_segment_commits[0]->GetPartitionId());
+    } else if (!context_.stale_segments.empty()) {
+        return GetStartedSS()->GetPartitionCommitByPartitionId(context_.stale_segments[0]->GetPartitionId());
     }
     return nullptr;
 }

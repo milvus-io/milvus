@@ -1284,6 +1284,16 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
+    engine::IDNumbers vector_ids;
+    vector_ids.reserve(request->entity_id_array_size());
+    for (int i = 0; i < request->entity_id_array_size(); i++) {
+        if (vector_ids[i] < 0) {
+            auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "id can not be negative number"};
+            SET_RESPONSE(response->mutable_status(), status, context);
+            return ::grpc::Status::OK;
+        }
+    }
+
     auto field_size = request->fields_size();
 
     std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
