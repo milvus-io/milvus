@@ -1,7 +1,3 @@
-*cmake-build-debug*
-*cmake-build-release*
-*cmake_build*
-*thirdparty*
 *src/grpc*
-*milvus/include*
-*unittest*
+*src/index/thirdparty*
+*src/index/unittest*

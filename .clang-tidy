@@ -23,8 +23,8 @@ Checks: >
     modernize-*, -modernize-pass-by-value
 
 # produce HeaderFilterRegex from core/build-support/lint_exclusions.txt with:
-# echo -n '^('; sed -e 's/*/\.*/g' core/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
-HeaderFilterRegex: '^(.*cmake-build-debug.*|.*cmake-build-release.*|.*cmake_build.*|.*thirdparty.*|.*src/grpc.*|.*milvus/include.*|.*unittest.*)$'
+# echo -n '^?!('; sed -e 's/*/\.*/g' core/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
+HeaderFilterRegex: '^?!(.*src/grpc.*|.*src/index/thirdparty.*|.*src/index/unittest.*|)$'
 AnalyzeTemporaryDtors: true
 CheckOptions:
   - key:             google-readability-braces-around-statements.ShortStatementLines
