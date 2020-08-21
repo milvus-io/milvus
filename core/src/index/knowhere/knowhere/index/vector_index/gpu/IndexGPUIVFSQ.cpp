@@ -46,7 +46,7 @@ GPUIVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
         auto device_index = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, build_index);
-        device_index->train(rows, reinterpret_cast<float*>(p_data));
+        device_index->train(rows, reinterpret_cast<const float*>(p_data));
 
         index_.reset(device_index);
         res_ = gpu_res;

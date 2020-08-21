@@ -356,7 +356,7 @@ WebRequestHandler::GetSegmentVectors(const std::string& collection_name, int64_t
     engine::IDNumbers vector_ids;
     STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, nullptr, segment_id, vector_ids));
 
-    auto ids_begin = std::min(vector_ids.size(), static_cast<size_t>(offset);
+    auto ids_begin = std::min(vector_ids.size(), static_cast<size_t>(offset));
     auto ids_end = std::min(vector_ids.size(), static_cast<size_t>(offset + page_size));
 
     auto new_ids = std::vector<int64_t>(vector_ids.begin() + ids_begin, vector_ids.begin() + ids_end);

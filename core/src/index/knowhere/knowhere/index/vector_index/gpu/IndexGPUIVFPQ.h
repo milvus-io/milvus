@@ -36,7 +36,7 @@ class GPUIVFPQ : public GPUIVF {
     VecIndexPtr
     CopyGpuToCpu(const Config&) override;
 
-    virtual ~GPUIVFPQ(){};
+    virtual ~GPUIVFPQ() = default;
 
  protected:
     std::shared_ptr<faiss::IVFSearchParameters>

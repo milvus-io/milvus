@@ -45,7 +45,7 @@ class GPUIDMAP : public IDMAP, public GPUIndex {
     void
     GenGraph(const float*, const int64_t, GraphType&, const Config&);
 
-    virtual ~GPUIDMAP(){};
+    virtual ~GPUIDMAP() = default;
 
  protected:
     BinarySet

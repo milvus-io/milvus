@@ -36,7 +36,7 @@ class GPUIVFSQ : public GPUIVF {
     VecIndexPtr
     CopyGpuToCpu(const Config&) override;
 
-    virtual ~GPUIVFSQ(){};
+    virtual ~GPUIVFSQ() = default;
 };
 
 using GPUIVFSQPtr = std::shared_ptr<GPUIVFSQ>;

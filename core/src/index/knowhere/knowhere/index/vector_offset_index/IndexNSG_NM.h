@@ -35,7 +35,7 @@ class NSG_NM : public VecIndex {
     }
 
     BinarySet
-    Serialize(const Config& config = Config()) override;
+    Serialize(const Config& config) override;
 
     void
     Load(const BinarySet&) override;
