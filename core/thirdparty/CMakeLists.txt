@@ -75,6 +75,7 @@ endif ()
 # ****************************** Thirdparty sqlite ***************************************
 if ( MILVUS_WITH_SQLITE )
     add_subdirectory( sqlite )
+endif()
 
 # ****************************** Thirdparty prometheus ***************************************
 if (MILVUS_WITH_PROMETHEUS)
