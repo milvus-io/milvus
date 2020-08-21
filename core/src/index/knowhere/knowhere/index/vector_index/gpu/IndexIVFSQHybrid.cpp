@@ -44,7 +44,7 @@ IVFSQHybrid::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
         auto device_index = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, build_index);
-        device_index->train(rows, (float*)p_data);
+        device_index->train(rows, reinterpret<float*>(p_data));
 
         index_.reset(device_index);
         res_ = gpu_res;
@@ -132,8 +132,9 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& quantizer_ptr, const Config&
         option.allInGpu = true;
 
         auto ivf_quantizer = std::dynamic_pointer_cast<FaissIVFQuantizer>(quantizer_ptr);
-        if (ivf_quantizer == nullptr)
+        if (ivf_quantizer == nullptr) {
             KNOWHERE_THROW_MSG("quantizer type not faissivfquantizer");
+        }
 
         auto index_composition = new faiss::IndexComposition;
         index_composition->index = index_.get();
@@ -188,9 +189,9 @@ IVFSQHybrid::SetQuantizer(const QuantizerPtr& quantizer_ptr) {
         KNOWHERE_THROW_MSG("Quantizer type error");
     }
 
-    faiss::IndexIVF* ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
 
-    faiss::gpu::GpuIndexFlat* is_gpu_flat_index = dynamic_cast<faiss::gpu::GpuIndexFlat*>(ivf_index->quantizer);
+    auto is_gpu_flat_index = dynamic_cast<faiss::gpu::GpuIndexFlat*>(ivf_index->quantizer);
     if (is_gpu_flat_index == nullptr) {
         //        delete ivf_index->quantizer;
         ivf_index->quantizer = ivf_quantizer->quantizer;

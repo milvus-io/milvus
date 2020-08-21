@@ -139,7 +139,7 @@ using FloatJson = nlohmann::basic_json<std::map, std::vector, std::string, bool,
 /////////////////////////////////// Private methods ///////////////////////////////////////
 void
 WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg) {
-    json["code"] = (int64_t)code;
+    json["code"] = code;
     json["message"] = msg;
 }
 
@@ -201,8 +201,9 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
             std::string name = it.first->GetName();
 
             engine::BinaryDataPtr data = data_chunk->fixed_fields_[name];
-            if (data == nullptr || data->data_.empty())
+            if (data == nullptr || data->data_.empty()) {
                 continue;
+            }
 
             auto single_size = data->data_.size() / id_size;
 
@@ -353,10 +354,10 @@ Status
 WebRequestHandler::GetSegmentVectors(const std::string& collection_name, int64_t segment_id, int64_t page_size,
                                      int64_t offset, nlohmann::json& json_out) {
     engine::IDNumbers vector_ids;
-    STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, 0, segment_id, vector_ids));
+    STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, nullptr, segment_id, vector_ids));
 
-    auto ids_begin = std::min(vector_ids.size(), (size_t)offset);
-    auto ids_end = std::min(vector_ids.size(), (size_t)(offset + page_size));
+    auto ids_begin = std::min(vector_ids.size(), static_cast<size_t>(offset);
+    auto ids_end = std::min(vector_ids.size(), static_cast<size_t>(offset + page_size));
 
     auto new_ids = std::vector<int64_t>(vector_ids.begin() + ids_begin, vector_ids.begin() + ids_end);
     nlohmann::json vectors_json;
@@ -381,8 +382,8 @@ WebRequestHandler::GetSegmentIds(const std::string& collection_name, int64_t seg
     std::vector<int64_t> ids;
     auto status = req_handler_.ListIDInSegment(context_ptr_, collection_name, segment_id, ids);
     if (status.ok()) {
-        auto ids_begin = std::min(ids.size(), (size_t)offset);
-        auto ids_end = std::min(ids.size(), (size_t)(offset + page_size));
+        auto ids_begin = std::min(ids.size(), static_cast<size_t>(offset));
+        auto ids_end = std::min(ids.size(), static_cast<size_t>(offset + page_size));
 
         if (ids_begin >= ids_end) {
             json_out["ids"] = std::vector<int64_t>();
@@ -812,7 +813,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
                 nlohmann::json one_entity_json;
                 for (const auto& field : field_mappings) {
                     auto field_name = field.first->GetName();
-                    switch ((int64_t)field.first->GetFtype()) {
+                    switch (static_cast<int64_t>(field.first->GetFtype())) {
                         case engine::DataType::INT32: {
                             int32_t int32_value;
                             int64_t offset = (i * step + j) * sizeof(int32_t);
@@ -1276,8 +1277,8 @@ WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& re
         offset = 0;
         page_size = collections.size();
     } else {
-        offset = std::min((size_t)offset, collections.size());
-        page_size = std::min(collections.size() - offset, (size_t)page_size);
+        offset = std::min(static_cast<size_t>(offset), collections.size());
+        page_size = std::min(collections.size() - offset, static_cast<size_t>(page_size));
     }
 
     nlohmann::json collections_json;
@@ -1418,8 +1419,8 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
         offset = 0;
         page_size = partition_names.size();
     } else {
-        offset = std::min((size_t)offset, partition_names.size());
-        page_size = std::min(partition_names.size() - offset, (size_t)page_size);
+        offset = std::min(static_cast<size_t>(offset), partition_names.size());
+        page_size = std::min(partition_names.size() - offset, static_cast<size_t>(page_size));
     }
 
     partition_list_dto->count = partition_names.size();
@@ -1613,7 +1614,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
                 if (ids.empty()) {
                     ids.resize(row_num * sizeof(int64_t));
                 }
-                int64_t id = entity.value().get<int64_t>();
+                auto id = entity.value().get<int64_t>();
                 int64_t id_offset = offset * sizeof(int64_t);
                 memcpy(ids.data() + id_offset, &id, sizeof(int64_t));
                 continue;
@@ -1718,7 +1719,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     auto pair = chunk_data.find(engine::FIELD_UID);
     if (pair != chunk_data.end()) {
         int64_t count = pair->second.size() / 8;
-        int64_t* pdata = reinterpret_cast<int64_t*>(pair->second.data());
+        auto pdata = reinterpret_cast<int64_t*>(pair->second.data());
         ids_dto->ids = ids_dto->ids.createShared();
         for (int64_t i = 0; i < count; ++i) {
             ids_dto->ids->push_back(std::to_string(pdata[i]).c_str());

@@ -25,7 +25,6 @@
 
 namespace milvus {
 namespace knowhere {
-
 BinarySet
 IndexAnnoy::Serialize(const Config& config) {
     if (!index_) {
@@ -42,7 +41,7 @@ IndexAnnoy::Serialize(const Config& config) {
 
     size_t index_length = index_->get_index_length();
     std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_length]);
-    memcpy(index_data.get(), index_->get_index(), static_cast<size_t>(index_length));
+    memcpy(index_data.get(), index_->get_index(), index_length);
 
     BinarySet res_set;
     res_set.Append("annoy_metric_type", metric_type, metric_type_length);
