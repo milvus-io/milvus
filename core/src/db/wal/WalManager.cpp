@@ -11,6 +11,9 @@
 
 #include "db/wal/WalManager.h"
 #include "db/Utils.h"
+#include "db/snapshot/ResourceHelper.h"
+#include "db/snapshot/ResourceTypes.h"
+#include "db/snapshot/Snapshots.h"
 #include "db/wal/WalOperationCodec.h"
 #include "utils/CommonUtil.h"
 
@@ -67,13 +70,15 @@ Status
 WalManager::DropCollection(const std::string& collection_name) {
     // write a placeholder file 'del' under collection folder, let cleanup thread remove this folder
     std::string path = ConstructFilePath(collection_name, WAL_DEL_FILE_NAME);
-    WalFile file;
-    file.OpenFile(path, WalFile::OVER_WRITE);
-    bool del = true;
-    file.Write<bool>(&del);
+    if (!path.empty()) {
+        WalFile file;
+        file.OpenFile(path, WalFile::OVER_WRITE);
+        bool del = true;
+        file.Write<bool>(&del);
 
-    AddCleanupTask(collection_name);
-    StartCleanupThread();
+        AddCleanupTask(collection_name);
+        StartCleanupThread();
+    }
 
     return Status::OK();
 }
@@ -124,9 +129,11 @@ WalManager::OperationDone(const std::string& collection_name, idx_t op_id) {
 
             // write max op id to disk
             std::string path = ConstructFilePath(collection_name, WAL_MAX_OP_FILE_NAME);
-            WalFile file;
-            file.OpenFile(path, WalFile::OVER_WRITE);
-            file.Write<idx_t>(&op_id);
+            if (!path.empty()) {
+                WalFile file;
+                file.OpenFile(path, WalFile::OVER_WRITE);
+                file.Write<idx_t>(&op_id);
+            }
         }
     }
 
@@ -256,9 +263,9 @@ WalManager::RecordInsertOperation(const InsertEntityOperationPtr& operation, con
         DataChunkPtr& chunk = chunks[i];
         int64_t chunk_size = utils::GetSizeOfChunk(chunk);
 
-        {
-            // open wal file
-            std::string path = ConstructFilePath(operation->collection_name_, std::to_string(op_id));
+        // open wal file
+        std::string path = ConstructFilePath(operation->collection_name_, std::to_string(op_id));
+        if (!path.empty()) {
             std::lock_guard<std::mutex> lock(file_map_mutex_);
             WalFilePtr file = file_map_[operation->collection_name_];
             if (file == nullptr) {
@@ -309,9 +316,9 @@ WalManager::RecordDeleteOperation(const DeleteEntityOperationPtr& operation, con
     idx_t op_id = id_gen_.GetNextIDNumber();
     int64_t append_size = operation->entity_ids_.size() * sizeof(idx_t);
 
-    {
-        // open wal file
-        std::string path = ConstructFilePath(operation->collection_name_, std::to_string(op_id));
+    // open wal file
+    std::string path = ConstructFilePath(operation->collection_name_, std::to_string(op_id));
+    if (!path.empty()) {
         std::lock_guard<std::mutex> lock(file_map_mutex_);
         WalFilePtr file = file_map_[operation->collection_name_];
         if (file == nullptr) {
@@ -339,17 +346,29 @@ WalManager::RecordDeleteOperation(const DeleteEntityOperationPtr& operation, con
 
 std::string
 WalManager::ConstructFilePath(const std::string& collection_name, const std::string& file_name) {
-    std::experimental::filesystem::path full_path(wal_path_);
-    std::experimental::filesystem::create_directory(full_path);
-    full_path.append(collection_name);
-    std::experimental::filesystem::create_directory(full_path);
+    // use snapshot to construct wal path
+    // typically, the wal file path is like: /xxx/xxx/wal/C_1/xxxxxxxxxx
+    // if the snapshot not work, use collection name to construct path
+    snapshot::ScopedSnapshotT ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    if (status.ok() && ss->GetCollection() != nullptr) {
+        std::string col_path = snapshot::GetResPath<snapshot::Collection>(wal_path_, ss->GetCollection());
 
-    if (!file_name.empty()) {
+        std::experimental::filesystem::path full_path(col_path);
+        std::experimental::filesystem::create_directory(full_path);
         full_path.append(file_name);
-    }
 
-    std::string path(full_path.c_str());
-    return path;
+        std::string path(full_path.c_str());
+        return path;
+    } else {
+        std::experimental::filesystem::path full_path(wal_path_);
+        full_path.append(collection_name);
+        std::experimental::filesystem::create_directory(full_path);
+        full_path.append(file_name);
+
+        std::string path(full_path.c_str());
+        return path;
+    }
 }
 
 void

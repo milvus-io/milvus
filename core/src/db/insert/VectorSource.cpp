@@ -21,7 +21,7 @@
 namespace milvus {
 namespace engine {
 
-VectorSource::VectorSource(const DataChunkPtr& chunk) : chunk_(chunk) {
+VectorSource::VectorSource(const DataChunkPtr& chunk, idx_t op_id) : chunk_(chunk), op_id_(op_id) {
 }
 
 Status
