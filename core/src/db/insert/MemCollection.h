@@ -12,6 +12,7 @@
 #pragma once
 
 #include <atomic>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -21,7 +22,6 @@
 
 #include "config/ConfigMgr.h"
 #include "db/insert/MemSegment.h"
-#include "db/insert/VectorSource.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -37,10 +37,10 @@ class MemCollection {
     ~MemCollection() = default;
 
     Status
-    Add(int64_t partition_id, const VectorSourcePtr& source);
+    Add(int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id);
 
     Status
-    Delete(const std::vector<idx_t>& ids);
+    Delete(const std::vector<idx_t>& ids, idx_t op_id);
 
     Status
     EraseMem(int64_t partition_id);
@@ -56,18 +56,19 @@ class MemCollection {
 
  private:
     Status
-    ApplyDeletes();
+    ApplyDeletesToMem();
+
+    Status
+    ApplyDeletesToFiles();
 
  private:
     int64_t collection_id_;
-
-    MemSegmentMap mem_segments_;
-
     DBOptions options_;
 
-    std::mutex mutex_;
+    MemSegmentMap mem_segments_;
+    std::mutex mem_mutex_;
 
-    std::set<idx_t> doc_ids_to_delete_;
+    DeleteIDMap ids_to_delete_;
 };
 
 using MemCollectionPtr = std::shared_ptr<MemCollection>;

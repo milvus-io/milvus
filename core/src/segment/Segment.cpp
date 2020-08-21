@@ -16,6 +16,9 @@
 // under the License.
 
 #include "segment/Segment.h"
+#include "db/SnapshotUtils.h"
+#include "db/snapshot/Snapshots.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/Log.h"
 
 #include <algorithm>
@@ -26,6 +29,52 @@ namespace milvus {
 namespace engine {
 
 const char* COLLECTIONS_FOLDER = "/collections";
+
+Status
+Segment::SetFields(int64_t collection_id) {
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id));
+
+    auto collection = ss->GetCollection();
+    auto& fields = ss->GetResources<snapshot::Field>();
+    for (auto& kv : fields) {
+        const snapshot::FieldPtr& field = kv.second.Get();
+        STATUS_CHECK(AddField(field));
+    }
+
+    return Status::OK();
+}
+
+Status
+Segment::AddField(const snapshot::FieldPtr& field) {
+    if (field == nullptr) {
+        return Status(DB_ERROR, "Field is null pointer");
+    }
+
+    std::string name = field->GetName();
+    DataType ftype = static_cast<DataType>(field->GetFtype());
+    if (IsVectorField(field)) {
+        json params = field->GetParams();
+        if (params.find(knowhere::meta::DIM) == params.end()) {
+            std::string msg = "Vector field params must contain: dimension";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(DB_ERROR, msg);
+        }
+
+        int64_t field_width = 0;
+        int64_t dimension = params[knowhere::meta::DIM];
+        if (ftype == DataType::VECTOR_BINARY) {
+            field_width += (dimension / 8);
+        } else {
+            field_width += (dimension * sizeof(float));
+        }
+        AddField(name, ftype, field_width);
+    } else {
+        AddField(name, ftype);
+    }
+
+    return Status::OK();
+}
 
 Status
 Segment::AddField(const std::string& field_name, DataType field_type, int64_t field_width) {

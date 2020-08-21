@@ -19,6 +19,7 @@
 #include <ctime>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include <fiu/fiu-local.h>
 
@@ -27,6 +28,7 @@
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/Snapshots.h"
+#include "db/wal/WalManager.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -39,64 +41,57 @@ MemCollection::MemCollection(int64_t collection_id, const DBOptions& options)
 }
 
 Status
-MemCollection::Add(int64_t partition_id, const milvus::engine::VectorSourcePtr& source) {
-    while (!source->AllAdded()) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        MemSegmentPtr current_mem_segment;
-        auto pair = mem_segments_.find(partition_id);
-        if (pair != mem_segments_.end()) {
-            MemSegmentList& segments = pair->second;
-            if (!segments.empty()) {
-                current_mem_segment = segments.back();
-            }
-        }
-
-        Status status;
-        if (current_mem_segment == nullptr || current_mem_segment->IsFull()) {
-            MemSegmentPtr new_mem_segment = std::make_shared<MemSegment>(collection_id_, partition_id, options_);
-            STATUS_CHECK(new_mem_segment->CreateSegment());
-            status = new_mem_segment->Add(source);
-            if (status.ok()) {
-                mem_segments_[partition_id].emplace_back(new_mem_segment);
-            } else {
-                return status;
-            }
-        } else {
-            status = current_mem_segment->Add(source);
-        }
-
-        if (!status.ok()) {
-            std::string err_msg = "Insert failed: " + status.ToString();
-            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << err_msg;
-            return Status(DB_ERROR, err_msg);
+MemCollection::Add(int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id) {
+    std::lock_guard<std::mutex> lock(mem_mutex_);
+    MemSegmentPtr current_mem_segment;
+    auto pair = mem_segments_.find(partition_id);
+    if (pair != mem_segments_.end()) {
+        MemSegmentList& segments = pair->second;
+        if (!segments.empty()) {
+            current_mem_segment = segments.back();
         }
     }
+
+    int64_t chunk_size = utils::GetSizeOfChunk(chunk);
+
+    Status status;
+    if (current_mem_segment == nullptr || current_mem_segment->GetCurrentMem() + chunk_size > MAX_MEM_SEGMENT_SIZE) {
+        MemSegmentPtr new_mem_segment = std::make_shared<MemSegment>(collection_id_, partition_id, options_);
+        status = new_mem_segment->Add(chunk, op_id);
+        if (status.ok()) {
+            mem_segments_[partition_id].emplace_back(new_mem_segment);
+        } else {
+            return status;
+        }
+    } else {
+        status = current_mem_segment->Add(chunk, op_id);
+    }
+
+    if (!status.ok()) {
+        std::string err_msg = "Insert failed: " + status.ToString();
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
     return Status::OK();
 }
 
 Status
-MemCollection::Delete(const std::vector<idx_t>& ids) {
-    // Locate which collection file the doc id lands in
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& partition_segments : mem_segments_) {
-            MemSegmentList& segments = partition_segments.second;
-            for (auto& segment : segments) {
-                segment->Delete(ids);
-            }
-        }
+MemCollection::Delete(const std::vector<idx_t>& ids, idx_t op_id) {
+    if (ids.empty()) {
+        return Status::OK();
     }
+
     // Add the id to delete list so it can be applied to other segments on disk during the next flush
-    for (auto& id : ids) {
-        doc_ids_to_delete_.insert(id);
-    }
+    std::set<idx_t> ids_to_delete(ids.begin(), ids.end());
+    ids_to_delete_.insert(std::make_pair(op_id, ids_to_delete));
 
     return Status::OK();
 }
 
 Status
 MemCollection::EraseMem(int64_t partition_id) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mem_mutex_);
     auto pair = mem_segments_.find(partition_id);
     if (pair != mem_segments_.end()) {
         mem_segments_.erase(pair);
@@ -109,9 +104,10 @@ Status
 MemCollection::Serialize() {
     TimeRecorder recorder("MemCollection::Serialize collection " + std::to_string(collection_id_));
 
-    if (!doc_ids_to_delete_.empty()) {
+    // apply delete to segment file and MemSegment
+    if (!ids_to_delete_.empty()) {
         while (true) {
-            auto status = ApplyDeletes();
+            auto status = ApplyDeletesToFiles();
             if (status.ok()) {
                 break;
             } else if (status.code() == SS_STALE_ERROR) {
@@ -124,11 +120,13 @@ MemCollection::Serialize() {
                 return status;
             }
         }
+
+        ApplyDeletesToMem();
+        ids_to_delete_.clear();
     }
 
-    doc_ids_to_delete_.clear();
-
-    std::lock_guard<std::mutex> lock(mutex_);
+    // serialize mem to new segment files
+    std::lock_guard<std::mutex> lock(mem_mutex_);
     for (auto& partition_segments : mem_segments_) {
         MemSegmentList& segments = partition_segments.second;
         for (auto& segment : segments) {
@@ -136,7 +134,6 @@ MemCollection::Serialize() {
             if (!status.ok()) {
                 return status;
             }
-            LOG_ENGINE_DEBUG_ << "Flushed segment " << segment->GetSegmentId() << " of collection " << collection_id_;
         }
     }
 
@@ -154,7 +151,7 @@ MemCollection::GetCollectionId() const {
 
 size_t
 MemCollection::GetCurrentMem() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mem_mutex_);
     size_t total_mem = 0;
     for (auto& partition_segments : mem_segments_) {
         MemSegmentList& segments = partition_segments.second;
@@ -166,7 +163,31 @@ MemCollection::GetCurrentMem() {
 }
 
 Status
-MemCollection::ApplyDeletes() {
+MemCollection::ApplyDeletesToMem() {
+    if (ids_to_delete_.empty()) {
+        return Status::OK();
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mem_mutex_);
+        for (auto& partition_segments : mem_segments_) {
+            MemSegmentList& segments = partition_segments.second;
+            for (auto& segment : segments) {
+                segment->Delete(ids_to_delete_);
+            }
+        }
+    }
+
+    // notify wal manager to remove wal files, only notify the max op id
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_));
+    WalManager::GetInstance().OperationDone(ss->GetName(), ids_to_delete_.rbegin()->first);
+
+    return Status::OK();
+}
+
+Status
+MemCollection::ApplyDeletesToFiles() {
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_));
 
@@ -181,26 +202,23 @@ MemCollection::ApplyDeletes() {
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
 
         // Step 1: Check delete_id in mem
-        std::vector<idx_t> delete_ids;
-        {
-            segment::IdBloomFilterPtr pre_bloom_filter;
-            STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
-            for (auto& id : doc_ids_to_delete_) {
+        std::set<idx_t> ids_to_check;
+        segment::IdBloomFilterPtr pre_bloom_filter;
+        STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
+        for (auto& pair : ids_to_delete_) {
+            for (auto id : pair.second) {
                 if (pre_bloom_filter->Check(id)) {
-                    delete_ids.push_back(id);
+                    ids_to_check.insert(id);
                 }
             }
+        }
 
-            if (delete_ids.empty()) {
-                return Status::OK();
-            }
+        if (ids_to_check.empty()) {
+            return Status::OK();
         }
 
         std::vector<engine::idx_t> uids;
         STATUS_CHECK(segment_reader->LoadUids(uids));
-
-        std::sort(delete_ids.begin(), delete_ids.end());
-        std::set<idx_t> ids_to_check(delete_ids.begin(), delete_ids.end());
 
         // Step 2: Mark previous deleted docs file and bloom filter file stale
         auto& field_visitors_map = seg_visitor->GetFieldVisitors();
