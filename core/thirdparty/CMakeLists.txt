@@ -81,3 +81,6 @@ endif()
 if (MILVUS_WITH_PROMETHEUS)
     add_subdirectory( prometheus )
 endif ()
+
+# ****************************** Thirdparty fiu ***************************************
+add_subdirectory( fiu )

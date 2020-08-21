@@ -200,13 +200,6 @@ foreach (_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     set(${_LIB_NAME} "${_LIB_VERSION}")
 endforeach ()
 
-if (DEFINED ENV{MILVUS_FIU_URL})
-    set(FIU_SOURCE_URL "$ENV{MILVUS_FIU_URL}")
-else ()
-    set(FIU_SOURCE_URL "https://github.com/albertito/libfiu/archive/${FIU_VERSION}.tar.gz"
-                       "https://gitee.com/quicksilver/libfiu/repository/archive/${FIU_VERSION}.zip")
-endif ()
-
 if (DEFINED ENV{MILVUS_OATPP_URL})
     set(OATPP_SOURCE_URL "$ENV{MILVUS_OATPP_URL}")
 else ()
@@ -219,50 +212,6 @@ if (DEFINED ENV{MILVUS_AWS_URL})
 else ()
     set(AWS_SOURCE_URL "https://github.com/aws/aws-sdk-cpp/archive/${AWS_VERSION}.tar.gz")
 endif ()
-
-
-# ----------------------------------------------------------------------
-# fiu
-macro(build_fiu)
-    message(STATUS "Building FIU-${FIU_VERSION} from source")
-    set(FIU_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep")
-    set(FIU_SHARED_LIB "${FIU_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    set(FIU_INCLUDE_DIR "${FIU_PREFIX}/include")
-
-    ExternalProject_Add(fiu_ep
-            URL
-            ${FIU_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            URL_MD5
-            "75f9d076daf964c9410611701f07c61b"
-            CONFIGURE_COMMAND
-            ""
-            BUILD_IN_SOURCE
-            1
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            INSTALL_COMMAND
-            ${MAKE}
-            "PREFIX=${FIU_PREFIX}"
-            install
-            BUILD_BYPRODUCTS
-            ${FIU_SHARED_LIB}
-            )
-
-        file(MAKE_DIRECTORY "${FIU_INCLUDE_DIR}")
-        add_library(fiu SHARED IMPORTED)
-    set_target_properties(fiu
-        PROPERTIES IMPORTED_LOCATION "${FIU_SHARED_LIB}"
-        INTERFACE_INCLUDE_DIRECTORIES "${FIU_INCLUDE_DIR}")
-
-    add_dependencies(fiu fiu_ep)
-endmacro()
-
-resolve_dependency(fiu)
-
-get_target_property(FIU_INCLUDE_DIR fiu INTERFACE_INCLUDE_DIRECTORIES)
-include_directories(SYSTEM ${FIU_INCLUDE_DIR})
 
 # ----------------------------------------------------------------------
 # oatpp
