@@ -4,6 +4,7 @@ import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
 
@@ -11,10 +12,10 @@ public class TestCollectionCount {
     int segmentRowCount = 5000;
     int dimension = 128;
     int nb = 10000;
-//    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
-//    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
-    List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension,nb,false);
-    List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultEntities(dimension,nb,true);
+    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
+    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
+    List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension,nb,vectors);
+    List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultBinaryEntities(dimension,nb,vectorsBinary);
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testCollectionCountNoVectors(MilvusClient client, String collectionName) {

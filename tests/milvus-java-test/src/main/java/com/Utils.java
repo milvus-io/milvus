@@ -79,17 +79,17 @@ public class Utils {
         return defaultFieldList;
     }
 
-    public static List<Map<String,Object>> genDefaultEntities(int dimension, int vectorCount, boolean isBinary){
-        List<Map<String,Object>> fields = genDefaultFields(dimension, isBinary);
+    public static List<Map<String,Object>> genDefaultEntities(int dimension, int vectorCount, List<List<Float>> vectors){
+        List<Map<String,Object>> fieldsMap = genDefaultFields(dimension, false);
         List<Long> intValues = new ArrayList<>(vectorCount);
         List<Float> floatValues = new ArrayList<>(vectorCount);
-        List<List<Float>> vectors = genVectors(vectorCount,dimension,false);
-        List<ByteBuffer> binaryVectors = genBinaryVectors(vectorCount,dimension);
+//        List<List<Float>> vectors = genVectors(vectorCount,dimension,false);
+//        List<ByteBuffer> binaryVectors = genBinaryVectors(vectorCount,dimension);
         for (int i = 0; i < vectorCount; ++i) {
             intValues.add((long) i);
             floatValues.add((float) i);
         }
-        for(Map<String,Object> field: fields){
+        for(Map<String,Object> field: fieldsMap){
             String fieldType = field.get("field").toString();
             switch (fieldType){
                 case "int64":
@@ -101,11 +101,36 @@ public class Utils {
                 case "float_vector":
                     field.put("values",vectors);
                     break;
-                case "binary_vector":
-                    field.put("values",binaryVectors);
             }
         }
-        return fields;
+        return fieldsMap;
+    }
+
+    public static List<Map<String,Object>> genDefaultBinaryEntities(int dimension, int vectorCount, List<ByteBuffer> vectorsBinary){
+        List<Map<String,Object>> binaryFieldsMap = genDefaultFields(dimension, true);
+        List<Long> intValues = new ArrayList<>(vectorCount);
+        List<Float> floatValues = new ArrayList<>(vectorCount);
+//        List<List<Float>> vectors = genVectors(vectorCount,dimension,false);
+//        List<ByteBuffer> binaryVectors = genBinaryVectors(vectorCount,dimension);
+        for (int i = 0; i < vectorCount; ++i) {
+            intValues.add((long) i);
+            floatValues.add((float) i);
+        }
+        for(Map<String,Object> field: binaryFieldsMap){
+            String fieldType = field.get("field").toString();
+            switch (fieldType){
+                case "int64":
+                    field.put("values",intValues);
+                    break;
+                case "float":
+                    field.put("values",floatValues);
+                    break;
+                case "binary_vector":
+                    field.put("values",vectorsBinary);
+                    break;
+            }
+        }
+        return binaryFieldsMap;
     }
 
     public static String setIndexParam(String indexType, String metricType, int nlist) {
@@ -149,12 +174,13 @@ public class Utils {
         Integer value = jsonObject.getInteger(key);
         return value;
     }
-//    public static List<Float> getVector(List<Map<String,Object>> entities, int i){
-//       List<Float> vector = new ArrayList<>();
-//        entities.forEach(entity -> {
-//            if("float_vector".equals(entity.get("field"))){
-//                vector.add(entity.get("values").get(i));
-//            }
-//        });
-//    }
+    public static List<Float> getVector(List<Map<String,Object>> entities, int i){
+       List<Float> vector = new ArrayList<>();
+        entities.forEach(entity -> {
+            if("float_vector".equals(entity.get("field")) && Objects.nonNull(entity.get("values"))){
+                vector.add(((List<Float>)entity.get("values")).get(i));
+            }
+        });
+        return vector;
+    }
 }
