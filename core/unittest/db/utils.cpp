@@ -27,7 +27,7 @@
 #include "cache/GpuCacheMgr.h"
 #include "config/ServerConfig.h"
 #include "codecs/Codec.h"
-#include "db/DBImpl.h"
+#include "db/DBFactory.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
@@ -174,7 +174,8 @@ DBTest::SetUp() {
     auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
     dummy_context_->SetTraceContext(trace_context);
 
-    db_ = std::make_shared<milvus::engine::DBImpl>(GetOptions());
+    db_ = milvus::engine::DBFactory::BuildDB(GetOptions());
+    db_->Start();
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
     res_mgr->Clear();
@@ -196,6 +197,7 @@ DBTest::SetUp() {
 
 void
 DBTest::TearDown() {
+    db_->Stop();
     db_ = nullptr; // db must be stopped before JobMgr and Snapshot
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
@@ -222,12 +224,14 @@ SegmentTest::SetUp() {
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(false, options);
 
-    db_ = std::make_shared<milvus::engine::DBImpl>(options);
+    db_ = milvus::engine::DBFactory::BuildDB(options);
+    db_->Start();
 }
 
 void
 SegmentTest::TearDown() {
     BaseTest::SnapshotStop();
+    db_->Stop();
     db_ = nullptr;
     BaseTest::TearDown();
 }
@@ -256,7 +260,8 @@ SchedulerTest::SetUp() {
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(true, options);
-    db_ = std::make_shared<milvus::engine::DBImpl>(options);
+    db_ = milvus::engine::DBFactory::BuildDB(options);
+    db_->Start();
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
     res_mgr->Clear();
@@ -278,6 +283,7 @@ SchedulerTest::SetUp() {
 
 void
 SchedulerTest::TearDown() {
+    db_->Stop();
     db_ = nullptr; // db must be stopped before JobMgr and Snapshot
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
