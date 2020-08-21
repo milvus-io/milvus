@@ -11,12 +11,13 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "config/ConfigMgr.h"
-#include "db/insert/VectorSource.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Resources.h"
 #include "segment/SegmentWriter.h"
@@ -24,6 +25,8 @@
 
 namespace milvus {
 namespace engine {
+
+using DeleteIDMap = std::map<idx_t, std::set<idx_t>>;  // operation id to delete ids
 
 class MemSegment {
  public:
@@ -33,43 +36,34 @@ class MemSegment {
 
  public:
     Status
-    CreateSegment();
+    Add(const DataChunkPtr& chunk, idx_t op_id);
 
     Status
-    Add(const VectorSourcePtr& source);
-
-    Status
-    Delete(const std::vector<idx_t>& ids);
+    Delete(const DeleteIDMap& ids);
 
     int64_t
     GetCurrentMem();
 
-    int64_t
-    GetMemLeft();
-
-    bool
-    IsFull();
-
     Status
     Serialize();
 
-    int64_t
-    GetSegmentId() const;
-
  private:
     Status
-    GetSingleEntitySize(int64_t& single_size);
+    CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snapshot::NewSegmentOperation>& operation,
+                     segment::SegmentWriterPtr& writer);
+
+    Status
+    PutChunksToWriter(const segment::SegmentWriterPtr& writer);
 
  private:
     int64_t collection_id_;
     int64_t partition_id_;
 
-    std::shared_ptr<snapshot::NewSegmentOperation> operation_;
-    snapshot::SegmentPtr segment_;
     DBOptions options_;
-    int64_t current_mem_;
+    int64_t current_mem_ = 0;
 
-    segment::SegmentWriterPtr segment_writer_ptr_;
+    using ChunkMap = std::map<idx_t, DataChunkPtr>;
+    ChunkMap chunks_;
 };
 
 using MemSegmentPtr = std::shared_ptr<MemSegment>;

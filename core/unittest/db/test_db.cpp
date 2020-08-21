@@ -567,15 +567,13 @@ TEST_F(DBTest, MergeTest) {
 
     const uint64_t entity_count = 100;
     milvus::engine::DataChunkPtr data_chunk;
-    BuildEntities(entity_count, 0, data_chunk);
 
     // insert entities into collection multiple times
     int64_t repeat = 2;
     for (int32_t i = 0; i < repeat; i++) {
+        BuildEntities(entity_count, 0, data_chunk);
         status = db_->Insert(collection_name, "", data_chunk);
         ASSERT_TRUE(status.ok());
-
-        data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
 
         status = db_->Flush();
         ASSERT_TRUE(status.ok());
@@ -937,8 +935,7 @@ TEST_F(DBTest, StatsTest) {
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
-    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
-
+    BuildEntities(entity_count, 0, data_chunk);
     status = db_->Insert(collection_name, partition_name, data_chunk);
     ASSERT_TRUE(status.ok());
 
@@ -1031,8 +1028,7 @@ TEST_F(DBTest, FetchTest) {
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
-    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
-
+    BuildEntities(entity_count, 0, data_chunk);
     status = db_->Insert(collection_name, partition_name, data_chunk);
     ASSERT_TRUE(status.ok());
 
@@ -1297,8 +1293,7 @@ TEST_F(DBTest, LoadTest) {
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
-    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
-
+    BuildEntities(entity_count, 0, data_chunk);
     status = db_->Insert(collection_name, partition_name, data_chunk);
     ASSERT_TRUE(status.ok());
 
