@@ -95,7 +95,6 @@ KnowhereResource::Initialize() {
                                                                 iter->second.temp_memory, iter->second.resource_num);
     }
 #endif
-
     return Status::OK();
 }
 

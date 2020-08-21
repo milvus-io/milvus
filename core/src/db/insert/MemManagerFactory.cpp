@@ -13,9 +13,6 @@
 #include "MemManagerImpl.h"
 
 #include <memory>
-#include <regex>
-#include <sstream>
-#include <string>
 
 namespace milvus {
 namespace engine {

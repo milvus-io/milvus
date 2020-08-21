@@ -25,6 +25,7 @@
 
 namespace milvus {
 namespace knowhere {
+
 BinarySet
 IndexAnnoy::Serialize(const Config& config) {
     if (!index_) {
