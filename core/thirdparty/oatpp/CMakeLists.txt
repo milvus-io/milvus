@@ -26,16 +26,16 @@ FetchContent_Declare(
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )
 
 
-set( OATPP_BUILD_TESTS  CACHE BOOL OFF FORCE )
-set( OATPP_INSTALL      CACHE BOOL OFF FORCE )
-set( OATPP_DISABLE_LOGV CACHE BOOL ON  FORCE )
-set( OATPP_DISABLE_LOGD CACHE BOOL ON  FORCE )
-set( OATPP_DISABLE_LOGI CACHE BOOL ON  FORCE )
 FetchContent_GetProperties( oatpp )
 if ( NOT oatpp_POPULATED )
 
     FetchContent_Populate( oatpp )
 
+    set( OATPP_BUILD_TESTS  CACHE BOOL OFF FORCE )
+    set( OATPP_INSTALL      CACHE BOOL OFF FORCE )
+    set( OATPP_DISABLE_LOGV CACHE BOOL ON  FORCE )
+    set( OATPP_DISABLE_LOGD CACHE BOOL ON  FORCE )
+    set( OATPP_DISABLE_LOGI CACHE BOOL ON  FORCE )
     # Adding the following targets:
     # oatpp, oatpp-test
     add_subdirectory( ${oatpp_SOURCE_DIR}
