@@ -72,7 +72,17 @@ if ( MILVUS_WITH_MYSQLPP )
     add_subdirectory( mysqlpp )
 endif ()
 
+# ****************************** Thirdparty sqlite ***************************************
+if ( MILVUS_WITH_SQLITE )
+    add_subdirectory( sqlite )
+endif()
+
 # ****************************** Thirdparty prometheus ***************************************
 if (MILVUS_WITH_PROMETHEUS)
     add_subdirectory( prometheus )
+endif ()
+
+# ****************************** Thirdparty aws ***************************************
+if (MILVUS_WITH_AWS)
+    add_subdirectory( aws )
 endif ()
