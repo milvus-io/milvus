@@ -78,6 +78,10 @@ class EventExecutor {
     }
 
  private:
+    EventExecutor() {
+        queue_.SetCapacity(10000);
+    }
+
     static EventExecutor&
     GetInstanceImpl() {
         static EventExecutor executor;
@@ -108,7 +112,6 @@ class EventExecutor {
         }
     }
 
-    EventExecutor() = default;
     EventExecutor(const EventExecutor&) = delete;
 
     ThreadPtr thread_ptr_ = nullptr;
