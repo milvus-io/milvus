@@ -94,7 +94,6 @@ KnowhereResource::Initialize() {
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(iter->first, iter->second.pinned_memory,
                                                                 iter->second.temp_memory, iter->second.resource_num);
     }
-
 #endif
 
     return Status::OK();

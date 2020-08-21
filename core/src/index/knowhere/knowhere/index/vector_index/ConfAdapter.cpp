@@ -110,13 +110,13 @@ IVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 IVFConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    if (mode == IndexMode::MODE_GPU) {
+    int64_t max_nprobe = MAX_NPROBE;
 #ifdef MILVUS_GPU_VERSION
-        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, faiss::gpu::getMaxKSelection());
-    } else {
-#endif
-        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
+    if (mode == IndexMode::MODE_GPU) {
+        max_nprobe = faiss::gpu::getMaxKSelection();
     }
+#endif
+    CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, max_nprobe);
 
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }

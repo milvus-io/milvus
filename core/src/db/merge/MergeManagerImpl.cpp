@@ -34,7 +34,7 @@ MergeManagerImpl::CreateStrategy(MergeStrategyType type, MergeStrategyPtr& strat
         case MergeStrategyType::LAYERED:
         case MergeStrategyType::ADAPTIVE:
         default: {
-            std::string msg = "Unsupported merge strategy type: " + std::to_string((int32_t)type);
+            std::string msg = "Unsupported merge strategy type: " + std::to_string(static_cast<int32_t>(type));
             LOG_ENGINE_ERROR_ << msg;
             return Status(DB_ERROR, msg);
         }
