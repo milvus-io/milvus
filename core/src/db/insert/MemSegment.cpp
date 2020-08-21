@@ -242,7 +242,7 @@ MemSegment::IsFull() {
 }
 
 Status
-MemSegment::Serialize(uint64_t wal_lsn) {
+MemSegment::Serialize() {
     int64_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
@@ -260,7 +260,7 @@ MemSegment::Serialize(uint64_t wal_lsn) {
 
     STATUS_CHECK(operation_->CommitRowCount(segment_writer_ptr_->RowCount()));
     STATUS_CHECK(operation_->Push());
-    LOG_ENGINE_DEBUG_ << "New segment " << segment_->GetID() << " serialized, lsn = " << wal_lsn;
+    LOG_ENGINE_DEBUG_ << "New segment " << segment_->GetID() << " serialized";
     return Status::OK();
 }
 
