@@ -197,14 +197,14 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 }
 
 Status
-DBImpl::DropCollection(const std::string& name) {
+DBImpl::DropCollection(const std::string& collection_name) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << name;
+    LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << collection_name;
 
     snapshot::ScopedSnapshotT ss;
     auto& snapshots = snapshot::Snapshots::GetInstance();
-    STATUS_CHECK(snapshots.GetSnapshot(ss, name));
+    STATUS_CHECK(snapshots.GetSnapshot(ss, collection_name));
 
     mem_mgr_->EraseMem(ss->GetCollectionId());  // not allow insert
 
