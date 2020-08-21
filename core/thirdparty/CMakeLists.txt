@@ -76,3 +76,8 @@ endif ()
 if (MILVUS_WITH_PROMETHEUS)
     add_subdirectory( prometheus )
 endif ()
+
+# ****************************** Thirdparty prometheus ***************************************
+if ( MILVUS_WITH_OATPP )
+    add_subdirectory( oatpp )
+endif ()
