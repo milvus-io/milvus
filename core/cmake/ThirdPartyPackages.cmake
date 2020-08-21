@@ -463,15 +463,15 @@ macro(build_aws)
 
 endmacro()
 
-if(MILVUS_WITH_AWS)
-    resolve_dependency(AWS)
-
-    link_directories(SYSTEM ${AWS_PREFIX}/lib)
-
-    get_target_property(AWS_CPP_SDK_S3_INCLUDE_DIR aws-cpp-sdk-s3 INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${AWS_CPP_SDK_S3_INCLUDE_DIR})
-
-    get_target_property(AWS_CPP_SDK_CORE_INCLUDE_DIR aws-cpp-sdk-core INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${AWS_CPP_SDK_CORE_INCLUDE_DIR})
-
-endif()
+# if(MILVUS_WITH_AWS)
+#     resolve_dependency(AWS)
+#
+#     link_directories(SYSTEM ${AWS_PREFIX}/lib)
+#
+#     get_target_property(AWS_CPP_SDK_S3_INCLUDE_DIR aws-cpp-sdk-s3 INTERFACE_INCLUDE_DIRECTORIES)
+#     include_directories(SYSTEM ${AWS_CPP_SDK_S3_INCLUDE_DIR})
+#
+#     get_target_property(AWS_CPP_SDK_CORE_INCLUDE_DIR aws-cpp-sdk-core INTERFACE_INCLUDE_DIRECTORIES)
+#     include_directories(SYSTEM ${AWS_CPP_SDK_CORE_INCLUDE_DIR})
+#
+# endif()
