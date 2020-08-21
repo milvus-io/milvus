@@ -27,9 +27,10 @@
 //        client.flush(collectionName);
 //        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, get_length));
 //        assert (res.getResponse().ok());
+//        assert (res.getValidIds(), ids.subList(0, get_length));
 //        for (int i = 0; i < get_length; i++) {
-//            List<Map<String,Object>> fields = res.getFieldsMap();
-//            assert (res.getFieldsMap().get(i).equals(vectors.get(i)));
+//            List<Map<String,Object>> fieldsMap = res.getFieldsMap();
+//            assert (fieldsMap.get(i).get("float_vector").equals(defaultEntities.get(defaultEntities.size()-1).get("values").get("float_vector")));
 //        }
 //    }
 //

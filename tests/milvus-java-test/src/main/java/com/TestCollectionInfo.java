@@ -20,10 +20,10 @@ public class TestCollectionInfo {
     String defaultIndexType = "FLAT";
     String metricType = "L2";
     String indexParam = Utils.setIndexParam(indexType,metricType,nList);
-//    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
-//    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
-    List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension,nb,false);
-    List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultEntities(dimension,nb,true);
+    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
+    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
+    List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension,nb,vectors);
+    List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultBinaryEntities(dimension,nb,vectorsBinary);
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testGetEntityIdsAfterDeleteEntities(MilvusClient client, String collectionName) {

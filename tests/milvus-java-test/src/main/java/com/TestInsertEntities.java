@@ -9,16 +9,15 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
-import java.util.stream.Stream;
 
 public class TestInsertEntities {
     int dimension = 128;
     String tag = "tag";
     int nb = 8000;
-//    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
-//    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
-    List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension,nb,false);
-    List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultEntities(dimension,nb,true);
+    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
+    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
+    List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension,nb,vectors);
+    List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultBinaryEntities(dimension,nb,vectorsBinary);
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testInsertEntitiesCollectionNotExisted(MilvusClient client, String collectionName) throws InterruptedException {
@@ -72,19 +71,19 @@ public class TestInsertEntities {
         assert(!res.getResponse().ok());
     }
 
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testInsertEntityWithInvalidDimension(MilvusClient client, String collectionName) {
-//        vectors.get(0).add((float) 0);
-        List<Map<String,Object>> entities = Utils.genDefaultEntities(dimension+1,nb,false);
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(entities).build();
-        InsertResponse res = client.insert(insertParam);
-        assert(!res.getResponse().ok());
-    }
+//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+//    public void testInsertEntityWithInvalidDimension(MilvusClient client, String collectionName) {
+////        vectors.get(0).add((float) 0);
+//        List<Map<String,Object>> entities = Utils.genDefaultEntities(dimension+1,nb,vectors);
+//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(entities).build();
+//        InsertResponse res = client.insert(insertParam);
+//        assert(!res.getResponse().ok());
+//    }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testInsertEntityWithInvalidVectors(MilvusClient client, String collectionName) {
 //        vectors.set(0, new ArrayList<>());
-        List<Map<String,Object>> invalidEntities = Utils.genDefaultEntities(dimension,nb,false);
+        List<Map<String,Object>> invalidEntities = Utils.genDefaultEntities(dimension,nb,new ArrayList<>());
         invalidEntities.forEach(entity ->{
             if("float_vector".equals(entity.get("field"))){
                 entity.put("values",new ArrayList<>());
@@ -171,7 +170,7 @@ public class TestInsertEntities {
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testInsertBinaryEntityWithInvalidDimension(MilvusClient client, String collectionName) {
         List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension-1);
-        List<Map<String,Object>> binaryEntities = Utils.genDefaultEntities(dimension-1,nb,true);
+        List<Map<String,Object>> binaryEntities = Utils.genDefaultBinaryEntities(dimension-1,nb,vectorsBinary);
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(binaryEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(!res.getResponse().ok());
