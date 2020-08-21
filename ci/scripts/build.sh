@@ -155,13 +155,13 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
     echo "clang-format check passed!"
 
     # clang-tidy check
-#    make check-clang-tidy
-#    if [ $? -ne 0 ]; then
-#        echo "ERROR! clang-tidy check failed"
-#        rm -f CMakeCache.txt
-#        exit 1
-#    fi
-#    echo "clang-tidy check passed!"
+    make check-clang-tidy
+    if [ $? -ne 0 ]; then
+        echo "ERROR! clang-tidy check failed"
+        rm -f CMakeCache.txt
+        exit 1
+    fi
+    echo "clang-tidy check passed!"
 fi
 
 if [[ ${COMPILE_BUILD} == "ON" ]];then
