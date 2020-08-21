@@ -17,6 +17,12 @@
 #include "crc32c/crc32c.h"
 #include "storage/ExtraFileInfo.h"
 
+const char* MAGIC = "Milvus";
+const int MAGIC_SIZE = 6;
+const int SINGLE_KV_DATA_SIZE = 64;
+const int HEADER_SIZE = 4096;
+const int SUM_SIZE = 16;
+
 namespace milvus {
 namespace storage {
 
@@ -43,7 +49,7 @@ WriteMagic(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path) {
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
-    fs_ptr->writer_ptr_->Write((void*)MAGIC, MAGIC_SIZE);
+    fs_ptr->writer_ptr_->Write(const_cast<char*>(MAGIC), MAGIC_SIZE);
     fs_ptr->writer_ptr_->Close();
 }
 
@@ -136,7 +142,7 @@ CheckSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path) {
 
     fs_ptr->reader_ptr_->Close();
 
-    auto sum = (uint8_t)atoi(record);
+    auto sum = static_cast<uint8_t>(atoi(record));
     return sum == result;
 }
 

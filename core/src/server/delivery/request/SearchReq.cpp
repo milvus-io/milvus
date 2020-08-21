@@ -79,6 +79,12 @@ SearchReq::OnExecute() {
             if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
                 field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
                 dimension = field->GetParams()[engine::PARAM_DIMENSION];
+                // validate search metric type and DataType match
+                bool is_binary = (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT) ? false : true;
+                if (query_ptr_->metric_types.find(field->GetName()) != query_ptr_->metric_types.end()) {
+                    auto metric_type = query_ptr_->metric_types.at(field->GetName());
+                    STATUS_CHECK(ValidateSearchMetricType(metric_type, is_binary));
+                }
             }
         }
 

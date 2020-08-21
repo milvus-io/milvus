@@ -76,7 +76,7 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
         size_t data_size = iter->second->data_.size();
 
         snapshot::FieldPtr field = ss->GetField(name);
-        DataType ftype = static_cast<DataType>(field->GetFtype());
+        auto ftype = static_cast<DataType>(field->GetFtype());
         std::string err_msg = "Illegal data size for chunk field: ";
         switch (ftype) {
             case DataType::BOOL:
@@ -150,7 +150,7 @@ MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id
 }
 
 Status
-MemManagerImpl::DeleteEntities(int64_t collection_id, const std::vector<id_t>& entity_ids, uint64_t lsn) {
+MemManagerImpl::DeleteEntities(int64_t collection_id, const std::vector<idx_t>& entity_ids, uint64_t lsn) {
     std::unique_lock<std::mutex> lock(mutex_);
     MemCollectionPtr mem = GetMemByCollection(collection_id);
 

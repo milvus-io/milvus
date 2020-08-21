@@ -11,8 +11,6 @@
 
 set(MILVUS_THIRDPARTY_DEPENDENCIES
 
-        MySQLPP
-        Prometheus
         SQLite
         fiu
         AWS
@@ -28,11 +26,7 @@ foreach (DEPENDENCY ${MILVUS_THIRDPARTY_DEPENDENCIES})
 endforeach ()
 
 macro(build_dependency DEPENDENCY_NAME)
-    if ("${DEPENDENCY_NAME}" STREQUAL "MySQLPP")
-        build_mysqlpp()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "Prometheus")
-        build_prometheus()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "SQLite")
+    if ("${DEPENDENCY_NAME}" STREQUAL "SQLite")
         build_sqlite()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "fiu")
         build_fiu()
@@ -210,19 +204,6 @@ foreach (_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
 endforeach ()
 
 
-if (DEFINED ENV{MILVUS_MYSQLPP_URL})
-    set(MYSQLPP_SOURCE_URL "$ENV{MILVUS_MYSQLPP_URL}")
-else ()
-    set(MYSQLPP_SOURCE_URL "https://tangentsoft.com/mysqlpp/releases/mysql++-${MYSQLPP_VERSION}.tar.gz")
-endif ()
-
-if (DEFINED ENV{MILVUS_PROMETHEUS_URL})
-    set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
-else ()
-    set(PROMETHEUS_SOURCE_URL
-        "https://github.com/milvus-io/prometheus-cpp/archive/${PROMETHEUS_VERSION}.zip")
-endif ()
-
 if (DEFINED ENV{MILVUS_SQLITE_URL})
     set(SQLITE_SOURCE_URL "$ENV{MILVUS_SQLITE_URL}")
 else ()
@@ -240,8 +221,8 @@ endif ()
 if (DEFINED ENV{MILVUS_OATPP_URL})
     set(OATPP_SOURCE_URL "$ENV{MILVUS_OATPP_URL}")
 else ()
-     set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
-#    set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/${OATPP_VERSION}.zip")
+    set(OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz")
+#   set(OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/${OATPP_VERSION}.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_AWS_URL})
@@ -250,147 +231,6 @@ else ()
     set(AWS_SOURCE_URL "https://github.com/aws/aws-sdk-cpp/archive/${AWS_VERSION}.tar.gz")
 endif ()
 
-
-# ----------------------------------------------------------------------
-# MySQL++
-
-macro(build_mysqlpp)
-    message(STATUS "Building MySQL++-${MYSQLPP_VERSION} from source")
-    set(MYSQLPP_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep")
-    set(MYSQLPP_INCLUDE_DIR "${MYSQLPP_PREFIX}/include")
-    set(MYSQLPP_SHARED_LIB
-            "${MYSQLPP_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}")
-
-    set(MYSQLPP_CONFIGURE_ARGS
-            "--prefix=${MYSQLPP_PREFIX}"
-            "--enable-thread-check"
-            "CFLAGS=${EP_C_FLAGS}"
-            "CXXFLAGS=${EP_CXX_FLAGS}"
-            "LDFLAGS=-pthread")
-
-    ExternalProject_Add(mysqlpp_ep
-            URL
-            ${MYSQLPP_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            URL_MD5
-            "cda38b5ecc0117de91f7c42292dd1e79"
-            CONFIGURE_COMMAND
-            "./configure"
-            ${MYSQLPP_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            BUILD_BYPRODUCTS
-            ${MYSQLPP_SHARED_LIB})
-
-    file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
-    add_library(mysqlpp SHARED IMPORTED)
-    set_target_properties(
-            mysqlpp
-            PROPERTIES
-            IMPORTED_LOCATION "${MYSQLPP_SHARED_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${MYSQLPP_INCLUDE_DIR}")
-
-    add_dependencies(mysqlpp mysqlpp_ep)
-
-endmacro()
-
-if (MILVUS_WITH_MYSQLPP)
-
-    resolve_dependency(MySQLPP)
-    get_target_property(MYSQLPP_INCLUDE_DIR mysqlpp INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM "${MYSQLPP_INCLUDE_DIR}")
-    link_directories(SYSTEM ${MYSQLPP_PREFIX}/lib)
-endif ()
-
-# ----------------------------------------------------------------------
-# Prometheus
-
-macro(build_prometheus)
-    message(STATUS "Building Prometheus-${PROMETHEUS_VERSION} from source")
-    set(PROMETHEUS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/prometheus_ep-prefix/src/prometheus_ep")
-    set(PROMETHEUS_STATIC_LIB_NAME prometheus-cpp)
-    set(PROMETHEUS_CORE_STATIC_LIB
-            "${PROMETHEUS_PREFIX}/core/${CMAKE_STATIC_LIBRARY_PREFIX}${PROMETHEUS_STATIC_LIB_NAME}-core${CMAKE_STATIC_LIBRARY_SUFFIX}"
-            )
-    set(PROMETHEUS_PUSH_STATIC_LIB
-            "${PROMETHEUS_PREFIX}/push/${CMAKE_STATIC_LIBRARY_PREFIX}${PROMETHEUS_STATIC_LIB_NAME}-push${CMAKE_STATIC_LIBRARY_SUFFIX}"
-            )
-    set(PROMETHEUS_PULL_STATIC_LIB
-            "${PROMETHEUS_PREFIX}/pull/${CMAKE_STATIC_LIBRARY_PREFIX}${PROMETHEUS_STATIC_LIB_NAME}-pull${CMAKE_STATIC_LIBRARY_SUFFIX}"
-            )
-
-    set(PROMETHEUS_CMAKE_ARGS
-            ${EP_COMMON_CMAKE_ARGS}
-            -DCMAKE_INSTALL_LIBDIR=lib
-            -DBUILD_SHARED_LIBS=OFF
-            "-DCMAKE_INSTALL_PREFIX=${PROMETHEUS_PREFIX}"
-            -DCMAKE_BUILD_TYPE=Release)
-
-    ExternalProject_Add(prometheus_ep
-            URL
-            ${PROMETHEUS_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            URL_MD5
-            "6550819ae4d61c480a55a69f08159413"
-            CMAKE_ARGS
-            ${PROMETHEUS_CMAKE_ARGS}
-            UPDATE_COMMAND
-            ""
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE}
-            "DESTDIR=${PROMETHEUS_PREFIX}"
-            install
-            BUILD_BYPRODUCTS
-            "${PROMETHEUS_CORE_STATIC_LIB}"
-            "${PROMETHEUS_PUSH_STATIC_LIB}"
-            "${PROMETHEUS_PULL_STATIC_LIB}")
-
-    file(MAKE_DIRECTORY "${PROMETHEUS_PREFIX}/push/include")
-    add_library(prometheus-cpp-push STATIC IMPORTED)
-    set_target_properties(prometheus-cpp-push
-            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_PUSH_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${PROMETHEUS_PREFIX}/push/include")
-    add_dependencies(prometheus-cpp-push prometheus_ep)
-
-    file(MAKE_DIRECTORY "${PROMETHEUS_PREFIX}/pull/include")
-    add_library(prometheus-cpp-pull STATIC IMPORTED)
-    set_target_properties(prometheus-cpp-pull
-            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_PULL_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${PROMETHEUS_PREFIX}/pull/include")
-    add_dependencies(prometheus-cpp-pull prometheus_ep)
-
-    file(MAKE_DIRECTORY "${PROMETHEUS_PREFIX}/core/include")
-    add_library(prometheus-cpp-core STATIC IMPORTED)
-    set_target_properties(prometheus-cpp-core
-            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_CORE_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${PROMETHEUS_PREFIX}/core/include")
-    add_dependencies(prometheus-cpp-core prometheus_ep)
-endmacro()
-
-if (MILVUS_WITH_PROMETHEUS)
-
-    resolve_dependency(Prometheus)
-
-    link_directories(SYSTEM ${PROMETHEUS_PREFIX}/push/)
-    include_directories(SYSTEM ${PROMETHEUS_PREFIX}/push/include)
-
-    link_directories(SYSTEM ${PROMETHEUS_PREFIX}/pull/)
-    include_directories(SYSTEM ${PROMETHEUS_PREFIX}/pull/include)
-
-    link_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/)
-    include_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/include)
-
-endif ()
 
 # ----------------------------------------------------------------------
 # SQLite

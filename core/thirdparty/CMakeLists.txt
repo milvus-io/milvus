@@ -26,6 +26,13 @@ include( FetchContent )
 set( FETCHCONTENT_BASE_DIR  ${MILVUS_BINARY_DIR}/3rdparty_download )
 set( FETCHCONTENT_QUIET     OFF )
 
+if( CUSTOM_THIRDPARTY_DOWNLOAD_PATH )
+    set( THIRDPARTY_DOWNLOAD_PATH ${CUSTOM_THIRDPARTY_DOWNLOAD_PATH} )
+else()
+    set( THIRDPARTY_DOWNLOAD_PATH ${CMAKE_BINARY_DIR}/3rdparty_download/download )
+endif()
+message( STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}" )
+
 # ----------------------------------------------------------------------
 # Find pthreads
 
@@ -58,4 +65,14 @@ endif()
 # ****************************** Thirdparty perftools ***************************************
 if ( ENABLE_CPU_PROFILING )
     add_subdirectory( profilers )
+endif ()
+
+# ****************************** Thirdparty mysqlpp ***************************************
+if ( MILVUS_WITH_MYSQLPP )
+    add_subdirectory( mysqlpp )
+endif ()
+
+# ****************************** Thirdparty prometheus ***************************************
+if (MILVUS_WITH_PROMETHEUS)
+    add_subdirectory( prometheus )
 endif ()

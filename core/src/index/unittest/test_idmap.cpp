@@ -72,7 +72,7 @@ TEST_P(IDMAPTest, idmap_basic) {
 
     // null faiss index
     {
-        ASSERT_ANY_THROW(index_->Serialize());
+        ASSERT_ANY_THROW(index_->Serialize(conf));
         ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
         ASSERT_ANY_THROW(index_->Add(nullptr, conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
@@ -95,7 +95,7 @@ TEST_P(IDMAPTest, idmap_basic) {
 #endif
     }
 
-    auto binaryset = index_->Serialize();
+    auto binaryset = index_->Serialize(conf);
     auto new_index = std::make_shared<milvus::knowhere::IDMAP>();
     new_index->Load(binaryset);
     auto result2 = new_index->Query(query_dataset, conf);
@@ -158,7 +158,7 @@ TEST_P(IDMAPTest, idmap_serialize) {
         //        PrintResult(re_result, nq, k);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
-        auto binaryset = index_->Serialize();
+        auto binaryset = index_->Serialize(conf);
         auto bin = binaryset.GetByName("IVF");
 
         std::string filename = "/tmp/idmap_test_serialize.bin";
@@ -216,10 +216,10 @@ TEST_P(IDMAPTest, idmap_copy) {
 
         fiu_init(0);
         fiu_enable("GPUIDMP.SerializeImpl.throw_exception", 1, nullptr, 0);
-        ASSERT_ANY_THROW(clone_index->Serialize());
+        ASSERT_ANY_THROW(clone_index->Serialize(conf));
         fiu_disable("GPUIDMP.SerializeImpl.throw_exception");
 
-        auto binary = clone_index->Serialize();
+        auto binary = clone_index->Serialize(conf);
         clone_index->Load(binary);
         auto new_result = clone_index->Query(query_dataset, conf);
         AssertAnns(new_result, nq, k);

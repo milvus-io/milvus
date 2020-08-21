@@ -97,6 +97,43 @@ CopyStructuredData(const nlohmann::json& json, std::vector<uint8_t>& raw) {
     memcpy(raw.data(), values.data(), size * sizeof(T));
 }
 
+void
+CopyRowVectorFromJson(const nlohmann::json& json, std::vector<uint8_t>& vectors_data, bool bin) {
+    //    if (!json.is_array()) {
+    //        return Status(ILLEGAL_BODY, "field \"vectors\" must be a array");
+    //    }
+    std::vector<float> float_vector;
+    if (!bin) {
+        for (auto& data : json) {
+            float_vector.emplace_back(data.get<float>());
+        }
+        auto size = float_vector.size() * sizeof(float);
+        vectors_data.resize(size);
+        memcpy(vectors_data.data(), float_vector.data(), size);
+    } else {
+        for (auto& data : json) {
+            vectors_data.emplace_back(data.get<uint8_t>());
+        }
+    }
+}
+
+template <typename T>
+void
+CopyRowStructuredData(const nlohmann::json& entity_json, const std::string& field_name, const int64_t offset,
+                      const int64_t row_num, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
+    T value = entity_json.get<T>();
+    std::vector<uint8_t> temp_data(sizeof(T), 0);
+    memcpy(temp_data.data(), &value, sizeof(T));
+    if (chunk_data.find(field_name) == chunk_data.end()) {
+        std::vector<uint8_t> T_data(row_num * sizeof(T), 0);
+        memcpy(T_data.data(), temp_data.data(), sizeof(T));
+        chunk_data.insert({field_name, T_data});
+    } else {
+        int64_t T_offset = offset * sizeof(T);
+        memcpy(chunk_data.at(field_name).data() + T_offset, temp_data.data(), sizeof(T));
+    }
+}
+
 using FloatJson = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t, float>;
 
 /////////////////////////////////// Private methods ///////////////////////////////////////
@@ -212,7 +249,7 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
                     auto vector_size = single_size * sizeof(int8_t) / sizeof(float);
                     float_vector.resize(vector_size);
                     int64_t offset = vector_size * i;
-                    memcpy(float_vector.data(), data->data_.data() + offset, vector_size);
+                    memcpy(float_vector.data(), data->data_.data() + offset, vector_size * sizeof(float));
                     entity_json[name] = float_vector;
                     break;
                 }
@@ -236,12 +273,15 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
 
     json_out["collection_name"] = schema.collection_name_;
     for (const auto& field : schema.fields_) {
+        if (field.first == engine::FIELD_UID) {
+            continue;
+        }
         nlohmann::json field_json;
         field_json["field_name"] = field.first;
-        field_json["field_type"] = field.second.field_type_;
+        field_json["field_type"] = type2str.at(field.second.field_type_);
         field_json["index_params"] = field.second.index_params_;
         field_json["extra_params"] = field.second.field_params_;
-        json_out["field"].push_back(field_json);
+        json_out["fields"].push_back(field_json);
     }
     return Status::OK();
 }
@@ -261,6 +301,52 @@ WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohman
     }
 
     return status;
+}
+
+Status
+WebRequestHandler::GetPageEntities(const std::string& collection_name, const int64_t page_size, const int64_t offset,
+                                   nlohmann::json& json_out) {
+    std::string collection_info;
+    STATUS_CHECK(req_handler_.GetCollectionStats(context_ptr_, collection_name, collection_info));
+    nlohmann::json json_info = nlohmann::json::parse(collection_info);
+
+    if (!json_info.contains("partitions")) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Collection info does not include partitions");
+    }
+    if (!json_info["partitions"].is_array()) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Collection info partition json is not an array");
+    }
+    int64_t entity_num = offset;
+    std::vector<int64_t> segment_ids;
+    for (auto& json_partition : json_info["partitions"]) {
+        for (auto& json_segment : json_partition["segments"]) {
+            auto row_count = json_segment["row_count"].get<int64_t>();
+            if (entity_num >= row_count) {
+                entity_num -= row_count;
+            }
+            segment_ids.emplace_back(json_segment["id"].get<int64_t>());
+        }
+    }
+    int64_t real_offset = entity_num;
+    int64_t real_page_size = page_size;
+
+    engine::IDNumbers entity_ids;
+    for (const auto seg_id : segment_ids) {
+        engine::IDNumbers temp_ids;
+        STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, collection_name, seg_id, temp_ids));
+        auto ids_begin = real_offset;
+        auto ids_end = std::min(temp_ids.size(), (size_t)(real_offset + real_page_size));
+        auto new_ids = std::vector<int64_t>(temp_ids.begin() + ids_begin, temp_ids.begin() + ids_end);
+        auto cur_size = entity_ids.size();
+        auto new_size = new_ids.size();
+        entity_ids.resize(cur_size + new_size);
+        memcpy(entity_ids.data() + cur_size, new_ids.data(), new_size * sizeof(int64_t));
+
+        real_page_size -= (ids_end - ids_begin);
+        real_offset = 0;
+    }
+    std::vector<std::string> field_names;
+    STATUS_CHECK(GetEntityByIDs(collection_name, entity_ids, field_names, json_out));
 }
 
 Status
@@ -548,9 +634,16 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
             }
             engine::VectorsData vector_data;
             for (auto& vector_records : vector_param_it.value()["values"]) {
-                // TODO: Binary vector???
-                for (auto& data : vector_records) {
-                    vector_query->query_vector.float_data.emplace_back(data.get<float>());
+                if (field_type_.find(vector_name) != field_type_.end()) {
+                    if (field_type_.at(vector_name) == engine::DataType::VECTOR_FLOAT) {
+                        for (auto& data : vector_records) {
+                            vector_query->query_vector.float_data.emplace_back(data.get<float>());
+                        }
+                    } else if (field_type_.at(vector_name) == engine::DataType::VECTOR_BINARY) {
+                        for (auto& data : vector_records) {
+                            vector_query->query_vector.binary_data.emplace_back(data.get<int8_t>());
+                        }
+                    }
                 }
             }
             query_ptr->index_fields.insert(vector_name);
@@ -653,6 +746,9 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
     if (!status.ok()) {
         return Status{UNEXPECTED_ERROR, "DescribeHybridCollection failed"};
     }
+    for (const auto& field : collection_schema.fields_) {
+        field_type_.insert({field.first, field.second.field_type_});
+    }
 
     milvus::json extra_params;
     if (json.contains("fields")) {
@@ -678,6 +774,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         auto boolean_query_json = query_json["bool"];
         auto boolean_query = std::make_shared<query::BooleanQuery>();
         query_ptr_ = std::make_shared<query::Query>();
+        query_ptr_->collection_id = collection_name;
 
         status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr_);
         if (!status.ok()) {
@@ -828,10 +925,7 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
         }
     }
 
-    std::vector<uint8_t> id_data = data_chunk->fixed_fields_[engine::FIELD_UID]->data_;
-    std::vector<int64_t> id_array(valid_size);
-    memcpy(id_array.data(), id_data.data(), valid_size * sizeof(int64_t));
-    CopyData2Json(data_chunk, field_mappings, id_array, json_out);
+    CopyData2Json(data_chunk, field_mappings, ids, json_out);
     return Status::OK();
 }
 
@@ -1136,6 +1230,12 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     }
 
     milvus::json json_params;
+    if (json_str.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
+        json_params[engine::PARAM_SEGMENT_ROW_COUNT] = json_str[engine::PARAM_SEGMENT_ROW_COUNT];
+    }
+    if (json_str.contains(engine::PARAM_UID_AUTOGEN)) {
+        json_params[engine::PARAM_UID_AUTOGEN] = json_str[engine::PARAM_UID_AUTOGEN];
+    }
 
     auto status = req_handler_.CreateCollection(context_ptr_, collection_name, fields, json_params);
 
@@ -1198,8 +1298,8 @@ WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& re
         result_json["collections"] = collections_json;
     }
 
+    AddStatusToJson(result_json, status.code(), status.message());
     result = result_json.dump().c_str();
-
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
@@ -1474,36 +1574,107 @@ WebRequestHandler::GetSegmentInfo(const OString& collection_name, const OString&
  */
 StatusDtoT
 WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::server::web::OString& body,
-                                VectorIdsDtoT& ids_dto) {
+                                EntityIdsDtoT& ids_dto) {
     if (nullptr == body.get() || body->getSize() == 0) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Request payload is required.")
     }
 
     auto body_json = nlohmann::json::parse(body->c_str());
-    std::string partition_name = body_json["partition_tag"];
-    int32_t row_num = body_json["row_num"];
+    std::string partition_name;
+    if (body_json.contains("partition_tag")) {
+        partition_name = body_json["partition_tag"];
+    }
 
     CollectionSchema collection_schema;
     std::unordered_map<std::string, engine::DataType> field_types;
     auto status = req_handler_.GetCollectionInfo(context_ptr_, collection_name->std_str(), collection_schema);
+    if (!status.ok()) {
+        auto msg = "Collection " + collection_name->std_str() + " not exist";
+        RETURN_STATUS_DTO(COLLECTION_NOT_EXISTS, msg.c_str());
+    }
     for (const auto& field : collection_schema.fields_) {
         field_types.insert({field.first, field.second.field_type_});
     }
 
-    auto entities = body_json["entity"];
-    if (!entities.is_array()) {
-        RETURN_STATUS_DTO(ILLEGAL_BODY, "An entity must be an array");
+    std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
+    int64_t row_num;
+
+    auto entities_json = body_json["entities"];
+    if (!entities_json.is_array()) {
+        RETURN_STATUS_DTO(ILLEGAL_ARGUMENT, "Entities is not an array");
+    }
+    row_num = entities_json.size();
+    int64_t offset = 0;
+    std::vector<uint8_t> ids;
+    for (auto& one_entity : entities_json) {
+        for (auto& entity : one_entity.items()) {
+            std::string field_name = entity.key();
+            if (field_name == NAME_ID) {
+                if (ids.empty()) {
+                    ids.resize(row_num * sizeof(int64_t));
+                }
+                int64_t id = entity.value().get<int64_t>();
+                int64_t id_offset = offset * sizeof(int64_t);
+                memcpy(ids.data() + id_offset, &id, sizeof(int64_t));
+                continue;
+            }
+            std::vector<uint8_t> temp_data;
+            switch (field_types.at(field_name)) {
+                case engine::DataType::INT32: {
+                    CopyRowStructuredData<int32_t>(entity.value(), field_name, offset, row_num, chunk_data);
+                    break;
+                }
+                case engine::DataType::INT64: {
+                    CopyRowStructuredData<int64_t>(entity.value(), field_name, offset, row_num, chunk_data);
+                    break;
+                }
+                case engine::DataType::FLOAT: {
+                    CopyRowStructuredData<float>(entity.value(), field_name, offset, row_num, chunk_data);
+                    break;
+                }
+                case engine::DataType::DOUBLE: {
+                    CopyRowStructuredData<double>(entity.value(), field_name, offset, row_num, chunk_data);
+                    break;
+                }
+                case engine::DataType::VECTOR_FLOAT:
+                case engine::DataType::VECTOR_BINARY: {
+                    bool is_bin = !(field_types.at(field_name) == engine::DataType::VECTOR_FLOAT);
+                    CopyRowVectorFromJson(entity.value(), temp_data, is_bin);
+                    auto size = temp_data.size();
+                    if (chunk_data.find(field_name) == chunk_data.end()) {
+                        std::vector<uint8_t> vector_data(row_num * size, 0);
+                        memcpy(vector_data.data(), temp_data.data(), size);
+                        chunk_data.insert({field_name, vector_data});
+                    } else {
+                        int64_t vector_offset = offset * size;
+                        memcpy(chunk_data.at(field_name).data() + vector_offset, temp_data.data(), size);
+                    }
+                    break;
+                }
+                default: {}
+            }
+        }
+        offset++;
     }
 
-    std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
+    if (!ids.empty()) {
+        chunk_data.insert({engine::FIELD_UID, ids});
+    }
 
-    for (auto& entity : entities) {
-        std::string field_name = entity["field_name"];
-        auto field_value = entity["field_value"];
-        auto size = field_value.size();
-        if (size != row_num) {
-            RETURN_STATUS_DTO(ILLEGAL_ROWRECORD, "Field row count inconsist");
+#if 0
+    for (auto& entity : body_json["entities"].items()) {
+        std::string field_name = entity.key();
+        auto field_value = entity.value();
+        if (!field_value.is_array()) {
+            RETURN_STATUS_DTO(ILLEGAL_ROWRECORD, "Field value is not an array");
         }
+        if (field_name == NAME_ID) {
+            std::vector<uint8_t> temp_data(field_value.size() * sizeof(int64_t), 0);
+            CopyStructuredData<int64_t>(field_value, temp_data);
+            chunk_data.insert({engine::FIELD_UID, temp_data});
+            continue;
+        }
+        row_num = field_value.size();
 
         std::vector<uint8_t> temp_data;
         switch (field_types.at(field_name)) {
@@ -1536,6 +1707,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
 
         chunk_data.insert(std::make_pair(field_name, temp_data));
     }
+#endif
 
     status = req_handler_.Insert(context_ptr_, collection_name->c_str(), partition_name, row_num, chunk_data);
     if (!status.ok()) {
@@ -1547,6 +1719,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     if (pair != chunk_data.end()) {
         int64_t count = pair->second.size() / 8;
         int64_t* pdata = reinterpret_cast<int64_t*>(pair->second.data());
+        ids_dto->ids = ids_dto->ids.createShared();
         for (int64_t i = 0; i < count; ++i) {
             ids_dto->ids->push_back(std::to_string(pdata[i]).c_str());
         }
@@ -1561,6 +1734,15 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
                              milvus::server::web::OString& response) {
     auto status = Status::OK();
     try {
+        if (query_params.get("offset") && query_params.get("page_size")) {
+            nlohmann::json json_out;
+            auto offset = std::stoi(query_params.get("offset")->std_str(), nullptr);
+            auto page_size = std::stoi(query_params.get("page_size")->std_str(), nullptr);
+            status = GetPageEntities(collection_name->std_str(), page_size, offset, json_out);
+            response = json_out.dump().c_str();
+            ASSIGN_RETURN_STATUS_DTO(status);
+        }
+
         auto query_ids = query_params.get("ids");
         if (query_ids == nullptr || query_ids.get() == nullptr) {
             RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param ids is required.");
@@ -1594,6 +1776,7 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         } else {
             json["entities"] = entity_result_json;
         }
+        response = json.dump().c_str();
     } catch (std::exception& e) {
         RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, e.what());
     }

@@ -24,12 +24,15 @@
 namespace milvus {
 namespace knowhere {
 
-#define DEFAULT_MAX_DIM 32768
-#define DEFAULT_MIN_DIM 1
-#define DEFAULT_MAX_K 16384
-#define DEFAULT_MIN_K 1
-#define DEFAULT_MIN_ROWS 1  // minimum size for build index
-#define DEFAULT_MAX_ROWS 50000000
+static const int64_t MIN_NLIST = 1;
+static const int64_t MAX_NLIST = 1LL << 20;
+static const int64_t MIN_NPROBE = 1;
+static const int64_t MAX_NPROBE = MAX_NLIST;
+static const int64_t DEFAULT_MIN_DIM = 1;
+static const int64_t DEFAULT_MAX_DIM = 32768;
+static const int64_t DEFAULT_MIN_ROWS = 1;  // minimum size for build index
+static const int64_t DEFAULT_MAX_ROWS = 50000000;
+static const std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
 
 #define CheckIntByRange(key, min, max)                                                                   \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() > max || \
@@ -59,7 +62,6 @@ namespace knowhere {
 
 bool
 ConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
     return true;
@@ -67,6 +69,8 @@ ConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 ConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    const int64_t DEFAULT_MIN_K = 1;
+    const int64_t DEFAULT_MAX_K = 16384;
     CheckIntByRange(knowhere::meta::TOPK, DEFAULT_MIN_K - 1, DEFAULT_MAX_K);
     return true;
 }
@@ -85,9 +89,6 @@ MatchNlist(int64_t size, int64_t nlist) {
 
 bool
 IVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t MAX_NLIST = 999999;
-    static int64_t MIN_NLIST = 1;
-
     CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
 
@@ -109,23 +110,20 @@ IVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 IVFConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    static int64_t MIN_NPROBE = 1;
-    static int64_t MAX_NPROBE = 999999;  // todo(linxj): [1, nlist]
-
-    if (mode == IndexMode::MODE_GPU) {
+    int64_t max_nprobe = MAX_NPROBE;
 #ifdef MILVUS_GPU_VERSION
-        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, faiss::gpu::getMaxKSelection());
-#endif
-    } else {
-        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
+    if (mode == IndexMode::MODE_GPU) {
+        max_nprobe = faiss::gpu::getMaxKSelection();
     }
+#endif
+    CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, max_nprobe);
 
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 
 bool
 IVFSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t DEFAULT_NBITS = 8;
+    const int64_t DEFAULT_NBITS = 8;
     oricfg[knowhere::IndexParams::nbits] = DEFAULT_NBITS;
 
     return IVFConfAdapter::CheckTrain(oricfg, mode);
@@ -133,10 +131,7 @@ IVFSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t DEFAULT_NBITS = 8;
-    static int64_t MAX_NLIST = 999999;
-    static int64_t MIN_NLIST = 1;
-    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
+    const int64_t DEFAULT_NBITS = 8;
 
     oricfg[knowhere::IndexParams::nbits] = DEFAULT_NBITS;
 
@@ -174,8 +169,8 @@ IVFPQConfAdapter::GetValidMList(int64_t dimension, std::vector<int64_t>& resset)
      * Only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-quantizer are currently supported with
      * no precomputed codes. Precomputed codes supports any number of dimensions, but will involve memory overheads.
      */
-    static std::vector<int64_t> support_dim_per_subquantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
-    static std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
+    static const std::vector<int64_t> support_dim_per_subquantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
+    static const std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
 
     for (const auto& dimperquantizer : support_dim_per_subquantizer) {
         if (!(dimension % dimperquantizer)) {
@@ -190,15 +185,14 @@ IVFPQConfAdapter::GetValidMList(int64_t dimension, std::vector<int64_t>& resset)
 
 bool
 NSGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t MIN_KNNG = 5;
-    static int64_t MAX_KNNG = 300;
-    static int64_t MIN_SEARCH_LENGTH = 10;
-    static int64_t MAX_SEARCH_LENGTH = 300;
-    static int64_t MIN_OUT_DEGREE = 5;
-    static int64_t MAX_OUT_DEGREE = 300;
-    static int64_t MIN_CANDIDATE_POOL_SIZE = 50;
-    static int64_t MAX_CANDIDATE_POOL_SIZE = 1000;
-    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
+    const int64_t MIN_KNNG = 5;
+    const int64_t MAX_KNNG = 300;
+    const int64_t MIN_SEARCH_LENGTH = 10;
+    const int64_t MAX_SEARCH_LENGTH = 300;
+    const int64_t MIN_OUT_DEGREE = 5;
+    const int64_t MAX_OUT_DEGREE = 300;
+    const int64_t MIN_CANDIDATE_POOL_SIZE = 50;
+    const int64_t MAX_CANDIDATE_POOL_SIZE = 1000;
 
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
@@ -325,9 +319,9 @@ RHNSWSQConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const Inde
 
 bool
 BinIDMAPConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD,
-                                            knowhere::Metric::TANIMOTO, knowhere::Metric::SUBSTRUCTURE,
-                                            knowhere::Metric::SUPERSTRUCTURE};
+    static const std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD,
+                                                  knowhere::Metric::TANIMOTO, knowhere::Metric::SUBSTRUCTURE,
+                                                  knowhere::Metric::SUPERSTRUCTURE};
 
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
@@ -337,10 +331,8 @@ BinIDMAPConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 BinIVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD,
-                                            knowhere::Metric::TANIMOTO};
-    static int64_t MAX_NLIST = 999999;
-    static int64_t MIN_NLIST = 1;
+    static const std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD,
+                                                  knowhere::Metric::TANIMOTO};
 
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);

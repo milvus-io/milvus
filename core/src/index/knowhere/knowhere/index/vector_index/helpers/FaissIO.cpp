@@ -28,21 +28,21 @@ MemoryIOWriter::operator()(const void* ptr, size_t size, size_t nitems) {
         total = total_need * magic_num;
         rp = size * nitems;
         data_ = new uint8_t[total];
-        memcpy((void*)(data_), ptr, rp);
+        memcpy(data_, ptr, rp);
         return nitems;
     }
 
     if (total_need > total) {
         total = total_need * magic_num;
         auto new_data = new uint8_t[total];
-        memcpy((void*)new_data, (void*)data_, rp);
+        memcpy(new_data, data_, rp);
         delete[] data_;
         data_ = new_data;
 
-        memcpy((void*)(data_ + rp), ptr, size * nitems);
+        memcpy((data_ + rp), ptr, size * nitems);
         rp = total_need;
     } else {
-        memcpy((void*)(data_ + rp), ptr, size * nitems);
+        memcpy((data_ + rp), ptr, size * nitems);
         rp = total_need;
     }
 
@@ -51,12 +51,14 @@ MemoryIOWriter::operator()(const void* ptr, size_t size, size_t nitems) {
 
 size_t
 MemoryIOReader::operator()(void* ptr, size_t size, size_t nitems) {
-    if (rp >= total)
+    if (rp >= total) {
         return 0;
+    }
     size_t nremain = (total - rp) / size;
-    if (nremain < nitems)
+    if (nremain < nitems) {
         nitems = nremain;
-    memcpy(ptr, (void*)(data_ + rp), size * nitems);
+    }
+    memcpy(ptr, (data_ + rp), size * nitems);
     rp += size * nitems;
     return nitems;
 }

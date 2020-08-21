@@ -197,14 +197,14 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 }
 
 Status
-DBImpl::DropCollection(const std::string& name) {
+DBImpl::DropCollection(const std::string& collection_name) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << name;
+    LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << collection_name;
 
     snapshot::ScopedSnapshotT ss;
     auto& snapshots = snapshot::Snapshots::GetInstance();
-    STATUS_CHECK(snapshots.GetSnapshot(ss, name));
+    STATUS_CHECK(snapshots.GetSnapshot(ss, collection_name));
 
     mem_mgr_->EraseMem(ss->GetCollectionId());  // not allow insert
 
@@ -413,7 +413,7 @@ DBImpl::DescribeIndex(const std::string& collection_name, const std::string& fie
 
 Status
 DBImpl::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
-               id_t op_id) {
+               idx_t op_id) {
     CHECK_INITIALIZED;
 
     if (data_chunk == nullptr) {
@@ -510,7 +510,7 @@ DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_ar
 }
 
 Status
-DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id) {
+DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) {
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;

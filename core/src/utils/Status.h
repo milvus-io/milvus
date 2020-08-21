@@ -31,15 +31,15 @@ using StatusCode = ErrorCode;
 class Status {
  public:
     Status(StatusCode code, const std::string& msg);
-    Status();
-    ~Status();
+    Status() = default;
+    virtual ~Status();
 
     Status(const Status& s);
 
+    Status(Status&& s);
+
     Status&
     operator=(const Status& s);
-
-    Status(Status&& s);
 
     Status&
     operator=(Status&& s);

@@ -29,8 +29,7 @@ namespace scheduler {
 class Scheduler : public interface::dumpable {
  public:
     explicit Scheduler(ResourceMgrPtr res_mgr);
-
-    ~Scheduler();
+    virtual ~Scheduler() = default;
 
     Scheduler(const Scheduler&) = delete;
     Scheduler(Scheduler&&) = delete;
