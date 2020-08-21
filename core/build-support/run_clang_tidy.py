@@ -23,12 +23,16 @@ import lintutils
 from subprocess import PIPE
 import sys
 from functools import partial
+import re
 
 
 def _get_chunk_key(filenames):
     # lists are not hashable so key on the first filename in a chunk
     return filenames[0]
 
+def _count_key(str, key):
+    m = re.findall(key, str)
+    return len(m)
 
 # clang-tidy outputs complaints in '/path:line_number: complaint' format,
 # so we can scan its output to get a list of files to fix
@@ -58,7 +62,13 @@ def _check_all(cmd, filenames):
                 msg = "clang-tidy suggested fixes for {}"
                 print("\n".join(map(msg.format, problem_files)))
                 print(stdout.decode("utf-8"))
-                error = True
+                # ignore clang-diagnostic-error
+                cnt_error = _count_key(stdout, "error:")
+                cnt_warning = _count_key(stdout, "warning:")
+                cnt_ignore = _count_key(stdout, "clang-diagnostic-error")
+                print("clang-tidy - error: {}, warning: {}, ignore {}".
+                      format(cnt_error, cnt_warning, cnt_ignore))
+                error = (cnt_error > cnt_ignore or cnt_warning > 0)
     except Exception:
         error = True
         raise
