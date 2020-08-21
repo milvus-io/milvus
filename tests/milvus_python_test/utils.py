@@ -594,17 +594,9 @@ def gen_invalid_params():
         -1,
         # None,
         [1, 2, 3],
-        (1, 2),
-        {"a": 1},
         " ",
         "",
         "String",
-        "12-s",
-        "BB。A",
-        " siede ",
-        "(mn)",
-        "pip+",
-        "=c",
         "中文"
     ]
     return params
