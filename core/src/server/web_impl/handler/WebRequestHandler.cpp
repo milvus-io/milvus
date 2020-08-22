@@ -207,7 +207,7 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
 
             auto single_size = data->data_.size() / id_size;
 
-            switch (type) {
+            switch (static_cast<engine::DataType>(type)) {
                 case engine::DataType::INT32: {
                     int32_t int32_value;
                     int64_t offset = sizeof(int32_t) * i;
@@ -254,6 +254,8 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
                     entity_json[name] = float_vector;
                     break;
                 }
+                default:
+                    break;
             }
         }
         one_json["entity"] = entity_json;
@@ -823,7 +825,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
                 for (const auto& field : field_mappings) {
                     auto field_name = field.first->GetName();
                     auto field_data = result->data_chunk_->fixed_fields_;
-                    switch (static_cast<engine::DataType>(field.first->GetFtype())) {
+                    switch (field.first->GetFtype()) {
                         case engine::DataType::INT32: {
                             int32_t int32_value;
                             int64_t offset = (i * step + j) * sizeof(int32_t);

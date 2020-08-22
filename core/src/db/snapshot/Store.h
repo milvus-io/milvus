@@ -296,7 +296,7 @@ class Store : public std::enable_shared_from_this<Store> {
                     fename << "fe_" << field->GetID() << "_" << ++id_map[FieldElement::Name];
 
                     FieldElementPtr element;
-                    FieldElement temp_fe(c->GetID(), field->GetID(), fename.str(), fei);
+                    FieldElement temp_fe(c->GetID(), field->GetID(), fename.str(), (FieldElementType)fei);
                     temp_fe.Activate();
                     CreateResource<FieldElement>(std::move(temp_fe), element);
                     all_records.push_back(element);
@@ -338,7 +338,7 @@ class Store : public std::enable_shared_from_this<Store> {
                             FieldElementPtr fe_p;
                             GetResource<FieldElement>(field_element_id, fe_p);
                             CreateResource<SegmentFile>(
-                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_element_id, fe_p->GetFtype(), 0,
+                                SegmentFile(c->GetID(), p->GetID(), s->GetID(), field_element_id, fe_p->GetFEtype(), 0,
                                             0, 0, 0, ACTIVE),
                                 sf);
                             all_records.push_back(sf);

@@ -75,12 +75,12 @@ SearchReq::OnExecute() {
         std::unordered_map<std::string, engine::DataType> field_types;
         for (auto& schema : fields_schema) {
             auto field = schema.first;
-            field_types.insert(std::make_pair(field->GetName(), static_cast<engine::DataType>(field->GetFtype())));
-            if (field->GetFtype() == static_cast<engine::snapshot::FTYPE_TYPE>(engine::DataType::VECTOR_FLOAT) ||
-                field->GetFtype() == static_cast<engine::snapshot::FTYPE_TYPE>(engine::DataType::VECTOR_BINARY)) {
+            field_types.insert(std::make_pair(field->GetName(), field->GetFtype()));
+            if (field->GetFtype() == engine::DataType::VECTOR_FLOAT ||
+                field->GetFtype() == engine::DataType::VECTOR_BINARY) {
                 dimension = field->GetParams()[engine::PARAM_DIMENSION];
                 // validate search metric type and DataType match
-                bool is_binary = (field->GetFtype() == static_cast<int>(engine::DataType::VECTOR_FLOAT)) ? false : true;
+                bool is_binary = (field->GetFtype() == engine::DataType::VECTOR_FLOAT) ? false : true;
                 if (query_ptr_->metric_types.find(field->GetName()) != query_ptr_->metric_types.end()) {
                     auto metric_type = query_ptr_->metric_types.at(field->GetName());
                     STATUS_CHECK(ValidateSearchMetricType(metric_type, is_binary));
