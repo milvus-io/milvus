@@ -20,7 +20,7 @@ message( STATUS "Building oatpp-${OATPP_VERSION} from source" )
 FetchContent_Declare(
         oatpp
         URL             ${OATPP_SOURCE_URL}
-        URL_MD5         "396350ca4fe5bedab3769e09eee2cc9f"
+        # URL_MD5         "396350ca4fe5bedab3769e09eee2cc9f"
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/oatpp-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/oatpp-build
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )
