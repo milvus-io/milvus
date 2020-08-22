@@ -657,7 +657,7 @@ TEST_F(WebControllerTest, INSERT_IDS) {
 }
 
 TEST_F(WebControllerTest, GET_ENTITY_BY_ID) {
-    auto collection_name = "test_insert_collection_test" + RandomName();
+    auto collection_name = "test_get_collection_test" + RandomName();
     nlohmann::json mapping_json;
     CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
 
@@ -689,12 +689,12 @@ TEST_F(WebControllerTest, GET_ENTITY_BY_ID) {
 }
 
 TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
-    auto collection_name = "test_insert_collection_test" + RandomName();
+    auto collection_name = "test_get_collection_test" + RandomName();
     nlohmann::json mapping_json;
     CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
 
     const int64_t dim = DIM;
-    const int64_t nb = 20;
+    const int64_t nb = 3;
     nlohmann::json insert_json;
     GenEntities(nb, dim, insert_json);
 
@@ -706,10 +706,99 @@ TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
     auto status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
     ASSERT_TRUE(status.ok());
 
-    std::string offset = "10";
+    GenEntities(22, dim, insert_json);
+    response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
+    ASSERT_EQ(22, result_dto->ids->size());
+
+    status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
+    ASSERT_TRUE(status.ok());
+
+    std::string offset = "0";
     std::string page_size = "10";
     response = client_ptr->getEntity(collection_name.c_str(), offset.c_str(), page_size.c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    //    offset = "10";
+    //    page_size = "20";
+    //    response = client_ptr->getEntity(collection_name.c_str(), offset.c_str(), page_size.c_str(), connection_ptr);
+    //    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, SYSTEM_INFO) {
+    auto response = client_ptr->cmd("config", "", "", connection_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(result_json.contains("cluster.enable"));
+}
+
+TEST_F(WebControllerTest, SEARCH) {
+    auto collection_name = "test_search_collection_test" + RandomName();
+    std::string mapping_str = R"({
+        "collection_name": "test_collection",
+        "fields": [
+            {
+                "field_name": "field_vec",
+                "field_type": "VECTOR_FLOAT",
+                "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
+                "extra_params": {"dim": 4}
+            },
+            {
+                "field_name": "int64",
+                "field_type": "int64",
+                "index_params": {},
+                "extra_params": {}
+            }
+        ],
+        "segment_row_count": 100000
+    })";
+    nlohmann::json mapping_json = nlohmann::json::parse(mapping_str);
+    mapping_json["collection_name"] = collection_name;
+    auto response = client_ptr->createCollection(mapping_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+
+    const int64_t dim = 4;
+    const int64_t nb = 20;
+    nlohmann::json insert_json;
+    GenEntities(nb, dim, insert_json);
+
+    response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
+    ASSERT_EQ(nb, result_dto->ids->size());
+
+    auto status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
+    ASSERT_TRUE(status.ok());
+
+    std::string query_str = R"({
+        "query": {
+            "bool": {
+                "must": [
+                    {
+                        "vector": {
+                            "field_vec":
+                                {
+                                "topk": 2,
+                                "values": [[1, 2, 3, 4]],
+                                "metric_type": "L2",
+                                "params": {
+                                    "nprobe": 1024
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    })";
+
+    response = client_ptr->entityOp(collection_name.c_str(), query_str.c_str(), connection_ptr);
+    //    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDtoT>(object_mapper.get());
+    //    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, error_dto->code);
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->std_str());
+    ASSERT_TRUE(result_json.contains("num"));
+    ASSERT_EQ(1, result_json["num"].get<int64_t>());
 }
 
 TEST_F(WebControllerTest, INDEX) {
