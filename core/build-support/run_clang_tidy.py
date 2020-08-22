@@ -63,7 +63,8 @@ def _check_all(cmd, filenames):
                 msg = "clang-tidy suggested fixes for {}"
                 print("\n".join(map(msg.format, problem_files)))
                 print(stdout.decode("utf-8"))
-                # ignore clang-diagnostic-error
+                # ignore thirdparty header file not found issue, such as:
+                #   error: 'fiu.h' file not found [clang-diagnostic-error]
                 cnt_error = _count_key(stdout, "error:")
                 cnt_warning = _count_key(stdout, "warning:")
                 cnt_ignore = _count_key(stdout, "clang-diagnostic-error")
