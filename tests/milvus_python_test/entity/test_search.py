@@ -1261,9 +1261,8 @@ class TestSearchDSL(object):
         term = update_term_expr({"term": {}}, [term_first, term_second])
         expr = {"must": [gen_default_vector_expr(default_query), term]}
         query = update_query_expr(default_query, expr=expr)
-        res = connect.search(collection, query)
-        assert len(res) == nq
-        assert len(res[0]) == 0
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
 
     # TODO
     @pytest.mark.level(2)
@@ -1327,8 +1326,8 @@ class TestSearchDSL(object):
         expr = {"must": [gen_default_vector_expr(default_query), range]}
         query = update_query_expr(default_query, expr=expr)
         res = connect.search(collection, query)
-        assert len(res) == nq
-        assert len(res[0]) == 0
+        with pytest.raises(Exception) as e:
+            res = connect.search(collection, query)
 
     """
     ******************************************************************
