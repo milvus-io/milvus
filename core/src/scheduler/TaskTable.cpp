@@ -20,6 +20,7 @@
 #include <ctime>
 #include <sstream>
 #include <vector>
+#include <src/scheduler/task/SearchTask.h>
 
 namespace milvus {
 namespace scheduler {
@@ -170,7 +171,6 @@ TaskTable::PickToLoad(uint64_t limit) {
         }
         if (not cross && table_[index]->IsFinish()) {
             table_.set_front(index);
-            table_[index]->SetFinished(FinishedTask::Create());
         } else if (table_[index]->state == TaskTableItemState::LOADED) {
             cross = true;
             ++loaded_count;
@@ -258,7 +258,6 @@ TaskTable::PickToExecute(uint64_t limit) {
 
         if (not cross && table_[index]->IsFinish()) {
             table_.set_front(index);
-            table_[index]->SetFinished(FinishedTask::Create());
         } else if (table_[index]->state == TaskTableItemState::LOADED) {
             cross = true;
             indexes.push_back(index);

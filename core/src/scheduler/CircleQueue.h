@@ -44,27 +44,27 @@ class CircleQueue {
     CircleQueue(CircleQueue&& q) = delete;
 
  public:
-    const_reference operator[](size_type n) {
+    const_reference operator[](size_type n) const {
         return data_[n % capacity_];
     }
 
     size_type
-    front() {
+    front() const {
         return front_.load(MEMORY_ORDER);
     }
 
     size_type
-    rear() {
+    rear() const {
         return rear_;
     }
 
     size_type
-    size() {
+    size() const {
         return size_;
     }
 
     size_type
-    capacity() {
+    capacity() const {
         return capacity_;
     }
 

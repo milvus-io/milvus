@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/resource/Resource.h"
+#include "scheduler/task/FinishedTask.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 
@@ -173,6 +174,7 @@ Resource::loader_function() {
             task_item->Loaded();
             if (task_item->from) {
                 task_item->from->Moved();
+                task_item->from->task = FinishedTask::Create();
                 task_item->from = nullptr;
             }
             if (subscriber_) {
@@ -202,6 +204,7 @@ Resource::executor_function() {
             }
             auto start = get_current_timestamp();
             Process(task_item->task);
+            task_item->task = FinishedTask::Create();
             auto finish = get_current_timestamp();
             ++total_task_;
             total_cost_ += finish - start;
