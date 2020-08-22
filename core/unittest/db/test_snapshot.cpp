@@ -459,6 +459,72 @@ TEST_F(SnapshotTest, PartitionTest2) {
     ASSERT_FALSE(status.ok());
 }
 
+TEST_F(SnapshotTest, DropSegmentTest){
+    LSN_TYPE lsn = 0;
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
+    auto collection_name = "test";
+    ScopedSnapshotT ss;
+    ss = CreateCollection(collection_name, ++lsn);
+
+
+    milvus::Status status;
+
+    PartitionContext pp_ctx;
+    std::stringstream p_name_stream;
+
+    auto num = RandomInt(3, 5);
+    for (auto i = 0; i < num; ++i) {
+        p_name_stream.str("");
+        p_name_stream << "partition_" << i;
+        pp_ctx.name = p_name_stream.str();
+        ss = CreatePartition(ss->GetName(), pp_ctx, next_lsn());
+        ASSERT_TRUE(ss);
+    }
+
+    ASSERT_EQ(ss->NumberOfPartitions(), num + 1);
+
+    auto total_row_cnt = 0;
+    auto partitions = ss->GetResources<Partition>();
+    SegmentFileContext sf_context;
+    SFContextBuilder(sf_context, ss);
+
+    for (auto& kv : partitions) {
+        num = RandomInt(2, 5);
+        auto row_cnt = 1024;
+        for (auto i = 0; i < num; ++i) {
+            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
+            total_row_cnt += row_cnt;
+        }
+    }
+
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(total_row_cnt, ss->GetCollectionCommit()->GetRowCount());
+
+    OperationContext drop_seg_context;
+    auto segments = ss->GetResources<Segment>();
+    auto prev_partitions = ss->GetResources<Partition>();
+    ASSERT_TRUE(!prev_partitions.empty());
+    ASSERT_TRUE(!segments.empty());
+    for (auto kv:segments){
+        milvus::engine::snapshot::ID_TYPE segment_id = kv.first;
+        auto seg = ss->GetResource<milvus::engine::snapshot::Segment>(segment_id);
+        drop_seg_context.prev_segment = seg;
+        auto drop_op = std::make_shared<milvus::engine::snapshot::DropSegmentOperation>(drop_seg_context, ss);
+        status = drop_op->Push();
+        ASSERT_TRUE(status.ok());
+    }
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    ASSERT_TRUE(status.ok());
+    auto result_segments = ss->GetResources<Segment>();
+    auto result_partitions = ss->GetResources<Partition>();
+    ASSERT_TRUE(!result_partitions.empty());
+    ASSERT_TRUE(result_segments.empty());
+
+}
+
 TEST_F(SnapshotTest, IndexTest) {
     LSN_TYPE lsn = 0;
     auto next_lsn = [&]() -> decltype(lsn) {
