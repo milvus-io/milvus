@@ -17,6 +17,14 @@ else ()
     set( SQLITE_SOURCE_URL "https://www.sqlite.org/2019/sqlite-autoconf-${SQLITE_VERSION}.tar.gz" )
 endif ()
 
+if( CCACHE_FOUND )
+    set( SQLITE_C_COMPILER      "${CCACHE_FOUND} ${CMAKE_C_COMPILER}" )
+    set( SQLITE_CXX_COMPILER    "${CCACHE_FOUND} ${CMAKE_CXX_COMPILER}" )
+else()
+    set( SQLITE_C_COMPILER      ${CMAKE_C_COMPILER} )
+    set( SQLITE_CXX_COMPILER    ${CMAKE_CXX_COMPILER} )
+endif()
+
 macro( build_sqlite )
     message(STATUS "Building SQLITE-${SQLITE_VERSION} from source")
 
@@ -29,8 +37,8 @@ macro( build_sqlite )
             URL_MD5             "3c68eb400f8354605736cd55400e1572"
             CONFIGURE_COMMAND   <SOURCE_DIR>/configure
                                     "--prefix=<INSTALL_DIR>"
-                                    "CC=${CCACHE_FOUND} ${CMAKE_C_COMPILER}"
-                                    "CXX=${CCACHE_FOUND} ${CMAKE_CXX_COMPILER}"
+                                    "CC=${SQLITE_C_COMPILER}"
+                                    "CXX=${SQLITE_CXX_COMPILER}"
                                     "CFLAGS=${EP_C_FLAGS}"
                                     "CXXFLAGS=-O3 -fPIC -Wno-error -fopenmp"
             BUILD_COMMAND       ${MAKE} ${MAKE_BUILD_ARGS}
