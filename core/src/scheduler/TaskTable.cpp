@@ -17,10 +17,10 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
+#include <src/scheduler/task/SearchTask.h>
 #include <ctime>
 #include <sstream>
 #include <vector>
-#include <src/scheduler/task/SearchTask.h>
 
 namespace milvus {
 namespace scheduler {

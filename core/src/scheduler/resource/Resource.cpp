@@ -10,9 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/resource/Resource.h"
-#include "scheduler/task/FinishedTask.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
+#include "scheduler/task/FinishedTask.h"
 
 #include <iostream>
 #include <limits>
