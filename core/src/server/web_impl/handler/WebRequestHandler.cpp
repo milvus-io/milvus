@@ -821,7 +821,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
                 for (const auto& field : field_mappings) {
                     auto field_name = field.first->GetName();
                     auto field_data = result->data_chunk_->fixed_fields_;
-                    switch ((int64_t)field.first->GetFtype()) {
+                    switch (field.first->GetFtype()) {
                         case engine::DataType::INT32: {
                             int32_t int32_value;
                             int64_t offset = (i * step + j) * sizeof(int32_t);
