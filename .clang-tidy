@@ -20,7 +20,7 @@ Checks: >
     -*, clang-diagnostic-*, -clang-diagnostic-error,
     clang-analyzer-*, -clang-analyzer-alpha*,
     google-*, -google-runtime-references, -google-readability-todo,
-    modernize-*, -modernize-pass-by-value
+    modernize-*, -modernize-pass-by-value, -modernize-use-equals-default
 
 # produce HeaderFilterRegex from core/build-support/lint_exclusions.txt with:
 # echo -n '^?!('; sed -e 's/*/\.*/g' core/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
