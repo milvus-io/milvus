@@ -189,7 +189,6 @@ WalOperationCodec::IterateOperation(const WalFilePtr& file, WalOperationPtr& ope
         // read partition name
         int32_t part_name_length = 0;
         std::string partition_name;
-        read_bytes = file->Read<int32_t>(&part_name_length);
         if (part_name_length > 0) {
             read_bytes = file->ReadStr(partition_name, part_name_length);
             if (read_bytes <= 0) {

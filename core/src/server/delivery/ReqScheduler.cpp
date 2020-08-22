@@ -64,8 +64,9 @@ ReqScheduler::Stop() {
     }
 
     for (auto& iter : execute_threads_) {
-        if (iter == nullptr)
+        if (iter == nullptr) {
             continue;
+        }
         iter->join();
     }
     req_groups_.clear();

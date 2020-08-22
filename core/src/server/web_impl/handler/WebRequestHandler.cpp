@@ -336,7 +336,7 @@ WebRequestHandler::GetPageEntities(const std::string& collection_name, const int
         engine::IDNumbers temp_ids;
         STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, collection_name, seg_id, temp_ids));
         auto ids_begin = real_offset;
-        auto ids_end = std::min(temp_ids.size(), (size_t)(real_offset + real_page_size));
+        auto ids_end = std::min(temp_ids.size(), static_cast<size_t>(real_offset + real_page_size));
         auto new_ids = std::vector<int64_t>(temp_ids.begin() + ids_begin, temp_ids.begin() + ids_end);
         auto cur_size = entity_ids.size();
         auto new_size = new_ids.size();
@@ -348,6 +348,7 @@ WebRequestHandler::GetPageEntities(const std::string& collection_name, const int
     }
     std::vector<std::string> field_names;
     STATUS_CHECK(GetEntityByIDs(collection_name, entity_ids, field_names, json_out));
+    return Status::OK();
 }
 
 Status
@@ -882,17 +883,17 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
                                std::string& result_str) {
     std::vector<int64_t> entity_ids;
     if (!json.contains("ids")) {
-        return Status(BODY_FIELD_LOSS, "Field \"delete\" must contains \"ids\"");
+        return Status(BODY_FIELD_LOSS, R"(Field "delete" must contains "ids")");
     }
     auto ids = json["ids"];
     if (!ids.is_array()) {
-        return Status(BODY_FIELD_LOSS, "\"ids\" must be an array");
+        return Status(BODY_FIELD_LOSS, R"("ids" must be an array)");
     }
 
     for (auto& id : ids) {
         auto id_str = id.get<std::string>();
         if (!ValidateStringIsNumber(id_str).ok()) {
-            return Status(ILLEGAL_BODY, "Members in \"ids\" must be integer string");
+            return Status(ILLEGAL_BODY, R"(Members in "ids" must be integer string)");
         }
         entity_ids.emplace_back(std::stol(id_str));
     }
@@ -1426,7 +1427,7 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
     partition_list_dto->count = partition_names.size();
     partition_list_dto->partitions = partition_list_dto->partitions.createShared();
 
-    if (offset < (int64_t)(partition_names.size())) {
+    if (offset < static_cast<int64_t>(partition_names.size())) {
         for (int64_t i = offset; i < page_size + offset; i++) {
             auto partition_dto = PartitionFieldsDto::createShared();
             partition_dto->partition_tag = partition_names.at(i).c_str();
