@@ -93,7 +93,9 @@ if (MILVUS_WITH_PROMETHEUS)
 endif ()
 
 # ****************************** Thirdparty fiu ***************************************
-add_subdirectory( fiu )
+if ( MILVUS_WITH_FIU )
+    add_subdirectory( fiu )
+endif()
 
 # ****************************** Thirdparty oatpp ***************************************
 if ( MILVUS_WITH_OATPP )
@@ -104,4 +106,3 @@ endif()
 if (MILVUS_WITH_AWS)
     add_subdirectory( aws )
 endif ()
->>>>>>> upstream/master

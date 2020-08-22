@@ -15,4 +15,4 @@ aux_source_directory( ${MILVUS_ENGINE_SRC}/utils UTILS_FILES )
 
 add_library( utils STATIC ${UTILS_FILES} )
 
-add_dependencies( utils fiu )
+target_link_libraries( utils PRIVATE fiu )
