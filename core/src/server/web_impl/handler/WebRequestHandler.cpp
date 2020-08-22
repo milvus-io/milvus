@@ -256,8 +256,8 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
             }
         }
         one_json["entity"] = entity_json;
-        one_json["id"] = id_array[i];
-        json_res.push_back(one_json);
+        one_json["id"] = std::to_string(id_array[i]);
+        json_res["entities"].push_back(one_json);
     }
     return Status::OK();
 }
@@ -318,15 +318,22 @@ WebRequestHandler::GetPageEntities(const std::string& collection_name, const int
     }
     int64_t entity_num = offset;
     std::vector<int64_t> segment_ids;
+    int64_t row_count = 0;
+    bool already_find = false;
     for (auto& json_partition : json_info["partitions"]) {
         for (auto& json_segment : json_partition["segments"]) {
-            auto row_count = json_segment["row_count"].get<int64_t>();
-            if (entity_num >= row_count) {
-                entity_num -= row_count;
+            auto count = json_segment["row_count"].get<int64_t>();
+            row_count += count;
+            if (entity_num < count) {
+                already_find = true;
+            }
+            if (not already_find && entity_num >= count) {
+                entity_num -= count;
             }
             segment_ids.emplace_back(json_segment["id"].get<int64_t>());
         }
     }
+    json_out["count"] = row_count;
     int64_t real_offset = entity_num;
     int64_t real_page_size = page_size;
 
@@ -344,6 +351,9 @@ WebRequestHandler::GetPageEntities(const std::string& collection_name, const int
 
         real_page_size -= (ids_end - ids_begin);
         real_offset = 0;
+    }
+    if (segment_ids.empty()) {
+        return Status::OK();
     }
     std::vector<std::string> field_names;
     STATUS_CHECK(GetEntityByIDs(collection_name, entity_ids, field_names, json_out));
@@ -487,7 +497,7 @@ WebRequestHandler::Compact(const nlohmann::json& json, std::string& result_str) 
 
 Status
 WebRequestHandler::GetConfig(std::string& result_str) {
-    std::string cmd = "get_config *";
+    std::string cmd = "get_milvus_config";
     std::string reply;
     auto status = CommandLine(cmd, reply);
     if (status.ok()) {
@@ -632,7 +642,6 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
             if (!vector_param_it.value()["params"].empty()) {
                 vector_query->extra_params = vector_param_it.value()["params"];
             }
-            engine::VectorsData vector_data;
             for (auto& vector_records : vector_param_it.value()["values"]) {
                 if (field_type_.find(vector_name) != field_type_.end()) {
                     if (field_type_.at(vector_name) == engine::DataType::VECTOR_FLOAT) {
@@ -802,16 +811,16 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         }
 
         auto step = result->result_ids_.size() / result->row_num_;  // topk
-        auto field_data = result->data_chunk_->fixed_fields_;
         for (int64_t i = 0; i < result->row_num_; i++) {
             nlohmann::json raw_result_json;
             for (size_t j = 0; j < step; j++) {
                 nlohmann::json one_result_json;
                 one_result_json["id"] = std::to_string(result->result_ids_.at(i * step + j));
                 one_result_json["distance"] = std::to_string(result->result_distances_.at(i * step + j));
-                nlohmann::json one_entity_json;
+                FloatJson one_entity_json;
                 for (const auto& field : field_mappings) {
                     auto field_name = field.first->GetName();
+                    auto field_data = result->data_chunk_->fixed_fields_;
                     switch ((int64_t)field.first->GetFtype()) {
                         case engine::DataType::INT32: {
                             int32_t int32_value;
@@ -865,10 +874,12 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
                         default: { return Status(SERVER_UNEXPECTED_ERROR, "Return field data type is wrong"); }
                     }
                 }
-                one_result_json["entity"] = one_entity_json;
+                if (!one_entity_json.empty()) {
+                    one_result_json["entity"] = one_entity_json;
+                }
                 raw_result_json.push_back(one_result_json);
             }
-            result_json.emplace_back(raw_result_json);
+            result_json["result"].push_back(raw_result_json);
         }
         result_str = result_json.dump();
     }
@@ -935,7 +946,7 @@ WebRequestHandler::GetDevices(DevicesDtoT& devices_dto) {
     auto& system_info = SystemInfo::GetInstance();
 
     devices_dto->cpu = devices_dto->cpu->createShared();
-    devices_dto->cpu->memory = system_info.GetPhysicalMemory() >> 30;
+    devices_dto->cpu->memory = system_info.GetPhysicalMemory();
 
     devices_dto->gpus = devices_dto->gpus.createShared();
 
@@ -949,7 +960,7 @@ WebRequestHandler::GetDevices(DevicesDtoT& devices_dto) {
 
     for (size_t i = 0; i < count; i++) {
         auto device_dto = DeviceInfoDto::createShared();
-        device_dto->memory = device_mems.at(i) >> 30;
+        device_dto->memory = device_mems.at(i);
         devices_dto->gpus->emplace_back("GPU" + OString(std::to_string(i).c_str()), device_dto);
     }
 #endif
@@ -1739,6 +1750,7 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
             auto offset = std::stoi(query_params.get("offset")->std_str(), nullptr);
             auto page_size = std::stoi(query_params.get("page_size")->std_str(), nullptr);
             status = GetPageEntities(collection_name->std_str(), page_size, offset, json_out);
+            AddStatusToJson(json_out, status.code(), status.message());
             response = json_out.dump().c_str();
             ASSIGN_RETURN_STATUS_DTO(status);
         }
@@ -1869,8 +1881,8 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
             if (j.contains("compact")) {
                 status = Compact(j["compact"], result_str);
             }
-            //        } else if (op->equals("config")) {
-            //            status = SetConfig(j, result_str);
+        } else if (op->equals("config")) {
+            status = SetConfig(j, result_str);
         } else {
             status = Status(UNKNOWN_PATH, "Unknown path: /system/" + op->std_str());
         }
