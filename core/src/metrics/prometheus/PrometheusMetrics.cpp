@@ -97,7 +97,7 @@ PrometheusMetrics::GPUPercentGaugeSet() {
 
     for (int i = 0; i < numDevice; ++i) {
         prometheus::Gauge& GPU_percent = GPU_percent_.Add({{"DeviceNum", std::to_string(i)}});
-        double percent = (double)used_memory[i] / (double)used_total[i];
+        double percent = static_cast<double>(used_memory[i]) / static_cast<double>(used_total[i]);
         GPU_percent.Set(percent * 100);
     }
 }
@@ -232,8 +232,8 @@ PrometheusMetrics::CPUTemperature() {
     std::vector<float> CPU_temperatures = server::SystemInfo::GetInstance().CPUTemperature();
 
     float avg_cpu_temp = 0;
-    for (size_t i = 0; i < CPU_temperatures.size(); ++i) {
-        avg_cpu_temp += CPU_temperatures[i];
+    for (float CPU_temperature : CPU_temperatures) {
+        avg_cpu_temp += CPU_temperature;
     }
     avg_cpu_temp /= CPU_temperatures.size();
 
