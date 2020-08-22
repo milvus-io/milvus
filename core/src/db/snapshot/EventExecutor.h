@@ -22,9 +22,7 @@
 #include "db/snapshot/MetaEvent.h"
 #include "utils/BlockingQueue.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 using EventPtr = std::shared_ptr<MetaEvent>;
 using ThreadPtr = std::shared_ptr<std::thread>;
@@ -69,12 +67,12 @@ class EventExecutor {
 
     void
     Start() {
-        if (timing_thread_ptr_ == nullptr) {
-            timing_thread_ptr_ = std::make_shared<std::thread>(&EventExecutor::TimingThread, this);
-        }
-
         if (gc_thread_ptr_ == nullptr) {
             gc_thread_ptr_ = std::make_shared<std::thread>(&EventExecutor::GCThread, this);
+        }
+
+        if (timing_thread_ptr_ == nullptr) {
+            timing_thread_ptr_ = std::make_shared<std::thread>(&EventExecutor::TimingThread, this);
         }
     }
 
@@ -185,6 +183,4 @@ class EventExecutor {
     StorePtr store_;
 };
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::snapshot::engine
