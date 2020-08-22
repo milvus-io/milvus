@@ -54,13 +54,8 @@ WalProxy::Stop() {
 
 Status
 WalProxy::DropCollection(const std::string& collection_name) {
-    auto status = db_->DropCollection(collection_name);
-    if (!status.ok()) {
-        return status;
-    }
-
     WalManager::GetInstance().DropCollection(collection_name);
-    return status;
+    return db_->DropCollection(collection_name);
 }
 
 Status

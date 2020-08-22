@@ -81,3 +81,8 @@ endif()
 if (MILVUS_WITH_PROMETHEUS)
     add_subdirectory( prometheus )
 endif ()
+
+# ****************************** Thirdparty aws ***************************************
+if (MILVUS_WITH_AWS)
+    add_subdirectory( aws )
+endif ()
