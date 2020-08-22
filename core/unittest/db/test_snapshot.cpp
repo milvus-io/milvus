@@ -485,7 +485,7 @@ TEST_F(SnapshotTest, DropSegmentTest){
 
     ASSERT_EQ(ss->NumberOfPartitions(), num + 1);
 
-    auto new_total = 0;
+    auto total_row_cnt = 0;
     auto partitions = ss->GetResources<Partition>();
     SegmentFileContext sf_context;
     SFContextBuilder(sf_context, ss);
@@ -495,8 +495,13 @@ TEST_F(SnapshotTest, DropSegmentTest){
         auto row_cnt = 1024;
         for (auto i = 0; i < num; ++i) {
             ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
+            total_row_cnt += row_cnt;
         }
     }
+
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(total_row_cnt, ss->GetCollectionCommit()->GetRowCount());
 
     OperationContext drop_seg_context;
     auto segments = ss->GetResources<Segment>();
@@ -510,9 +515,9 @@ TEST_F(SnapshotTest, DropSegmentTest){
         auto drop_op = std::make_shared<milvus::engine::snapshot::DropSegmentOperation>(drop_seg_context, ss);
         status = drop_op->Push();
         ASSERT_TRUE(status.ok());
-        auto segment = ss->GetResource<Segment>(segment_id);
-        ASSERT_TRUE(segment == nullptr);
     }
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    ASSERT_TRUE(status.ok());
     auto result_segments = ss->GetResources<Segment>();
     auto result_partitions = ss->GetResources<Partition>();
     ASSERT_TRUE(!result_partitions.empty());
