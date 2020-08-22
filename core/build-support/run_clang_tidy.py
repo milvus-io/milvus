@@ -57,6 +57,9 @@ def _check_all(cmd, filenames):
     pool = mp.Pool()
     error = False
     try:
+        cnt_error = 0
+        cnt_warning = 0
+        cnt_ignore = 0
         # check output of completed clang-tidy invocations in parallel
         for problem_files, stdout in pool.imap(checker, chunks):
             if problem_files:
@@ -65,9 +68,9 @@ def _check_all(cmd, filenames):
                 print(stdout.decode("utf-8"))
                 # ignore thirdparty header file not found issue, such as:
                 #   error: 'fiu.h' file not found [clang-diagnostic-error]
-                cnt_error = _count_key(stdout, "error:")
-                cnt_warning = _count_key(stdout, "warning:")
-                cnt_ignore = _count_key(stdout, "clang-diagnostic-error")
+                cnt_error += _count_key(stdout, "error:")
+                cnt_warning += _count_key(stdout, "warning:")
+                cnt_ignore += _count_key(stdout, "clang-diagnostic-error")
                 print("clang-tidy - error: {}, warning: {}, ignore {}".
                       format(cnt_error, cnt_warning, cnt_ignore))
                 error = error or (cnt_error > cnt_ignore or cnt_warning > 0)
