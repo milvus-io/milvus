@@ -76,8 +76,8 @@ SearchReq::OnExecute() {
         for (auto& schema : fields_schema) {
             auto field = schema.first;
             field_types.insert(std::make_pair(field->GetName(), static_cast<engine::DataType>(field->GetFtype())));
-            if (field->GetFtype() == static_cast<int>(engine::DataType::VECTOR_FLOAT) ||
-                field->GetFtype() == static_cast<int>(engine::DataType::VECTOR_BINARY)) {
+            if (field->GetFtype() == static_cast<engine::snapshot::FTYPE_TYPE>(engine::DataType::VECTOR_FLOAT) ||
+                field->GetFtype() == static_cast<engine::snapshot::FTYPE_TYPE>(engine::DataType::VECTOR_BINARY)) {
                 dimension = field->GetParams()[engine::PARAM_DIMENSION];
                 // validate search metric type and DataType match
                 bool is_binary = (field->GetFtype() == static_cast<int>(engine::DataType::VECTOR_FLOAT)) ? false : true;
