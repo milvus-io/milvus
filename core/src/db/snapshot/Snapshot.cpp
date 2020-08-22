@@ -247,7 +247,7 @@ Snapshot::ToString() const {
         for (auto& fe_id : fc_m) {
             auto fe = GetResource<FieldElement>(fe_id);
             ss << "\n\tFieldElement: id=" << fe_id << ",name=" << fe->GetName() << " CID=" << fe->GetCollectionId();
-            ss << ",fetype=" << (int)fe->GetFEtype() << ",typename=" << fe->GetTypeName();
+            ss << ",fetype=" << static_cast<int32_t>(fe->GetFEtype()) << ",typename=" << fe->GetTypeName();
         }
     }
 
@@ -273,7 +273,7 @@ Snapshot::ToString() const {
                 auto sf = GetResource<SegmentFile>(sf_id);
                 ss << "\n\tSegmentFile: id=" << sf_id << ",field_element_id=" << sf->GetFieldElementId();
                 ss << ",size=" << sf->GetSize();
-                ss << ",fetype=" << (int)sf->GetFEtype();
+                ss << ",fetype=" << static_cast<int32_t>(sf->GetFEtype());
             }
         }
     }
