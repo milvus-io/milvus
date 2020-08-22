@@ -79,8 +79,8 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 void
 IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
-        int64_t dim = dataset_ptr->Get<int64_t>(meta::DIM);
-        int64_t rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+        auto dim = dataset_ptr->Get<int64_t>(meta::DIM);
+        auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
 
         hnswlib::SpaceInterface<float>* space;
         std::string metric_type = config[Metric::TYPE];
@@ -131,7 +131,7 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 #pragma omp parallel for
     for (int i = 1; i < rows; ++i) {
         faiss::BuilderSuspend::check_wait();
-        index_->addPoint(((float*)p_data + Dim() * i), p_ids[i]);
+        index_->addPoint((reinterpret_cast<const float*>(p_data) + Dim() * i), p_ids[i]);
     }
 }
 
@@ -145,8 +145,8 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     size_t k = config[meta::TOPK].get<int64_t>();
     size_t id_size = sizeof(int64_t) * k;
     size_t dist_size = sizeof(float) * k;
-    auto p_id = (int64_t*)malloc(id_size * rows);
-    auto p_dist = (float*)malloc(dist_size * rows);
+    auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
+    auto p_dist = static_cast<float*>(malloc(dist_size * rows));
 
     index_->setEf(config[IndexParams::ef]);
 
@@ -157,7 +157,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
         std::vector<P> ret;
-        const float* single_query = (float*)p_data + i * Dim();
+        const float* single_query = reinterpret_cast<const float*>(p_data) + i * Dim();
 
         // if (normalize) {
         //     std::vector<float> norm_vector(Dim());
@@ -166,7 +166,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         // } else {
         //     ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
         // }
-        ret = index_->searchKnn((float*)single_query, k, compare, blacklist);
+        ret = index_->searchKnn(single_query, k, compare, blacklist);
 
         while (ret.size() < k) {
             ret.emplace_back(std::make_pair(-1, -1));
@@ -207,7 +207,7 @@ IndexHNSW::Dim() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    return (*(size_t*)index_->dist_func_param_);
+    return (*static_cast<size_t*>(index_->dist_func_param_));
 }
 
 void
