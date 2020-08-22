@@ -827,9 +827,6 @@ class TestInsertInvalid(object):
         '''
         entity_id = get_entity_id
         ids = [entity_id for _ in range(nb)]
-        # if isinstance(entity_id, int):
-        #     connect.insert(id_collection, entities, ids)
-        # else:
         with pytest.raises(Exception):
             connect.insert(id_collection, entities, ids)
 
