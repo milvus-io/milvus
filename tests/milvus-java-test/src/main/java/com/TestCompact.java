@@ -3,23 +3,12 @@ package com;
 import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
-
-import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.Map;
 
 public class TestCompact {
-
-    int dimension = 128;
-    int nb = 8000;
-    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
-    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
-    List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension,nb,vectors);
-    List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultBinaryEntities(dimension,nb,vectorsBinary);
-
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testCompactAfterDelete(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultEntities).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
         List<Long> ids = res.getEntityIds();
@@ -37,7 +26,7 @@ public class TestCompact {
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testCompactAfterDeleteBinary(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultBinaryEntities).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
         List<Long> ids = res.getEntityIds();
