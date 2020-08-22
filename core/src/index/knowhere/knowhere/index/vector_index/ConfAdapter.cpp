@@ -96,8 +96,8 @@ IVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     // CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
 
     // auto tune params
-    int64_t nq = oricfg[knowhere::meta::ROWS].get<int64_t>();
-    int64_t nlist = oricfg[knowhere::IndexParams::nlist].get<int64_t>();
+    auto nq = oricfg[knowhere::meta::ROWS].get<int64_t>();
+    auto nlist = oricfg[knowhere::IndexParams::nlist].get<int64_t>();
     oricfg[knowhere::IndexParams::nlist] = MatchNlist(nq, nlist);
 
     // Best Practice
@@ -153,7 +153,7 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
 
     std::vector<int64_t> resset;
-    int64_t dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
+    auto dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
     IVFPQConfAdapter::GetValidMList(dimension, resset);
 
     CheckIntByValues(knowhere::IndexParams::m, resset);
@@ -278,7 +278,7 @@ RHNSWPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     CheckIntByRange(knowhere::IndexParams::M, MIN_M, MAX_M);
 
     std::vector<int64_t> resset;
-    int64_t dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
+    auto dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
     IVFPQConfAdapter::GetValidMList(dimension, resset);
 
     CheckIntByValues(knowhere::IndexParams::PQM, resset);

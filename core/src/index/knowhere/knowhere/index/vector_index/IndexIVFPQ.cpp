@@ -41,7 +41,7 @@ IVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), config[IndexParams::m].get<int64_t>(),
         config[IndexParams::nbits].get<int64_t>(), metric_type));
 
-    index_->train(rows, (float*)p_data);
+    index_->train(rows, reinterpret_cast<const float*>(p_data));
 }
 
 VecIndexPtr

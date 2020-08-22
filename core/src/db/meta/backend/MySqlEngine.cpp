@@ -45,6 +45,7 @@ static const MetaField MetaMappingsField = MetaField(F_MAPPINGS, "JSON", "NOT NU
 static const MetaField MetaNumField = MetaField(F_NUM, "BIGINT", "NOT NULL");
 static const MetaField MetaLSNField = MetaField(F_LSN, "BIGINT", "NOT NULL");
 static const MetaField MetaFtypeField = MetaField(F_FTYPE, "BIGINT", "NOT NULL");
+static const MetaField MetaFEtypeField = MetaField(F_FETYPE, "BIGINT", "NOT NULL");
 static const MetaField MetaStateField = MetaField(F_STATE, "TINYINT", "NOT NULL");
 static const MetaField MetaCreatedOnField = MetaField(F_CREATED_ON, "BIGINT", "NOT NULL");
 static const MetaField MetaUpdatedOnField = MetaField(F_UPDATED_ON, "BIGINT", "NOT NULL");
@@ -85,7 +86,7 @@ static const MetaSchema SEGMENTCOMMIT_SCHEMA(TABLE_SEGMENT_COMMIT,
 
 static const MetaSchema SEGMENTFILE_SCHEMA(TABLE_SEGMENT_FILE,
                                            {MetaIdField, MetaCollectionIdField, MetaPartitionIdField,
-                                            MetaSegmentIdField, MetaFieldElementIdField, MetaFtypeField,
+                                            MetaSegmentIdField, MetaFieldElementIdField, MetaFEtypeField,
                                             MetaRowCountField, MetaSizeField, MetaLSNField, MetaStateField,
                                             MetaCreatedOnField, MetaUpdatedOnField});
 
@@ -103,7 +104,7 @@ static const MetaSchema FIELDCOMMIT_SCHEMA(TABLE_FIELD_COMMIT,
 
 static const MetaSchema FIELDELEMENT_SCHEMA(TABLE_FIELD_ELEMENT,
                                             {MetaIdField, MetaCollectionIdField, MetaFieldIdField, MetaNameField,
-                                             MetaFtypeField, MetaTypeNameField, MetaParamsField, MetaLSNField,
+                                             MetaFEtypeField, MetaTypeNameField, MetaParamsField, MetaLSNField,
                                              MetaStateField, MetaCreatedOnField, MetaUpdatedOnField});
 
 }  // namespace

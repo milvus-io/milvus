@@ -183,7 +183,7 @@ SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
     std::vector<int64_t> total_time_array;
     try {
         FILE* file = fopen("/proc/stat", "r");
-        fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = NULL);
+        fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = nullptr);
         if (file == nullptr) {
             LOG_SERVER_ERROR_ << "Failed to read /proc/stat";
             return total_time_array;
@@ -195,7 +195,7 @@ SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
         for (int i = 0; i < num_processors_; i++) {
             char buffer[1024];
             char* ret = fgets(buffer, sizeof(buffer) - 1, file);
-            fiu_do_on("SystemInfo.getTotalCpuTime.read_proc", ret = NULL);
+            fiu_do_on("SystemInfo.getTotalCpuTime.read_proc", ret = nullptr);
             if (ret == nullptr) {
                 LOG_SERVER_ERROR_ << "Could not read stat file";
                 fclose(file);
@@ -293,7 +293,7 @@ SystemInfo::CPUTemperature() {
     std::string path = "/sys/class/hwmon/";
     try {
         DIR* dir = opendir(path.c_str());
-        fiu_do_on("SystemInfo.CPUTemperature.opendir", dir = NULL);
+        fiu_do_on("SystemInfo.CPUTemperature.opendir", dir = nullptr);
         if (!dir) {
             LOG_SERVER_ERROR_ << "Could not open hwmon directory";
             return result;
@@ -311,7 +311,7 @@ SystemInfo::CPUTemperature() {
                     std::string object = filename;
                     object += "/temp1_input";
                     FILE* file = fopen(object.c_str(), "r");
-                    fiu_do_on("SystemInfo.CPUTemperature.openfile", file = NULL);
+                    fiu_do_on("SystemInfo.CPUTemperature.openfile", file = nullptr);
                     if (file == nullptr) {
                         LOG_SERVER_ERROR_ << "Could not open temperature file";
                         return result;

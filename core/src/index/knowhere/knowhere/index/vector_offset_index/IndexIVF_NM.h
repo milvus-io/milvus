@@ -36,7 +36,7 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     }
 
     BinarySet
-    Serialize(const Config& config = Config()) override;
+    Serialize(const Config& config) override;
 
     void
     Load(const BinarySet&) override;

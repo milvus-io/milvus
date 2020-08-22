@@ -62,7 +62,7 @@ SegmentWriter::Initialize() {
     for (auto& iter : field_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         std::string name = field->GetName();
-        engine::DataType ftype = static_cast<engine::DataType>(field->GetFtype());
+        auto ftype = static_cast<engine::DataType>(field->GetFtype());
         if (engine::IsVectorField(field)) {
             json params = field->GetParams();
             if (params.find(knowhere::meta::DIM) == params.end()) {
