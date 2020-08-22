@@ -415,7 +415,6 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
         return status;
     } else {
         if (general_query->leaf->term_query != nullptr) {
-            // process attrs_data
             bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_);
             STATUS_CHECK(ProcessTermQuery(bitset, general_query->leaf->term_query, attr_type));
         }
@@ -512,6 +511,10 @@ ExecutionEngineImpl::ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, const 
                 STATUS_CHECK(IndexedTermQuery(bitset, field_name, attr_type.at(field_name), term_it.value()));
             }
         }
+        term_it++;
+        if (term_it != term_query_json.end()) {
+            return Status(SERVER_INVALID_DSL_PARAMETER, "Term query does not support multiple fields");
+        }
     } catch (std::exception& ex) {
         return Status{SERVER_INVALID_DSL_PARAMETER, ex.what()};
     }
@@ -528,7 +531,7 @@ ProcessIndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr&
         bool flag = false;
         for (auto& range_value_it : range_values_json.items()) {
             const std::string& comp_op = range_value_it.key();
-            T value = range_value_it.value().get<T>();
+            T value = range_value_it.value();
             if (not flag) {
                 bitset = (*bitset) | T_index->Range(value, knowhere::s_map_operator_type.at(comp_op));
                 flag = true;
@@ -582,15 +585,22 @@ ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, Dat
                                        faiss::ConcurrentBitsetPtr& bitset, const query::RangeQueryPtr& range_query) {
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
-
-    auto range_query_json = range_query->json_obj;
-    JSON_NULL_CHECK(range_query_json);
-    auto range_it = range_query_json.begin();
-    if (range_it != range_query_json.end()) {
-        const std::string& field_name = range_it.key();
-        knowhere::IndexPtr index_ptr = nullptr;
-        segment_ptr->GetStructuredIndex(field_name, index_ptr);
-        IndexedRangeQuery(bitset, attr_type.at(field_name), index_ptr, range_it.value());
+    try {
+        auto range_query_json = range_query->json_obj;
+        JSON_NULL_CHECK(range_query_json);
+        auto range_it = range_query_json.begin();
+        if (range_it != range_query_json.end()) {
+            const std::string& field_name = range_it.key();
+            knowhere::IndexPtr index_ptr = nullptr;
+            segment_ptr->GetStructuredIndex(field_name, index_ptr);
+            STATUS_CHECK(IndexedRangeQuery(bitset, attr_type.at(field_name), index_ptr, range_it.value()));
+        }
+        range_it++;
+        if (range_it != range_query_json.end()) {
+            return Status(SERVER_INVALID_DSL_PARAMETER, "Range query does not support multiple fields");
+        }
+    } catch (std::exception& ex) {
+        return Status{SERVER_INVALID_DSL_PARAMETER, ex.what()};
     }
     return Status::OK();
 }
