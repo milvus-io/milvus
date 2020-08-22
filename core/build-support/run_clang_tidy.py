@@ -55,6 +55,7 @@ def _check_all(cmd, filenames):
     }
     checker = partial(_check_some_files, completed_processes)
     pool = mp.Pool()
+    error = False
     try:
         # check output of completed clang-tidy invocations in parallel
         for problem_files, stdout in pool.imap(checker, chunks):
@@ -68,7 +69,7 @@ def _check_all(cmd, filenames):
                 cnt_ignore = _count_key(stdout, "clang-diagnostic-error")
                 print("clang-tidy - error: {}, warning: {}, ignore {}".
                       format(cnt_error, cnt_warning, cnt_ignore))
-                error = (cnt_error > cnt_ignore or cnt_warning > 0)
+                error = error or (cnt_error > cnt_ignore or cnt_warning > 0)
     except Exception:
         error = True
         raise
