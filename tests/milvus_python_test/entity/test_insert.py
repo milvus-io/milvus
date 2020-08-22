@@ -827,11 +827,8 @@ class TestInsertInvalid(object):
         '''
         entity_id = get_entity_id
         ids = [entity_id for _ in range(nb)]
-        if isinstance(entity_id, int):
+        with pytest.raises(Exception):
             connect.insert(id_collection, entities, ids)
-        else:
-            with pytest.raises(Exception):
-                connect.insert(id_collection, entities, ids)
 
     def test_insert_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
