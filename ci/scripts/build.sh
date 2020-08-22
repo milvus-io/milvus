@@ -24,6 +24,8 @@ Usage:
                               Build type (default: Release)
     -s [CUDA_ARCH]            Building for the cuda architecture
     -j[N] or --jobs=[N]       Allow N jobs at once; infinite jobs with no arg.
+    --custom_thirdparty=[CUSTOM_THIRDPARTY_PATH]
+                              Custom paths of thirdparty downloaded files(default: NULL)
     -l                        Run cpplint & check clang-format
     -n                        No make and make install step
     -g                        Building for the architecture of the GPU in the system
@@ -39,7 +41,7 @@ Usage:
 Use \"$0  --help\" for more information about a given command.
 "
 
-ARGS=`getopt -o "i:t:s:j::lngcupvh" -l "install_prefix::,build_type::,jobs::,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
+ARGS=`getopt -o "i:t:s:j::lngcupvh" -l "install_prefix::,build_type::,custom_thirdparty::,jobs::,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
 
 eval set -- "${ARGS}"
 
@@ -62,6 +64,11 @@ while true ; do
                         case "$2" in
                                 "") PARALLEL_LEVEL=""; shift 2 ;;
                                 *)  PARALLEL_LEVEL=$2 ; shift 2 ;;
+                        esac ;;
+                --custom_thirdparty)
+                        case "$2" in
+                                "") CUSTOM_THIRDPARTY_DOWNLOAD_PATH=""; shift 2 ;;
+                                *)  CUSTOM_THIRDPARTY_DOWNLOAD_PATH=$2 ; shift 2 ;;
                         esac ;;
                 -g) echo "Building for the architecture of the GPU in the system..." ; GPU_VERSION="ON" ; shift ;;
                 --with_mkl) echo "Build with MKL" ; WITH_MKL="ON" ; shift ;;
@@ -99,6 +106,7 @@ FIU_ENABLE=${FIU_ENABLE:="OFF"}
 PRIVILEGES=${PRIVILEGES:="OFF"}
 CLEANUP=${CLEANUP:="OFF"}
 PARALLEL_LEVEL=${PARALLEL_LEVEL:="8"}
+CUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_DOWNLOAD_PATH:=""}
 
 for arg do
 if [[ $arg == "clean" ]];then
@@ -115,9 +123,6 @@ if [[ ! -d ${CORE_BUILD_DIR} ]]; then
     mkdir ${CORE_BUILD_DIR}
 fi
 
-# Zero the cache statistics (but not the configuration options)
-ccache -z
-
 pushd ${CORE_BUILD_DIR}
 
 CMAKE_CMD="cmake \
@@ -133,6 +138,7 @@ CMAKE_CMD="cmake \
 -DOpenBLAS_SOURCE=AUTO \
 -DMILVUS_WITH_FIU=${FIU_ENABLE} \
 -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
+-DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_DOWNLOAD_PATH} \
 ${MILVUS_CORE_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
@@ -165,6 +171,10 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 fi
 
 if [[ ${COMPILE_BUILD} == "ON" ]];then
+
+    # Zero the cache statistics (but not the configuration options)
+    ccache -z
+
     # compile and build
     make -j${PARALLEL_LEVEL} VERBOSE=${VERBOSE} || exit 1
 
@@ -173,6 +183,9 @@ if [[ ${COMPILE_BUILD} == "ON" ]];then
     else
         make install || exit 1
     fi
+
+    echo -e "===\n=== ccache statistics after build\n==="
+    ccache --show-stats
 fi
 
 popd

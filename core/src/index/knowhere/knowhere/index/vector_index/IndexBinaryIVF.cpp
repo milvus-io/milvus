@@ -51,17 +51,18 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA(dataset_ptr)
 
     try {
-        int64_t k = config[meta::TOPK].get<int64_t>();
+        auto k = config[meta::TOPK].get<int64_t>();
         auto elems = rows * k;
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
-        auto p_id = (int64_t*)malloc(p_id_size);
-        auto p_dist = (float*)malloc(p_dist_size);
+        auto p_id = static_cast<int64_t*>(malloc(p_id_size));
+        auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
-        QueryImpl(rows, (uint8_t*)p_data, k, p_dist, p_id, config);
+        QueryImpl(rows, reinterpret_cast<const uint8_t*>(p_data), k, p_dist, p_id, config);
 
         auto ret_ds = std::make_shared<Dataset>();
+
         ret_ds->Set(meta::IDS, p_id);
         ret_ds->Set(meta::DISTANCE, p_dist);
 
@@ -111,8 +112,8 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::IndexBinary* coarse_quantizer = new faiss::IndexBinaryFlat(dim, metric_type);
     auto index = std::make_shared<faiss::IndexBinaryIVF>(coarse_quantizer, dim, nlist, metric_type);
-    index->train(rows, (uint8_t*)p_data);
-    index->add_with_ids(rows, (uint8_t*)p_data, p_ids);
+    index->train(rows, static_cast<const uint8_t*>(p_data));
+    index->add_with_ids(rows, static_cast<const uint8_t*>(p_data), p_ids);
     index_ = index;
 }
 
@@ -132,8 +133,8 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
     ivf_index->nprobe = params->nprobe;
 
     stdclock::time_point before = stdclock::now();
-    int32_t* i_distances = reinterpret_cast<int32_t*>(distances);
-    index_->search(n, (uint8_t*)data, k, i_distances, labels, bitset_);
+    auto i_distances = reinterpret_cast<int32_t*>(distances);
+    index_->search(n, data, k, i_distances, labels, bitset_);
 
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();

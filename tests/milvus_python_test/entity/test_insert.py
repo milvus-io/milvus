@@ -925,28 +925,6 @@ class TestInsertInvalidBinary(object):
         yield request.param
 
     @pytest.mark.level(2)
-    def test_insert_ids_invalid(self, connect, binary_id_collection, get_entity_id):
-        '''
-        target: test insert, with using customize ids, which are not int64
-        method: create collection and insert entities in it
-        expected: raise an exception
-        '''
-        entity_id = get_entity_id
-        ids = [entity_id for _ in range(nb)]
-        with pytest.raises(Exception):
-            connect.insert(binary_id_collection, binary_entities, ids)
-
-    @pytest.mark.level(2)
-    def test_insert_with_invalid_tag_name(self, connect, binary_collection, get_tag_name):
-        tag_name = get_tag_name
-        connect.create_partition(binary_collection, tag)
-        if tag_name is not None:
-            with pytest.raises(Exception):
-                connect.insert(binary_collection, binary_entity, partition_tag=tag_name)
-        else:
-            connect.insert(binary_collection, binary_entity, partition_tag=tag_name)
-
-    @pytest.mark.level(2)
     def test_insert_with_invalid_field_name(self, connect, binary_collection, get_field_name):
         field_name = get_field_name
         tmp_entity = update_field_name(copy.deepcopy(binary_entity), "int64", get_field_name)

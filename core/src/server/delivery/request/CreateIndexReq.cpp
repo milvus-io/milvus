@@ -67,9 +67,9 @@ CreateIndexReq::OnExecute() {
 
         // pick up field
         engine::snapshot::FieldPtr field;
-        for (auto field_it = fields_schema.begin(); field_it != fields_schema.end(); field_it++) {
-            if (field_it->first->GetName() == field_name_) {
-                field = field_it->first;
+        for (auto& field_it : fields_schema) {
+            if (field_it.first->GetName() == field_name_) {
+                field = field_it.first;
                 break;
             }
         }
@@ -87,7 +87,7 @@ CreateIndexReq::OnExecute() {
         engine::CollectionIndex index;
         if (engine::IsVectorField(field)) {
             auto params = field->GetParams();
-            int64_t dimension = params[engine::PARAM_DIMENSION].get<int64_t>();
+            auto dimension = params[engine::PARAM_DIMENSION].get<int64_t>();
 
             // validate metric type
             std::string metric_type;
