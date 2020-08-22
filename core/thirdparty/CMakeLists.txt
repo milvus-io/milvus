@@ -34,6 +34,16 @@ endif()
 message( STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}" )
 
 # ----------------------------------------------------------------------
+# using ccache
+if( CCACHE_FOUND )
+    set( EP_C_COMPILER      "${CCACHE_FOUND} ${CMAKE_C_COMPILER}" )
+    set( EP_CXX_COMPILER    "${CCACHE_FOUND} ${CMAKE_CXX_COMPILER}" )
+else()
+    set( EP_C_COMPILER      ${CMAKE_C_COMPILER} )
+    set( EP_CXX_COMPILER    ${CMAKE_CXX_COMPILER} )
+endif()
+
+# ----------------------------------------------------------------------
 # Find pthreads
 
 set( THREADS_PREFER_PTHREAD_FLAG ON )
