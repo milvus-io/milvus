@@ -37,7 +37,7 @@ GPUIVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
             new faiss::gpu::GpuIndexIVFPQ(gpu_res->faiss_res.get(), dim, config[IndexParams::nlist].get<int64_t>(),
                                           config[IndexParams::m], config[IndexParams::nbits],
                                           GetMetricType(config[Metric::TYPE].get<std::string>()));  // IP not support
-        device_index->train(rows, (float*)p_data);
+        device_index->train(rows, reinterpret_cast<const float*>(p_data));
 
         index_.reset(device_index);
         res_ = gpu_res;

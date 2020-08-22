@@ -51,7 +51,7 @@ DiskOperation::GetDirectory() const {
 void
 DiskOperation::ListDirectory(std::vector<std::string>& file_paths) {
     std::experimental::filesystem::path target_path(dir_path_);
-    typedef std::experimental::filesystem::directory_iterator d_it;
+    using d_it = std::experimental::filesystem::directory_iterator;
     d_it it_end;
     d_it it(target_path);
     if (std::experimental::filesystem::is_directory(dir_path_)) {
