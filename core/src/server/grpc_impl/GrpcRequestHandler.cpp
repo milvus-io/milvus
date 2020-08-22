@@ -1287,7 +1287,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     engine::IDNumbers vector_ids;
     vector_ids.reserve(request->entity_id_array_size());
     for (int i = 0; i < request->entity_id_array_size(); i++) {
-        if (vector_ids[i] < 0) {
+        if (request->entity_id_array(i) < 0) {
             auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "id can not be negative number"};
             SET_RESPONSE(response->mutable_status(), status, context);
             return ::grpc::Status::OK;
