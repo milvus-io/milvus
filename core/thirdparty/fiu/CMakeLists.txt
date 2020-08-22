@@ -56,6 +56,3 @@ install( FILES  ${INSTALL_DIR}/lib/libfiu.so
 get_target_property( var fiu INTERFACE_INCLUDE_DIRECTORIES )
 message( STATUS ${var} )
 set_directory_properties( PROPERTY INCLUDE_DIRECTORIES ${var} )
-
-# get_property( FIU_INCLUDE_DIR DIRECTORY PROPERTY INCLUDE_DIRECTORIES )
-# message( FATAL_ERROR ${FIU_INCLUDE_DIR} )

@@ -88,12 +88,6 @@ add_executable( milvus_server   ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
 target_link_libraries( milvus_server PRIVATE ${SERVER_LIBS} )
 install( TARGETS milvus_server DESTINATION bin )
 
-# install( FILES
-#          ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}
-#          ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}.0
-#          ${CMAKE_BINARY_DIR}/fiu_ep-prefix/src/fiu_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}fiu${CMAKE_SHARED_LIBRARY_SUFFIX}.1.00
-#          DESTINATION lib )
-
 if ( FOUND_OPENBLAS STREQUAL "false" )
     install( FILES
         ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}
