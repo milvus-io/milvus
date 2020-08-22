@@ -16,11 +16,13 @@ public class Utils {
         w2v = w2v.stream().map(x -> x / norm).collect(Collectors.toList());
         return w2v;
     }
+
     public static String genUniqueStr(String str_value){
         String prefix = "_"+RandomStringUtils.randomAlphabetic(10);
         String str = str_value == null || str_value.trim().isEmpty() ? "test" : str_value;
         return str.trim()+prefix;
     }
+
     public static List<List<Float>> genVectors(int vectorCount, int dimension, boolean norm) {
         List<List<Float>> vectors = new ArrayList<>();
         Random random = new Random();
@@ -48,6 +50,7 @@ public class Utils {
         }
         return vectors;
     }
+
     private static List<Map<String, Object>> genBaseFieldsWithoutVector(){
         List<Map<String,Object>> fieldsList = new ArrayList<>();
         Map<String, Object> intFields = new HashMap<>();
@@ -61,6 +64,7 @@ public class Utils {
         return fieldsList;
 
     }
+    
     public static List<Map<String, Object>> genDefaultFields(int dimension, boolean isBinary){
         List<Map<String, Object>> defaultFieldList = genBaseFieldsWithoutVector();
         Map<String, Object> vectorField = new HashMap<>();
