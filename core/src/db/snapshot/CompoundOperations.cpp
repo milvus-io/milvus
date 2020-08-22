@@ -961,8 +961,8 @@ CreateCollectionOperation::DoExecute(StorePtr store) {
         for (auto& element_schema : field_elements) {
             FieldElementPtr element;
             STATUS_CHECK(store->CreateResource<FieldElement>(
-                FieldElement(collection->GetID(), field->GetID(), element_schema->GetName(), element_schema->GetFtype(),
-                             element_schema->GetTypeName()),
+                FieldElement(collection->GetID(), field->GetID(), element_schema->GetName(),
+                             element_schema->GetFEtype(), element_schema->GetTypeName()),
                 element));
             auto t_fe_ctx_p = ResourceContextBuilder<FieldElement>().SetOp(meta::oUpdate).CreatePtr();
             AddStepWithLsn(*element, c_context_.lsn, t_fe_ctx_p);

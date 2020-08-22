@@ -92,7 +92,7 @@ GetSnapshotIndex(const std::string& collection_name, const std::string& field_na
     auto field_elements = ss->GetFieldElementsByField(field_name);
     if (IsVectorField(field)) {
         for (auto& field_element : field_elements) {
-            if (field_element->GetFtype() == static_cast<snapshot::FTYPE_TYPE>(engine::FieldElementType::FET_INDEX)) {
+            if (field_element->GetFEtype() == engine::FieldElementType::FET_INDEX) {
                 index_info.index_name_ = field_element->GetName();
                 index_info.index_type_ = field_element->GetTypeName();
                 auto json = field_element->GetParams();
@@ -107,7 +107,7 @@ GetSnapshotIndex(const std::string& collection_name, const std::string& field_na
         }
     } else {
         for (auto& field_element : field_elements) {
-            if (field_element->GetFtype() == static_cast<snapshot::FTYPE_TYPE>(engine::FieldElementType::FET_INDEX)) {
+            if (field_element->GetFEtype() == engine::FieldElementType::FET_INDEX) {
                 index_info.index_name_ = field_element->GetName();
                 index_info.index_type_ = field_element->GetTypeName();
             }
@@ -134,8 +134,8 @@ DeleteSnapshotIndex(const std::string& collection_name, const std::string& field
         STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
         std::vector<snapshot::FieldElementPtr> elements = ss->GetFieldElementsByField(name);
         for (auto& element : elements) {
-            if (element->GetFtype() == engine::FieldElementType::FET_INDEX ||
-                element->GetFtype() == engine::FieldElementType::FET_COMPRESS_SQ8) {
+            if (element->GetFEtype() == engine::FieldElementType::FET_INDEX ||
+                element->GetFEtype() == engine::FieldElementType::FET_COMPRESS_SQ8) {
                 snapshot::OperationContext context;
                 context.stale_field_elements.push_back(element);
                 auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
@@ -225,7 +225,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
 
                     // if the element is index, print index name/type
                     // else print element name
-                    if (element->GetFtype() == engine::FieldElementType::FET_INDEX) {
+                    if (element->GetFEtype() == engine::FieldElementType::FET_INDEX) {
                         json_file[JSON_NAME] = element->GetName();
                         json_file[JSON_INDEX_TYPE] = element->GetTypeName();
                     } else {
