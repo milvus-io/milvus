@@ -32,8 +32,8 @@ macro( build_mysqlpp )
                                     "--enable-thread-check"
                                     "CXXFLAGS=${MYSQLPP_CXX_FLAGS}"
                                     "LDFLAGS=-pthread"
-                                    "cc=${CCACHE_FOUND} ${CMAKE_C_COMPILER}"
-                                    "cxx=${CCACHE_FOUND} ${CMAKE_CXX_COMPILER}"
+                                    "cc=${EP_C_COMPILER}"
+                                    "cxx=${EP_CXX_COMPILER}"
             BUILD_COMMAND       ${MAKE} ${MAKE_BUILD_ARGS}
             INSTALL_COMMAND     ${MAKE} install
             BUILD_IN_SOURCE     1
