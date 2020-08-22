@@ -178,6 +178,7 @@ public class Utils {
         Integer value = jsonObject.getInteger(key);
         return value;
     }
+
     public static List<Float> getVector(List<Map<String,Object>> entities, int i){
        List<Float> vector = new ArrayList<>();
         entities.forEach(entity -> {

@@ -30,7 +30,7 @@ public class TestIndex {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_index_repeatably(MilvusClient client, String collectionName) {
+    public void testCreateIndexRepeatably(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         client.insert(insertParam);
         Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
@@ -41,14 +41,14 @@ public class TestIndex {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_index_with_no_vector(MilvusClient client, String collectionName) {
+    public void testCreateIndexWithNoVector(MilvusClient client, String collectionName) {
         Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_index_table_not_existed(MilvusClient client, String collectionName) {
+    public void testCreateIndexTableNotExisted(MilvusClient client, String collectionName) {
         String collectionNameNew = Utils.genUniqueStr(collectionName);
         Index index = new Index.Builder(collectionNameNew, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
         Response res_create = client.createIndex(index);
@@ -56,14 +56,14 @@ public class TestIndex {
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_create_index_without_connect(MilvusClient client, String collectionName) {
+    public void testCreateIndexWithoutConnect(MilvusClient client, String collectionName) {
         Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
         Response res_create = client.createIndex(index);
         assert(!res_create.ok());
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_index_invalid_n_list(MilvusClient client, String collectionName) {
+    public void testCreateIndexInvalidNList(MilvusClient client, String collectionName) {
         int n_list = 0;
         String indexParamNew = Utils.setIndexParam(Constants.indexType, "L2", n_list);
         Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(indexParamNew).build();
@@ -73,7 +73,7 @@ public class TestIndex {
 
     // # 3407
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-    public void test_create_index_invalid_metric_type_binary(MilvusClient client, String collectionName) {
+    public void testCreateIndexInvalidMetricTypeBinary(MilvusClient client, String collectionName) {
         String metric_type = "L2";
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
         client.insert(insertParam);
@@ -85,7 +85,7 @@ public class TestIndex {
 
     // #3408
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_drop_index(MilvusClient client, String collectionName) {
+    public void testDropIndex(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         client.insert(insertParam);
         Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
@@ -97,7 +97,7 @@ public class TestIndex {
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-    public void test_drop_index_binary(MilvusClient client, String collectionName) {
+    public void testDropIndexBinary(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
         client.insert(insertParam);
         Index index = new Index.Builder(collectionName, Constants.binaryFieldName).withParamsInJson(Constants.binaryIndexParam).build();
@@ -109,14 +109,14 @@ public class TestIndex {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_drop_index_table_not_existed(MilvusClient client, String collectionName) {
+    public void testDropIndexTableNotExisted(MilvusClient client, String collectionName) {
         String collectionNameNew = Utils.genUniqueStr(collectionName);
 //        Response res_drop = client.dropIndex(collectionNameNew, Constants.floatFieldName);
 //        assert(!res_drop.ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_drop_index_without_connect(MilvusClient client, String collectionName) {
+    public void testDropIndexWithoutConnect(MilvusClient client, String collectionName) {
 //        Response res_drop = client.dropIndex(collectionNameNew, Constants.floatFieldName);
 //        assert(!res_drop.ok());
     }
