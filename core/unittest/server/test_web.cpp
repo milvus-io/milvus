@@ -14,8 +14,7 @@
 #include <random>
 #include <thread>
 
-#include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 #include <src/server/delivery/ReqScheduler.h>
 #include <boost/filesystem.hpp>
