@@ -5,8 +5,8 @@ Usage:
   $0 [flags] [Arguments]
 
     -l [ARTIFACTORY_URL]          Artifactory URL
-    --cache_dir=[CCACHE_DIR]      Ccache directory
-    -f [FILE] or --file=[FILE]    Ccache compress package file
+    --cache_dir=[CACHE_DIR]       Cache directory
+    -f [FILE] or --file=[FILE]    Cache compress package file
     -u [USERNAME]                 Artifactory Username
     -p [PASSWORD]                 Artifactory Password
     -h or --help                  Print help information
@@ -32,7 +32,7 @@ while true ; do
                 --cache_dir)
                         case "$2" in
                                 "") echo "Option cache_dir, no argument"; exit 1 ;;
-                                *)  CCACHE_DIR=$2 ; shift 2 ;;
+                                *)  CACHE_DIR=$2 ; shift 2 ;;
                         esac ;;
                 -u)
                         case "$2" in
@@ -56,8 +56,6 @@ while true ; do
 done
 
 # Set defaults for vars modified by flags to this script
-CCACHE_DIR=${CCACHE_DIR:="${HOME}/.ccache"}
-PACKAGE_FILE=${PACKAGE_FILE:="ccache-${OS_NAME}-${BUILD_ENV_IMAGE_ID}.tar.gz"}
 BRANCH_NAME=$(git log --decorate | head -n 1 | sed 's/.*(\(.*\))/\1/' | sed 's/.*, //' | sed 's=[a-zA-Z]*\/==g')
 
 if [[ -z "${ARTIFACTORY_URL}" || "${ARTIFACTORY_URL}" == "" ]];then
@@ -65,40 +63,42 @@ if [[ -z "${ARTIFACTORY_URL}" || "${ARTIFACTORY_URL}" == "" ]];then
     exit 1
 fi
 
-if [[ ! -d "${CCACHE_DIR}" ]]; then
-    echo "\"${CCACHE_DIR}\" directory does not exist !"
+if [[ ! -d "${CACHE_DIR}" ]]; then
+    echo "\"${CACHE_DIR}\" directory does not exist !"
     exit 1
 fi
 
-function check_ccache() {
+if [[ -z "${PACKAGE_FILE}" ]]; then
+    echo "You have not input PACKAGE_FILE !"
+    exit 1
+fi
+
+function check_cache() {
     BRANCH=$1
     wget -q --spider "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}"
     return $?
 }
 
-echo -e "===\n=== ccache statistics after build\n==="
-ccache --show-stats
-
 if [[ -n "${CHANGE_TARGET}" && "${BRANCH_NAME}" =~ "PR-" ]]; then
-    check_ccache ${CHANGE_TARGET}
+    check_cache ${CHANGE_TARGET}
     if [[ $? == 0 ]];then
-        echo "Skip Update ccache package ..." && exit 0
+        echo "Skip Update cache package ..." && exit 0
     fi
 fi
 
 if [[ "${BRANCH_NAME}" != "HEAD" ]];then
     REMOTE_PACKAGE_PATH="${ARTIFACTORY_URL}/${BRANCH_NAME}"
-    echo "Updating ccache package file: ${PACKAGE_FILE}"
-    tar zcf ./"${PACKAGE_FILE}" -C "${CCACHE_DIR}" .
-    echo "Uploading ccache package file ${PACKAGE_FILE} to ${REMOTE_PACKAGE_PATH}"
+    echo "Updating cache package file: ${PACKAGE_FILE}"
+    tar zcf ./"${PACKAGE_FILE}" -C "${CACHE_DIR}" .
+    echo "Uploading cache package file ${PACKAGE_FILE} to ${REMOTE_PACKAGE_PATH}"
     curl -u"${USERNAME}":"${PASSWORD}" -T "${PACKAGE_FILE}" "${REMOTE_PACKAGE_PATH}"/"${PACKAGE_FILE}"
     if [[ $? == 0 ]];then
-        echo "Uploading ccache package file success !"
+        echo "Uploading cache package file success !"
         exit 0
     else
-        echo "Uploading ccache package file fault !"
+        echo "Uploading cache package file fault !"
         exit 1
     fi
 fi
 
-echo "Skip Update ccache package ..."
+echo "Skip Update cache package ..."

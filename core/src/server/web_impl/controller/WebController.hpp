@@ -561,7 +561,8 @@ class WebController : public oatpp::web::server::api::ApiController {
              QUERIES(QueryParams, query_params)) {
         auto handler = WebRequestHandler();
 
-        String response;
+
+         String response;
         auto status_dto = handler.GetEntity(collection_name, query_params, response);
         switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:

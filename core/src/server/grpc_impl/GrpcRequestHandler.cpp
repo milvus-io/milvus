@@ -168,7 +168,7 @@ void
 DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr& boolean_clause,
                 query::QueryPtr& query_ptr) {
     if (general_query.has_boolean_query()) {
-        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
+        boolean_clause->SetOccur(static_cast<query::Occur>(general_query.boolean_query().occur()));
         for (uint64_t i = 0; i < general_query.boolean_query().general_query_size(); ++i) {
             if (general_query.boolean_query().general_query(i).has_boolean_query()) {
                 query::BooleanQueryPtr query = std::make_shared<query::BooleanQuery>();
@@ -272,8 +272,9 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
 
         // judge whether data exists
         engine::BinaryDataPtr data = data_chunk->fixed_fields_[name];
-        if (data == nullptr || data->data_.empty())
+        if (data == nullptr || data->data_.empty()) {
             continue;
+        }
 
         auto single_size = (id_size != 0) ? (data->data_.size() / id_size) : 0;
 
@@ -371,7 +372,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
             if (attrs[0].attr_type_.find(field_name) != attrs[0].attr_type_.end()) {
                 auto grpc_field = response->add_fields();
                 grpc_field->set_field_name(field_name);
-                grpc_field->set_type((::milvus::grpc::DataType)attrs[0].attr_type_.at(field_name));
+                grpc_field->set_type(static_cast<::milvus::grpc::DataType>(attrs[0].attr_type_.at(field_name)));
                 auto grpc_attr_data = grpc_field->mutable_attr_record();
 
                 std::vector<int32_t> int32_data;
@@ -1025,7 +1026,7 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
             auto& field_schema = field_kv.second;
 
             field->set_name(field_name);
-            field->set_type((milvus::grpc::DataType)field_schema.field_type_);
+            field->set_type(static_cast<milvus::grpc::DataType>(field_schema.field_type_));
 
             auto grpc_field_param = field->add_extra_params();
             grpc_field_param->set_key(EXTRA_PARAM_KEY);
@@ -1283,6 +1284,16 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
+
+    engine::IDNumbers vector_ids;
+    vector_ids.reserve(request->entity_id_array_size());
+    for (int i = 0; i < request->entity_id_array_size(); i++) {
+        if (request->entity_id_array(i) < 0) {
+            auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "id can not be negative number"};
+            SET_RESPONSE(response->mutable_status(), status, context);
+            return ::grpc::Status::OK;
+        }
+    }
 
     auto field_size = request->fields_size();
 
