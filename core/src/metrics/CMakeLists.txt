@@ -16,9 +16,9 @@ aux_source_directory( ${MILVUS_ENGINE_SRC}/metrics/prometheus   METRICS_PROMETHE
 
 set( METRICS_LIB    yaml-cpp )
 
-set( PROMETHEUS_LIB prometheus-cpp-push
-                    prometheus-cpp-pull
-                    prometheus-cpp-core
+set( PROMETHEUS_LIB prometheus-cpp::core
+                    prometheus-cpp::pull
+                    prometheus-cpp::push
                     )
 
 add_library(    metrics STATIC ${METRICS_FILES})
@@ -26,9 +26,9 @@ add_library(    metrics STATIC ${METRICS_FILES})
 if ( MILVUS_WITH_PROMETHEUS )
     target_sources( metrics PRIVATE ${METRICS_PROMETHEUS_FILES} )
     add_dependencies( metrics ${PROMETHEUS_LIB} )
-    list( APPEND metrics_lib ${PROMETHEUS_LIB} )
+    list( APPEND METRICS_LIB ${PROMETHEUS_LIB} )
 endif ()
 
 
 target_link_libraries( metrics PRIVATE ${METRICS_LIB} )
-add_dependencies( metrics fiu )
+target_link_libraries( metrics PRIVATE fiu )

@@ -53,7 +53,7 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
         reader.name = this->index_type() + "_Index";
         auto binary = index_binary.GetByName(reader.name);
 
-        reader.total = (size_t)binary->size;
+        reader.total = static_cast<size_t>(binary->size);
         reader.data_ = binary->data.get();
 
         auto idx = faiss::read_index(&reader);
@@ -75,7 +75,7 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     }
     GET_TENSOR_DATA(dataset_ptr)
 
-    index_->add(rows, (float*)p_data);
+    index_->add(rows, reinterpret_cast<const float*>(p_data));
 }
 
 DatasetPtr
@@ -85,11 +85,11 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
     GET_TENSOR_DATA(dataset_ptr)
 
-    int64_t k = config[meta::TOPK].get<int64_t>();
+    auto k = config[meta::TOPK].get<int64_t>();
     int64_t id_size = sizeof(int64_t) * k;
     int64_t dist_size = sizeof(float) * k;
-    auto p_id = (int64_t*)malloc(id_size * rows);
-    auto p_dist = (float*)malloc(dist_size * rows);
+    auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
+    auto p_dist = static_cast<float*>(malloc(dist_size * rows));
     for (auto i = 0; i < k * rows; ++i) {
         p_id[i] = -1;
         p_dist[i] = -1;
@@ -99,7 +99,7 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 
     real_index->hnsw.efSearch = (config[IndexParams::ef]);
-    real_index->search(rows, (float*)p_data, k, p_dist, p_id, blacklist);
+    real_index->search(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, blacklist);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

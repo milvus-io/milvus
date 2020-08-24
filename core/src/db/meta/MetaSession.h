@@ -31,6 +31,8 @@
 #include "utils/Status.h"
 
 namespace milvus::engine::meta {
+using snapshot::FETYPE_TYPE;
+using snapshot::FTYPE_TYPE;
 
 class MetaSession {
  public:
@@ -228,8 +230,17 @@ MetaSession::Select(const std::string& field, const std::vector<U>& values,
         if (ftype_p != nullptr) {
             iter = raw.find(F_FTYPE);
             if (iter != raw.end()) {
-                auto ftype = std::stol(iter->second);
+                auto ftype = (FTYPE_TYPE)std::stol(iter->second);
                 ftype_p->SetFtype(ftype);
+            }
+        }
+
+        auto fetype_p = std::dynamic_pointer_cast<snapshot::FEtypeField>(resource);
+        if (fetype_p != nullptr) {
+            iter = raw.find(F_FETYPE);
+            if (iter != raw.end()) {
+                auto fetype = (FETYPE_TYPE)std::stol(iter->second);
+                fetype_p->SetFEtype(fetype);
             }
         }
 

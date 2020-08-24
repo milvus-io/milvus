@@ -189,7 +189,6 @@ class TestFlushBase:
         logging.getLogger().debug(res)
         assert res
 
-    # TODO: stable case
     def test_add_flush_auto(self, connect, id_collection):
         '''
         method: add entities
@@ -198,7 +197,7 @@ class TestFlushBase:
         # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
         ids = connect.insert(id_collection, entities, ids)
-        timeout = 10
+        timeout = 20
         start_time = time.time()
         while (time.time() - start_time < timeout):
             time.sleep(1)
@@ -250,36 +249,32 @@ class TestFlushBase:
         assert res
 
     # TODO: CI fail, LOCAL pass
-    def _test_collection_count_during_flush(self, connect, args):
+    @pytest.mark.level(2)
+    def test_collection_count_during_flush(self, connect, collection, args):
         '''
         method: flush collection at background, call `count_entities`
-        expected: status ok
+        expected: no timeout
         '''
-        collection = gen_unique_str("test_flush")
-        # param = {'collection_name': collection,
-        #          'dimension': dim,
-        #          'index_file_size': index_file_size,
-        #          'metric_type': MetricType.L2}
-        milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-        milvus.create_collection(collection, default_fields)
-        # vectors = gen_vector(nb, dim)
-        ids = milvus.insert(collection, entities, ids=[i for i in range(nb)])
-
-        def flush(collection_name):
+        ids = []
+        for i in range(5):
+            tmp_ids = connect.insert(collection, entities)
+            connect.flush([collection])
+            ids.extend(tmp_ids)
+        disable_flush(connect)
+        status = connect.delete_entity_by_id(collection, ids)
+        def flush():
             milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-            status = milvus.delete_entity_by_id(collection_name, [i for i in range(nb)])
-            with pytest.raises(Exception) as e:
-                milvus.flush([collection_name])
-
-
-        p = Process(target=flush, args=(collection,))
+            logging.error("start flush")
+            milvus.flush([collection])
+            logging.error("end flush")
+    
+        p = threading.Thread(target=flush, args=())
         p.start()
-        res = milvus.count_entities(collection)
-        assert res == nb
+        time.sleep(0.2)
+        logging.error("start count")
+        res = connect.count_entities(collection, timeout = 10)
         p.join()
-        res = milvus.count_entities(collection)
-        assert res == nb
-        logging.getLogger().info(res)
+        res = connect.count_entities(collection)
         assert res == 0
 
 
@@ -312,8 +307,7 @@ class TestFlushAsync:
         future = connect.flush([collection], _async=True)
         status = future.result()
 
-    # TODO:
-    def _test_flush_async(self, connect, collection):
+    def test_flush_async(self, connect, collection):
         nb = 100000
         vectors = gen_vectors(nb, dim)
         connect.insert(collection, entities)

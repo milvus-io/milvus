@@ -776,7 +776,7 @@ TEST_F(DBTest, CompactTest) {
         if (delete_count < 0) {
             return;
         }
-        std::vector<milvus::engine::id_t> delete_ids;
+        std::vector<milvus::engine::idx_t> delete_ids;
         for (auto i = from; i < to; ++i) {
             delete_ids.push_back(batch_entity_ids[i]);
         }
@@ -970,6 +970,7 @@ TEST_F(DBTest, StatsTest) {
     // validate collection stats
     milvus::json json_stats;
     status = db_->GetCollectionStats(collection_name, json_stats);
+    ASSERT_TRUE(status.ok());
 
     std::string ss = json_stats.dump();
     ASSERT_FALSE(ss.empty());

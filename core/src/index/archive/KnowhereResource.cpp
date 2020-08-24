@@ -63,8 +63,9 @@ KnowhereResource::Initialize() {
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = config.gpu.enable();
     fiu_do_on("KnowhereResource.Initialize.disable_gpu", enable_gpu = false);
-    if (not enable_gpu)
+    if (!enable_gpu) {
         return Status::OK();
+    }
 
     struct GpuResourceSetting {
         int64_t pinned_memory = 256 * M_BYTE;
@@ -89,11 +90,11 @@ KnowhereResource::Initialize() {
     }
 
     // init gpu resources
-    for (auto iter = gpu_resources.begin(); iter != gpu_resources.end(); ++iter) {
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(iter->first, iter->second.pinned_memory,
-                                                                iter->second.temp_memory, iter->second.resource_num);
+    for (auto& gpu_resource : gpu_resources) {
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(gpu_resource.first, gpu_resource.second.pinned_memory,
+                                                                gpu_resource.second.temp_memory,
+                                                                gpu_resource.second.resource_num);
     }
-
 #endif
 
     return Status::OK();

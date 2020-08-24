@@ -80,6 +80,13 @@ static std::map<std::string, engine::DataType> str2type = {{"int32", engine::Dat
                                                            {"vector_float", engine::DataType::VECTOR_FLOAT},
                                                            {"vector_binary", engine::DataType::VECTOR_BINARY}};
 
+static std::map<engine::DataType, std::string> type2str = {{engine::DataType::INT32, "int32"},
+                                                           {engine::DataType::INT64, "int64"},
+                                                           {engine::DataType::FLOAT, "float"},
+                                                           {engine::DataType::DOUBLE, "double"},
+                                                           {engine::DataType::VECTOR_FLOAT, "vector_float"},
+                                                           {engine::DataType::VECTOR_BINARY, "vector_binary"}};
+
 }  // namespace web
 }  // namespace server
 }  // namespace milvus

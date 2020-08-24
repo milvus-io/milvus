@@ -19,4 +19,4 @@ set(LOG_FILES   ${MILVUS_ENGINE_SRC}/log/Log.cpp
                 )
 
 add_library(log STATIC ${LOG_FILES})
-add_dependencies(log fiu)
+target_link_libraries( log PRIVATE fiu )

@@ -65,7 +65,7 @@ IndexRHNSWSQ::Load(const BinarySet& index_binary) {
         reader.name = this->index_type() + "_Data";
         auto binary = index_binary.GetByName(reader.name);
 
-        reader.total = (size_t)binary->size;
+        reader.total = static_cast<size_t>(binary->size);
         reader.data_ = binary->data.get();
 
         auto real_idx = dynamic_cast<faiss::IndexRHNSWSQ*>(index_.get());
@@ -89,7 +89,7 @@ IndexRHNSWSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
             new faiss::IndexRHNSWSQ(int(dim), faiss::QuantizerType::QT_8bit, config[IndexParams::M], metric_type);
         idx->hnsw.efConstruction = config[IndexParams::efConstruction];
         index_ = std::shared_ptr<faiss::Index>(idx);
-        index_->train(rows, (float*)p_data);
+        index_->train(rows, static_cast<const float*>(p_data));
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }

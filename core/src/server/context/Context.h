@@ -26,7 +26,7 @@ namespace server {
 
 class Context {
  public:
-    explicit Context(const std::string& request_id);
+    explicit Context(std::string request_id);
 
     inline std::string
     ReqID() const {
@@ -40,9 +40,9 @@ class Context {
     Follower(const std::string& operation_name) const;
 
     void
-    SetTraceContext(const std::shared_ptr<tracing::TraceContext>& trace_context);
+    SetTraceContext(const tracing::TraceContextPtr& trace_context);
 
-    const std::shared_ptr<tracing::TraceContext>&
+    const tracing::TraceContextPtr&
     GetTraceContext() const;
 
     void
@@ -60,7 +60,7 @@ class Context {
  private:
     std::string req_id_;
     ReqType req_type_;
-    std::shared_ptr<tracing::TraceContext> trace_context_;
+    tracing::TraceContextPtr trace_context_;
     ConnectionContextPtr context_;
 };
 

@@ -37,16 +37,16 @@ all_index_types = [
 ]
 
 default_index_params = [
-    {"nlist": 1024},
-    {"nlist": 1024},
-    {"nlist": 1024},
-    {"nlist": 1024},
-    {"nlist": 1024, "m": 16},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128, "m": 16},
     {"M": 48, "efConstruction": 500},
     # {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
     {"n_trees": 50},
-    {"nlist": 1024},
-    {"nlist": 1024}
+    {"nlist": 128},
+    {"nlist": 128}
 ]
 
 
@@ -64,6 +64,14 @@ def delete_support():
 
 def ivf():
     return ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_SQ8_HYBRID", "IVF_PQ"]
+
+
+def binary_metrics():
+    return ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
+
+
+def structure_metrics():
+    return ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 
 def l2(x, y):
@@ -275,12 +283,14 @@ def assert_equal_entity(a, b):
 
 
 def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
-                      metric_type="L2"):
+                      metric_type="L2", replace_vecs=None):
     if rand_vector is True:
         dimension = len(entities[-1]["values"][0])
         query_vectors = gen_vectors(nq, dimension)
     else:
         query_vectors = entities[-1]["values"][:nq]
+    if replace_vecs:
+        query_vectors = replace_vecs
     must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
     must_param["vector"][field_name]["metric_type"] = metric_type
     query = {
@@ -340,14 +350,6 @@ def gen_invalid_range():
         {"range": {"range": {"int64": {"GT": 0, "LT": nb // 2}}}}
     ]
     return range
-
-
-def gen_invalid_ranges():
-    ranges = [
-        {"GT": nb, "LT": 0},
-        {"GT": "0", "LT": "1000"}
-    ]
-    return ranges
 
 
 def gen_valid_ranges():
@@ -430,25 +432,28 @@ def remove_vector_field(entities):
 
 
 def update_field_name(entities, old_name, new_name):
-    for item in entities:
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
         if item["field"] == old_name:
             item["field"] = new_name
-    return entities
+    return tmp_entities
 
 
 def update_field_type(entities, old_name, new_name):
-    for item in entities:
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
         if item["field"] == old_name:
             item["type"] = new_name
-    return entities
+    return tmp_entities
 
 
 def update_field_value(entities, old_type, new_value):
-    for item in entities:
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
         if item["type"] == old_type:
-            for i in item["values"]:
-                item["values"][i] = new_value
-    return entities
+            for index, value in enumerate(item["values"]):
+                item["values"][index] = new_value
+    return tmp_entities
 
 
 def add_vector_field(nb, dimension=dimension):
@@ -589,17 +594,9 @@ def gen_invalid_params():
         -1,
         # None,
         [1, 2, 3],
-        (1, 2),
-        {"a": 1},
         " ",
         "",
         "String",
-        "12-s",
-        "BB。A",
-        " siede ",
-        "(mn)",
-        "pip+",
-        "=c",
         "中文"
     ]
     return params
@@ -763,10 +760,10 @@ def gen_binary_index():
     return index_params
 
 
-def get_search_param(index_type):
-    search_params = {"metric_type": "L2"}
+def get_search_param(index_type, metric_type="L2"):
+    search_params = {"metric_type": metric_type}
     if index_type in ivf() or index_type in binary_support():
-        search_params.update({"nprobe": 32})
+        search_params.update({"nprobe": 64})
     elif index_type == "HNSW":
         search_params.update({"ef": 64})
     elif index_type == "NSG":

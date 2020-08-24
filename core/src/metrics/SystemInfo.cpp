@@ -41,13 +41,13 @@ SystemInfo::Init() {
     // initialize CPU information
     try {
         struct tms time_sample;
-        char line[128];
         last_cpu_ = times(&time_sample);
         last_sys_cpu_ = time_sample.tms_stime;
         last_user_cpu_ = time_sample.tms_utime;
         num_processors_ = 0;
         FILE* file = fopen("/proc/cpuinfo", "r");
         if (file) {
+            char line[128];
             while (fgets(line, 128, file) != nullptr) {
                 if (strncmp(line, "processor", 9) == 0) {
                     num_processors_++;
@@ -157,7 +157,7 @@ SystemInfo::MemoryPercent() {
         Init();
     }
 
-    double mem_used = static_cast<double>(GetProcessUsedMemory() * 100);
+    auto mem_used = static_cast<double>(GetProcessUsedMemory() * 100);
     return mem_used / static_cast<double>(total_ram_);
 }
 
@@ -183,8 +183,8 @@ SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
     std::vector<int64_t> total_time_array;
     try {
         FILE* file = fopen("/proc/stat", "r");
-        fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = NULL);
-        if (file == NULL) {
+        fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = nullptr);
+        if (file == nullptr) {
             LOG_SERVER_ERROR_ << "Failed to read /proc/stat";
             return total_time_array;
         }
@@ -195,14 +195,14 @@ SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
         for (int i = 0; i < num_processors_; i++) {
             char buffer[1024];
             char* ret = fgets(buffer, sizeof(buffer) - 1, file);
-            fiu_do_on("SystemInfo.getTotalCpuTime.read_proc", ret = NULL);
-            if (ret == NULL) {
+            fiu_do_on("SystemInfo.getTotalCpuTime.read_proc", ret = nullptr);
+            if (ret == nullptr) {
                 LOG_SERVER_ERROR_ << "Could not read stat file";
                 fclose(file);
                 return total_time_array;
             }
 
-            sscanf(buffer, "cpu  %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu", &user, &nice, &system,
+            sscanf(buffer, "cpu  %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld", &user, &nice, &system,
                    &idle, &iowait, &irq, &softirq, &steal, &guest, &guestnice);
 
             work_time_array.push_back(user + nice + system);
@@ -248,8 +248,9 @@ std::vector<int64_t>
 SystemInfo::GPUMemoryTotal() {
     // get GPU usage percent
     fiu_do_on("SystemInfo.GPUMemoryTotal.mock", initialized_ = false);
-    if (!initialized_)
+    if (!initialized_) {
         Init();
+    }
     std::vector<int64_t> result;
 
 #ifdef MILVUS_GPU_VERSION
@@ -268,8 +269,9 @@ SystemInfo::GPUMemoryTotal() {
 std::vector<int64_t>
 SystemInfo::GPUTemperature() {
     fiu_do_on("SystemInfo.GPUTemperature.mock", initialized_ = false);
-    if (!initialized_)
+    if (!initialized_) {
         Init();
+    }
     std::vector<int64_t> result;
 
 #ifdef MILVUS_GPU_VERSION
@@ -291,14 +293,14 @@ SystemInfo::CPUTemperature() {
     std::string path = "/sys/class/hwmon/";
     try {
         DIR* dir = opendir(path.c_str());
-        fiu_do_on("SystemInfo.CPUTemperature.opendir", dir = NULL);
+        fiu_do_on("SystemInfo.CPUTemperature.opendir", dir = nullptr);
         if (!dir) {
             LOG_SERVER_ERROR_ << "Could not open hwmon directory";
             return result;
         }
 
-        struct dirent* ptr = NULL;
-        while ((ptr = readdir(dir)) != NULL) {
+        struct dirent* ptr = nullptr;
+        while ((ptr = readdir(dir)) != nullptr) {
             std::string filename(path);
             filename.append(ptr->d_name);
 
@@ -309,7 +311,7 @@ SystemInfo::CPUTemperature() {
                     std::string object = filename;
                     object += "/temp1_input";
                     FILE* file = fopen(object.c_str(), "r");
-                    fiu_do_on("SystemInfo.CPUTemperature.openfile", file = NULL);
+                    fiu_do_on("SystemInfo.CPUTemperature.openfile", file = nullptr);
                     if (file == nullptr) {
                         LOG_SERVER_ERROR_ << "Could not open temperature file";
                         return result;
@@ -335,8 +337,9 @@ std::vector<int64_t>
 SystemInfo::GPUMemoryUsed() {
     // get GPU memory used
     fiu_do_on("SystemInfo.GPUMemoryUsed.mock", initialized_ = false);
-    if (!initialized_)
+    if (!initialized_) {
         Init();
+    }
 
     std::vector<int64_t> result;
 
@@ -367,10 +370,10 @@ SystemInfo::Octets() {
         lastline = line;
     }
     std::vector<size_t> space_position;
-    size_t space_pos = lastline.find(" ");
+    size_t space_pos = lastline.find(' ');
     while (space_pos != std::string::npos) {
         space_position.push_back(space_pos);
-        space_pos = lastline.find(" ", space_pos + 1);
+        space_pos = lastline.find(' ', space_pos + 1);
     }
     // InOctets is between 6th and 7th " " and OutOctets is between 7th and 8th " "
     size_t inoctets_begin = space_position[6] + 1;

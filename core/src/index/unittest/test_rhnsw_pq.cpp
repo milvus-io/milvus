@@ -53,7 +53,7 @@ TEST_P(RHNSWPQTest, HNSW_basic) {
     EXPECT_EQ(index_->Dim(), dim);
 
     // Serialize and Load before Query
-    milvus::knowhere::BinarySet bs = index_->Serialize();
+    milvus::knowhere::BinarySet bs = index_->Serialize(conf);
     auto result1 = index_->Query(query_dataset, conf);
     //    AssertAnns(result1, nq, k);
 
@@ -121,7 +121,7 @@ TEST_P(RHNSWPQTest, HNSW_serialize) {
     {
         index_->Train(base_dataset, conf);
         index_->Add(base_dataset, conf);
-        auto binaryset = index_->Serialize();
+        auto binaryset = index_->Serialize(conf);
         auto bin_idx = binaryset.GetByName(index_->index_type() + "_Index");
         auto bin_dat = binaryset.GetByName(index_->index_type() + "_Data");
 

@@ -40,25 +40,19 @@ class MemCollection {
     Add(int64_t partition_id, const VectorSourcePtr& source);
 
     Status
-    Delete(const std::vector<id_t>& ids);
+    Delete(const std::vector<idx_t>& ids);
 
     Status
     EraseMem(int64_t partition_id);
 
     Status
-    Serialize(uint64_t wal_lsn);
+    Serialize();
 
     int64_t
     GetCollectionId() const;
 
     size_t
     GetCurrentMem();
-
-    uint64_t
-    GetLSN();
-
-    void
-    SetLSN(uint64_t lsn);
 
  private:
     Status
@@ -73,10 +67,8 @@ class MemCollection {
 
     std::mutex mutex_;
 
-    std::set<id_t> doc_ids_to_delete_;
-
-    std::atomic<uint64_t> lsn_;
-};  // SSMemCollection
+    std::set<idx_t> doc_ids_to_delete_;
+};
 
 using MemCollectionPtr = std::shared_ptr<MemCollection>;
 
