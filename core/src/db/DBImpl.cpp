@@ -42,8 +42,8 @@
 #include <fiu/fiu-local.h>
 #include <src/scheduler/job/BuildIndexJob.h>
 #include <limits>
-#include <utility>
 #include <unordered_set>
+#include <utility>
 
 namespace milvus {
 namespace engine {
@@ -457,7 +457,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
 
     if (collection_field_names.size() != chunk_field_names.size()) {
         std::string msg = "Collection has " + std::to_string(collection_field_names.size()) +
-            " fields while the insert data has " + std::to_string(chunk_field_names.size()) + " fields";
+                          " fields while the insert data has " + std::to_string(chunk_field_names.size()) + " fields";
         return Status(DB_ERROR, msg);
     } else {
         for (auto& name : chunk_field_names) {

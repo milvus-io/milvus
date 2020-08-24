@@ -812,7 +812,7 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
         blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {
         dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
-                                                   bin_from_index->GetRawIds());
+                                              bin_from_index->GetRawIds());
         uids = bin_from_index->GetUids();
         blacklist = bin_from_index->GetBlacklist();
     }
