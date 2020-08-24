@@ -96,8 +96,8 @@ IVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     // CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
 
     // auto tune params
-    int64_t nq = oricfg[knowhere::meta::ROWS].get<int64_t>();
-    int64_t nlist = oricfg[knowhere::IndexParams::nlist].get<int64_t>();
+    auto nq = oricfg[knowhere::meta::ROWS].get<int64_t>();
+    auto nlist = oricfg[knowhere::IndexParams::nlist].get<int64_t>();
     oricfg[knowhere::IndexParams::nlist] = MatchNlist(nq, nlist);
 
     // Best Practice
@@ -110,13 +110,13 @@ IVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 IVFConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    if (mode == IndexMode::MODE_GPU) {
+    int64_t max_nprobe = MAX_NPROBE;
 #ifdef MILVUS_GPU_VERSION
-        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, faiss::gpu::getMaxKSelection());
-    } else {
-#endif
-        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
+    if (mode == IndexMode::MODE_GPU) {
+        max_nprobe = faiss::gpu::getMaxKSelection();
     }
+#endif
+    CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, max_nprobe);
 
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
@@ -153,7 +153,7 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
 
     std::vector<int64_t> resset;
-    int64_t dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
+    auto dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
     IVFPQConfAdapter::GetValidMList(dimension, resset);
 
     CheckIntByValues(knowhere::IndexParams::m, resset);
@@ -278,7 +278,7 @@ RHNSWPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     CheckIntByRange(knowhere::IndexParams::M, MIN_M, MAX_M);
 
     std::vector<int64_t> resset;
-    int64_t dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
+    auto dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
     IVFPQConfAdapter::GetValidMList(dimension, resset);
 
     CheckIntByValues(knowhere::IndexParams::PQM, resset);

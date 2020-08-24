@@ -61,7 +61,7 @@ using ResultIds = std::vector<faiss::Index::idx_t>;
 using ResultDistances = std::vector<faiss::Index::distance_t>;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-enum DataType {
+enum class DataType {
     NONE = 0,
     BOOL = 1,
     INT8 = 2,
@@ -79,7 +79,7 @@ enum DataType {
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-enum FieldElementType {
+enum class FieldElementType {
     FET_NONE = 0,
     FET_RAW = 1,
     FET_BLOOM_FILTER = 2,

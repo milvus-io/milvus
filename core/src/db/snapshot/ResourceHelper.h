@@ -123,7 +123,7 @@ CreateResPtr<SegmentCommit>() {
 template <>
 inline SegmentFile::Ptr
 CreateResPtr<SegmentFile>() {
-    return std::make_shared<SegmentFile>(0, 0, 0, 0, 0);
+    return std::make_shared<SegmentFile>(0, 0, 0, 0, FieldElementType::FET_NONE);
 }
 
 template <>
@@ -135,7 +135,7 @@ CreateResPtr<SchemaCommit>() {
 template <>
 inline Field::Ptr
 CreateResPtr<Field>() {
-    return std::make_shared<Field>("", 0, 0);
+    return std::make_shared<Field>("", 0, DataType::NONE);
 }
 
 template <>
@@ -147,7 +147,7 @@ CreateResPtr<FieldCommit>() {
 template <>
 inline FieldElement::Ptr
 CreateResPtr<FieldElement>() {
-    return std::make_shared<FieldElement>(0, 0, "", 0);
+    return std::make_shared<FieldElement>(0, 0, "", FieldElementType::FET_NONE);
 }
 
 }  // namespace milvus::engine::snapshot

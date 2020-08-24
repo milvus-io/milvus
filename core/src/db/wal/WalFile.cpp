@@ -18,9 +18,6 @@
 namespace milvus {
 namespace engine {
 
-WalFile::WalFile() {
-}
-
 WalFile::~WalFile() {
     CloseFile();
 }
@@ -30,7 +27,20 @@ WalFile::OpenFile(const std::string& path, OpenMode mode) {
     CloseFile();
 
     try {
-        std::string str_mode = (mode == OpenMode::READ) ? "rb" : "awb";
+        std::string str_mode;
+        switch (mode) {
+            case OpenMode::READ:
+                str_mode = "rb";
+                break;
+            case OpenMode::APPEND_WRITE:
+                str_mode = "awb";
+                break;
+            case OpenMode::OVER_WRITE:
+                str_mode = "wb";
+                break;
+            default:
+                return Status(DB_ERROR, "Unsupported file mode");
+        }
         file_ = fopen(path.c_str(), str_mode.c_str());
         if (file_ == nullptr) {
             std::string msg = "Failed to create wal file: " + path;

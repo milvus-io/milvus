@@ -82,8 +82,9 @@ GetEntityByIDReq::OnExecute() {
 
         if (field_names_.empty()) {
             for (const auto& schema : field_mappings) {
-                if (schema.first->GetName() == engine::FIELD_UID)
+                if (schema.first->GetName() == engine::FIELD_UID) {
                     continue;
+                }
                 field_mappings_.insert(schema);
                 field_names_.emplace_back(schema.first->GetName());
             }

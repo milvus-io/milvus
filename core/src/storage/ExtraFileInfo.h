@@ -29,10 +29,9 @@
 #include "storage/FSHandler.h"
 
 extern const char* MAGIC;
-extern const int MAGIC_SIZE;
-extern const int SINGLE_KV_DATA_SIZE;
-extern const int HEADER_SIZE;
-extern const int SUM_SIZE;
+extern const int64_t MAGIC_SIZE;
+extern const int64_t HEADER_SIZE;
+extern const int64_t SUM_SIZE;
 
 namespace milvus {
 namespace storage {

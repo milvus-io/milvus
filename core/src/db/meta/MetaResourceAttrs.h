@@ -110,7 +110,11 @@ AttrValue2Str(typename ResourceContext<ResourceT>::ResPtr src, const std::string
         int2str(int_value, value);
     } else if (F_FTYPE == attr) {
         auto ftype_field = std::dynamic_pointer_cast<snapshot::FtypeField>(src);
-        int_value = ftype_field->GetFtype();
+        int_value = (int)ftype_field->GetFtype();
+        int2str(int_value, value);
+    } else if (F_FETYPE == attr) {
+        auto fetype_field = std::dynamic_pointer_cast<snapshot::FEtypeField>(src);
+        int_value = (int)fetype_field->GetFEtype();
         int2str(int_value, value);
     } else if (F_FIELD_ID == attr) {
         auto field_id_field = std::dynamic_pointer_cast<snapshot::FieldIdField>(src);

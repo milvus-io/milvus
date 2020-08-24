@@ -168,7 +168,7 @@ void
 DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr& boolean_clause,
                 query::QueryPtr& query_ptr) {
     if (general_query.has_boolean_query()) {
-        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
+        boolean_clause->SetOccur(static_cast<query::Occur>(general_query.boolean_query().occur()));
         for (uint64_t i = 0; i < general_query.boolean_query().general_query_size(); ++i) {
             if (general_query.boolean_query().general_query(i).has_boolean_query()) {
                 query::BooleanQueryPtr query = std::make_shared<query::BooleanQuery>();
@@ -272,8 +272,9 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
 
         // judge whether data exists
         engine::BinaryDataPtr data = data_chunk->fixed_fields_[name];
-        if (data == nullptr || data->data_.empty())
+        if (data == nullptr || data->data_.empty()) {
             continue;
+        }
 
         auto single_size = (id_size != 0) ? (data->data_.size() / id_size) : 0;
 
@@ -371,7 +372,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
             if (attrs[0].attr_type_.find(field_name) != attrs[0].attr_type_.end()) {
                 auto grpc_field = response->add_fields();
                 grpc_field->set_field_name(field_name);
-                grpc_field->set_type((::milvus::grpc::DataType)attrs[0].attr_type_.at(field_name));
+                grpc_field->set_type(static_cast<::milvus::grpc::DataType>(attrs[0].attr_type_.at(field_name)));
                 auto grpc_attr_data = grpc_field->mutable_attr_record();
 
                 std::vector<int32_t> int32_data;
@@ -1020,12 +1021,15 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
 
         response->set_collection_name(request->collection_name());
         for (auto& field_kv : collection_schema.fields_) {
+            if (field_kv.first == engine::FIELD_UID) {
+                continue;
+            }
             auto field = response->add_fields();
             auto& field_name = field_kv.first;
             auto& field_schema = field_kv.second;
 
             field->set_name(field_name);
-            field->set_type((milvus::grpc::DataType)field_schema.field_type_);
+            field->set_type(static_cast<milvus::grpc::DataType>(field_schema.field_type_));
 
             auto grpc_field_param = field->add_extra_params();
             grpc_field_param->set_key(EXTRA_PARAM_KEY);
@@ -1284,6 +1288,16 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
+    engine::IDNumbers vector_ids;
+    vector_ids.reserve(request->entity_id_array_size());
+    for (int i = 0; i < request->entity_id_array_size(); i++) {
+        if (request->entity_id_array(i) < 0) {
+            auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "id can not be negative number"};
+            SET_RESPONSE(response->mutable_status(), status, context);
+            return ::grpc::Status::OK;
+        }
+    }
+
     auto field_size = request->fields_size();
 
     std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
@@ -1312,7 +1326,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         auto grpc_float_size = request->fields(i).attr_record().float_value_size();
         auto grpc_double_size = request->fields(i).attr_record().double_value_size();
         const auto& field = request->fields(i);
-        auto field_name = field.field_name();
+        auto& field_name = field.field_name();
 
         std::vector<uint8_t> temp_data;
         if (grpc_int32_size > 0) {
@@ -1679,6 +1693,10 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
         if (dsl_json.empty()) {
             return Status{SERVER_INVALID_ARGUMENT, "Query dsl is null"};
         }
+        auto status = Status::OK();
+        if (vector_params.empty()) {
+            return Status(SERVER_INVALID_DSL_PARAMETER, "DSL must include vector query");
+        }
         for (const auto& vector_param : vector_params) {
             const std::string& vector_string = vector_param.json();
             milvus::json vector_json = json::parse(vector_string);
@@ -1716,11 +1734,16 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
         if (dsl_json.contains("bool")) {
             auto boolean_query_json = dsl_json["bool"];
             JSON_NULL_CHECK(boolean_query_json);
-            STATUS_CHECK(ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr));
+            status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr);
+            if (!status.ok()) {
+                return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool");
+            }
+        } else {
+            return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool query");
         }
         return Status::OK();
     } catch (std::exception& e) {
-        return Status{SERVER_INVALID_DSL_PARAMETER, e.what()};
+        return Status(SERVER_INVALID_DSL_PARAMETER, e.what());
     }
 }
 

@@ -116,8 +116,8 @@ TestProcess(std::shared_ptr<milvus::Connection> connection, const milvus::Mappin
 
     {  // search vectors
         // std::string metric_type = "HAMMING";
-        std::string metric_type = "JACCARD";
-        // std::string metric_type = "TANIMOTO";
+//        std::string metric_type = "JACCARD";
+         std::string metric_type = "TANIMOTO";
 
         nlohmann::json dsl_json, vector_param_json;
         milvus_sdk::Utils::GenBinaryDSLJson(dsl_json, vector_param_json, metric_type);

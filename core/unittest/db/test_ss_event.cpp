@@ -87,8 +87,7 @@ TEST_F(EventTest, TestInActiveResGcEvent) {
 
     SegmentFilePtr seg_file;
     status = store_->CreateResource<SegmentFile>(
-        SegmentFile(collection->GetID(), partition->GetID(), s->GetID(), field_element->GetID(),
-            field_element->GetFtype()), seg_file);
+        SegmentFile(collection->GetID(), partition->GetID(), s->GetID(), field_element->GetID(), field_element->GetFEtype()), seg_file);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     SegmentCommitPtr sc;

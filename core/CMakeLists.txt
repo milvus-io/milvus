@@ -61,10 +61,6 @@ import_mysql_inc()
 using_ccache_if_defined( MILVUS_USE_CCACHE )
 
 include( ExternalProject )
-include( FetchContent )
-set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
-set(FETCHCONTENT_QUIET OFF)
-include( ThirdPartyPackages )
 
 # **************************** Compiler arguments ****************************
 
@@ -118,6 +114,7 @@ if("$ENV{CMAKE_EXPORT_COMPILE_COMMANDS}" STREQUAL "1" OR CLANG_TIDY_FOUND)
   # with various development tools, such as Vim's YouCompleteMe plugin.
   # See http://clang.llvm.org/docs/JSONCompilationDatabase.html
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+  set(CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
 endif()
 
 #
@@ -232,8 +229,8 @@ if ( MILVUS_GPU_VERSION )
 else ()
     set( GPU_ENABLE "false" )
 endif ()
-configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template
-                ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml @ONLY)
+configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/conf/milvus.template
+                ${CMAKE_CURRENT_SOURCE_DIR}/conf/milvus.yaml @ONLY)
 
 install(DIRECTORY scripts/
         DESTINATION scripts
@@ -247,7 +244,7 @@ install(DIRECTORY scripts/migration
         GROUP_EXECUTE GROUP_READ
         WORLD_EXECUTE WORLD_READ)
 install(FILES
-        conf/server_config.yaml
+        conf/milvus.yaml
         DESTINATION
         conf)
 

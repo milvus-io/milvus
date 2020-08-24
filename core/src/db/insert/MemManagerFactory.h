@@ -13,8 +13,6 @@
 
 #include "MemManager.h"
 
-#include <memory>
-
 namespace milvus {
 namespace engine {
 

@@ -70,9 +70,7 @@ if ( MILVUS_GPU_VERSION )
 endif()
 
 if ( MILVUS_WITH_AWS )
-    set( S3_CLIENT_LIB  aws-cpp-sdk-s3
-                        aws-cpp-sdk-core
-                        )
+    set( S3_CLIENT_LIB  AWS::aws-cpp-sdk-s3 )
 
     list( APPEND UNITTEST_LIBS  ${S3_CLIENT_LIB}
                                 curl

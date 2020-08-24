@@ -34,7 +34,7 @@ class DBProxy : public DB {
     CreateCollection(const snapshot::CreateCollectionContext& context) override;
 
     Status
-    DropCollection(const std::string& name) override;
+    DropCollection(const std::string& collection_name) override;
 
     Status
     HasCollection(const std::string& collection_name, bool& has_or_not) override;

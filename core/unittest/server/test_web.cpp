@@ -14,8 +14,7 @@
 #include <random>
 #include <thread>
 
-#include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 #include <src/server/delivery/ReqScheduler.h>
 #include <boost/filesystem.hpp>
@@ -46,6 +45,7 @@ INITIALIZE_EASYLOGGINGPP
 static const char* COLLECTION_NAME = "test_milvus_web_collection";
 
 static int64_t DIM = 128;
+static int64_t NB = 100;
 
 using OStatus = oatpp::web::protocol::http::Status;
 using OString = milvus::server::web::OString;
@@ -247,20 +247,20 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("OPTIONS", "/collections/{collection_name}", optionsCollection,
              PATH(String, collection_name, "collection_name"))
 
-    API_CALL("GET", "/collections/{collection_name}", getCollection, PATH(String, collection_name, "collection_name"),
-             QUERY(String, info))
+    API_CALL("GET", "/collections/{collection_name}", getCollection, PATH(String, collection_name, "collection_name"))
 
     API_CALL("DELETE", "/collections/{collection_name}", dropCollection,
              PATH(String, collection_name, "collection_name"))
 
     API_CALL("OPTIONS", "/collections/{collection_name}/fields/{field_name}/indexes", optionsIndexes,
-             PATH(String, collection_name, "collection_name"))
+             PATH(String, collection_name, "collection_name"), PATH(String, field_name, "field_name"))
 
     API_CALL("POST", "/collections/{collection_name}/fields/{field_name}/indexes", createIndex,
-             PATH(String, collection_name, "collection_name"), BODY_STRING(OString, body))
+             PATH(String, collection_name, "collection_name"), PATH(String, field_name, "field_name"),
+             BODY_STRING(OString, body))
 
     API_CALL("DELETE", "/collections/{collection_name}/fields/{field_name}/indexes", dropIndex,
-             PATH(String, collection_name, "collection_name"))
+             PATH(String, collection_name, "collection_name"), PATH(String, field_name, "field_name"))
 
     API_CALL("OPTIONS", "/collections/{collection_name}/partitions", optionsPartitions,
              PATH(String, collection_name, "collection_name"))
@@ -288,6 +288,9 @@ class TestClient : public oatpp::web::client::ApiClient {
              PATH(String, collection_name, "collection_name"))
 
     API_CALL("GET", "/collections/{collection_name}/entities", getEntity,
+             PATH(String, collection_name, "collection_name"), QUERY(String, offset), QUERY(String, page_size))
+
+    API_CALL("GET", "/collections/{collection_name}/entities", getEntityByID,
              PATH(String, collection_name, "collection_name"), QUERY(String, ids))
 
     API_CALL("POST", "/collections/{collection_name}/entities", insert,
@@ -415,7 +418,7 @@ CreateCollection(const TestClientP& client_ptr, const TestConnP& connection_ptr,
     mapping_json = nlohmann::json::parse(mapping_str);
     mapping_json["collection_name"] = collection_name;
     mapping_json["auto_id"] = auto_id;
-    auto response = client_ptr->getCollection(collection_name.c_str(), "", connection_ptr);
+    auto response = client_ptr->getCollection(collection_name.c_str(), connection_ptr);
     if (OStatus::CODE_200.code == response->getStatusCode()) {
         return;
     }
@@ -513,7 +516,7 @@ TEST_F(WebControllerTest, GET_COLLECTION_INFO) {
 
     OQueryParams params;
 
-    auto response = client_ptr->getCollection(collection_name.c_str(), "", connection_ptr);
+    auto response = client_ptr->getCollection(collection_name.c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto json_response = nlohmann::json::parse(response->readBodyToString()->c_str());
     ASSERT_EQ(collection_name, json_response["collection_name"]);
@@ -521,7 +524,7 @@ TEST_F(WebControllerTest, GET_COLLECTION_INFO) {
 
     // invalid collection name
     collection_name = "57474dgdfhdfhdh  dgd";
-    response = client_ptr->getCollection(collection_name.c_str(), "", connection_ptr);
+    response = client_ptr->getCollection(collection_name.c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
     auto status_sto = response->readBodyToDto<milvus::server::web::StatusDtoT>(object_mapper.get());
     ASSERT_EQ(milvus::server::web::StatusCode::ILLEGAL_COLLECTION_NAME, status_sto->code);
@@ -653,15 +656,192 @@ TEST_F(WebControllerTest, INSERT_IDS) {
     ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
 }
 
+TEST_F(WebControllerTest, GET_ENTITY_BY_ID) {
+    auto collection_name = "test_get_collection_test" + RandomName();
+    nlohmann::json mapping_json;
+    CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
+
+    const int64_t dim = DIM;
+    const int64_t nb = 20;
+    nlohmann::json insert_json;
+    GenEntities(nb, dim, insert_json);
+
+    auto response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
+    ASSERT_EQ(nb, result_dto->ids->size());
+
+    auto status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
+
+    auto id_size = 2;
+    std::vector<std::string> ids(id_size);
+    for (int i = 0; i < id_size; i++) {
+        ids[i] = result_dto->ids[i]->std_str();
+    }
+
+    std::string query_ids;
+    milvus::StringHelpFunctions::MergeStringWithDelimeter(ids, ",", query_ids);
+    response = client_ptr->getEntityByID(collection_name.c_str(), query_ids.c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    response = client_ptr->dropCollection(collection_name.c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
+    auto collection_name = "test_get_collection_test" + RandomName();
+    nlohmann::json mapping_json;
+    CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
+
+    const int64_t dim = DIM;
+    const int64_t nb = 3;
+    nlohmann::json insert_json;
+    GenEntities(nb, dim, insert_json);
+
+    auto response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
+    ASSERT_EQ(nb, result_dto->ids->size());
+
+    auto status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
+    ASSERT_TRUE(status.ok());
+
+    GenEntities(22, dim, insert_json);
+    response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
+    ASSERT_EQ(22, result_dto->ids->size());
+
+    status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
+    ASSERT_TRUE(status.ok());
+
+    std::string offset = "0";
+    std::string page_size = "10";
+    response = client_ptr->getEntity(collection_name.c_str(), offset.c_str(), page_size.c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    //    offset = "10";
+    //    page_size = "20";
+    //    response = client_ptr->getEntity(collection_name.c_str(), offset.c_str(), page_size.c_str(), connection_ptr);
+    //    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, SYSTEM_INFO) {
+    auto response = client_ptr->cmd("config", "", "", connection_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(result_json.contains("cluster.enable"));
+}
+
+TEST_F(WebControllerTest, SEARCH) {
+    auto collection_name = "test_search_collection_test" + RandomName();
+    std::string mapping_str = R"({
+        "collection_name": "test_collection",
+        "fields": [
+            {
+                "field_name": "field_vec",
+                "field_type": "VECTOR_FLOAT",
+                "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
+                "extra_params": {"dim": 4}
+            },
+            {
+                "field_name": "int64",
+                "field_type": "int64",
+                "index_params": {},
+                "extra_params": {}
+            }
+        ],
+        "segment_row_count": 100000
+    })";
+    nlohmann::json mapping_json = nlohmann::json::parse(mapping_str);
+    mapping_json["collection_name"] = collection_name;
+    auto response = client_ptr->createCollection(mapping_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+
+    const int64_t dim = 4;
+    const int64_t nb = 20;
+    nlohmann::json insert_json;
+    GenEntities(nb, dim, insert_json);
+
+    response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
+    ASSERT_EQ(nb, result_dto->ids->size());
+
+    auto status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
+    ASSERT_TRUE(status.ok());
+
+    std::string query_str = R"({
+        "query": {
+            "bool": {
+                "must": [
+                    {
+                        "vector": {
+                            "field_vec":
+                                {
+                                "topk": 2,
+                                "values": [[1, 2, 3, 4]],
+                                "metric_type": "L2",
+                                "params": {
+                                    "nprobe": 1024
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    })";
+
+    response = client_ptr->entityOp(collection_name.c_str(), query_str.c_str(), connection_ptr);
+    //    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDtoT>(object_mapper.get());
+    //    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, error_dto->code);
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->std_str());
+    ASSERT_TRUE(result_json.contains("num"));
+    ASSERT_EQ(1, result_json["num"].get<int64_t>());
+}
+
 TEST_F(WebControllerTest, INDEX) {
-    //    auto collection_name = "test_insert_collection_test" + RandomName();
-    //    nlohmann::json mapping_json;
-    //    CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
-    //
-    //    // test index with imcomplete param
-    //    nlohmann::json index_json;
-    //    auto response = client_ptr->createIndex(collection_name.c_str(), index_json.dump().c_str(), connection_ptr);
-    //    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+    auto collection_name = "test_index_collection_test" + RandomName();
+    nlohmann::json mapping_json;
+    CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
+
+    nlohmann::json insert_json;
+    GenEntities(NB, DIM, insert_json);
+    auto response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+    auto result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
+    ASSERT_EQ(NB, result_dto->ids->size());
+
+    // test index with imcomplete param
+    std::string field_name = "field_vec";
+    std::string index_str = R"({
+        "metric_type": "L2",
+        "index_type": "IVF_FLAT",
+        "params": {
+            "nlist": 1024
+        }
+    })";
+    nlohmann::json index_json;
+    response =
+        client_ptr->createIndex(collection_name.c_str(), field_name.c_str(), index_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+
+    index_json = nlohmann::json::parse(index_str);
+    response =
+        client_ptr->createIndex(collection_name.c_str(), field_name.c_str(), index_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+
+    response = client_ptr->getCollection(collection_name.c_str(), connection_ptr);
+    nlohmann::json collection_json = nlohmann::json::parse(response->readBodyToString()->std_str());
+    std::cout << collection_json.dump() << std::endl;
+    for (const auto& field_json : collection_json["fields"]) {
+        if (field_json["field_name"] == "field_vec") {
+            nlohmann::json index_params = field_json["index_params"];
+            ASSERT_EQ(index_params["index_type"].get<std::string>(), milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
+            break;
+        }
+    }
     //
     //    //    index_json["index_type"] = milvus::server::web::IndexMap.at(milvus::engine::FAISS_IDMAP);
     //

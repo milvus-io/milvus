@@ -58,7 +58,7 @@ WalOperationCodec::WriteInsertOperation(const WalFilePtr& file, const std::strin
         int32_t part_name_length = partition_name.size();
         total_bytes += file->Write<int32_t>(&part_name_length);
         if (part_name_length > 0) {
-            total_bytes += file->Write((void*)partition_name.data(), part_name_length);
+            total_bytes += file->Write(partition_name.data(), part_name_length);
         }
 
         // write fixed data
@@ -71,11 +71,11 @@ WalOperationCodec::WriteInsertOperation(const WalFilePtr& file, const std::strin
 
             int32_t field_name_length = pair.first.size();
             total_bytes += file->Write<int32_t>(&field_name_length);
-            total_bytes += file->Write((void*)pair.first.data(), field_name_length);
+            total_bytes += file->Write(pair.first.data(), field_name_length);
 
             int64_t data_size = pair.second->data_.size();
             total_bytes += file->Write<int64_t>(&data_size);
-            total_bytes += file->Write((void*)pair.second->data_.data(), data_size);
+            total_bytes += file->Write(pair.second->data_.data(), data_size);
         }
 
         // TODO: write variable data
@@ -90,8 +90,6 @@ WalOperationCodec::WriteInsertOperation(const WalFilePtr& file, const std::strin
         if (total_bytes != calculate_total_bytes) {
             LOG_ENGINE_ERROR_ << "wal serialize(insert) bytes " << total_bytes << " not equal "
                               << calculate_total_bytes;
-        } else {
-            LOG_ENGINE_DEBUG_ << "Wal serialize(insert) " << total_bytes << " bytes";
         }
     } catch (std::exception& ex) {
         std::string msg = "Failed to write insert operation, reason: " + std::string(ex.what());
@@ -132,7 +130,7 @@ WalOperationCodec::WriteDeleteOperation(const WalFilePtr& file, const IDNumbers&
         int64_t id_count = entity_ids.size();
         total_bytes += file->Write<int64_t>(&id_count);
 
-        total_bytes += file->Write((void*)entity_ids.data(), id_count * sizeof(idx_t));
+        total_bytes += file->Write(entity_ids.data(), id_count * sizeof(idx_t));
 
         // write operation id again
         // Note: makesure operation id is written at end, so that wal cleanup thread know which file can be deleted
@@ -144,8 +142,6 @@ WalOperationCodec::WriteDeleteOperation(const WalFilePtr& file, const IDNumbers&
         if (total_bytes != calculate_total_bytes) {
             LOG_ENGINE_ERROR_ << "wal serialize(delete) bytes " << total_bytes << " not equal "
                               << calculate_total_bytes;
-        } else {
-            LOG_ENGINE_DEBUG_ << "Wal serialize(delete) " << total_bytes << " bytes";
         }
     } catch (std::exception& ex) {
         std::string msg = "Failed to write insert operation, reason: " + std::string(ex.what());
@@ -192,15 +188,13 @@ WalOperationCodec::IterateOperation(const WalFilePtr& file, WalOperationPtr& ope
     if (type == WalOperationType::INSERT_ENTITY) {
         // read partition name
         int32_t part_name_length = 0;
-        read_bytes = file->Read<int32_t>(&part_name_length);
-        if (read_bytes <= 0) {
-            return Status(DB_ERROR, "End of file");
-        }
-
         std::string partition_name;
-        read_bytes = file->ReadStr(partition_name, part_name_length);
-        if (read_bytes <= 0) {
-            return Status(DB_ERROR, "End of file");
+        file->Read<int32_t>(&part_name_length);
+        if (part_name_length > 0) {
+            read_bytes = file->ReadStr(partition_name, part_name_length);
+            if (read_bytes <= 0) {
+                return Status(DB_ERROR, "End of file");
+            }
         }
 
         // read fixed data

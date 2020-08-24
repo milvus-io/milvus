@@ -38,7 +38,7 @@ Status::Status(const Status& s) {
     CopyFrom(s);
 }
 
-Status::Status(Status&& s) {
+Status::Status(Status&& s) noexcept {
     MoveFrom(s);
 }
 
@@ -49,7 +49,7 @@ Status::operator=(const Status& s) {
 }
 
 Status&
-Status::operator=(Status&& s) {
+Status::operator=(Status&& s) noexcept {
     MoveFrom(s);
     return *this;
 }

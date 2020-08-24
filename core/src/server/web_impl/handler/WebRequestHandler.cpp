@@ -139,7 +139,7 @@ using FloatJson = nlohmann::basic_json<std::map, std::vector, std::string, bool,
 /////////////////////////////////// Private methods ///////////////////////////////////////
 void
 WebRequestHandler::AddStatusToJson(nlohmann::json& json, int64_t code, const std::string& msg) {
-    json["code"] = (int64_t)code;
+    json["code"] = code;
     json["message"] = msg;
 }
 
@@ -201,12 +201,13 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
             std::string name = it.first->GetName();
 
             engine::BinaryDataPtr data = data_chunk->fixed_fields_[name];
-            if (data == nullptr || data->data_.empty())
+            if (data == nullptr || data->data_.empty()) {
                 continue;
+            }
 
             auto single_size = data->data_.size() / id_size;
 
-            switch (type) {
+            switch (static_cast<engine::DataType>(type)) {
                 case engine::DataType::INT32: {
                     int32_t int32_value;
                     int64_t offset = sizeof(int32_t) * i;
@@ -249,15 +250,17 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
                     auto vector_size = single_size * sizeof(int8_t) / sizeof(float);
                     float_vector.resize(vector_size);
                     int64_t offset = vector_size * i;
-                    memcpy(float_vector.data(), data->data_.data() + offset, vector_size);
+                    memcpy(float_vector.data(), data->data_.data() + offset, vector_size * sizeof(float));
                     entity_json[name] = float_vector;
                     break;
                 }
+                default:
+                    break;
             }
         }
         one_json["entity"] = entity_json;
-        one_json["id"] = id_array[i];
-        json_res.push_back(one_json);
+        one_json["id"] = std::to_string(id_array[i]);
+        json_res["entities"].push_back(one_json);
     }
     return Status::OK();
 }
@@ -304,13 +307,70 @@ WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohman
 }
 
 Status
+WebRequestHandler::GetPageEntities(const std::string& collection_name, const int64_t page_size, const int64_t offset,
+                                   nlohmann::json& json_out) {
+    std::string collection_info;
+    STATUS_CHECK(req_handler_.GetCollectionStats(context_ptr_, collection_name, collection_info));
+    nlohmann::json json_info = nlohmann::json::parse(collection_info);
+
+    if (!json_info.contains("partitions")) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Collection info does not include partitions");
+    }
+    if (!json_info["partitions"].is_array()) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Collection info partition json is not an array");
+    }
+    int64_t entity_num = offset;
+    std::vector<int64_t> segment_ids;
+    int64_t row_count = 0;
+    bool already_find = false;
+    for (auto& json_partition : json_info["partitions"]) {
+        for (auto& json_segment : json_partition["segments"]) {
+            auto count = json_segment["row_count"].get<int64_t>();
+            row_count += count;
+            if (entity_num < count) {
+                already_find = true;
+            }
+            if (not already_find && entity_num >= count) {
+                entity_num -= count;
+            }
+            segment_ids.emplace_back(json_segment["id"].get<int64_t>());
+        }
+    }
+    json_out["count"] = row_count;
+    int64_t real_offset = entity_num;
+    int64_t real_page_size = page_size;
+
+    engine::IDNumbers entity_ids;
+    for (const auto seg_id : segment_ids) {
+        engine::IDNumbers temp_ids;
+        STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, collection_name, seg_id, temp_ids));
+        auto ids_begin = real_offset;
+        auto ids_end = std::min(temp_ids.size(), static_cast<size_t>(real_offset + real_page_size));
+        auto new_ids = std::vector<int64_t>(temp_ids.begin() + ids_begin, temp_ids.begin() + ids_end);
+        auto cur_size = entity_ids.size();
+        auto new_size = new_ids.size();
+        entity_ids.resize(cur_size + new_size);
+        memcpy(entity_ids.data() + cur_size, new_ids.data(), new_size * sizeof(int64_t));
+
+        real_page_size -= (ids_end - ids_begin);
+        real_offset = 0;
+    }
+    if (segment_ids.empty()) {
+        return Status::OK();
+    }
+    std::vector<std::string> field_names;
+    STATUS_CHECK(GetEntityByIDs(collection_name, entity_ids, field_names, json_out));
+    return Status::OK();
+}
+
+Status
 WebRequestHandler::GetSegmentVectors(const std::string& collection_name, int64_t segment_id, int64_t page_size,
                                      int64_t offset, nlohmann::json& json_out) {
     engine::IDNumbers vector_ids;
-    STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, 0, segment_id, vector_ids));
+    STATUS_CHECK(req_handler_.ListIDInSegment(context_ptr_, nullptr, segment_id, vector_ids));
 
-    auto ids_begin = std::min(vector_ids.size(), (size_t)offset);
-    auto ids_end = std::min(vector_ids.size(), (size_t)(offset + page_size));
+    auto ids_begin = std::min(vector_ids.size(), static_cast<size_t>(offset));
+    auto ids_end = std::min(vector_ids.size(), static_cast<size_t>(offset + page_size));
 
     auto new_ids = std::vector<int64_t>(vector_ids.begin() + ids_begin, vector_ids.begin() + ids_end);
     nlohmann::json vectors_json;
@@ -335,8 +395,8 @@ WebRequestHandler::GetSegmentIds(const std::string& collection_name, int64_t seg
     std::vector<int64_t> ids;
     auto status = req_handler_.ListIDInSegment(context_ptr_, collection_name, segment_id, ids);
     if (status.ok()) {
-        auto ids_begin = std::min(ids.size(), (size_t)offset);
-        auto ids_end = std::min(ids.size(), (size_t)(offset + page_size));
+        auto ids_begin = std::min(ids.size(), static_cast<size_t>(offset));
+        auto ids_end = std::min(ids.size(), static_cast<size_t>(offset + page_size));
 
         if (ids_begin >= ids_end) {
             json_out["ids"] = std::vector<int64_t>();
@@ -441,7 +501,7 @@ WebRequestHandler::Compact(const nlohmann::json& json, std::string& result_str) 
 
 Status
 WebRequestHandler::GetConfig(std::string& result_str) {
-    std::string cmd = "get_config *";
+    std::string cmd = "get_milvus_config";
     std::string reply;
     auto status = CommandLine(cmd, reply);
     if (status.ok()) {
@@ -586,7 +646,6 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
             if (!vector_param_it.value()["params"].empty()) {
                 vector_query->extra_params = vector_param_it.value()["params"];
             }
-            engine::VectorsData vector_data;
             for (auto& vector_records : vector_param_it.value()["values"]) {
                 if (field_type_.find(vector_name) != field_type_.end()) {
                     if (field_type_.at(vector_name) == engine::DataType::VECTOR_FLOAT) {
@@ -728,6 +787,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         auto boolean_query_json = query_json["bool"];
         auto boolean_query = std::make_shared<query::BooleanQuery>();
         query_ptr_ = std::make_shared<query::Query>();
+        query_ptr_->collection_id = collection_name;
 
         status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr_);
         if (!status.ok()) {
@@ -755,17 +815,17 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         }
 
         auto step = result->result_ids_.size() / result->row_num_;  // topk
-        auto field_data = result->data_chunk_->fixed_fields_;
         for (int64_t i = 0; i < result->row_num_; i++) {
             nlohmann::json raw_result_json;
             for (size_t j = 0; j < step; j++) {
                 nlohmann::json one_result_json;
                 one_result_json["id"] = std::to_string(result->result_ids_.at(i * step + j));
                 one_result_json["distance"] = std::to_string(result->result_distances_.at(i * step + j));
-                nlohmann::json one_entity_json;
+                FloatJson one_entity_json;
                 for (const auto& field : field_mappings) {
                     auto field_name = field.first->GetName();
-                    switch ((int64_t)field.first->GetFtype()) {
+                    auto field_data = result->data_chunk_->fixed_fields_;
+                    switch (field.first->GetFtype()) {
                         case engine::DataType::INT32: {
                             int32_t int32_value;
                             int64_t offset = (i * step + j) * sizeof(int32_t);
@@ -818,10 +878,12 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
                         default: { return Status(SERVER_UNEXPECTED_ERROR, "Return field data type is wrong"); }
                     }
                 }
-                one_result_json["entity"] = one_entity_json;
+                if (!one_entity_json.empty()) {
+                    one_result_json["entity"] = one_entity_json;
+                }
                 raw_result_json.push_back(one_result_json);
             }
-            result_json.emplace_back(raw_result_json);
+            result_json["result"].push_back(raw_result_json);
         }
         result_str = result_json.dump();
     }
@@ -834,17 +896,17 @@ WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohman
                                std::string& result_str) {
     std::vector<int64_t> entity_ids;
     if (!json.contains("ids")) {
-        return Status(BODY_FIELD_LOSS, "Field \"delete\" must contains \"ids\"");
+        return Status(BODY_FIELD_LOSS, R"(Field "delete" must contains "ids")");
     }
     auto ids = json["ids"];
     if (!ids.is_array()) {
-        return Status(BODY_FIELD_LOSS, "\"ids\" must be an array");
+        return Status(BODY_FIELD_LOSS, R"("ids" must be an array)");
     }
 
     for (auto& id : ids) {
         auto id_str = id.get<std::string>();
         if (!ValidateStringIsNumber(id_str).ok()) {
-            return Status(ILLEGAL_BODY, "Members in \"ids\" must be integer string");
+            return Status(ILLEGAL_BODY, R"(Members in "ids" must be integer string)");
         }
         entity_ids.emplace_back(std::stol(id_str));
     }
@@ -878,10 +940,7 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
         }
     }
 
-    std::vector<uint8_t> id_data = data_chunk->fixed_fields_[engine::FIELD_UID]->data_;
-    std::vector<int64_t> id_array(valid_size);
-    memcpy(id_array.data(), id_data.data(), valid_size * sizeof(int64_t));
-    CopyData2Json(data_chunk, field_mappings, id_array, json_out);
+    CopyData2Json(data_chunk, field_mappings, ids, json_out);
     return Status::OK();
 }
 
@@ -891,7 +950,7 @@ WebRequestHandler::GetDevices(DevicesDtoT& devices_dto) {
     auto& system_info = SystemInfo::GetInstance();
 
     devices_dto->cpu = devices_dto->cpu->createShared();
-    devices_dto->cpu->memory = system_info.GetPhysicalMemory() >> 30;
+    devices_dto->cpu->memory = system_info.GetPhysicalMemory();
 
     devices_dto->gpus = devices_dto->gpus.createShared();
 
@@ -905,7 +964,7 @@ WebRequestHandler::GetDevices(DevicesDtoT& devices_dto) {
 
     for (size_t i = 0; i < count; i++) {
         auto device_dto = DeviceInfoDto::createShared();
-        device_dto->memory = device_mems.at(i) >> 30;
+        device_dto->memory = device_mems.at(i);
         devices_dto->gpus->emplace_back("GPU" + OString(std::to_string(i).c_str()), device_dto);
     }
 #endif
@@ -1232,8 +1291,8 @@ WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& re
         offset = 0;
         page_size = collections.size();
     } else {
-        offset = std::min((size_t)offset, collections.size());
-        page_size = std::min(collections.size() - offset, (size_t)page_size);
+        offset = std::min(static_cast<size_t>(offset), collections.size());
+        page_size = std::min(collections.size() - offset, static_cast<size_t>(page_size));
     }
 
     nlohmann::json collections_json;
@@ -1374,14 +1433,14 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
         offset = 0;
         page_size = partition_names.size();
     } else {
-        offset = std::min((size_t)offset, partition_names.size());
-        page_size = std::min(partition_names.size() - offset, (size_t)page_size);
+        offset = std::min(static_cast<size_t>(offset), partition_names.size());
+        page_size = std::min(partition_names.size() - offset, static_cast<size_t>(page_size));
     }
 
     partition_list_dto->count = partition_names.size();
     partition_list_dto->partitions = partition_list_dto->partitions.createShared();
 
-    if (offset < (int64_t)(partition_names.size())) {
+    if (offset < static_cast<int64_t>(partition_names.size())) {
         for (int64_t i = offset; i < page_size + offset; i++) {
             auto partition_dto = PartitionFieldsDto::createShared();
             partition_dto->partition_tag = partition_names.at(i).c_str();
@@ -1569,7 +1628,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
                 if (ids.empty()) {
                     ids.resize(row_num * sizeof(int64_t));
                 }
-                int64_t id = entity.value().get<int64_t>();
+                auto id = entity.value().get<int64_t>();
                 int64_t id_offset = offset * sizeof(int64_t);
                 memcpy(ids.data() + id_offset, &id, sizeof(int64_t));
                 continue;
@@ -1674,7 +1733,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     auto pair = chunk_data.find(engine::FIELD_UID);
     if (pair != chunk_data.end()) {
         int64_t count = pair->second.size() / 8;
-        int64_t* pdata = reinterpret_cast<int64_t*>(pair->second.data());
+        auto pdata = reinterpret_cast<int64_t*>(pair->second.data());
         ids_dto->ids = ids_dto->ids.createShared();
         for (int64_t i = 0; i < count; ++i) {
             ids_dto->ids->push_back(std::to_string(pdata[i]).c_str());
@@ -1690,6 +1749,16 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
                              milvus::server::web::OString& response) {
     auto status = Status::OK();
     try {
+        if (query_params.get("offset") && query_params.get("page_size")) {
+            nlohmann::json json_out;
+            auto offset = std::stoi(query_params.get("offset")->std_str(), nullptr);
+            auto page_size = std::stoi(query_params.get("page_size")->std_str(), nullptr);
+            status = GetPageEntities(collection_name->std_str(), page_size, offset, json_out);
+            AddStatusToJson(json_out, status.code(), status.message());
+            response = json_out.dump().c_str();
+            ASSIGN_RETURN_STATUS_DTO(status);
+        }
+
         auto query_ids = query_params.get("ids");
         if (query_ids == nullptr || query_ids.get() == nullptr) {
             RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param ids is required.");
@@ -1723,6 +1792,7 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         } else {
             json["entities"] = entity_result_json;
         }
+        response = json.dump().c_str();
     } catch (std::exception& e) {
         RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, e.what());
     }
@@ -1815,8 +1885,8 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
             if (j.contains("compact")) {
                 status = Compact(j["compact"], result_str);
             }
-            //        } else if (op->equals("config")) {
-            //            status = SetConfig(j, result_str);
+        } else if (op->equals("config")) {
+            status = SetConfig(j, result_str);
         } else {
             status = Status(UNKNOWN_PATH, "Unknown path: /system/" + op->std_str());
         }

@@ -561,8 +561,9 @@ class TestIndexBinary:
         nq = get_nq
         ids = connect.insert(binary_collection, binary_entities)
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        query, vecs = gen_query_vectors(binary_field_name, binary_entities, top_k, nq)
+        query, vecs = gen_query_vectors(binary_field_name, binary_entities, top_k, nq, metric_type="JACCARD")
         search_param = get_search_param(get_jaccard_index["index_type"], metric_type="JACCARD")
+        logging.getLogger().info(search_param)
         res = connect.search(binary_collection, query, search_params=search_param)
         assert len(res) == nq
 
