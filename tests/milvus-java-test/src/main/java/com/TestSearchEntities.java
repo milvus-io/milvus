@@ -19,199 +19,157 @@ public class TestSearchEntities {
 
     List<List<Float>> queryVectors = Constants.vectors.subList(0, nq);
     List<ByteBuffer> queryVectorsBinary = Constants.vectorsBinary.subList(0, nq);
-    public String searchParamStr = Constants.searchParam;
+    public String dsl = Constants.searchParam;
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_search_collection_not_existed(MilvusClient client, String collectionName)  {
+    public void testSearchCollectionNotExisted(MilvusClient client, String collectionName)  {
         String collectionNameNew = Utils.genUniqueStr(collectionName);
-        SearchParam searchParam = new SearchParam.Builder(collectionNameNew).withDSL(searchParamStr).build();
+        SearchParam searchParam = new SearchParam.Builder(collectionNameNew).withDSL(dsl).build();
         SearchResponse res_search = client.search(searchParam);
         assert (!res_search.getResponse().ok());
     }
 
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_index_IVFLAT(MilvusClient client, String collectionName)  {
-//        IndexType indexType = IndexType.IVFLAT;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
-//        client.insert(insertParam);
-//        client.flush(collectionName);
-//        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
-//        client.createIndex(index);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withFloatVectors(queryVectors)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k).build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
-//        Assert.assertEquals(res_search.size(), nq);
-//        Assert.assertEquals(res_search.get(0).size(), top_k);
-//    }
-//
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_ids_IVFLAT(MilvusClient client, String collectionName)  {
-//        IndexType indexType = IndexType.IVFLAT;
-//        List<Long> vectorIds;
-//        vectorIds = Stream.iterate(0L, n -> n)
-//                .limit(nb)
-//                .collect(Collectors.toList());
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).withVectorIds(vectorIds).build();
-//        InsertResponse res = client.insert(insertParam);
-//        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
-//        client.createIndex(index);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withFloatVectors(queryVectors)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k).build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
-//        Assert.assertEquals(res_search.get(0).get(0).getVectorId(), 0L);
-//    }
-//
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_distance_IVFLAT(MilvusClient client, String collectionName)  {
-//        IndexType indexType = IndexType.IVFLAT;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
-//        InsertResponse res = client.insert(insertParam);
-//        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
-//        client.createIndex(index);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withFloatVectors(queryVectors)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k).build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
-//        double distance = res_search.get(0).get(0).getDistance();
-//        if (collectionName.startsWith("L2")) {
-//            Assert.assertEquals(distance, 0.0, epsilon);
-//        }else if (collectionName.startsWith("IP")) {
-//            Assert.assertEquals(distance, 1.0, epsilon);
-//        }
-//    }
-//
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_partition(MilvusClient client, String collectionName) {
-//        IndexType indexType = IndexType.IVFLAT;
-//        String tag = RandomStringUtils.randomAlphabetic(10);
-//        Response createpResponse = client.createPartition(collectionName, tag);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
-//        InsertResponse res = client.insert(insertParam);
-//        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
-//        client.createIndex(index);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withFloatVectors(queryVectors)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k).build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
-//        double distance = res_search.get(0).get(0).getDistance();
-//        if (collectionName.startsWith("L2")) {
-//            Assert.assertEquals(distance, 0.0, epsilon);
-//        }else if (collectionName.startsWith("IP")) {
-//            Assert.assertEquals(distance, 1.0, epsilon);
-//        }
-//    }
-//
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_partition_not_exited(MilvusClient client, String collectionName) {
-//        IndexType indexType = IndexType.IVFLAT;
-//        String tag = RandomStringUtils.randomAlphabetic(10);
-//        Response createpResponse = client.createPartition(collectionName, tag);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
-//        InsertResponse res = client.insert(insertParam);
-//        String tagNew = RandomStringUtils.randomAlphabetic(10);
-//        List<String> queryTags = new ArrayList<>();
-//        queryTags.add(tagNew);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withFloatVectors(queryVectors)
-//                .withParamsInJson(searchParamStr)
-//                .withPartitionTags(queryTags)
-//                .withTopK(top_k).build();
-//        SearchResponse res_search = client.search(searchParam);
-//        assert (!res_search.getResponse().ok());
-//        Assert.assertEquals(res_search.getQueryResultsList().size(), 0);
-//    }
-//
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_partition_empty(MilvusClient client, String collectionName) {
-//        IndexType indexType = IndexType.IVFLAT;
-//        String tag = RandomStringUtils.randomAlphabetic(10);
-//        Response createpResponse = client.createPartition(collectionName, tag);
-//        String tagNew = "";
-//        List<String> queryTags = new ArrayList<>();
-//        queryTags.add(tagNew);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withFloatVectors(queryVectors)
-//                .withParamsInJson(searchParamStr)
-//                .withPartitionTags(queryTags)
-//                .withTopK(top_k).build();
-//        SearchResponse res_search = client.search(searchParam);
-//        assert (!res_search.getResponse().ok());
-//    }
-//
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_distance_FLAT(MilvusClient client, String collectionName)  {
-//        IndexType indexType = IndexType.FLAT;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
-//        InsertResponse res = client.insert(insertParam);
-//        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
-//        client.createIndex(index);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withFloatVectors(queryVectors)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k).build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
-//        double distance = res_search.get(0).get(0).getDistance();
-//        if (collectionName.startsWith("L2")) {
-//            Assert.assertEquals(distance, 0.0, epsilon);
-//        }else if (collectionName.startsWith("IP")) {
-//            Assert.assertEquals(distance, 1.0, epsilon);
-//        }
-//    }
-//
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_invalid_n_probe(MilvusClient client, String collectionName)  {
-//        int n_probe_new = -1;
-//        String searchParamStrNew = Utils.setSearchParam(n_probe_new);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
-//        client.insert(insertParam);
-//        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
-//        client.createIndex(index);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withFloatVectors(queryVectors)
-//                .withParamsInJson(searchParamStrNew)
-//                .withTopK(top_k).build();
-//        SearchResponse res_search = client.search(searchParam);
-//        assert (!res_search.getResponse().ok());
-//    }
-//
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_count_lt_top_k(MilvusClient client, String collectionName) {
-//        int top_k_new = 100;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(small_vectors).build();
-//        client.insert(insertParam);
-//        client.flush(collectionName);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withFloatVectors(queryVectors)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k_new).build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
-//        Assert.assertEquals(res_search.size(), nq);
-//        Assert.assertEquals(res_search.get(0).size(), small_vectors.size());
-//    }
-//
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_invalid_top_k(MilvusClient client, String collectionName) {
-//        int top_k_new = 0;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
-//        client.insert(insertParam);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withFloatVectors(queryVectors)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k_new).build();
-//        SearchResponse res_search = client.search(searchParam);
-//        assert (!res_search.getResponse().ok());
-//    }
-//
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testSearchCollectionEmpty(MilvusClient client, String collectionName)  {
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchResponse res_search = client.search(searchParam);
+        assert (res_search.getResponse().ok());
+        Assert.assertEquals(res_search.getResultIdsList().size(), 0);
+    }
+
+    // # 3429
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testSearchCollection(MilvusClient client, String collectionName)  {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getEntityIds();
+        client.flush(collectionName);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchResponse res_search = client.search(searchParam);
+        Assert.assertEquals(res_search.getResultIdsList().size(), Constants.nq);
+        Assert.assertEquals(res_search.getResultDistancesList().size(), Constants.nq);
+        Assert.assertEquals(res_search.getResultIdsList().get(0).size(), Constants.topk);
+        Assert.assertEquals(res_search.getResultIdsList().get(0).get(0), ids.get(0));
+        Assert.assertEquals(res_search.getFieldsMap().get(0).size(), top_k);
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testSearchDistance(MilvusClient client, String collectionName)  {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getEntityIds();
+        client.flush(collectionName);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchResponse res_search = client.search(searchParam);
+        for (int i = 0; i < Constants.nq; i++) {
+            double distance = res_search.getResultDistancesList().get(i).get(0);
+            Assert.assertEquals(distance, 0.0, Constants.epsilon);
+        }
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testSearchDistanceIP(MilvusClient client, String collectionName)  {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getEntityIds();
+        client.flush(collectionName);
+        String dsl = Utils.setSearchParam("IP", Constants.vectors.subList(0, nq), top_k, n_probe);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchResponse res_search = client.search(searchParam);
+        for (int i = 0; i < Constants.nq; i++) {
+            double distance = res_search.getResultDistancesList().get(i).get(0);
+            Assert.assertEquals(distance, 1.0, Constants.epsilon);
+        }
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testSearchPartition(MilvusClient client, String collectionName) {
+        String tag = "tag";
+        List<String> queryTags = new ArrayList<>();
+        queryTags.add(tag);
+        client.createPartition(collectionName, tag);
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        client.flush(collectionName);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).withPartitionTags(queryTags).build();
+        SearchResponse res_search = client.search(searchParam);
+        Assert.assertEquals(res_search.getResultDistancesList().size(), 0);
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testSearchPartitionNotExited(MilvusClient client, String collectionName) {
+        String tag = Utils.genUniqueStr("tag");
+        List<String> queryTags = new ArrayList<>();
+        queryTags.add(tag);
+        client.createPartition(collectionName, tag);
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert (res.getResponse().ok());
+        client.flush(collectionName);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).withPartitionTags(queryTags).build();
+        SearchResponse res_search = client.search(searchParam);
+        Assert.assertEquals(res_search.getResultDistancesList().size(), 0);
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testSearchInvalidNProbe(MilvusClient client, String collectionName)  {
+        int n_probe_new = -1;
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getEntityIds();
+        client.flush(collectionName);
+        Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
+        Response res_create = client.createIndex(index);
+        String dsl = Utils.setSearchParam(Constants.defaultMetricType, Constants.vectors.subList(0, nq), top_k, n_probe_new);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchResponse res_search = client.search(searchParam);
+        assert(!res_search.getResponse().ok());
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testSearchCountLessThanTopK(MilvusClient client, String collectionName) {
+        int top_k_new = 100;
+        int nb = 50;
+        List<Map<String,Object>> entities = Utils.genDefaultEntities(Constants.dimension, nb, Utils.genVectors(nb, Constants.dimension, false));
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(entities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getEntityIds();
+        client.flush(collectionName);
+        String dsl = Utils.setSearchParam(Constants.defaultMetricType, Constants.vectors.subList(0, nq), top_k_new, n_probe);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchResponse res_search = client.search(searchParam);
+        assert(res_search.getResponse().ok());
+        Assert.assertEquals(res_search.getResultIdsList().size(), Constants.nq);
+        Assert.assertEquals(res_search.getResultDistancesList().size(), Constants.nq);
+        Assert.assertEquals(res_search.getResultIdsList().get(0).size(), nb);
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testSearchInvalidTopK(MilvusClient client, String collectionName) {
+        int top_k = -1;
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getEntityIds();
+        client.flush(collectionName);
+//        Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
+//        Response res_create = client.createIndex(index);
+        String dsl = Utils.setSearchParam(Constants.defaultMetricType, Constants.vectors.subList(0, nq), top_k, n_probe);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchResponse res_search = client.search(searchParam);
+        assert(!res_search.getResponse().ok());
+    }
+
 //    // Binary tests
 //    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void test_search_collection_not_existed_binary(MilvusClient client, String collectionName)  {
-//        String collectionNameNew = collectionName + "_";
+//    public void testSearchCollectionNotExistedBinary(MilvusClient client, String collectionName)  {
+//        String collectionNameNew = Utils.genUniqueStr(collectionName);
 //        SearchParam searchParam = new SearchParam.Builder(collectionNameNew)
 //                .withBinaryVectors(queryVectorsBinary)
 //                .withParamsInJson(searchParamStr)

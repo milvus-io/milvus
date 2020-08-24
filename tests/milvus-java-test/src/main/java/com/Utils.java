@@ -152,19 +152,22 @@ public class Utils {
         JSONObject searchParam = new JSONObject();
         JSONObject fieldParam = new JSONObject();
         fieldParam.put("topk", topk);
-        fieldParam.put("metricType", metricType);
-        fieldParam.put("queryVectors", queryVectors);
+        fieldParam.put("metric_type", metricType);
+        fieldParam.put("query", queryVectors);
+        fieldParam.put("type", Constants.vectorType);
         JSONObject tmpSearchParam = new JSONObject();
         tmpSearchParam.put("nprobe", nprobe);
         fieldParam.put("params", tmpSearchParam);
         JSONObject vectorParams = new JSONObject();
         vectorParams.put(Constants.floatFieldName, fieldParam);
         searchParam.put("vector", vectorParams);
-        JSONObject boolParam = new JSONObject();
-        JSONArray mustParam = new JSONArray();
-        mustParam.add(searchParam);
-        boolParam.put("bool", mustParam);
-        return JSONObject.toJSONString(boolParam);
+        JSONObject param = new JSONObject();
+        JSONObject mustParam = new JSONObject();
+        JSONArray tmp = new JSONArray();
+        tmp.add(searchParam);
+        mustParam.put("must", tmp);
+        param.put("bool", mustParam);
+        return JSONObject.toJSONString(param);
     }
 
     public static String setBinarySearchParam(String metricType, List<ByteBuffer> queryVectors, int topk, int nprobe) {
@@ -180,8 +183,8 @@ public class Utils {
         vectorParams.put(Constants.floatFieldName, fieldParam);
         searchParam.put("vector", vectorParams);
         JSONObject boolParam = new JSONObject();
-        JSONArray mustParam = new JSONArray();
-        mustParam.add(searchParam);
+        JSONObject mustParam = new JSONObject();
+        mustParam.put("must", new JSONArray().add(searchParam));
         boolParam.put("bool", mustParam);
         return JSONObject.toJSONString(searchParam);
     }
