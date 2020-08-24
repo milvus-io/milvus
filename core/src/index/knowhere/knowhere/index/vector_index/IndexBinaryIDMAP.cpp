@@ -53,64 +53,13 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
-    //    QueryImpl(rows, (uint8_t*)p_data, k, p_dist, p_id, Config());
     QueryImpl(rows, (uint8_t*)p_data, k, p_dist, p_id, config);
     auto ret_ds = std::make_shared<Dataset>();
-    if (index_->metric_type == faiss::METRIC_Hamming) {
-        auto pf_dist = (float*)malloc(p_dist_size);
-        int32_t* pi_dist = (int32_t*)p_dist;
-        for (int i = 0; i < elems; i++) {
-            *(pf_dist + i) = (float)(*(pi_dist + i));
-        }
-        ret_ds->Set(meta::IDS, p_id);
-        ret_ds->Set(meta::DISTANCE, pf_dist);
-        free(p_dist);
-    } else {
-        ret_ds->Set(meta::IDS, p_id);
-        ret_ds->Set(meta::DISTANCE, p_dist);
-    }
-    return ret_ds;
-}
-
-#if 0
-DatasetPtr
-BinaryIDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-
-    auto dim = dataset_ptr->Get<int64_t>(meta::DIM);
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
-
-    int64_t k = config[meta::TOPK].get<int64_t>();
-    auto elems = rows * k;
-    size_t p_id_size = sizeof(int64_t) * elems;
-    size_t p_dist_size = sizeof(float) * elems;
-    auto p_id = (int64_t*)malloc(p_id_size);
-    auto p_dist = (float*)malloc(p_dist_size);
-
-    auto* pdistances = (int32_t*)p_dist;
-    index_->search_by_id(rows, p_data, k, pdistances, p_id, bitset_);
-
-    auto ret_ds = std::make_shared<Dataset>();
-    if (index_->metric_type == faiss::METRIC_Hamming) {
-        auto pf_dist = (float*)malloc(p_dist_size);
-        int32_t* pi_dist = (int32_t*)p_dist;
-        for (int i = 0; i < elems; i++) {
-            *(pf_dist + i) = (float)(*(pi_dist + i));
-        }
-        ret_ds->Set(meta::IDS, p_id);
-        ret_ds->Set(meta::DISTANCE, pf_dist);
-        free(p_dist);
-    } else {
-        ret_ds->Set(meta::IDS, p_id);
-        ret_ds->Set(meta::DISTANCE, p_dist);
-    }
+    ret_ds->Set(meta::IDS, p_id);
+    ret_ds->Set(meta::DISTANCE, p_dist);
 
     return ret_ds;
 }
-#endif
 
 int64_t
 BinaryIDMAP::Count() {
@@ -187,39 +136,25 @@ BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) 
     index_->add_with_ids(rows, (uint8_t*)p_data, new_ids.data());
 }
 
-#if 0
-DatasetPtr
-BinaryIDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-
-    //    GETBINARYTENSOR(dataset_ptr)
-    // auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
-    auto elems = dataset_ptr->Get<int64_t>(meta::DIM);
-
-    size_t p_x_size = sizeof(uint8_t) * elems;
-    auto p_x = (uint8_t*)malloc(p_x_size);
-
-    index_->get_vector_by_id(1, p_data, p_x, bitset_);
-
-    auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::TENSOR, p_x);
-    return ret_ds;
-}
-#endif
-
 void
 BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
                        const Config& config) {
-    int32_t* pdistances = (int32_t*)distances;
-
     auto flat_index = dynamic_cast<faiss::IndexBinaryIDMap*>(index_.get())->index;
     auto default_type = flat_index->metric_type;
     if (config.contains(Metric::TYPE))
         flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    index_->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
+
+    int32_t* i_distances = reinterpret_cast<int32_t*>(distances);
+    index_->search(n, (uint8_t*)data, k, i_distances, labels, bitset_);
+
+    // if hamming, it need transform int32 to float
+    if (flat_index->metric_type == faiss::METRIC_Hamming) {
+        int64_t num = n * k;
+        for (int64_t i = 0; i < num; i++) {
+            distances[i] = static_cast<float>(i_distances[i]);
+        }
+    }
+
     flat_index->metric_type = default_type;
 }
 
