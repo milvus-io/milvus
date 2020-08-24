@@ -8,8 +8,6 @@ import java.util.List;
 import java.util.Map;
 
 public class TestGetEntityByID {
-    int dimension = 128;
-    int nb = 8000;
     public List<Long> get_ids = Utils.toListIds(1111);
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
