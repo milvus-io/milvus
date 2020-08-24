@@ -44,6 +44,7 @@ CheckMagic(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path) {
     bool result = !strcmp(ch, MAGIC);
 
     fs_ptr->reader_ptr_->Close();
+    free(ch);
     return result;
 }
 
@@ -83,7 +84,7 @@ ReadHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string& file_pa
         result.insert(std::make_pair(pair[0], pair[1]));
     }
     fs_ptr->reader_ptr_->Close();
-
+    free(ch);
     return result;
 }
 
@@ -109,7 +110,7 @@ CalculateSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, 
     fs_ptr->reader_ptr_->Read(ch, size);
     std::uint8_t result = crc32c::Crc32c(ch, size);
     fs_ptr->reader_ptr_->Close();
-
+    free(ch);
     return result;
 }
 
@@ -148,6 +149,7 @@ CheckSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path) {
     fs_ptr->reader_ptr_->Close();
 
     auto sum = static_cast<uint8_t>(atoi(record));
+    free(record);
     return sum == result;
 }
 
