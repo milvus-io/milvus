@@ -515,6 +515,14 @@ class TestIndexBinary:
 
     @pytest.fixture(
         scope="function",
+        params=gen_binary_index()
+    )
+    def get_l2_index(self, request, connect):
+        request.param["metric_type"] = "L2"
+        return request.param
+
+    @pytest.fixture(
+        scope="function",
         params=[
             1,
             10,
@@ -566,6 +574,20 @@ class TestIndexBinary:
         logging.getLogger().info(search_param)
         res = connect.search(binary_collection, query, search_params=search_param)
         assert len(res) == nq
+
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index_invalid_metric_type_binary(self, connect, binary_collection, get_l2_index):
+        '''
+        target: test create index interface with invalid metric type
+        method: add entitys into binary connection, flash, create index with L2 metric type.
+        expected: return create_index failure
+        '''
+        # insert 6000 vectors
+        ids = connect.insert(binary_collection, binary_entities)
+        connect.flush([binary_collection])
+
+        with pytest.raises(Exception) as e:
+            res = connect.create_index(binary_collection, binary_field_name, get_l2_index)
 
     """
     ******************************************************************
