@@ -50,3 +50,11 @@ jobs:
       - name: Docker Run
         run: |
           docker-compose run ${{ matrix.service }}
+      - name: Docker Push
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          docker-compose push ${{ matrix.service }}
