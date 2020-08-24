@@ -111,12 +111,12 @@ services:
     shm_size: 2G
     environment:
       <<: *ccache
-    volumes: &centos-cuda-volumes
+    volumes:
       - .:/milvus:delegated
       - ${ARCH}-centos-${CENTOS}-cuda-cache:/build:delegated
     networks:
       - milvus
-    command: &centos-cuda-command
+    command:
       ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -l -g -n"]
 
 networks:

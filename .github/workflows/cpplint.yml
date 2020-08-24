@@ -8,7 +8,7 @@ on:
       - 'ci/**'
       - 'core/**'
       - 'docker/build_env/cpu/**'
-      - '.github/workflows/core.yml'
+      - '.github/workflows/cpplint.yml'
       - docker-compose.yml
       - '!**.md'
       - '!ci/jenkins/**'
@@ -17,7 +17,7 @@ on:
     paths:
       - 'ci/**'
       - 'core/**'
-      - '.github/workflows/core.yml'
+      - '.github/workflows/cpplint.yml'
       - docker-compose.yml
       - '!**.md'
       - '!ci/jenkins/**'
