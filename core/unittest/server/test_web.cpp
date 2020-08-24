@@ -727,7 +727,13 @@ TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
 }
 
 TEST_F(WebControllerTest, SYSTEM_INFO) {
-    auto response = client_ptr->cmd("config", "", "", connection_ptr);
+    std::string req = R"(
+    {
+        "cache.cache_size": "3221225472b"
+    })";
+    auto response = client_ptr->op("config", req.c_str(), connection_ptr);
+
+    response = client_ptr->cmd("config", "", "", connection_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
     auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
     ASSERT_TRUE(result_json.contains("cluster.enable"));
