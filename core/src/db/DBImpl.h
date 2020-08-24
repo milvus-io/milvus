@@ -137,7 +137,7 @@ class DBImpl : public DB, public ConfigObserver {
     TimingMetricThread();
 
     void
-    StartBuildIndexTask(const std::vector<std::string>& collection_names);
+    StartBuildIndexTask(const std::vector<std::string>& collection_names, bool reset_retry_times);
 
     void
     BackgroundBuildIndexTask(std::vector<std::string> collection_names);
@@ -162,6 +162,12 @@ class DBImpl : public DB, public ConfigObserver {
 
     void
     ResumeIfLast();
+
+    void
+    MarkIndexFailedSegments(snapshot::ID_TYPE collection_id, const snapshot::IDS_TYPE& failed_ids);
+
+    void
+    IgnoreIndexFailedSegments(snapshot::ID_TYPE collection_id, snapshot::IDS_TYPE& segment_ids);
 
  private:
     DBOptions options_;
@@ -188,6 +194,11 @@ class DBImpl : public DB, public ConfigObserver {
     ThreadPool index_thread_pool_;
     std::mutex index_result_mutex_;
     std::list<std::future<void>> index_thread_results_;
+
+    using SegmentIndexRetryMap = std::unordered_map<snapshot::ID_TYPE, int64_t>;
+    using CollectionIndexRetryMap = std::unordered_map<snapshot::ID_TYPE, SegmentIndexRetryMap>;
+    CollectionIndexRetryMap index_retry_map_;
+    std::mutex index_retry_mutex_;
 
     std::mutex build_index_mutex_;
 
