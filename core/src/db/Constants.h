@@ -30,5 +30,7 @@ constexpr int64_t DEFAULT_SEGMENT_ROW_COUNT = 100000;  // default row count per 
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * MB;
 constexpr int64_t MAX_WAL_FILE_SIZE = 256 * MB;
 
+constexpr int64_t BUILD_INEDX_RETRY_TIMES = 3;
+
 }  // namespace engine
 }  // namespace milvus
