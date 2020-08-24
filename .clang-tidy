@@ -20,7 +20,13 @@ Checks: >
     -*, clang-diagnostic-*, -clang-diagnostic-error,
     clang-analyzer-*, -clang-analyzer-alpha*,
     google-*, -google-runtime-references, -google-readability-todo,
-    modernize-*, -modernize-pass-by-value
+    modernize-*, -modernize-pass-by-value, -modernize-use-equals-default,
+    performance-faster-string-find, performance-for-range-copy,
+    performance-implicit-conversion-in-loop, performance-inefficient-algorithm,
+    performance-trivially-destructible, performance-inefficient-vector-operation,
+    performance-move-const-arg, performance-move-constructor-init,
+    performance-noexcept-move-constructor, performance-no-automatic-move,
+    performance-type-promotion-in-math-fn
 
 # produce HeaderFilterRegex from core/build-support/lint_exclusions.txt with:
 # echo -n '^?!('; sed -e 's/*/\.*/g' core/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'

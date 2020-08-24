@@ -42,6 +42,10 @@ public final class Constants {
 
     public static final List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
 
+    public static final List<Map<String,Object>> defaultFields = Utils.genDefaultFields(dimension,false);
+
+    public static final List<Map<String,Object>> defaultBinaryFields = Utils.genDefaultFields(dimension,true);
+
     public static final List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension, nb, vectors);
 
     public static final List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultBinaryEntities(dimension, nb, vectorsBinary);

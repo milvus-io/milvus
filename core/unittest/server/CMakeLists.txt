@@ -25,11 +25,9 @@ add_executable( test_server
                 # ${server_files}
                 # ${server_init_files}
                 )
-get_target_property( var server INCLUDE_DIRECTORIES)
-#set_target_properties( server PROPERTIES INTERFACE_INCLUDE_DIRECTORIES $<BUILD_INTERFACE:${var}>)
 
 target_link_libraries( test_server
-        ${UNITTEST_LIBS}
+                            ${UNITTEST_LIBS}
                                 server
                                  milvus_engine
                                  metrics
