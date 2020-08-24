@@ -71,6 +71,8 @@ def _check_all(cmd, filenames, ignore_checks):
                 for line in stdout.splitlines():
                     if any([len(re.findall(check, line)) > 0 for check in ignore_checks]):
                         cnt_info += line.replace(" error: ", " ignore: ").decode("utf-8") + "\n"
+                    else:
+                        cnt_info += line.decode("utf-8") + "\n"
                 cnt_error += _count_key(cnt_info, " error: ")
                 cnt_warning += _count_key(cnt_info, " warning: ")
                 cnt_ignore += _count_key(cnt_info, " ignore: ")
