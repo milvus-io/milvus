@@ -43,6 +43,7 @@
 #include <src/scheduler/job/BuildIndexJob.h>
 #include <limits>
 #include <utility>
+#include <unordered_set>
 
 namespace milvus {
 namespace engine {
@@ -435,6 +436,36 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     auto id_field = ss->GetField(FIELD_UID);
     if (id_field == nullptr) {
         return Status(DB_ERROR, "Field '_id' not found");
+    }
+
+    // check field names
+    auto field_names = ss->GetFieldNames();
+    std::unordered_set<std::string> collection_field_names;
+    for (auto& name : field_names) {
+        collection_field_names.insert(name);
+    }
+    collection_field_names.erase(engine::FIELD_UID);
+
+    std::unordered_set<std::string> chunk_field_names;
+    for (auto& pair : data_chunk->fixed_fields_) {
+        chunk_field_names.insert(pair.first);
+    }
+    for (auto& pair : data_chunk->variable_fields_) {
+        chunk_field_names.insert(pair.first);
+    }
+    chunk_field_names.erase(engine::FIELD_UID);
+
+    if (collection_field_names.size() != chunk_field_names.size()) {
+        std::string msg = "Collection has " + std::to_string(collection_field_names.size()) +
+            " fields while the insert data has " + std::to_string(chunk_field_names.size()) + " fields";
+        return Status(DB_ERROR, msg);
+    } else {
+        for (auto& name : chunk_field_names) {
+            if (collection_field_names.find(name) == collection_field_names.end()) {
+                std::string msg = "The field " + name + " is not defined in collection mapping";
+                return Status(DB_ERROR, msg);
+            }
+        }
     }
 
     // check id field existence
