@@ -36,13 +36,13 @@ class Status {
 
     Status(const Status& s);
 
-    Status(Status&& s);
+    Status(Status&& s) noexcept;
 
     Status&
     operator=(const Status& s);
 
     Status&
-    operator=(Status&& s);
+    operator=(Status&& s) noexcept;
 
     static Status
     OK() {
