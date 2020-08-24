@@ -307,8 +307,8 @@ WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohman
 }
 
 Status
-WebRequestHandler::GetPageEntities(const std::string& collection_name, const int64_t page_size, const int64_t offset,
-                                   nlohmann::json& json_out) {
+WebRequestHandler::GetPageEntities(const std::string& collection_name, const std::string& partition_tag,
+                                   const int64_t page_size, const int64_t offset, nlohmann::json& json_out) {
     std::string collection_info;
     STATUS_CHECK(req_handler_.GetCollectionStats(context_ptr_, collection_name, collection_info));
     nlohmann::json json_info = nlohmann::json::parse(collection_info);
@@ -324,6 +324,9 @@ WebRequestHandler::GetPageEntities(const std::string& collection_name, const int
     int64_t row_count = 0;
     bool already_find = false;
     for (auto& json_partition : json_info["partitions"]) {
+        if (!partition_tag.empty() && json_partition["tag"] != partition_tag) {
+            continue;
+        }
         for (auto& json_segment : json_partition["segments"]) {
             auto count = json_segment["row_count"].get<int64_t>();
             row_count += count;
@@ -333,7 +336,9 @@ WebRequestHandler::GetPageEntities(const std::string& collection_name, const int
             if (not already_find && entity_num >= count) {
                 entity_num -= count;
             }
-            segment_ids.emplace_back(json_segment["id"].get<int64_t>());
+            if (already_find) {
+                segment_ids.emplace_back(json_segment["id"].get<int64_t>());
+            }
         }
     }
     json_out["count"] = row_count;
@@ -1731,6 +1736,8 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
             ids_dto->ids->push_back(std::to_string(pdata[i]).c_str());
         }
     }
+    ids_dto->code = status.code();
+    ids_dto->message = status.message().c_str();
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1745,7 +1752,11 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
             nlohmann::json json_out;
             auto offset = std::stoi(query_params.get("offset")->std_str(), nullptr);
             auto page_size = std::stoi(query_params.get("page_size")->std_str(), nullptr);
-            status = GetPageEntities(collection_name->std_str(), page_size, offset, json_out);
+            std::string partition_tag;
+            if (query_params.get("partition_tag")) {
+                partition_tag = query_params.get("partition_tag")->std_str();
+            }
+            status = GetPageEntities(collection_name->std_str(), partition_tag, page_size, offset, json_out);
             AddStatusToJson(json_out, status.code(), status.message());
             response = json_out.dump().c_str();
             ASSIGN_RETURN_STATUS_DTO(status);
@@ -1780,9 +1791,9 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         nlohmann::json json;
         AddStatusToJson(json, status.code(), status.message());
         if (entity_result_json.empty()) {
-            json["entities"] = std::vector<int64_t>();
+            json = std::vector<int64_t>();
         } else {
-            json["entities"] = entity_result_json;
+            json = entity_result_json;
         }
         response = json.dump().c_str();
     } catch (std::exception& e) {
