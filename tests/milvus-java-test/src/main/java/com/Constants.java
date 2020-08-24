@@ -10,7 +10,19 @@ public final class Constants {
 
     public static final int n_list = 128;
 
+    public static final int n_probe = 64;
+
+    public static final int nq = 5;
+
+    public static final int topk = 10;
+
     public static final int nb = 8000;
+
+    public static final double epsilon = 0.001;
+
+    public static final String vectorType = "float";
+
+    public static final String defaultMetricType = "L2";
 
     public static final String indexType = "IVF_SQ8";
 
@@ -39,4 +51,9 @@ public final class Constants {
     public static final List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension, nb, vectors);
 
     public static final List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultBinaryEntities(dimension, nb, vectorsBinary);
+
+    public static final String searchParam = Utils.setSearchParam(defaultMetricType, vectors.subList(0, nq), topk, n_probe);
+
+    public static final String binarySearchParam = Utils.setBinarySearchParam(defaultBinaryMetricType, vectorsBinary.subList(0, nq), topk, n_probe);
+
 }
