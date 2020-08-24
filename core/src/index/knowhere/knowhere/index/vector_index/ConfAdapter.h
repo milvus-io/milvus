@@ -49,7 +49,7 @@ class IVFSQConfAdapter : public IVFConfAdapter {
 class IVFPQConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg, const IndexMode mode) override;
+    CheckTrain(Config& oricfg, IndexMode& mode) override;
 
     static void
     GetValidMList(int64_t dimension, std::vector<int64_t>& resset);

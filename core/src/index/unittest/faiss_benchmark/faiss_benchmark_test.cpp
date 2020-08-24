@@ -346,11 +346,11 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
     std::unordered_map<size_t, std::string> mode_str_map = {
         {MODE_CPU, "MODE_CPU"}, {MODE_MIX, "MODE_MIX"}, {MODE_GPU, "MODE_GPU"}};
 
-    double copy_time = 0.0;
     faiss::Index *gpu_index, *index;
     if (query_mode != MODE_CPU) {
         faiss::gpu::GpuClonerOptions option;
         option.allInGpu = true;
+        double copy_time = 0.0;
 
         faiss::IndexComposition index_composition;
         index_composition.index = cpu_index;

@@ -46,6 +46,7 @@ namespace knowhere {
         }                                                                                                \
     }
 
+
 #define CheckStrByValues(key, container)                                                                     \
     if (!oricfg.contains(key) || !oricfg[key].is_string()) {                                                 \
         return false;                                                                                        \
@@ -131,7 +132,7 @@ IVFSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 }
 
 bool
-IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
+IVFPQConfAdapter::CheckTrain(Config& oricfg, IndexMode& mode) {
     static int64_t DEFAULT_NBITS = 8;
     static int64_t MAX_NLIST = 999999;
     static int64_t MIN_NLIST = 1;
@@ -156,17 +157,25 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     // static int64_t MAX_POINTS_PER_CENTROID = 256;
     // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
 
-    std::vector<int64_t> resset;
     int64_t dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
-    IVFPQConfAdapter::GetValidMList(dimension, resset);
+    int64_t m = knowhere::IndexParams::m;
 
-    CheckIntByValues(knowhere::IndexParams::m, resset);
+#ifdef MILVUS_GPU_VERSION
+    if(mode == knowhere::IndexMode::MODE_GPU && !IVFPQConfAdapter::GetValidGPUM(dimension, m)) {
+        mode = knowhere::IndexMode::MODE_CPU;
+    }
+#endif
+    if(mode == knowhere::IndexMode::MODE_CPU && !IVFPQConfAdapter::GetValidCPUM(dimension, m)) {
+        return false;
+    }
 
     return true;
 }
 
-void
-IVFPQConfAdapter::GetValidMList(int64_t dimension, std::vector<int64_t>& resset) {
+
+bool
+IVFPQConfAdapter::GetValidGPUM(int64_t dimension, int64_t m) {
+    std::vector<int64_t> resset;
     resset.clear();
     /*
      * Faiss 1.6
@@ -185,6 +194,20 @@ IVFPQConfAdapter::GetValidMList(int64_t dimension, std::vector<int64_t>& resset)
             }
         }
     }
+    auto finder = std::find(std::begin(container), std::end(container), m);
+    if (finder == std::end(container)) {
+        return false;
+    } else {
+        return true;
+    }
+}
+
+bool
+IVFPQConfAdapter::GetValidCPUM(int64_t dimension, int64_t m) {
+    if(m <= dimension && (m % dimension) == 0)
+        return true;
+    else
+        return false;
 }
 
 bool
