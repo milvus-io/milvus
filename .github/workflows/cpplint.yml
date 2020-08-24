@@ -1,0 +1,52 @@
+name: Cpplint
+
+# This workflow is triggered on pushes or pull request to the repository.
+on:
+  push:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'ci/**'
+      - 'core/**'
+      - 'docker/build_env/cpu/**'
+      - '.github/workflows/core.yml'
+      - docker-compose.yml
+      - '!**.md'
+      - '!ci/jenkins/**'
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'ci/**'
+      - 'core/**'
+      - '.github/workflows/core.yml'
+      - docker-compose.yml
+      - '!**.md'
+      - '!ci/jenkins/**'
+
+jobs:
+  centos:
+    name: ${{ matrix.title }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        name:
+          - cpplint
+        include:
+          - name: cpplint
+            service: cpplint
+            title: Milvus CppLint
+    steps:
+      # This step checks out a copy of your repository.
+      - name: Checkout Milvus
+        uses: actions/checkout@v2
+      - name: Docker Pull
+        shell: bash
+        run: |
+          docker-compose pull --ignore-pull-failures ${{ matrix.service }}
+      - name: Docker Build
+        shell: bash
+        run: |
+          docker-compose build ${{ matrix.service }}
+      - name: Docker Run
+        run: |
+          docker-compose run ${{ matrix.service }}

@@ -31,82 +31,43 @@ pipeline {
         HELM_BRANCH = "0.11.0"
     }
     stages {
-        stage ('Milvus Parallel Stage') {
-            parallel {
-                stage ('Milvus Build and Unittest') {
-                    matrix {
-                        axes {
-                            axis {
-                                name 'OS_NAME'
-                                values 'centos7'
-                            }
-                            axis {
-                                name 'CPU_ARCH'
-                                values 'amd64'
-                            }
-                            axis {
-                                name 'BINARY_VERSION'
-                                values 'gpu', 'cpu'
-                            }
-                        }
-                        environment {
-                            PACKAGE_VERSION = VersionNumber([
-                                versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}'
-                            ]);
-                        }
-                        agent {
-                            kubernetes {
-                                label "${OS_NAME}-${BINARY_VERSION}-build-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
-                                defaultContainer 'jnlp'
-                                customWorkspace '/home/jenkins/agent/workspace'
-                                yamlFile "ci/jenkins/pod/milvus-${BINARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
-                            }
-                        }
-                        stages {
-                            stage('Build and Unittest') {
-                                steps {
-                                    container("milvus-${BINARY_VERSION}-build-env") {
-                                        MPLModule('Milvus Build')
-                                        MPLModule('Unittest')
-                                        MPLModule('Coverage')
-                                        MPLModule('Package Build')
-                                    }
-                                }
-                            }
-                        }
+        stage ('Milvus Build and Unittest') {
+            matrix {
+                axes {
+                    axis {
+                        name 'OS_NAME'
+                        values 'centos7'
+                    }
+                    axis {
+                        name 'CPU_ARCH'
+                        values 'amd64'
+                    }
+                    axis {
+                        name 'BINARY_VERSION'
+                        values 'gpu', 'cpu'
                     }
                 }
-                stage ('Milvus Lint') {
-                    matrix {
-                        axes {
-                            axis {
-                                name 'OS_NAME'
-                                values 'centos7'
-                            }
-                            axis {
-                                name 'CPU_ARCH'
-                                values 'amd64'
-                            }
-                            axis {
-                                name 'BINARY_VERSION'
-                                values 'gpu', 'cpu'
-                            }
-                        }
-                        agent {
-                            kubernetes {
-                                label "${OS_NAME}-${BINARY_VERSION}-lint-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
-                                defaultContainer 'jnlp'
-                                customWorkspace '/home/jenkins/agent/workspace'
-                                yamlFile "ci/jenkins/pod/milvus-${BINARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
-                            }
-                        }
-                        stages {
-                            stage('CppLint') {
-                                steps {
-                                    container("milvus-${BINARY_VERSION}-build-env") {
-                                        MPLModule('Cpp Lint')
-                                    }
-                                }
+                environment {
+                    PACKAGE_VERSION = VersionNumber([
+                        versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}'
+                    ]);
+                }
+                agent {
+                    kubernetes {
+                        label "${OS_NAME}-${BINARY_VERSION}-build-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                        defaultContainer 'jnlp'
+                        customWorkspace '/home/jenkins/agent/workspace'
+                        yamlFile "ci/jenkins/pod/milvus-${BINARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
+                    }
+                }
+                stages {
+                    stage('Build and Unittest') {
+                        steps {
+                            container("milvus-${BINARY_VERSION}-build-env") {
+                                MPLModule('Milvus Build')
+                                MPLModule('Unittest')
+                                MPLModule('Coverage')
+                                MPLModule('Package Build')
                             }
                         }
                     }
