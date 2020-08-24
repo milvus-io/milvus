@@ -10,6 +10,8 @@ pull_request_rules:
         - "status-success=AMD64 Ubuntu 18.04"
         - "status-success=AMD64 CentOS 7"
         - "status-success=Codacy/PR Quality Review"
+        - "status-success=Cpplint / Milvus CppLint"
+        - "status-success=Cpplint / Milvus GPU Version CppLint"
       actions:
         merge:
           method: squash

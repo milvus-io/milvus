@@ -84,9 +84,4 @@ public class TestCompact {
         Assert.assertEquals(segmentsBefore.get("data_size"), segmentsAfter.get("data_size"));
     }
 
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testCompactInvalidThreshold(MilvusClient client, String collectionName){
-
-    }
-
 }

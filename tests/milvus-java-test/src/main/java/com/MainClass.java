@@ -85,6 +85,7 @@ public class MainClass {
         collection = new Object[][]{{client, collectionName}};
         return collection;
     }
+
     @DataProvider(name="Collection")
     public Object[][] provideCollection() throws ConnectFailedException, InterruptedException {
         Object[][] collection = genCollection(false,true);

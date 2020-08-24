@@ -370,10 +370,10 @@ SystemInfo::Octets() {
         lastline = line;
     }
     std::vector<size_t> space_position;
-    size_t space_pos = lastline.find(" ");
+    size_t space_pos = lastline.find(' ');
     while (space_pos != std::string::npos) {
         space_position.push_back(space_pos);
-        space_pos = lastline.find(" ", space_pos + 1);
+        space_pos = lastline.find(' ', space_pos + 1);
     }
     // InOctets is between 6th and 7th " " and OutOctets is between 7th and 8th " "
     size_t inoctets_begin = space_position[6] + 1;

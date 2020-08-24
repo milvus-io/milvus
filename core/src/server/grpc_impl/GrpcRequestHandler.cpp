@@ -1021,6 +1021,9 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
 
         response->set_collection_name(request->collection_name());
         for (auto& field_kv : collection_schema.fields_) {
+            if (field_kv.first == engine::FIELD_UID) {
+                continue;
+            }
             auto field = response->add_fields();
             auto& field_name = field_kv.first;
             auto& field_schema = field_kv.second;
@@ -1323,7 +1326,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         auto grpc_float_size = request->fields(i).attr_record().float_value_size();
         auto grpc_double_size = request->fields(i).attr_record().double_value_size();
         const auto& field = request->fields(i);
-        auto field_name = field.field_name();
+        auto& field_name = field.field_name();
 
         std::vector<uint8_t> temp_data;
         if (grpc_int32_size > 0) {

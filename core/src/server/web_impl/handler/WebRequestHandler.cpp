@@ -541,25 +541,17 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
 
     std::vector<std::string> cmds;
     for (auto& el : json.items()) {
+        auto ekey = el.key();
         auto evalue = el.value();
-        if (!evalue.is_object()) {
-            return Status(ILLEGAL_BODY, "Invalid payload format, the root value must be json map");
-        }
 
-        for (auto& iel : el.value().items()) {
-            auto ievalue = iel.value();
-            if (!(ievalue.is_string() || ievalue.is_number() || ievalue.is_boolean())) {
-                return Status(ILLEGAL_BODY, "Config value must be one of string, numeric or boolean");
-            }
-            std::ostringstream ss;
-            if (ievalue.is_string()) {
-                std::string vle = ievalue;
-                ss << "set_config " << el.key() << "." << iel.key() << " " << vle;
-            } else {
-                ss << "set_config " << el.key() << "." << iel.key() << " " << ievalue;
-            }
-            cmds.emplace_back(ss.str());
+        std::ostringstream ss;
+        if (evalue.is_string()) {
+            std::string vle = evalue;
+            ss << "set_config " << el.key() << " " << vle;
+        } else {
+            ss << "set_config " << el.key() << " " << evalue;
         }
+        cmds.emplace_back(ss.str());
     }
 
     std::string msg;
