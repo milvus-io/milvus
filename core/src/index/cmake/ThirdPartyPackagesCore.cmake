@@ -553,7 +553,7 @@ macro(build_faiss)
     endif ()
 
     if (MILVUS_GPU_VERSION)
-        if (MILVUS_CUDA_ARCH STREQUAL "DEFAULT")
+        if (NOT MILVUS_CUDA_ARCH OR MILVUS_CUDA_ARCH STREQUAL "DEFAULT")
             set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
                 "--with-cuda-arch=-gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75"

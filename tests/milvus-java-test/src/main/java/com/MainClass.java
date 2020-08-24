@@ -69,7 +69,7 @@ public class MainClass {
     private Object[][] genCollection(boolean isBinary, boolean autoId) throws ConnectFailedException {
         Object[][] collection;
         String collectionName = Utils.genUniqueStr("collection");
-        List<Map<String, Object>> defaultFields = Utils.genDefaultFields(dimension,isBinary);
+        List<Map<String, Object>> defaultFields = Utils.genDefaultFields(dimension, isBinary);
         String jsonParams = String.format("{\"segment_row_count\": %s, \"auto_id\": %s}",segmentRowCount, autoId);
         // Generate connection instance
         MilvusClient client = new MilvusGrpcClient();
@@ -86,6 +86,7 @@ public class MainClass {
         collection = new Object[][]{{client, collectionName}};
         return collection;
     }
+
     @DataProvider(name="Collection")
     public Object[][] provideCollection() throws ConnectFailedException, InterruptedException {
         Object[][] collection = genCollection(false,true);

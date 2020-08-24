@@ -71,7 +71,7 @@ class TestInfoBase:
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
         assert res['segment_row_count'] == segment_row_count
-        assert len(res["fields"]) == 3
+        assert len(res["fields"]) == 2
         for field in res["fields"]:
             if field["type"] == filter_field:
                 assert field["name"] == filter_field["name"]
@@ -173,7 +173,7 @@ class TestInfoBase:
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
         assert res['segment_row_count'] == segment_row_count
-        assert len(res["fields"]) == 3
+        assert len(res["fields"]) == 2
         for field in res["fields"]:
             if field["type"] == filter_field:
                 assert field["name"] == filter_field["name"]
