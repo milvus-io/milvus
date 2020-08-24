@@ -1,5 +1,7 @@
 package com;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import io.milvus.client.*;
 import com.alibaba.fastjson.JSONObject;
 import org.apache.commons.lang3.RandomStringUtils;
@@ -146,9 +148,41 @@ public class Utils {
         return indexParams;
     }
 
-    public static String setSearchParam(int nprobe) {
+    public static String setSearchParam(String metricType, List<List<Float>> queryVectors, int topk, int nprobe) {
         JSONObject searchParam = new JSONObject();
-        searchParam.put("nprobe", nprobe);
+        JSONObject fieldParam = new JSONObject();
+        fieldParam.put("topk", topk);
+        fieldParam.put("metricType", metricType);
+        fieldParam.put("queryVectors", queryVectors);
+        JSONObject tmpSearchParam = new JSONObject();
+        tmpSearchParam.put("nprobe", nprobe);
+        fieldParam.put("params", tmpSearchParam);
+        JSONObject vectorParams = new JSONObject();
+        vectorParams.put(Constants.floatFieldName, fieldParam);
+        searchParam.put("vector", vectorParams);
+        JSONObject boolParam = new JSONObject();
+        JSONArray mustParam = new JSONArray();
+        mustParam.add(searchParam);
+        boolParam.put("bool", mustParam);
+        return JSONObject.toJSONString(boolParam);
+    }
+
+    public static String setBinarySearchParam(String metricType, List<ByteBuffer> queryVectors, int topk, int nprobe) {
+        JSONObject searchParam = new JSONObject();
+        JSONObject fieldParam = new JSONObject();
+        fieldParam.put("topk", topk);
+        fieldParam.put("metricType", metricType);
+        fieldParam.put("queryVectors", queryVectors);
+        JSONObject tmpSearchParam = new JSONObject();
+        tmpSearchParam.put("nprobe", nprobe);
+        fieldParam.put("params", tmpSearchParam);
+        JSONObject vectorParams = new JSONObject();
+        vectorParams.put(Constants.floatFieldName, fieldParam);
+        searchParam.put("vector", vectorParams);
+        JSONObject boolParam = new JSONObject();
+        JSONArray mustParam = new JSONArray();
+        mustParam.add(searchParam);
+        boolParam.put("bool", mustParam);
         return JSONObject.toJSONString(searchParam);
     }
 

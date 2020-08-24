@@ -1,46 +1,34 @@
-//package com;
-//
-//import io.milvus.client.*;
-//import org.apache.commons.lang3.RandomStringUtils;
-//import org.testng.Assert;
-//import org.testng.annotations.Test;
-//
-//import java.nio.ByteBuffer;
-//import java.util.*;
-//import java.util.stream.Collectors;
-//import java.util.stream.Stream;
-//
-//public class TestSearchVectors {
-//    int dimension = 128;
-//    int n_list = 1024;
-//    int default_n_list = 16384;
-//    int nb = 10000;
-//    int small_nb = 10;
-//    int n_probe = 20;
-//    int top_k = 10;
-//    int nq = 5;
-//    double epsilon = 0.001;
-//    String indexType = "IVF_SQ8";
-//    String defaultIndexType = "FLAT";
-//    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
-//    List<List<Float>> small_vectors = Utils.genVectors(small_nb, dimension, true);
-//    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
-//    List<List<Float>> queryVectors = vectors.subList(0, nq);
-//    List<ByteBuffer> queryVectorsBinary = vectorsBinary.subList(0, nq);
-//    String indexParam = Utils.setIndexParam(n_list);
-//    public String searchParamStr = Utils.setSearchParam(n_probe);
-//
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_collection_not_existed(MilvusClient client, String collectionName)  {
-//        String collectionNameNew = collectionName + "_";
-//        SearchParam searchParam = new SearchParam.Builder(collectionNameNew)
-//                .withFloatVectors(queryVectors)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k).build();
-//        SearchResponse res_search = client.search(searchParam);
-//        assert (!res_search.getResponse().ok());
-//    }
-//
+package com;
+
+import io.milvus.client.*;
+import org.apache.commons.lang3.RandomStringUtils;
+import org.testng.Assert;
+import org.testng.annotations.Test;
+
+import java.nio.ByteBuffer;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+public class TestSearchEntities {
+
+    int small_nb = 10;
+    int n_probe = 20;
+    int top_k = 10;
+    int nq = 5;
+
+    List<List<Float>> queryVectors = Constants.vectors.subList(0, nq);
+    List<ByteBuffer> queryVectorsBinary = Constants.vectorsBinary.subList(0, nq);
+    public String searchParamStr = Constants.searchParam;
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_search_collection_not_existed(MilvusClient client, String collectionName)  {
+        String collectionNameNew = Utils.genUniqueStr(collectionName);
+        SearchParam searchParam = new SearchParam.Builder(collectionNameNew).withDSL(searchParamStr).build();
+        SearchResponse res_search = client.search(searchParam);
+        assert (!res_search.getResponse().ok());
+    }
+
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
 //    public void test_search_index_IVFLAT(MilvusClient client, String collectionName)  {
 //        IndexType indexType = IndexType.IVFLAT;
@@ -314,5 +302,5 @@
 //        SearchResponse res_search = client.search(searchParam);
 //        assert (!res_search.getResponse().ok());
 //    }
-//
-//}
+
+}
