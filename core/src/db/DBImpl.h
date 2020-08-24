@@ -85,6 +85,7 @@ class DBImpl : public DB, public ConfigObserver {
     Status
     DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) override;
 
+    // Note: the data_chunk will be consumed with this method, and only return id field to client
     Status
     Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
            idx_t op_id) override;
@@ -103,7 +104,7 @@ class DBImpl : public DB, public ConfigObserver {
     Status
     ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) override;
 
-    // if the input field_names is empty, will load all fields of this collection
+    // Note: if the input field_names is empty, will load all fields of this collection
     Status
     LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
                    const std::vector<std::string>& field_names, bool force) override;
@@ -114,6 +115,8 @@ class DBImpl : public DB, public ConfigObserver {
     Status
     Flush() override;
 
+    // Note: the threshold is percent of deleted entities that trigger compact action,
+    // default is 0.0, means compact will create a new segment even only one entity is deleted
     Status
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) override;
 

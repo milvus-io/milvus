@@ -35,7 +35,6 @@ Segment::SetFields(int64_t collection_id) {
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id));
 
-    auto collection = ss->GetCollection();
     auto& fields = ss->GetResources<snapshot::Field>();
     for (auto& kv : fields) {
         const snapshot::FieldPtr& field = kv.second.Get();
