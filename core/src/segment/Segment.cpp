@@ -51,7 +51,7 @@ Segment::AddField(const snapshot::FieldPtr& field) {
     }
 
     std::string name = field->GetName();
-    DataType ftype = static_cast<DataType>(field->GetFtype());
+    auto ftype = static_cast<DataType>(field->GetFtype());
     if (IsVectorField(field)) {
         json params = field->GetParams();
         if (params.find(knowhere::meta::DIM) == params.end()) {
