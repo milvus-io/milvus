@@ -58,14 +58,11 @@ DBWrapper::StartService() {
 
     opt.wal_enable_ = config.wal.enable();
 
-    // disable wal for ci devtest
-    opt.wal_enable_ = false;
-
     if (opt.wal_enable_) {
         int64_t wal_buffer_size = config.wal.buffer_size();
         wal_buffer_size /= (1024 * 1024);
         opt.buffer_size_ = wal_buffer_size;
-        opt.mxlog_path_ = config.wal.path();
+        opt.wal_path_ = config.wal.path();
     }
 
     // engine config

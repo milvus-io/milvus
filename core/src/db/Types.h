@@ -187,7 +187,7 @@ struct DBOptions {
     // wal relative configurations
     bool wal_enable_ = false;
     int64_t buffer_size_ = 256;
-    std::string mxlog_path_ = "/tmp/milvus/wal/";
+    std::string wal_path_ = "/tmp/milvus/wal/";
 
     // transcript configurations
     bool transcript_enable_ = false;
