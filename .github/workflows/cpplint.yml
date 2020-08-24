@@ -31,10 +31,14 @@ jobs:
       matrix:
         name:
           - cpplint
+          - cpplint-gpu
         include:
           - name: cpplint
             service: cpplint
             title: Milvus CppLint
+          - name: cpplint-gpu
+            service: cpplint-gpu
+            title: Milvus GPU Version CppLint
     steps:
       # This step checks out a copy of your repository.
       - name: Checkout Milvus
