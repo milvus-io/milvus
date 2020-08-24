@@ -3,19 +3,12 @@ package com;
 import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
-
-import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.Map;
 
 public class TestCollectionCount {
     int segmentRowCount = 5000;
-    int dimension = 128;
-    int nb = 10000;
-    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
-    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
-    List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension,nb,vectors);
-    List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultBinaryEntities(dimension,nb,vectorsBinary);
+    int dimension = Constants.dimension;
+    int nb = Constants.nb;
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testCollectionCountNoVectors(MilvusClient client, String collectionName) {
@@ -39,7 +32,7 @@ public class TestCollectionCount {
 
         InsertParam insertParam =
                 new InsertParam.Builder(collectionName)
-                        .withFields(defaultEntities)
+                        .withFields(Constants.defaultEntities)
                         .build();
         InsertResponse insertResponse = client.insert(insertParam);
         // Insert returns a list of entity ids that you will be using (if you did not supply the yourself) to reference the entities you just inserted
@@ -54,7 +47,7 @@ public class TestCollectionCount {
     public void testCollectionCountBinary(MilvusClient client, String collectionName) throws InterruptedException {
         // Add vectors
         InsertParam insertParam = new InsertParam.Builder(collectionName)
-                .withFields(defaultBinaryEntities)
+                .withFields(Constants.defaultBinaryEntities)
                 .build();
         client.insert(insertParam);
         client.flush(collectionName);
@@ -75,7 +68,7 @@ public class TestCollectionCount {
             Assert.assertEquals(cteateRes.ok(), true);
             // Add vectors
             InsertParam insertParam = new InsertParam.Builder(collectionNameNew)
-                    .withFields(defaultEntities)
+                    .withFields(Constants.defaultEntities)
                     .build();
             InsertResponse insertRes = client.insert(insertParam);
             Assert.assertEquals(insertRes.ok(), true);
