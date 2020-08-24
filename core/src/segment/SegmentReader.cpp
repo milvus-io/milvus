@@ -259,12 +259,14 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             return Status(DB_ERROR, "Field is not vector type");
         }
 
+        // load uids
+        std::vector<int64_t> uids;
+        STATUS_CHECK(LoadUids(uids));
+
         // load deleted doc
         auto& segment = segment_visitor_->GetSegment();
-        auto& snapshot = segment_visitor_->GetSnapshot();
-        auto segment_commit = snapshot->GetSegmentCommitBySegmentId(segment->GetID());
-        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-            std::make_shared<faiss::ConcurrentBitset>(segment_commit->GetRowCount());
+
+        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(uids.size());
 
         segment::DeletedDocsPtr deleted_docs_ptr;
         STATUS_CHECK(LoadDeletedDocs(deleted_docs_ptr));
@@ -274,10 +276,6 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 concurrent_bitset_ptr->set(offset);
             }
         }
-
-        // load uids
-        std::vector<int64_t> uids;
-        STATUS_CHECK(LoadUids(uids));
 
         knowhere::BinarySet index_data;
         knowhere::BinaryPtr raw_data, compress_data;
@@ -304,7 +302,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 engine::BinaryDataPtr raw;
                 STATUS_CHECK(LoadField(field_name, raw, false));
 
-                auto dataset = knowhere::GenDataset(segment_commit->GetRowCount(), dimension, raw->data_.data());
+                auto dataset = knowhere::GenDataset(uids.size(), dimension, raw->data_.data());
 
                 // construct IDMAP index
                 knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
