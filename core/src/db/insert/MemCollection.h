@@ -18,6 +18,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "config/ConfigMgr.h"
@@ -56,10 +57,7 @@ class MemCollection {
 
  private:
     Status
-    ApplyDeletesToMem();
-
-    Status
-    ApplyDeletesToFiles();
+    ApplyDeleteToFile();
 
  private:
     int64_t collection_id_;
@@ -68,7 +66,7 @@ class MemCollection {
     MemSegmentMap mem_segments_;
     std::mutex mem_mutex_;
 
-    DeleteIDMap ids_to_delete_;
+    std::unordered_set<idx_t> ids_to_delete_;
 };
 
 using MemCollectionPtr = std::shared_ptr<MemCollection>;
