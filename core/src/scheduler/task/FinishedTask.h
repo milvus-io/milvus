@@ -11,17 +11,25 @@
 
 #pragma once
 
-#include <string>
-#include "utils/Status.h"
+#include "scheduler/task/Task.h"
 
-namespace milvus {
-namespace server {
+#include <memory>
 
-class InstanceLockCheck {
+namespace milvus::scheduler {
+
+class FinishedTask : public Task {
  public:
-    static Status
-    Check(const std::string& path);
-};  // InstanceLockCheck
+    static std::shared_ptr<FinishedTask>
+    Create();
 
-}  // namespace server
-}  // namespace milvus
+ public:
+    FinishedTask();
+
+    Status
+    OnLoad(LoadType type, uint8_t device_id) override;
+
+    Status
+    OnExecute() override;
+};
+
+}  // namespace milvus::scheduler

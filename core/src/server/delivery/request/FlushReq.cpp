@@ -45,7 +45,6 @@ FlushReq::OnExecute() {
     }
 
     TimeRecorderAuto rc(hdr);
-    Status status = Status::OK();
     LOG_SERVER_DEBUG_ << hdr;
 
     // flush all collections

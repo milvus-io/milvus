@@ -5,8 +5,8 @@ Usage:
   $0 [flags] [Arguments]
 
     -l [ARTIFACTORY_URL]          Artifactory URL
-    --cache_dir=[CCACHE_DIR]      Ccache directory
-    -f [FILE] or --file=[FILE]    Ccache compress package file
+    --cache_dir=[CACHE_DIR]       Cache directory
+    -f [FILE] or --file=[FILE]    Cache compress package file
     -h or --help                  Print help information
 
 
@@ -30,7 +30,7 @@ while true ; do
                 --cache_dir)
                         case "$2" in
                                 "") echo "Option cache_dir, no argument"; exit 1 ;;
-                                *)  CCACHE_DIR=$2 ; shift 2 ;;
+                                *)  CACHE_DIR=$2 ; shift 2 ;;
                         esac ;;
                 -f|--file)
                         case "$2" in
@@ -44,8 +44,6 @@ while true ; do
 done
 
 # Set defaults for vars modified by flags to this script
-CCACHE_DIR=${CCACHE_DIR:="${HOME}/.ccache"}
-PACKAGE_FILE=${PACKAGE_FILE:="ccache-${OS_NAME}-${BUILD_ENV_IMAGE_ID}.tar.gz"}
 BRANCH_NAMES=$(git log --decorate | head -n 1 | sed 's/.*(\(.*\))/\1/' | sed 's=[a-zA-Z]*\/==g' | awk -F", " '{$1=""; print $0}')
 
 if [[ -z "${ARTIFACTORY_URL}" || "${ARTIFACTORY_URL}" == "" ]];then
@@ -53,7 +51,17 @@ if [[ -z "${ARTIFACTORY_URL}" || "${ARTIFACTORY_URL}" == "" ]];then
     exit 1
 fi
 
-function check_ccache() {
+if [[ -z "${CACHE_DIR}" ]]; then
+    echo "You have not input CACHE_DIR !"
+    exit 1
+fi
+
+if [[ -z "${PACKAGE_FILE}" ]]; then
+    echo "You have not input PACKAGE_FILE !"
+    exit 1
+fi
+
+function check_cache() {
     BRANCH=$1
     echo "fetching ${BRANCH}/${PACKAGE_FILE}"
     wget -q --spider "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}"
@@ -63,14 +71,14 @@ function check_ccache() {
 function download_file() {
     BRANCH=$1
     wget -q "${ARTIFACTORY_URL}/${BRANCH}/${PACKAGE_FILE}" && \
-    mkdir -p "${CCACHE_DIR}" && \
-    tar zxf "${PACKAGE_FILE}" -C "${CCACHE_DIR}" && \
+    mkdir -p "${CACHE_DIR}" && \
+    tar zxf "${PACKAGE_FILE}" -C "${CACHE_DIR}" && \
     rm ${PACKAGE_FILE}
     return $?
 }
 
 if [[ -n "${CHANGE_TARGET}" && "${BRANCH_NAME}" =~ "PR-" ]];then
-    check_ccache ${CHANGE_TARGET}
+    check_cache ${CHANGE_TARGET}
     if [[ $? == 0 ]];then
         download_file ${CHANGE_TARGET}
         if [[ $? == 0 ]];then
@@ -79,7 +87,7 @@ if [[ -n "${CHANGE_TARGET}" && "${BRANCH_NAME}" =~ "PR-" ]];then
         fi
     fi
 
-    check_ccache ${BRANCH_NAME}
+    check_cache ${BRANCH_NAME}
     if [[ $? == 0 ]];then
         download_file ${BRANCH_NAME}
         if [[ $? == 0 ]];then
@@ -92,7 +100,7 @@ fi
 for CURRENT_BRANCH in ${BRANCH_NAMES}
 do
     if [[ "${CURRENT_BRANCH}" != "HEAD" ]];then
-        check_ccache ${CURRENT_BRANCH}
+        check_cache ${CURRENT_BRANCH}
         if [[ $? == 0 ]];then
             download_file ${CURRENT_BRANCH}
             if [[ $? == 0 ]];then

@@ -24,8 +24,7 @@ namespace milvus::engine::meta {
 class SqliteEngine : public MetaEngine {
  public:
     explicit SqliteEngine(const DBMetaOptions& options);
-
-    ~SqliteEngine();
+    virtual ~SqliteEngine();
 
  public:
     Status

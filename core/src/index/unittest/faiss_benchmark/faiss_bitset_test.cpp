@@ -64,32 +64,32 @@ elapsed() {
 }
 
 void
-normalize(float* arr, size_t nq, size_t dim) {
-    for (size_t i = 0; i < nq; i++) {
+normalize(float* arr, int32_t nq, int32_t dim) {
+    for (int32_t i = 0; i < nq; i++) {
         double vecLen = 0.0, inv_vecLen = 0.0;
-        for (size_t j = 0; j < dim; j++) {
+        for (int32_t j = 0; j < dim; j++) {
             double val = arr[i * dim + j];
             vecLen += val * val;
         }
         inv_vecLen = 1.0 / std::sqrt(vecLen);
-        for (size_t j = 0; j < dim; j++) {
+        for (int32_t j = 0; j < dim; j++) {
             arr[i * dim + j] = (float)(arr[i * dim + j] * inv_vecLen);
         }
     }
 }
 
 void*
-hdf5_read(const std::string& file_name, const std::string& dataset_name, H5T_class_t dataset_class, size_t& d_out,
-          size_t& n_out) {
+hdf5_read(const std::string& file_name, const std::string& dataset_name, H5T_class_t dataset_class, int32_t& d_out,
+          int32_t& n_out) {
     hid_t file, dataset, datatype, dataspace, memspace;
-    H5T_class_t t_class;   /* data type class */
-    hsize_t dimsm[3];      /* memory space dimensions */
-    hsize_t dims_out[2];   /* dataset dimensions */
-    hsize_t count[2];      /* size of the hyperslab in the file */
-    hsize_t offset[2];     /* hyperslab offset in the file */
-    hsize_t count_out[3];  /* size of the hyperslab in memory */
-    hsize_t offset_out[3]; /* hyperslab offset in memory */
-    void* data_out;        /* output buffer */
+    H5T_class_t t_class;      /* data type class */
+    hsize_t dimsm[3];         /* memory space dimensions */
+    hsize_t dims_out[2];      /* dataset dimensions */
+    hsize_t count[2];         /* size of the hyperslab in the file */
+    hsize_t offset[2];        /* hyperslab offset in the file */
+    hsize_t count_out[3];     /* size of the hyperslab in memory */
+    hsize_t offset_out[3];    /* hyperslab offset in memory */
+    void* data_out = nullptr; /* output buffer */
 
     /* Open the file and the dataset. */
     file = H5Fopen(file_name.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -160,7 +160,7 @@ get_index_file_name(const std::string& ann_test_name, const std::string& index_k
 }
 
 bool
-parse_ann_test_name(const std::string& ann_test_name, size_t& dim, faiss::MetricType& metric_type) {
+parse_ann_test_name(const std::string& ann_test_name, int32_t& dim, faiss::MetricType& metric_type) {
     size_t pos1, pos2;
 
     if (ann_test_name.empty())
@@ -187,14 +187,14 @@ parse_ann_test_name(const std::string& ann_test_name, size_t& dim, faiss::Metric
 }
 
 int32_t
-GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::idx_t* index, size_t ground_k, size_t k,
-                  size_t nq, int32_t index_add_loops) {
-    size_t min_k = std::min(ground_k, k);
+GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::idx_t* index, int32_t ground_k,
+                  int32_t k, int32_t nq, int32_t index_add_loops) {
+    int32_t min_k = std::min(ground_k, k);
     int hit = 0;
-    for (int i = 0; i < nq; i++) {
+    for (int32_t i = 0; i < nq; i++) {
         std::set<faiss::Index::idx_t> ground(ground_index + i * ground_k,
                                              ground_index + i * ground_k + min_k / index_add_loops);
-        for (int j = 0; j < min_k; j++) {
+        for (int32_t j = 0; j < min_k; j++) {
             faiss::Index::idx_t id = index[i * k + j];
             if (ground.count(id) > 0) {
                 hit++;
@@ -206,7 +206,7 @@ GetResultHitCount(const faiss::Index::idx_t* ground_index, const faiss::Index::i
 
 #if DEBUG_VERBOSE
 void
-print_array(const char* header, bool is_integer, const void* arr, size_t nq, size_t k) {
+print_array(const char* header, bool is_integer, const void* arr, int32_t nq, int32_t k) {
     const int ROW = 10;
     const int COL = 10;
     assert(ROW <= nq);
@@ -229,7 +229,7 @@ print_array(const char* header, bool is_integer, const void* arr, size_t nq, siz
 
 void
 load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std::string& index_key,
-               faiss::gpu::StandardGpuResources& res, const faiss::MetricType metric_type, const size_t dim,
+               faiss::gpu::StandardGpuResources& res, const faiss::MetricType metric_type, const int32_t dim,
                int32_t index_add_loops, QueryMode mode = MODE_CPU) {
     double t0 = elapsed();
 
@@ -244,7 +244,7 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
         printf("[%.3f s] Reading index file: %s\n", elapsed() - t0, index_file_name.c_str());
         cpu_index = faiss::read_index(index_file_name.c_str());
     } catch (...) {
-        size_t nb, d;
+        int32_t nb, d;
         printf("[%.3f s] Loading HDF5 file: %s\n", elapsed() - t0, ann_file_name.c_str());
         float* xb = (float*)hdf5_read(ann_file_name, HDF5_DATASET_TRAIN, H5T_FLOAT, d, nb);
         assert(d == dim || !"dataset does not have correct dimension");
@@ -254,21 +254,21 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
             normalize(xb, nb, d);
         }
 
-        printf("[%.3f s] Creating CPU index \"%s\" d=%ld\n", elapsed() - t0, index_key.c_str(), d);
+        printf("[%.3f s] Creating CPU index \"%s\" d=%d\n", elapsed() - t0, index_key.c_str(), d);
         cpu_index = faiss::index_factory(d, index_key.c_str(), metric_type);
 
         printf("[%.3f s] Cloning CPU index to GPU\n", elapsed() - t0);
         gpu_index = faiss::gpu::index_cpu_to_gpu(&res, GPU_DEVICE_IDX, cpu_index);
         delete cpu_index;
 
-        printf("[%.3f s] Training on %ld vectors\n", elapsed() - t0, nb);
+        printf("[%.3f s] Training on %d vectors\n", elapsed() - t0, nb);
         gpu_index->train(nb, xb);
 
         // add index multiple times to get ~1G data set
         for (int i = 0; i < index_add_loops; i++) {
-            printf("[%.3f s] No.%d Indexing database, size %ld*%ld\n", elapsed() - t0, i, nb, d);
+            printf("[%.3f s] No.%d Indexing database, size %d*%d\n", elapsed() - t0, i, nb, d);
             std::vector<faiss::Index::idx_t> xids(nb);
-            for (int t = 0; t < nb; t++) {
+            for (int32_t t = 0; t < nb; t++) {
                 xids[t] = i * nb + t;
             }
             gpu_index->add_with_ids(nb, xb, xids.data());
@@ -294,10 +294,10 @@ load_base_data(faiss::Index*& index, const std::string& ann_test_name, const std
 }
 
 void
-load_query_data(faiss::Index::distance_t*& xq, size_t& nq, const std::string& ann_test_name,
-                const faiss::MetricType metric_type, const size_t dim) {
+load_query_data(faiss::Index::distance_t*& xq, int32_t& nq, const std::string& ann_test_name,
+                const faiss::MetricType metric_type, const int32_t dim) {
     double t0 = elapsed();
-    size_t d;
+    int32_t d;
 
     const std::string ann_file_name = ann_test_name + HDF5_POSTFIX;
 
@@ -311,16 +311,16 @@ load_query_data(faiss::Index::distance_t*& xq, size_t& nq, const std::string& an
 }
 
 void
-load_ground_truth(faiss::Index::idx_t*& gt, size_t& k, const std::string& ann_test_name, const size_t nq) {
+load_ground_truth(faiss::Index::idx_t*& gt, int32_t& k, const std::string& ann_test_name, const int32_t nq) {
     const std::string ann_file_name = ann_test_name + HDF5_POSTFIX;
 
     // load ground-truth and convert int to long
-    size_t nq2;
+    int32_t nq2;
     int* gt_int = (int*)hdf5_read(ann_file_name, HDF5_DATASET_NEIGHBORS, H5T_INTEGER, k, nq2);
     assert(nq2 == nq || !"incorrect nb of ground truth index");
 
     gt = new faiss::Index::idx_t[k * nq];
-    for (int i = 0; i < k * nq; i++) {
+    for (int32_t i = 0; i < k * nq; i++) {
         gt[i] = gt_int[i];
     }
     delete[] gt_int;
@@ -341,7 +341,7 @@ load_ground_truth(faiss::Index::idx_t*& gt, size_t& k, const std::string& ann_te
 }
 
 faiss::ConcurrentBitsetPtr
-CreateBitset(size_t size, int32_t percentage) {
+CreateBitset(int32_t size, int32_t percentage) {
     if (percentage < 0 || percentage > 100) {
         assert(false);
     }
@@ -349,7 +349,7 @@ CreateBitset(size_t size, int32_t percentage) {
     faiss::ConcurrentBitsetPtr bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(size);
     if (percentage != 0) {
         int32_t step = 100 / percentage;
-        for (int64_t i = 0; i < size; i += step) {
+        for (int32_t i = 0; i < size; i += step) {
             bitset_ptr->set(i);
         }
     }
@@ -359,22 +359,22 @@ CreateBitset(size_t size, int32_t percentage) {
 void
 test_with_nprobes(const std::string& ann_test_name, const std::string& index_key, faiss::Index* cpu_index,
                   faiss::gpu::StandardGpuResources& res, const QueryMode query_mode, const faiss::Index::distance_t* xq,
-                  const faiss::Index::idx_t* gt, const std::vector<size_t> nprobes, const int32_t index_add_loops,
+                  const faiss::Index::idx_t* gt, const std::vector<int32_t>& nprobes, const int32_t index_add_loops,
                   const int32_t search_loops) {
     double t0 = elapsed();
 
-    const std::vector<size_t> NQ = {100};
-    const std::vector<size_t> K = {100};
-    const size_t GK = 100;  // topk of ground truth
+    const std::vector<int32_t> NQ = {100};
+    const std::vector<int32_t> K = {100};
+    const int32_t GK = 100;  // topk of ground truth
 
-    std::unordered_map<size_t, std::string> mode_str_map = {
+    std::unordered_map<int32_t, std::string> mode_str_map = {
         {MODE_CPU, "MODE_CPU"}, {MODE_MIX, "MODE_MIX"}, {MODE_GPU, "MODE_GPU"}};
 
-    double copy_time = 0.0;
-    faiss::Index *gpu_index, *index;
+    faiss::Index *gpu_index = nullptr, *index = nullptr;
     if (query_mode != MODE_CPU) {
         faiss::gpu::GpuClonerOptions option;
         option.allInGpu = true;
+        double copy_time = 0.0;
 
         faiss::IndexComposition index_composition;
         index_composition.index = cpu_index;
@@ -426,6 +426,8 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                 delete cpu_index;
                 index = gpu_index;
                 break;
+            default:
+                break;
         }
     } else {
         index = cpu_index;
@@ -461,11 +463,11 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
         faiss::Index::distance_t* D = new faiss::Index::distance_t[NQ.back() * K.back()];
 
         for (size_t j = 0; j < K.size(); j++) {
-            size_t t_k = K[j];
+            int32_t t_k = K[j];
             for (size_t i = 0; i < NQ.size(); i++) {
-                size_t t_nq = NQ[i];
+                int32_t t_nq = NQ[i];
 
-                printf("\n%s | %s - %s | nq = %4ld, k = %4ld, nprobe=%lu\n", ann_test_name.c_str(), index_key.c_str(),
+                printf("\n%s | %s - %s | nq = %4d, k = %4d, nprobe=%d\n", ann_test_name.c_str(), index_key.c_str(),
                        mode_str_map[query_mode].c_str(), t_nq, t_k, nprobe);
                 printf("================================================================================\n");
                 for (size_t s = 0; s < bitset_array.size(); s++) {
@@ -508,14 +510,14 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
 
 void
 test_ann_hdf5(const std::string& ann_test_name, const std::string& cluster_type, const std::string& index_type,
-              const QueryMode query_mode, int32_t index_add_loops, const std::vector<size_t>& nprobes,
+              const QueryMode query_mode, int32_t index_add_loops, const std::vector<int32_t>& nprobes,
               int32_t search_loops) {
     double t0 = elapsed();
 
     faiss::gpu::StandardGpuResources res;
 
     faiss::MetricType metric_type;
-    size_t dim;
+    int32_t dim;
 
     if (query_mode == MODE_MIX && index_type != "SQ8Hybrid") {
         assert(index_type == "SQ8Hybrid" || !"Only SQ8Hybrid support MODE_MIX");
@@ -529,7 +531,7 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& cluster_type,
         return;
     }
 
-    size_t nq, k;
+    int32_t nq, k;
     faiss::Index* index;
     faiss::Index::distance_t* xq;
     faiss::Index::idx_t* gt;  // ground-truth index
@@ -540,7 +542,7 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& cluster_type,
     printf("[%.3f s] Loading queries\n", elapsed() - t0);
     load_query_data(xq, nq, ann_test_name, metric_type, dim);
 
-    printf("[%.3f s] Loading ground truth for %ld queries\n", elapsed() - t0, nq);
+    printf("[%.3f s] Loading ground truth for %d queries\n", elapsed() - t0, nq);
     load_ground_truth(gt, k, ann_test_name, nq);
 
     test_with_nprobes(ann_test_name, index_key, index, res, query_mode, xq, gt, nprobes, index_add_loops, search_loops);
@@ -565,7 +567,7 @@ test_ann_hdf5(const std::string& ann_test_name, const std::string& cluster_type,
  *************************************************************************************/
 
 TEST(FAISSTEST, BENCHMARK) {
-    std::vector<size_t> param_nprobes = {32, 128};
+    std::vector<int32_t> param_nprobes = {32, 128};
     const int32_t SEARCH_LOOPS = 1;
     const int32_t SIFT_INSERT_LOOPS = 1;
 

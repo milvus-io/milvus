@@ -26,8 +26,41 @@ WalProxy::WalProxy(const DBPtr& db, const DBOptions& options) : DBProxy(db, opti
 }
 
 Status
+WalProxy::Start() {
+    // let service start
+    auto status = db_->Start();
+    if (!status.ok()) {
+        return status;
+    }
+
+    if (options_.wal_enable_) {
+        WalManager::GetInstance().Start(options_);
+        WalManager::GetInstance().Recovery(db_);
+    }
+
+    return status;
+}
+
+Status
+WalProxy::Stop() {
+    auto status = db_->Stop();
+
+    if (options_.wal_enable_) {
+        WalManager::GetInstance().Stop();
+    }
+
+    return status;
+}
+
+Status
+WalProxy::DropCollection(const std::string& collection_name) {
+    WalManager::GetInstance().DropCollection(collection_name);
+    return db_->DropCollection(collection_name);
+}
+
+Status
 WalProxy::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
-                 id_t op_id) {
+                 idx_t op_id) {
     // write operation into disk
     InsertEntityOperationPtr op = std::make_shared<InsertEntityOperation>();
     op->collection_name_ = collection_name;
@@ -38,25 +71,13 @@ WalProxy::Insert(const std::string& collection_name, const std::string& partitio
 }
 
 Status
-WalProxy::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, id_t op_id) {
+WalProxy::DeleteEntityByID(const std::string& collection_name, const IDNumbers& entity_ids, idx_t op_id) {
     // write operation into disk
     DeleteEntityOperationPtr op = std::make_shared<DeleteEntityOperation>();
     op->collection_name_ = collection_name;
     op->entity_ids_ = entity_ids;
 
     return WalManager::GetInstance().RecordOperation(op, db_);
-}
-
-Status
-WalProxy::Flush(const std::string& collection_name) {
-    auto status = db_->Flush(collection_name);
-    return status;
-}
-
-Status
-WalProxy::Flush() {
-    auto status = db_->Flush();
-    return status;
 }
 
 }  // namespace engine

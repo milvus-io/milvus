@@ -61,7 +61,7 @@ InsertReq::OnExecute() {
 
         // step 1: check collection existence
         bool exist = false;
-        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
         if (!exist) {
             return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
@@ -76,7 +76,7 @@ InsertReq::OnExecute() {
         }
 
         // step 3: check insert data limitation
-        status = ValidateInsertDataSize(data_chunk);
+        auto status = ValidateInsertDataSize(data_chunk);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid vector data: %s", "insert", 0, status.message().c_str());
             return status;

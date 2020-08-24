@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/Server.h"
-#include "server/init/InstanceLockCheck.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -26,8 +25,9 @@
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/GrpcServer.h"
 #include "server/init/CpuChecker.h"
+#include "server/init/Directory.h"
 #include "server/init/GpuChecker.h"
-#include "server/init/StorageChecker.h"
+#include "server/init/Timezone.h"
 #include "server/web_impl/WebServer.h"
 #include "src/version.h"
 //#include "storage/s3/S3ClientWrapper.h"
@@ -37,8 +37,7 @@
 #include "utils/SignalHandler.h"
 #include "utils/TimeRecorder.h"
 
-namespace milvus {
-namespace server {
+namespace milvus::server {
 
 Server&
 Server::GetInstance() {
@@ -144,13 +143,6 @@ Server::Start() {
     }
 
     try {
-        /* Read config file */
-        Status s = LoadConfig();
-        if (!s.ok()) {
-            std::cerr << "ERROR: Milvus server fail to load config file" << std::endl;
-            return s;
-        }
-
         auto meta_uri = config.general.meta_uri();
         if (meta_uri.length() > 6 && strcasecmp("sqlite", meta_uri.substr(0, 6).c_str()) == 0) {
             std::cout << "WARNING: You are using SQLite as the meta data management, "
@@ -163,103 +155,28 @@ Server::Start() {
         tracing_config_path.empty() ? tracing::TracerUtil::InitGlobal()
                                     : tracing::TracerUtil::InitGlobal(tracing_config_path);
 
+        STATUS_CHECK(Timezone::SetTimezone(config.general.timezone()));
+
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
-        auto time_zone = config.general.timezone();
+        STATUS_CHECK(LogMgr::InitLog(config.logs.trace.enable(), config.logs.level(), config.logs.path(),
+                                     config.logs.max_log_file_size(), config.logs.log_rotate_num()));
 
-        if (time_zone.length() == 3) {
-            time_zone = "CUT";
+        auto wal_path = config.wal.enable() ? config.wal.path() : "";
+        STATUS_CHECK(Directory::Initialize(config.storage.path(), wal_path, config.logs.path()));
+
+        std::cout << "Running on "
+                  << RunningMode(config.cluster.enable(), static_cast<ClusterRole>(config.cluster.role())) << " mode."
+                  << std::endl;
+        auto is_read_only = config.cluster.enable() && config.cluster.role() == ClusterRole::RO;
+
+        /* Only read-only mode do NOT lock directories */
+        if (is_read_only) {
+            STATUS_CHECK(Directory::Access("", "", config.logs.path()));
         } else {
-            int time_bias = std::stoi(time_zone.substr(3, std::string::npos));
-            if (time_bias == 0) {
-                time_zone = "CUT";
-            } else if (time_bias > 0) {
-                time_zone = "CUT" + std::to_string(-time_bias);
-            } else {
-                time_zone = "CUT+" + std::to_string(-time_bias);
-            }
-        }
+            STATUS_CHECK(Directory::Access(config.storage.path(), config.wal.path(), config.logs.path()));
 
-        if (setenv("TZ", time_zone.c_str(), 1) != 0) {
-            return Status(SERVER_UNEXPECTED_ERROR, "Fail to setenv");
-        }
-        tzset();
-
-        {
-            std::unordered_map<std::string, int64_t> level_to_int{
-                {"debug", 5}, {"info", 4}, {"warning", 3}, {"error", 2}, {"fatal", 1},
-            };
-
-            bool trace_enable = config.logs.trace.enable();
-            bool debug_enable = false;
-            bool info_enable = false;
-            bool warning_enable = false;
-            bool error_enable = false;
-            bool fatal_enable = false;
-            std::string logs_path = config.logs.path();
-            int64_t max_log_file_size = config.logs.max_log_file_size();
-            int64_t delete_exceeds = config.logs.log_rotate_num();
-
-            switch (level_to_int[config.logs.level()]) {
-                case 5:
-                    debug_enable = true;
-                case 4:
-                    info_enable = true;
-                case 3:
-                    warning_enable = true;
-                case 2:
-                    error_enable = true;
-                case 1:
-                    fatal_enable = true;
-                    break;
-                default:
-                    return Status(SERVER_UNEXPECTED_ERROR, "invalid log level");
-            }
-
-            LogMgr::InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable,
-                            logs_path, max_log_file_size, delete_exceeds);
-        }
-
-        bool cluster_enable = config.cluster.enable();
-        auto cluster_role = config.cluster.role();
-
-        if ((not cluster_enable) || cluster_role == ClusterRole::RW) {
-            try {
-                // True if a new directory was created, otherwise false.
-                boost::filesystem::create_directories(config.storage.path());
-            } catch (std::exception& ex) {
-                return Status(SERVER_UNEXPECTED_ERROR, "Cannot create db directory, " + std::string(ex.what()));
-            } catch (...) {
-                return Status(SERVER_UNEXPECTED_ERROR, "Cannot create db directory");
-            }
-
-            s = InstanceLockCheck::Check(config.storage.path());
-            if (!s.ok()) {
-                if (not cluster_enable) {
-                    std::cerr << "single instance lock db path failed." << s.message() << std::endl;
-                } else {
-                    std::cerr << cluster_role << " instance lock db path failed." << s.message() << std::endl;
-                }
-                return s;
-            }
-
-            if (config.wal.enable()) {
-                std::string wal_path = config.wal.path();
-
-                try {
-                    // True if a new directory was created, otherwise false.
-                    boost::filesystem::create_directories(wal_path);
-                } catch (...) {
-                    return Status(SERVER_UNEXPECTED_ERROR, "Cannot create wal directory");
-                }
-                s = InstanceLockCheck::Check(wal_path);
-                if (!s.ok()) {
-                    if (not cluster_enable) {
-                        std::cerr << "single instance lock wal path failed." << s.message() << std::endl;
-                    } else {
-                        std::cerr << cluster_role << " instance lock wal path failed." << s.message() << std::endl;
-                    }
-                    return s;
-                }
+            if (config.system.lock.enable()) {
+                STATUS_CHECK(Directory::Lock(config.storage.path(), wal_path));
             }
         }
 
@@ -270,7 +187,6 @@ Server::Start() {
 #else
         LOG_SERVER_INFO_ << "CPU edition";
 #endif
-        STATUS_CHECK(StorageChecker::CheckStoragePermission());
         STATUS_CHECK(CpuChecker::CheckCpuInstructionSet());
 #ifdef MILVUS_GPU_VERSION
         STATUS_CHECK(GpuChecker::CheckGpuEnvironment());
@@ -325,32 +241,6 @@ Server::Stop() {
 }
 
 Status
-Server::LoadConfig() {
-    // Config& config = Config::GetInstance();
-    // Status s = config.LoadConfigFile(config_filename_);
-    // if (!s.ok()) {
-    //     std::cerr << s.message() << std::endl;
-    //     return s;
-    // }
-
-    // config_mgr_ = std::make_shared<ConfigMgr>(config_filename_);
-    // try {
-    //     config_mgr_->Init();
-    //     config_mgr_->Load();
-    // } catch (std::exception &ex) {
-    //     std::cerr << "Load config file failed: " << ex.what() << std::endl;
-    //     return Status(SERVER_UNEXPECTED_ERROR, "LoadConfig failed.");
-    // }
-
-    // s = config.ValidateConfig();
-    // if (!s.ok()) {
-    //     std::cerr << "Config check fail: " << s.message() << std::endl;
-    //     return s;
-    // }
-    return milvus::Status::OK();
-}
-
-Status
 Server::StartService() {
     Status stat;
     stat = engine::KnowhereResource::Initialize();
@@ -392,6 +282,21 @@ Server::StopService() {
     engine::KnowhereResource::Finalize();
 }
 
+std::string
+Server::RunningMode(bool cluster_enable, ClusterRole cluster_role) {
+    if (cluster_enable) {
+        if (cluster_role == ClusterRole::RW) {
+            return "RW";
+        } else if (cluster_role == ClusterRole::RO) {
+            return "RO";
+        } else {
+            return "Unknown";
+        }
+    } else {
+        return "single";
+    }
+}
+
 void
 Server::LogConfigInFile(const std::string& path) {
     // TODO(yhz): Check if file exists
@@ -427,5 +332,4 @@ Server::LogCpuInfo() {
     LOG_SERVER_INFO_ << "\n\n" << std::string(15, '*') << "CPU" << std::string(15, '*') << "\n\n" << sub_str;
 }
 
-}  // namespace server
-}  // namespace milvus
+}  // namespace milvus::server

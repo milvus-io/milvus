@@ -42,7 +42,10 @@ extern Status
 ValidateSegmentRowCount(int64_t segment_row_count);
 
 extern Status
-ValidateIndexMetricType(const std::string& metric_type);
+ValidateIndexMetricType(const std::string& metric_type, const std::string& index_type);
+
+extern Status
+ValidateSearchMetricType(const std::string& metric_type, bool is_binary);
 
 extern Status
 ValidateSearchTopk(int64_t top_k);

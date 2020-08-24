@@ -61,12 +61,6 @@ import_mysql_inc()
 using_ccache_if_defined( MILVUS_USE_CCACHE )
 
 include( ExternalProject )
-include( FetchContent )
-set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
-set(FETCHCONTENT_QUIET OFF)
-include( ThirdPartyPackages )
-
-
 
 # **************************** Compiler arguments ****************************
 
@@ -92,8 +86,6 @@ set_milvus_definition( MILVUS_WITH_PROMETHEUS   "MILVUS_WITH_PROMETHEUS" )
 set_milvus_definition( ENABLE_CPU_PROFILING     "ENABLE_CPU_PROFILING" )
 set_milvus_definition( MILVUS_WITH_FIU          "FIU_ENABLE" )
 
-config_summary()
-
 if ( CMAKE_BUILD_TYPE STREQUAL "Release" )
     append_flags( CMAKE_CXX_FLAGS FLAGS "-O3" )
     append_flags( CUDA_NVCC_FLAGS FLAGS "-O3" )
@@ -112,59 +104,6 @@ append_flags( CMAKE_CXX_FLAGS
                     "-Werror"
                     )
 
-# **************************** Source files ****************************
-
-add_subdirectory( thirdparty )
-add_subdirectory( src )
-
-# Unittest lib
-if ( BUILD_UNIT_TEST STREQUAL "ON" )
-    if ( BUILD_COVERAGE STREQUAL "ON" )
-        append_flags(  CMAKE_CXX_FLAGS 
-                       FLAGS
-                            "-fprofile-arcs"
-                            "-ftest-coverage"
-                            )
-    endif ()
-    append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
-
-    add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/unittest )
-endif ()
-
-
-add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
-
-# **************************** Install ****************************
-
-if ( NOT MILVUS_DB_PATH )
-    set( MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}" )
-endif ()
-
-if ( MILVUS_GPU_VERSION )
-    set( GPU_ENABLE "true" )
-else ()
-    set( GPU_ENABLE "false" )
-endif ()
-configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template
-                ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml @ONLY)
-
-install(DIRECTORY scripts/
-        DESTINATION scripts
-        FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
-        GROUP_EXECUTE GROUP_READ
-        WORLD_EXECUTE WORLD_READ
-        FILES_MATCHING PATTERN "*.sh")
-install(DIRECTORY scripts/migration
-        DESTINATION scripts
-        FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
-        GROUP_EXECUTE GROUP_READ
-        WORLD_EXECUTE WORLD_READ)
-install(FILES
-        conf/server_config.yaml
-        DESTINATION
-        conf)
-
-
 # **************************** Coding style check tools ****************************
 find_package( Python COMPONENTS Interpreter Development )
 find_package( ClangTools )
@@ -174,7 +113,8 @@ if("$ENV{CMAKE_EXPORT_COMPILE_COMMANDS}" STREQUAL "1" OR CLANG_TIDY_FOUND)
   # Generate a Clang compile_commands.json "compilation database" file for use
   # with various development tools, such as Vim's YouCompleteMe plugin.
   # See http://clang.llvm.org/docs/JSONCompilationDatabase.html
-  set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
+  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+  set(CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
 endif()
 
 #
@@ -249,3 +189,62 @@ if ( ${CLANG_TIDY_FOUND} )
                                 --source_dir        ${CMAKE_CURRENT_SOURCE_DIR}/src
                                 ${MILVUS_LINT_QUIET} )
 endif ()
+
+#
+# Validate and print out Milvus configuration options
+#
+
+config_summary()
+
+# **************************** Source files ****************************
+
+add_subdirectory( thirdparty )
+add_subdirectory( src )
+
+# Unittest lib
+if ( BUILD_UNIT_TEST STREQUAL "ON" )
+    if ( BUILD_COVERAGE STREQUAL "ON" )
+        append_flags(  CMAKE_CXX_FLAGS
+                       FLAGS
+                            "-fprofile-arcs"
+                            "-ftest-coverage"
+                            )
+    endif ()
+    append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
+
+    add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/unittest )
+endif ()
+
+
+add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
+
+# **************************** Install ****************************
+
+if ( NOT MILVUS_DB_PATH )
+    set( MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}" )
+endif ()
+
+if ( MILVUS_GPU_VERSION )
+    set( GPU_ENABLE "true" )
+else ()
+    set( GPU_ENABLE "false" )
+endif ()
+configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/conf/milvus.template
+                ${CMAKE_CURRENT_SOURCE_DIR}/conf/milvus.yaml @ONLY)
+
+install(DIRECTORY scripts/
+        DESTINATION scripts
+        FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+        GROUP_EXECUTE GROUP_READ
+        WORLD_EXECUTE WORLD_READ
+        FILES_MATCHING PATTERN "*.sh")
+install(DIRECTORY scripts/migration
+        DESTINATION scripts
+        FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+        GROUP_EXECUTE GROUP_READ
+        WORLD_EXECUTE WORLD_READ)
+install(FILES
+        conf/milvus.yaml
+        DESTINATION
+        conf)
+

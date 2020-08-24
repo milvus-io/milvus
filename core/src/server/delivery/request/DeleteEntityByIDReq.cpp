@@ -47,7 +47,7 @@ DeleteEntityByIDReq::OnExecute() {
         TimeRecorderAuto rc("DeleteEntityByIDReq");
 
         bool exist = false;
-        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
         if (!exist) {
             return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }

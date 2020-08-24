@@ -158,7 +158,7 @@ install(TARGETS test_binaryivf DESTINATION unittest)
 
 ################################################################################
 #<NSG-TEST>
-add_definitions(-std=c++11 -O3 -lboost -march=native -Wall -DINFO)
+add_definitions(-std=c++11 -O3 -march=native -Werror -DINFO)
 
 find_package(OpenMP REQUIRED)
 if (OpenMP_FOUND)
@@ -265,6 +265,5 @@ endif ()
 target_link_libraries(test_structured_index_sort ${depend_libs} ${unittest_libs} ${basic_libs})
 install(TARGETS test_structured_index_sort DESTINATION unittest)
 
-#add_subdirectory(faiss_ori)
 #add_subdirectory(faiss_benchmark)
 #add_subdirectory(metric_alg_benchmark)

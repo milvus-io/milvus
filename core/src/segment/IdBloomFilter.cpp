@@ -41,14 +41,14 @@ IdBloomFilter::GetBloomFilter() {
 }
 
 bool
-IdBloomFilter::Check(id_t uid) {
+IdBloomFilter::Check(engine::idx_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
     return scaling_bloom_check(bloom_filter_, s.c_str(), s.size());
 }
 
 Status
-IdBloomFilter::Add(id_t uid) {
+IdBloomFilter::Add(engine::idx_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
     if (scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
@@ -60,7 +60,7 @@ IdBloomFilter::Add(id_t uid) {
 }
 
 Status
-IdBloomFilter::Remove(id_t uid) {
+IdBloomFilter::Remove(engine::idx_t uid) {
     std::string s = std::to_string(uid);
     const std::lock_guard<std::mutex> lock(mutex_);
     if (scaling_bloom_remove(bloom_filter_, s.c_str(), s.size(), uid) == -1) {

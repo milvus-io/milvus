@@ -56,7 +56,7 @@ Job::TaskDone(Task* task) {
     LOG_SERVER_DEBUG_ << LogOut("scheduler job [%ld] task %s finish", id(), task_desc.c_str());
 
     std::unique_lock<std::mutex> lock(mutex_);
-    for (JobTasks::iterator iter = tasks_.begin(); iter != tasks_.end(); ++iter) {
+    for (auto iter = tasks_.begin(); iter != tasks_.end(); ++iter) {
         if (task == (*iter).get()) {
             tasks_.erase(iter);
             break;

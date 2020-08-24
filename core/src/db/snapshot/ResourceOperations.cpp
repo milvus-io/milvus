@@ -75,12 +75,10 @@ PartitionOperation::PreCheck() {
 
 Status
 PartitionOperation::DoExecute(StorePtr store) {
-    auto status = CheckStale();
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(CheckStale());
     resource_ = std::make_shared<Partition>(context_.name, GetStartedSS()->GetCollection()->GetID());
     AddStep(*resource_, nullptr, false);
-    return status;
+    return Status::OK();
 }
 
 PartitionCommitOperation::PartitionCommitOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
@@ -98,6 +96,8 @@ PartitionCommitOperation::GetPrevResource() const {
         return GetStartedSS()->GetPartitionCommitByPartitionId(context_.new_segment_commit->GetPartitionId());
     } else if (context_.new_segment_commits.size() > 0) {
         return GetStartedSS()->GetPartitionCommitByPartitionId(context_.new_segment_commits[0]->GetPartitionId());
+    } else if (!context_.stale_segments.empty()) {
+        return GetStartedSS()->GetPartitionCommitByPartitionId(context_.stale_segments[0]->GetPartitionId());
     }
     return nullptr;
 }
@@ -114,8 +114,9 @@ PartitionCommitOperation::DoExecute(StorePtr store) {
         row_cnt = resource_->GetRowCount();
         size = resource_->GetSize();
         auto erase_sc = [&](SegmentCommitPtr& sc) {
-            if (!sc)
+            if (!sc) {
                 return;
+            }
             auto prev_sc = GetStartedSS()->GetSegmentCommitBySegmentId(sc->GetSegmentId());
             if (prev_sc) {
                 resource_->GetMappings().erase(prev_sc->GetID());
@@ -340,7 +341,7 @@ SegmentFileOperation::DoExecute(StorePtr store) {
     FieldElementPtr fe;
     STATUS_CHECK(GetStartedSS()->GetFieldElement(context_.field_name, context_.field_element_name, fe));
     resource_ = std::make_shared<SegmentFile>(context_.collection_id, context_.partition_id, context_.segment_id,
-                                              fe->GetID(), fe->GetFtype());
+                                              fe->GetID(), fe->GetFEtype());
     //    auto seg_ctx_p = ResourceContextBuilder<SegmentFile>().SetResource(resource_).SetOp(oAdd).CreatePtr();
     AddStep(*resource_, nullptr, false);
     return Status::OK();

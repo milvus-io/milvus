@@ -80,12 +80,6 @@ set( BOOST_LIB  libboost_system.a
                 libboost_serialization.a
                 )
 
-set( PROMETHEUS_LIB prometheus-cpp-push
-                    prometheus-cpp-pull
-                    prometheus-cpp-core
-                    curl
-                    )
-
 set( THIRD_PARTY_LIBS   sqlite
                         yaml-cpp # log
                         mysqlpp
@@ -94,9 +88,7 @@ set( THIRD_PARTY_LIBS   sqlite
                         ${GRPC_LIB}
                         )
 
-set( S3_CLIENT_LIB  aws-cpp-sdk-s3
-                    aws-cpp-sdk-core
-                    )
+set( S3_CLIENT_LIB  AWS::aws-cpp-sdk-s3 )
 
 if ( MILVUS_GPU_VERSION )
     set( CUDA_LIB   ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
@@ -109,20 +101,9 @@ if ( MILVUS_GPU_VERSION )
     target_sources( milvus_engine PUBLIC ${WRAPPER_GPU_FILES} )
 endif ()
 
-# cannot be enabled together with ENABLE_CPU_PROFILING
-if ( ENABLE_MEM_PROFILING )
-    list( APPEND THIRD_PARTY_LIBS tcmalloc )
-endif ()
-
 if ( ENABLE_CPU_PROFILING )
     list( APPEND THIRD_PARTY_LIBS
-                 PUBLIC  gperftools
-                         libunwind
-                         )
-endif ()
-
-if ( MILVUS_WITH_PROMETHEUS )
-    list( APPEND THIRD_PARTY_LIBS ${PROMETHEUS_LIB} )
+                 PUBLIC  gperftools )
 endif ()
 
 if ( MILVS_WITH_AWS )
@@ -143,8 +124,8 @@ target_link_libraries( milvus_engine
                PUBLIC  knowhere
                        segment
                        cache
-                       storage
                        codecs
+                       storage
                        tracing
                        ${THIRD_PARTY_LIBS}
                        ${ENGINE_LIBS}

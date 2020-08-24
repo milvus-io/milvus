@@ -48,11 +48,11 @@ extern const char* DEFAULT_STRUCTURED_INDEX;
 extern const char* DEFAULT_PARTITON_TAG;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-using id_t = int64_t;
+using idx_t = int64_t;
 using offset_t = int32_t;
 using date_t = int32_t;
 
-using IDNumbers = std::vector<id_t>;
+using IDNumbers = std::vector<idx_t>;
 
 using VectorDistance = faiss::Index::distance_t;
 using VectorDistances = std::vector<VectorDistance>;
@@ -61,7 +61,7 @@ using ResultIds = std::vector<faiss::Index::idx_t>;
 using ResultDistances = std::vector<faiss::Index::distance_t>;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-enum DataType {
+enum class DataType {
     NONE = 0,
     BOOL = 1,
     INT8 = 2,
@@ -79,7 +79,7 @@ enum DataType {
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-enum FieldElementType {
+enum class FieldElementType {
     FET_NONE = 0,
     FET_RAW = 1,
     FET_BLOOM_FILTER = 2,

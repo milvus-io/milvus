@@ -25,11 +25,9 @@
 namespace milvus {
 namespace engine {
 
-// TODO(zhiru): this class needs to be refactored once attributes are added
-
 class VectorSource {
  public:
-    explicit VectorSource(const DataChunkPtr& chunk);
+    explicit VectorSource(const DataChunkPtr& chunk, idx_t op_id);
 
     Status
     Add(const segment::SegmentWriterPtr& segment_writer_ptr, const int64_t& num_attrs_to_add, int64_t& num_attrs_added);
@@ -37,11 +35,16 @@ class VectorSource {
     bool
     AllAdded();
 
+    idx_t
+    OperationID() const {
+        return op_id_;
+    }
+
  private:
     DataChunkPtr chunk_;
-
+    idx_t op_id_ = 0;
     int64_t current_num_added_ = 0;
-};  // SSVectorSource
+};
 
 using VectorSourcePtr = std::shared_ptr<VectorSource>;
 
