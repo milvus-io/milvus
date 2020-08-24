@@ -18,10 +18,15 @@
 #include "storage/ExtraFileInfo.h"
 
 const char* MAGIC = "Milvus";
-const int MAGIC_SIZE = 6;
-const int SINGLE_KV_DATA_SIZE = 64;
-const int HEADER_SIZE = 4096;
-const int SUM_SIZE = 16;
+const int64_t MAGIC_SIZE = 6;
+const int64_t HEADER_SIZE = 4090;
+const int64_t SUM_SIZE = 16;
+
+bool
+validate(std::string s) {
+    std::regex test("[=;]+");
+    return !std::regex_match(s.begin(), s.end(), test);
+}
 
 namespace milvus {
 namespace storage {
@@ -167,7 +172,11 @@ WriteHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 
     std::string kv;
     for (auto& map : maps) {
-        kv.append(map.first + "=" + map.second + ";");
+        if (validate(map.first) && validate(map.second)) {
+            kv.append(map.first + "=" + map.second + ";");
+        } else {
+            throw "Equal and semicolon are illegal character in header data";
+        }
     }
     if (kv.size() > HEADER_SIZE) {
         throw "Exceeded the limit of header data size";

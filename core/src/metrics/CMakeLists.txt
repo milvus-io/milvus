@@ -31,4 +31,4 @@ endif ()
 
 
 target_link_libraries( metrics PRIVATE ${METRICS_LIB} )
-add_dependencies( metrics fiu )
+target_link_libraries( metrics PRIVATE fiu )

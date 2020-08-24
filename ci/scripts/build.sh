@@ -31,6 +31,7 @@ Usage:
     -g                        Building for the architecture of the GPU in the system
     --with_mkl                Build with MKL (default: OFF)
     --with_fiu                Build with FIU (default: OFF)
+    --tidy                    Run clang-tidy
     -c or --coverage          Build Code Coverage
     -u or --tests             Build unittest case
     -p or --privileges        Install command with elevated privileges
@@ -41,7 +42,7 @@ Usage:
 Use \"$0  --help\" for more information about a given command.
 "
 
-ARGS=`getopt -o "i:t:s:j::lngcupvh" -l "install_prefix::,build_type::,custom_thirdparty::,jobs::,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
+ARGS=`getopt -o "i:t:s:j::lngcupvh" -l "install_prefix::,build_type::,custom_thirdparty::,jobs::,tidy,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
 
 eval set -- "${ARGS}"
 
@@ -73,6 +74,7 @@ while true ; do
                 -g) echo "Building for the architecture of the GPU in the system..." ; GPU_VERSION="ON" ; shift ;;
                 --with_mkl) echo "Build with MKL" ; WITH_MKL="ON" ; shift ;;
                 --with_fiu) echo "Build with FIU" ; FIU_ENABLE="ON" ; shift ;;
+                --tidy) echo "Run clang-tidy" ; RUN_CLANG_TIDY="ON" ; shift ;;
                 --coverage) echo "Build code coverage" ; BUILD_COVERAGE="ON" ; shift ;;
                 -u|--tests) echo "Build unittest cases" ; BUILD_UNITTEST="ON" ; shift ;;
                 -n) echo "No build and install step" ; COMPILE_BUILD="OFF" ; shift ;;
@@ -101,6 +103,7 @@ COMPILE_BUILD=${COMPILE_BUILD:="ON"}
 GPU_VERSION=${GPU_VERSION:="OFF"}
 CUDA_ARCH=${CUDA_ARCH:="DEFAULT"}
 RUN_CPPLINT=${RUN_CPPLINT:="OFF"}
+RUN_CLANG_TIDY=${RUN_CLANG_TIDY:="OFF"}
 WITH_MKL=${WITH_MKL:="OFF"}
 FIU_ENABLE=${FIU_ENABLE:="OFF"}
 PRIVILEGES=${PRIVILEGES:="OFF"}
@@ -159,15 +162,17 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
         exit 1
     fi
     echo "clang-format check passed!"
+fi
 
+if [[ ${RUN_CLANG_TIDY} == "ON" ]]; then
     # clang-tidy check
-#    make check-clang-tidy
-#    if [ $? -ne 0 ]; then
-#        echo "ERROR! clang-tidy check failed"
-#        rm -f CMakeCache.txt
-#        exit 1
-#    fi
-#    echo "clang-tidy check passed!"
+    make check-clang-tidy
+    if [ $? -ne 0 ]; then
+        echo "ERROR! clang-tidy check failed"
+        rm -f CMakeCache.txt
+        exit 1
+    fi
+    echo "clang-tidy check passed!"
 fi
 
 if [[ ${COMPILE_BUILD} == "ON" ]];then

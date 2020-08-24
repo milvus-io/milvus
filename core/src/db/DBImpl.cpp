@@ -757,6 +757,15 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
         auto segment_commit = latest_ss->GetSegmentCommitBySegmentId(segment_id);
         auto row_count = segment_commit->GetRowCount();
         if (row_count == 0) {
+            snapshot::OperationContext drop_seg_context;
+            auto seg = latest_ss->GetResource<snapshot::Segment>(segment_id);
+            drop_seg_context.prev_segment = seg;
+            auto drop_op = std::make_shared<snapshot::DropSegmentOperation>(drop_seg_context, latest_ss);
+            status = drop_op->Push();
+            if (!status.ok()) {
+                LOG_ENGINE_ERROR_ << "Compact failed for segment " << segment_reader->GetSegmentPath() << ": "
+                                  << status.message();
+            }
             continue;
         }
 

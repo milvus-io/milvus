@@ -1,34 +1,19 @@
-
 package com;
 
 import com.alibaba.fastjson.JSONObject;
 import io.milvus.client.*;
-
 import org.testng.annotations.Test;
 
-import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 public class TestCollectionInfo {
-    int dimension = 128;
-    int nb = 8000;
-    int nList = 1024;
-    int defaultNList = 16384;
-    String indexType = "IVF_SQ8";
-    String defaultIndexType = "FLAT";
-    String metricType = "L2";
-    String indexParam = Utils.setIndexParam(indexType,metricType,nList);
-    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
-    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
-    List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension,nb,vectors);
-    List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultBinaryEntities(dimension,nb,vectorsBinary);
+    int nb = Constants.nb;
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testGetEntityIdsAfterDeleteEntities(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName)
-                .withFields(defaultEntities)
+                .withFields(Constants.defaultEntities)
                 .build();
         InsertResponse resInsert = client.insert(insertParam);
         client.flush(collectionName);
@@ -45,12 +30,12 @@ public class TestCollectionInfo {
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testGetEntityIdsAterDeleteEntitiesIndexed(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName)
-                .withFields(defaultEntities)
+                .withFields(Constants.defaultEntities)
                 .build();
         InsertResponse resInsert = client.insert(insertParam);
         client.flush(collectionName);
         Index index = new Index.Builder(collectionName, "float_vector")
-                .withParamsInJson(indexParam).build();
+                .withParamsInJson(Constants.indexParam).build();
         Response createIndexResponse = client.createIndex(index);
         assert(createIndexResponse.ok());
         List<Long> idsBefore = resInsert.getEntityIds();
@@ -66,7 +51,7 @@ public class TestCollectionInfo {
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testGetEntityIdsAfterDeleteEntitiesBinary(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName)
-                .withFields(defaultBinaryEntities)
+                .withFields(Constants.defaultBinaryEntities)
                 .build();
         InsertResponse resInsert = client.insert(insertParam);
         client.flush(collectionName);
