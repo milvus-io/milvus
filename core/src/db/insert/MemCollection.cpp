@@ -82,9 +82,18 @@ MemCollection::Delete(const std::vector<idx_t>& ids, idx_t op_id) {
         return Status::OK();
     }
 
-    // Add the id to delete list so it can be applied to other segments on disk during the next flush
-    std::set<idx_t> ids_to_delete(ids.begin(), ids.end());
-    ids_to_delete_.insert(std::make_pair(op_id, ids_to_delete));
+    // Add the id so it can be applied to segment files during the next flush
+    for (auto& id : ids) {
+        ids_to_delete_.insert(id);
+    }
+
+    // Add the id to mem segments so it can be applied during the next flush
+    std::lock_guard<std::mutex> lock(mem_mutex_);
+    for (auto& partition_segments : mem_segments_) {
+        for (auto& segment : partition_segments.second) {
+            segment->Delete(ids, op_id);
+        }
+    }
 
     return Status::OK();
 }
@@ -104,28 +113,15 @@ Status
 MemCollection::Serialize() {
     TimeRecorder recorder("MemCollection::Serialize collection " + std::to_string(collection_id_));
 
-    // apply delete to segment file and MemSegment
-    if (!ids_to_delete_.empty()) {
-        while (true) {
-            auto status = ApplyDeletesToFiles();
-            if (status.ok()) {
-                break;
-            } else if (status.code() == SS_STALE_ERROR) {
-                std::string err = "ApplyDeletes is stale, try again";
-                LOG_ENGINE_WARNING_ << err;
-                continue;
-            } else {
-                std::string err = "ApplyDeletes failed: " + status.ToString();
-                LOG_ENGINE_ERROR_ << err;
-                return status;
-            }
-        }
-
-        ApplyDeletesToMem();
-        ids_to_delete_.clear();
+    // apply deleted ids to exist setment files
+    auto status = ApplyDeleteToFile();
+    if (!status.ok()) {
+        LOG_ENGINE_DEBUG_ << "Failed to apply deleted ids to segment files" << status.message();
+        // Note: don't return here, continue serialize mem segments
     }
 
     // serialize mem to new segment files
+    // delete ids will be applied in MemSegment::Serialize() method
     std::lock_guard<std::mutex> lock(mem_mutex_);
     for (auto& partition_segments : mem_segments_) {
         MemSegmentList& segments = partition_segments.second;
@@ -144,55 +140,17 @@ MemCollection::Serialize() {
     return Status::OK();
 }
 
-int64_t
-MemCollection::GetCollectionId() const {
-    return collection_id_;
-}
-
-size_t
-MemCollection::GetCurrentMem() {
-    std::lock_guard<std::mutex> lock(mem_mutex_);
-    size_t total_mem = 0;
-    for (auto& partition_segments : mem_segments_) {
-        MemSegmentList& segments = partition_segments.second;
-        for (auto& segment : segments) {
-            total_mem += segment->GetCurrentMem();
-        }
-    }
-    return total_mem;
-}
-
 Status
-MemCollection::ApplyDeletesToMem() {
-    if (ids_to_delete_.empty()) {
-        return Status::OK();
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(mem_mutex_);
-        for (auto& partition_segments : mem_segments_) {
-            MemSegmentList& segments = partition_segments.second;
-            for (auto& segment : segments) {
-                segment->Delete(ids_to_delete_);
-            }
-        }
-    }
-
-    // notify wal manager to remove wal files, only notify the max op id
-    snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_));
-    WalManager::GetInstance().OperationDone(ss->GetName(), ids_to_delete_.rbegin()->first);
-
-    return Status::OK();
-}
-
-Status
-MemCollection::ApplyDeletesToFiles() {
+MemCollection::ApplyDeleteToFile() {
+    // iterate each segment to delete entities
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_));
 
     snapshot::OperationContext context;
     auto segments_op = std::make_shared<snapshot::CompoundSegmentsOperation>(context, ss);
+
+    std::unordered_set<idx_t> ids_to_delete;
+    ids_to_delete.swap(ids_to_delete_);
 
     int64_t segment_iterated = 0;
     auto segment_executor = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* iterator) -> Status {
@@ -205,11 +163,9 @@ MemCollection::ApplyDeletesToFiles() {
         std::set<idx_t> ids_to_check;
         segment::IdBloomFilterPtr pre_bloom_filter;
         STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
-        for (auto& pair : ids_to_delete_) {
-            for (auto id : pair.second) {
-                if (pre_bloom_filter->Check(id)) {
-                    ids_to_check.insert(id);
-                }
+        for (auto& id : ids_to_delete) {
+            if (pre_bloom_filter->Check(id)) {
+                ids_to_check.insert(id);
             }
         }
 
@@ -323,6 +279,24 @@ MemCollection::ApplyDeletesToFiles() {
 
     fiu_do_on("MemCollection.ApplyDeletes.RandomSleep", sleep(1));
     return segments_op->Push();
+}
+
+int64_t
+MemCollection::GetCollectionId() const {
+    return collection_id_;
+}
+
+size_t
+MemCollection::GetCurrentMem() {
+    std::lock_guard<std::mutex> lock(mem_mutex_);
+    size_t total_mem = 0;
+    for (auto& partition_segments : mem_segments_) {
+        MemSegmentList& segments = partition_segments.second;
+        for (auto& segment : segments) {
+            total_mem += segment->GetCurrentMem();
+        }
+    }
+    return total_mem;
 }
 
 }  // namespace engine

@@ -15,6 +15,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "config/ConfigMgr.h"
@@ -26,7 +27,12 @@
 namespace milvus {
 namespace engine {
 
-using DeleteIDMap = std::map<idx_t, std::set<idx_t>>;  // operation id to delete ids
+class MemAction {
+ public:
+    idx_t op_id_ = 0;
+    std::unordered_set<idx_t> delete_ids_;
+    DataChunkPtr insert_data_;
+};
 
 class MemSegment {
  public:
@@ -39,10 +45,12 @@ class MemSegment {
     Add(const DataChunkPtr& chunk, idx_t op_id);
 
     Status
-    Delete(const DeleteIDMap& ids);
+    Delete(const std::vector<idx_t>& ids, idx_t op_id);
 
     int64_t
-    GetCurrentMem();
+    GetCurrentMem() const {
+        return current_mem_;
+    }
 
     Status
     Serialize();
@@ -51,6 +59,9 @@ class MemSegment {
     Status
     CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snapshot::NewSegmentOperation>& operation,
                      segment::SegmentWriterPtr& writer);
+
+    Status
+    ApplyDeleteToMem();
 
     Status
     PutChunksToWriter(const segment::SegmentWriterPtr& writer);
@@ -62,8 +73,8 @@ class MemSegment {
     DBOptions options_;
     int64_t current_mem_ = 0;
 
-    using ChunkMap = std::map<idx_t, DataChunkPtr>;
-    ChunkMap chunks_;
+    using ActionArray = std::vector<MemAction>;
+    ActionArray actions_;  // the actions array mekesure insert/delete actions executed one by one
 };
 
 using MemSegmentPtr = std::shared_ptr<MemSegment>;

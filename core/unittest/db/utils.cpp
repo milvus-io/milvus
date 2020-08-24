@@ -158,6 +158,7 @@ DBTest::GetOptions() {
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
+    options.auto_flush_interval_ = 1000;
     return options;
 }
 
