@@ -90,6 +90,7 @@ set(depend_libs
         gomp
         gfortran
         pthread
+        fiu
         )
 
 if (MILVUS_SUPPORT_SPTAG)
