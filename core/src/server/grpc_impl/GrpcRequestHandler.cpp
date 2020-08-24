@@ -1323,7 +1323,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         auto grpc_float_size = request->fields(i).attr_record().float_value_size();
         auto grpc_double_size = request->fields(i).attr_record().double_value_size();
         const auto& field = request->fields(i);
-        auto field_name = field.field_name();
+        auto& field_name = field.field_name();
 
         std::vector<uint8_t> temp_data;
         if (grpc_int32_size > 0) {
