@@ -566,6 +566,33 @@ NewSegmentOperation::CommitRowCount(SIZE_TYPE row_cnt) {
     return Status::OK();
 }
 
+DropSegmentOperation::DropSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+}
+
+Status
+DropSegmentOperation::DoExecute(StorePtr store) {
+    OperationContext pc_context;
+    // create a empty segment commit
+    pc_context.stale_segments.push_back(context_.prev_segment);
+    PartitionCommitOperation pc_op(pc_context, GetAdjustedSS());
+    STATUS_CHECK(pc_op(store));
+    STATUS_CHECK(pc_op.GetResource(pc_context.new_partition_commit));
+    auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*pc_context.new_partition_commit, context_.lsn, pc_ctx_p);
+
+    auto cc_context = OperationContext();
+    cc_context.new_partition_commits.push_back(pc_context.new_partition_commit);
+
+    CollectionCommitOperation cc_op(cc_context, GetAdjustedSS());
+    STATUS_CHECK(cc_op(store));
+    STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn, cc_ctx_p);
+
+    return Status::OK();
+}
+
 Status
 NewSegmentOperation::DoExecute(StorePtr store) {
     // PXU TODO:

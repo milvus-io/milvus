@@ -161,13 +161,17 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
     echo "clang-format check passed!"
 
     # clang-tidy check
-#    make check-clang-tidy
-#    if [ $? -ne 0 ]; then
-#        echo "ERROR! clang-tidy check failed"
-#        rm -f CMakeCache.txt
-#        exit 1
-#    fi
-#    echo "clang-tidy check passed!"
+    if [[ ${GPU_VERSION} == "ON" ]]; then
+        make check-clang-tidy
+        if [ $? -ne 0 ]; then
+            echo "ERROR! clang-tidy check failed"
+            rm -f CMakeCache.txt
+            exit 1
+        fi
+        echo "clang-tidy check passed!"
+    else
+        echo "CPU version skip clang-tidy check!"
+    fi
 fi
 
 if [[ ${COMPILE_BUILD} == "ON" ]];then
