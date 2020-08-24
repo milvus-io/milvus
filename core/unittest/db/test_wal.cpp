@@ -291,8 +291,7 @@ TEST_F(WalTest, WalProxyTest) {
 
     // find out the wal files
     DBOptions opt = GetOptions();
-    std::experimental::filesystem::path collection_path = opt.meta_.path_;
-    collection_path.append(milvus::engine::WAL_DATA_FOLDER);
+    std::experimental::filesystem::path collection_path = opt.wal_path_;
     collection_path.append(collection_name);
 
     using DirectoryIterator = std::experimental::filesystem::recursive_directory_iterator;

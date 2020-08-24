@@ -26,7 +26,6 @@
 namespace milvus {
 namespace engine {
 
-const char* WAL_DATA_FOLDER = "wal";
 const char* WAL_MAX_OP_FILE_NAME = "max_op";
 const char* WAL_DEL_FILE_NAME = "del";
 
@@ -44,8 +43,7 @@ WalManager::Start(const DBOptions& options) {
     enable_ = options.wal_enable_;
     insert_buffer_size_ = options.insert_buffer_size_;
 
-    std::experimental::filesystem::path wal_path(options.meta_.path_);
-    wal_path.append((WAL_DATA_FOLDER));
+    std::experimental::filesystem::path wal_path(options.wal_path_);
     wal_path_ = wal_path.c_str();
     CommonUtil::CreateDirectory(wal_path_);
 

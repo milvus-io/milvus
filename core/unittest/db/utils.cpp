@@ -316,6 +316,7 @@ WalTest::GetOptions() {
     options.meta_.path_ = "/tmp/milvus_wal";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = true;
+    options.wal_path_ = options.meta_.path_ + "/wal";
     return options;
 }
 
