@@ -164,6 +164,22 @@ BuildEntities(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& da
 }
 
 void
+CopyChunkData(const milvus::engine::DataChunkPtr& src_chunk, milvus::engine::DataChunkPtr& target_chunk) {
+    target_chunk = std::make_shared<milvus::engine::DataChunk>();
+    target_chunk->count_ = src_chunk->count_;
+    for (auto& pair : src_chunk->fixed_fields_) {
+        milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+        raw->data_ = pair.second->data_;
+        target_chunk->fixed_fields_.insert(std::make_pair(pair.first, raw));
+    }
+    for (auto& pair : src_chunk->variable_fields_) {
+        milvus::engine::VaribleDataPtr raw = std::make_shared<milvus::engine::VaribleData>();
+        raw->data_ = pair.second->data_;
+        target_chunk->variable_fields_.insert(std::make_pair(pair.first, raw));
+    }
+}
+
+void
 BuildQueryPtr(const std::string& collection_name, int64_t n, int64_t topk, std::vector<std::string>& field_names,
               std::vector<std::string>& partitions, milvus::query::QueryPtr& query_ptr) {
     auto general_query = std::make_shared<milvus::query::GeneralQuery>();
@@ -644,16 +660,24 @@ TEST_F(DBTest, GetEntityTest) {
     auto insert_entities = [&](const std::string& collection, const std::string& partition,
                                uint64_t count, uint64_t batch_index, milvus::engine::IDNumbers& ids,
                                milvus::engine::DataChunkPtr& data_chunk) -> Status {
-        BuildEntities(count, batch_index, data_chunk);
-        STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
+        milvus::engine::DataChunkPtr consume_chunk;
+        BuildEntities(count, batch_index, consume_chunk);
+        CopyChunkData(consume_chunk, data_chunk);
+
+        // Note: consume_chunk is consumed by insert()
+        STATUS_CHECK(db_->Insert(collection, partition, consume_chunk));
         STATUS_CHECK(db_->Flush(collection));
-        auto iter = data_chunk->fixed_fields_.find(milvus::engine::FIELD_UID);
-        if (iter == data_chunk->fixed_fields_.end()) {
+        auto iter = consume_chunk->fixed_fields_.find(milvus::engine::FIELD_UID);
+        if (iter == consume_chunk->fixed_fields_.end()) {
             return Status(1, "Cannot find uid field");
         }
         auto& ids_buffer = iter->second;
-        ids.resize(data_chunk->count_);
+        ids.resize(consume_chunk->count_);
         memcpy(ids.data(), ids_buffer->data_.data(), ids_buffer->Size());
+
+        milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
+        raw->data_ = ids_buffer->data_;
+        data_chunk->fixed_fields_[milvus::engine::FIELD_UID] = raw;
 
         return Status::OK();
     };

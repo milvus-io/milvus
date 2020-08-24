@@ -427,8 +427,8 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    auto partition_ptr = ss->GetPartition(partition_name);
-    if (partition_ptr == nullptr) {
+    auto partition = ss->GetPartition(partition_name);
+    if (partition == nullptr) {
         return Status(DB_NOT_FOUND, "Fail to get partition " + partition_name);
     }
 
@@ -437,6 +437,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         return Status(DB_ERROR, "Field '_id' not found");
     }
 
+    // check id field existence
     auto& params = ss->GetCollection()->GetParams();
     bool auto_increment = true;
     if (params.find(PARAM_UID_AUTOGEN) != params.end()) {
@@ -446,39 +447,44 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     FIXEDX_FIELD_MAP& fields = data_chunk->fixed_fields_;
     auto pair = fields.find(engine::FIELD_UID);
     if (auto_increment) {
-        // id is auto increment, but client provides id, return error
+        // id is auto generated, but client provides id, return error
         if (pair != fields.end() && pair->second != nullptr) {
             return Status(DB_ERROR, "Field '_id' is auto increment, no need to provide id");
         }
     } else {
-        // id is not auto increment, but client doesn't provide id, return error
+        // id is not auto generated, but client doesn't provide id, return error
         if (pair == fields.end() || pair->second == nullptr) {
             return Status(DB_ERROR, "Field '_id' is user defined");
         }
     }
 
+    // consume the data chunk
+    DataChunkPtr consume_chunk = std::make_shared<DataChunk>();
+    consume_chunk->count_ = data_chunk->count_;
+    consume_chunk->fixed_fields_.swap(data_chunk->fixed_fields_);
+    consume_chunk->variable_fields_.swap(data_chunk->variable_fields_);
+
     // generate id
     if (auto_increment) {
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         IDNumbers ids;
-        STATUS_CHECK(id_generator.GetNextIDNumbers(data_chunk->count_, ids));
+        STATUS_CHECK(id_generator.GetNextIDNumbers(consume_chunk->count_, ids));
         BinaryDataPtr id_data = std::make_shared<BinaryData>();
         id_data->data_.resize(ids.size() * sizeof(int64_t));
         memcpy(id_data->data_.data(), ids.data(), ids.size() * sizeof(int64_t));
-        data_chunk->fixed_fields_[engine::FIELD_UID] = id_data;
+        consume_chunk->fixed_fields_[engine::FIELD_UID] = id_data;
+        data_chunk->fixed_fields_[engine::FIELD_UID] = id_data;  // return generated id to customer;
+    } else {
+        BinaryDataPtr id_data = std::make_shared<BinaryData>();
+        id_data->data_ = consume_chunk->fixed_fields_[engine::FIELD_UID]->data_;
+        data_chunk->fixed_fields_[engine::FIELD_UID] = id_data;  // return the id created by client
     }
 
-    // insert entities: collection_name is field id
-    snapshot::PartitionPtr part = ss->GetPartition(partition_name);
-    if (part == nullptr) {
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << partition_name;
-        return Status(DB_ERROR, "Invalid partiiton name");
-    }
-
+    // do insert
     int64_t collection_id = ss->GetCollectionId();
-    int64_t partition_id = part->GetID();
+    int64_t partition_id = partition->GetID();
 
-    auto status = mem_mgr_->InsertEntities(collection_id, partition_id, data_chunk, op_id);
+    auto status = mem_mgr_->InsertEntities(collection_id, partition_id, consume_chunk, op_id);
     if (!status.ok()) {
         return status;
     }
