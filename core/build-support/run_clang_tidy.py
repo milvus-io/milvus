@@ -41,7 +41,7 @@ def _check_some_files(completed_processes, filenames):
     return lintutils.stdout_pathcolonline(result, filenames)
 
 
-def _check_all(cmd, filenames):
+def _check_all(cmd, filenames, ignore_checks):
     # each clang-tidy instance will process 16 files
     chunks = lintutils.chunk(filenames, 16)
     cmds = [cmd + some for some in chunks]
@@ -65,15 +65,19 @@ def _check_all(cmd, filenames):
             if problem_files:
                 msg = "clang-tidy suggested fixes for {}"
                 print("\n".join(map(msg.format, problem_files)))
-                print(stdout.decode("utf-8"))
                 # ignore thirdparty header file not found issue, such as:
                 #   error: 'fiu.h' file not found [clang-diagnostic-error]
-                cnt_error += _count_key(stdout, "error:")
-                cnt_warning += _count_key(stdout, "warning:")
-                cnt_ignore += _count_key(stdout, "clang-diagnostic-error")
+                cnt_info = ""
+                for line in stdout.splitlines():
+                    if any([len(re.findall(check, line)) > 0 for check in ignore_checks]):
+                        cnt_info += line.replace(" error: ", " ignore: ").decode("utf-8") + "\n"
+                cnt_error += _count_key(cnt_info, " error: ")
+                cnt_warning += _count_key(cnt_info, " warning: ")
+                cnt_ignore += _count_key(cnt_info, " ignore: ")
+                print(cnt_info)
                 print("clang-tidy - error: {}, warning: {}, ignore {}".
                       format(cnt_error, cnt_warning, cnt_ignore))
-                error = error or (cnt_error > cnt_ignore or cnt_warning > 0)
+                error = error or (cnt_error > 0 or cnt_warning > 0)
     except Exception:
         error = True
         raise
@@ -94,6 +98,9 @@ if __name__ == "__main__":
     parser.add_argument("--exclude_globs",
                         help="Filename containing globs for files "
                         "that should be excluded from the checks")
+    parser.add_argument("--ignore_checks",
+                        help="Checkname containing checklist for files "
+                        "that should be ignore from the checks")
     parser.add_argument("--compile_commands",
                         required=True,
                         help="compile_commands.json to pass clang-tidy")
@@ -114,6 +121,11 @@ if __name__ == "__main__":
     if arguments.exclude_globs:
         for line in open(arguments.exclude_globs):
             exclude_globs.append(line.strip())
+
+    ignore_checks = []
+    if arguments.ignore_checks:
+        for line in open(arguments.ignore_checks):
+            ignore_checks.append(line.strip())
 
     linted_filenames = []
     for path in lintutils.get_sources(arguments.source_dir, exclude_globs):
@@ -137,4 +149,4 @@ if __name__ == "__main__":
                 sys.exit(returncode)
 
     else:
-        _check_all(cmd, linted_filenames)
+        _check_all(cmd, linted_filenames, ignore_checks)
