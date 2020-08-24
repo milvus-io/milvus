@@ -37,9 +37,6 @@ DropIndexReq::Create(const ContextPtr& context, const std::string& collection_na
 
 Status
 DropIndexReq::OnExecute() {
-    try {
-        std::string hdr = "DropIndexReq(collection=" + collection_name_ + ")";
-        TimeRecorderAuto rc(hdr);
 
     return Status::OK();
 }

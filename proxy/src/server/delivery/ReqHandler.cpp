@@ -159,9 +159,9 @@ ReqHandler::Insert(const ContextPtr& context, const std::string& collection_name
 Status
 ReqHandler::GetEntityByID(const ContextPtr& context, const std::string& collection_name, const engine::IDNumbers& ids,
                           std::vector<std::string>& field_names, std::vector<bool>& valid_row,
-                          engine::snapshot::FieldElementMappings& field_mappings, engine::DataChunkPtr& data_chunk) {
+                         engine::DataChunkPtr& data_chunk) {
     BaseReqPtr req_ptr =
-        GetEntityByIDReq::Create(context, collection_name, ids, field_names, valid_row, field_mappings, data_chunk);
+        GetEntityByIDReq::Create(context, collection_name, ids, field_names, valid_row, data_chunk);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
@@ -176,8 +176,8 @@ ReqHandler::DeleteEntityByID(const ContextPtr& context, const std::string& colle
 
 Status
 ReqHandler::Search(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
-                   engine::snapshot::FieldElementMappings& collection_mappings, engine::QueryResultPtr& result) {
-    BaseReqPtr req_ptr = SearchReq::Create(context, query_ptr, json_params, collection_mappings, result);
+                    engine::QueryResultPtr& result) {
+    BaseReqPtr req_ptr = SearchReq::Create(context, query_ptr, json_params, result);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }

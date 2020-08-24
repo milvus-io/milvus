@@ -42,12 +42,7 @@ ListIDInSegmentReq::Create(const ContextPtr& context, const std::string& collect
 
 Status
 ListIDInSegmentReq::OnExecute() {
-    try {
-        std::string hdr =
-            "ListIDInSegmentReq(collection=" + collection_name_ + " segment=" + std::to_string(segment_id_) + ")";
-        TimeRecorderAuto rc(hdr);
 
-        bool exist = false;
 
     return Status::OK();
 }

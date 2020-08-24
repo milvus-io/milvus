@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/ValidationUtil.h"
-// #include "db/Constants.h"
+#include "db/Constants.h"
 // #include "db/Utils.h"
 // #include "knowhere/index/vector_index/ConfAdapter.h"
 // #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -103,11 +103,11 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
     return Status::OK();
 }
 
-Status
-ValidateInsertDataSize(const engine::DataChunkPtr& data) {
+// Status
+// ValidateInsertDataSize(const engine::DataChunkPtr& data) {
 
-    return Status::OK();
-}
+//     return Status::OK();
+// }
 
 }  // namespace server
 }  // namespace milvus

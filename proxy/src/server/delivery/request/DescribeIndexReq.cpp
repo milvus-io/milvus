@@ -41,13 +41,6 @@ DescribeIndexReq::Create(const std::shared_ptr<milvus::server::Context>& context
 
 Status
 DescribeIndexReq::OnExecute() {
-    try {
-        std::string hdr = "DescribeIndexReq(collection=" + collection_name_ + ")";
-        TimeRecorderAuto rc(hdr);
-
-        // step 1: check arguments
-        STATUS_CHECK(ValidateCollectionName(collection_name_));
-        STATUS_CHECK(ValidateFieldName(field_name_));
 
     return Status::OK();
 }

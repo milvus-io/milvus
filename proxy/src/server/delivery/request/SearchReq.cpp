@@ -29,28 +29,22 @@ namespace milvus {
 namespace server {
 
 SearchReq::SearchReq(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
-                     engine::snapshot::FieldElementMappings& field_mappings, engine::QueryResultPtr& result)
+                      engine::QueryResultPtr& result)
     : BaseReq(context, ReqType::kSearch),
       query_ptr_(query_ptr),
       json_params_(json_params),
-      field_mappings_(field_mappings),
       result_(result) {
 }
 
 BaseReqPtr
 SearchReq::Create(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
-                  engine::snapshot::FieldElementMappings& field_mappings, engine::QueryResultPtr& result) {
-    return std::shared_ptr<BaseReq>(new SearchReq(context, query_ptr, json_params, field_mappings, result));
+                  engine::QueryResultPtr& result) {
+    return std::shared_ptr<BaseReq>(new SearchReq(context, query_ptr, json_params, result));
 }
 
 Status
 SearchReq::OnExecute() {
-    try {
-        std::string hdr = "SearchReq(table=" + query_ptr_->collection_id;
-        TimeRecorder rc(hdr);
 
-        STATUS_CHECK(ValidateCollectionName(query_ptr_->collection_id));
-        STATUS_CHECK(ValidatePartitionTags(query_ptr_->partitions));
 
     return Status::OK();
 }
