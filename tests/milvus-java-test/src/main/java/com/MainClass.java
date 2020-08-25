@@ -21,7 +21,6 @@ public class MainClass {
     private static String HOST = "127.0.0.1";
     private static int PORT = 19530;
     private int segmentRowCount = 5000;
-    public int dimension = 128;
     private static ConnectParam CONNECT_PARAM = new ConnectParam.Builder()
             .withHost(HOST)
             .withPort(PORT)
@@ -69,7 +68,7 @@ public class MainClass {
     private Object[][] genCollection(boolean isBinary, boolean autoId) throws ConnectFailedException {
         Object[][] collection;
         String collectionName = Utils.genUniqueStr("collection");
-        List<Map<String, Object>> defaultFields = Utils.genDefaultFields(dimension,isBinary);
+        List<Map<String, Object>> defaultFields = Utils.genDefaultFields(Constants.dimension,isBinary);
         String jsonParams = String.format("{\"segment_row_count\": %s, \"auto_id\": %s}",segmentRowCount, autoId);
         // Generate connection instance
         MilvusClient client = new MilvusGrpcClient();
@@ -86,6 +85,7 @@ public class MainClass {
         collection = new Object[][]{{client, collectionName}};
         return collection;
     }
+
     @DataProvider(name="Collection")
     public Object[][] provideCollection() throws ConnectFailedException, InterruptedException {
         Object[][] collection = genCollection(false,true);

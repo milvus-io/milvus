@@ -22,6 +22,10 @@ class EntityIdsDto : public ODTO {
     DTO_INIT(EntityIdsDto, DTO)
 
     DTO_FIELD(List<String>, ids);
+
+    DTO_FIELD(String, message);
+
+    DTO_FIELD(Int64, code);
 };
 
 #include OATPP_CODEGEN_END(DTO)

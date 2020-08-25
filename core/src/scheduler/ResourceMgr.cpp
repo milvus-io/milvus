@@ -186,7 +186,7 @@ ResourceMgr::DumpTaskTables() {
     ss << ">>>>>>>>>>>>>>>ResourceMgr::DumpTaskTable<<<<<<<<<<<<<<<" << std::endl;
     for (auto& resource : resources_) {
         ss << resource->name() << std::endl;
-        ss << resource->task_table().Dump().dump();
+        ss << resource->task_table().Dump().dump() << std::endl;
         ss << resource->name() << std::endl << std::endl;
     }
     return ss.str();

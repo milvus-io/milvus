@@ -1,5 +1,7 @@
 package com;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import io.milvus.client.*;
 import com.alibaba.fastjson.JSONObject;
 import org.apache.commons.lang3.RandomStringUtils;
@@ -7,6 +9,7 @@ import org.apache.commons.lang3.RandomStringUtils;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class Utils {
 
@@ -87,8 +90,6 @@ public class Utils {
         List<Map<String,Object>> fieldsMap = genDefaultFields(dimension, false);
         List<Long> intValues = new ArrayList<>(vectorCount);
         List<Float> floatValues = new ArrayList<>(vectorCount);
-//        List<List<Float>> vectors = genVectors(vectorCount,dimension,false);
-//        List<ByteBuffer> binaryVectors = genBinaryVectors(vectorCount,dimension);
         for (int i = 0; i < vectorCount; ++i) {
             intValues.add((long) i);
             floatValues.add((float) i);
@@ -146,9 +147,44 @@ public class Utils {
         return indexParams;
     }
 
-    public static String setSearchParam(int nprobe) {
+    public static String setSearchParam(String metricType, List<List<Float>> queryVectors, int topk, int nprobe) {
         JSONObject searchParam = new JSONObject();
-        searchParam.put("nprobe", nprobe);
+        JSONObject fieldParam = new JSONObject();
+        fieldParam.put("topk", topk);
+        fieldParam.put("metric_type", metricType);
+        fieldParam.put("query", queryVectors);
+        fieldParam.put("type", Constants.vectorType);
+        JSONObject tmpSearchParam = new JSONObject();
+        tmpSearchParam.put("nprobe", nprobe);
+        fieldParam.put("params", tmpSearchParam);
+        JSONObject vectorParams = new JSONObject();
+        vectorParams.put(Constants.floatFieldName, fieldParam);
+        searchParam.put("vector", vectorParams);
+        JSONObject param = new JSONObject();
+        JSONObject mustParam = new JSONObject();
+        JSONArray tmp = new JSONArray();
+        tmp.add(searchParam);
+        mustParam.put("must", tmp);
+        param.put("bool", mustParam);
+        return JSONObject.toJSONString(param);
+    }
+
+    public static String setBinarySearchParam(String metricType, List<ByteBuffer> queryVectors, int topk, int nprobe) {
+        JSONObject searchParam = new JSONObject();
+        JSONObject fieldParam = new JSONObject();
+        fieldParam.put("topk", topk);
+        fieldParam.put("metricType", metricType);
+        fieldParam.put("queryVectors", queryVectors);
+        JSONObject tmpSearchParam = new JSONObject();
+        tmpSearchParam.put("nprobe", nprobe);
+        fieldParam.put("params", tmpSearchParam);
+        JSONObject vectorParams = new JSONObject();
+        vectorParams.put(Constants.floatFieldName, fieldParam);
+        searchParam.put("vector", vectorParams);
+        JSONObject boolParam = new JSONObject();
+        JSONObject mustParam = new JSONObject();
+        mustParam.put("must", new JSONArray().add(searchParam));
+        boolParam.put("bool", mustParam);
         return JSONObject.toJSONString(searchParam);
     }
 
@@ -188,4 +224,19 @@ public class Utils {
         });
         return vector;
     }
+
+    public static JSONArray parseJsonArray(String message, String type) {
+        JSONObject jsonObject = JSONObject.parseObject(message);
+        JSONArray partitionsJsonArray = jsonObject.getJSONArray("partitions");
+        if ("partitions".equals(type))
+            return partitionsJsonArray;
+        JSONArray segmentsJsonArray = ((JSONObject)partitionsJsonArray.get(0)).getJSONArray("segments");
+        if ("segments".equals(type))
+            return segmentsJsonArray;
+        JSONArray filesJsonArray = ((JSONObject)segmentsJsonArray.get(0)).getJSONArray("files");
+        if ("files".equals(type))
+            return filesJsonArray;
+        throw  new RuntimeException("unsupported type");
+    }
+
 }
