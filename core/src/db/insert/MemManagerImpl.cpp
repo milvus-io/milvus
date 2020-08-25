@@ -184,13 +184,15 @@ MemManagerImpl::InternalFlush(std::set<int64_t>& collection_ids) {
 
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     for (auto& mem : temp_immutable_list) {
-        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetCollectionId();
+        int64_t collection_id = mem->GetCollectionId();
+        LOG_ENGINE_DEBUG_ << "Flushing collection: " << collection_id;
         auto status = mem->Serialize();
         if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetCollectionId() << " failed";
+            LOG_ENGINE_ERROR_ << "Flush collection " << collection_id << " failed";
             return status;
         }
-        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetCollectionId();
+        LOG_ENGINE_DEBUG_ << "Flushed collection: " << collection_id;
+        collection_ids.insert(collection_id);
     }
 
     return Status::OK();

@@ -169,8 +169,8 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     auto params = ctx.collection->GetParams();
     if (params.find(PARAM_UID_AUTOGEN) == params.end()) {
         params[PARAM_UID_AUTOGEN] = true;
-        ctx.collection->SetParams(params);
     }
+    ctx.collection->SetParams(params);
 
     // check uid existence
     snapshot::FieldPtr uid_field;
@@ -406,8 +406,10 @@ DBImpl::DropIndex(const std::string& collection_name, const std::string& field_n
 
     STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
 
-    std::set<std::string> merge_collection_names = {collection_name};
-    StartMergeTask(merge_collection_names, true);
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+    std::set<int64_t> collection_ids = {ss->GetCollectionId()};
+    StartMergeTask(collection_ids, true);
 
     return Status::OK();
 }
@@ -837,7 +839,7 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
 void
 DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
     Status status;
-    std::set<std::string> flushed_collections;
+    std::set<int64_t> flushed_collection_ids;
     if (!collection_name.empty()) {
         // flush one collection
         snapshot::ScopedSnapshotT ss;
@@ -854,34 +856,21 @@ DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
             if (!status.ok()) {
                 return;
             }
+            flushed_collection_ids.insert(collection_id);
         }
-
-        flushed_collections.insert(collection_name);
     } else {
         // flush all collections
-        std::set<int64_t> collection_ids;
         {
             const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-            status = mem_mgr_->Flush(collection_ids);
+            status = mem_mgr_->Flush(flushed_collection_ids);
             if (!status.ok()) {
                 return;
             }
-        }
-
-        for (auto id : collection_ids) {
-            snapshot::ScopedSnapshotT ss;
-            status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, id);
-            if (!status.ok()) {
-                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
-                return;
-            }
-
-            flushed_collections.insert(ss->GetName());
         }
     }
 
     if (merge) {
-        StartMergeTask(flushed_collections);
+        StartMergeTask(flushed_collection_ids);
     }
 }
 
@@ -1056,8 +1045,7 @@ DBImpl::WaitBuildIndexFinish() {
 }
 
 void
-DBImpl::StartMergeTask(const std::set<std::string>& collection_names, bool force_merge_all) {
-    // LOG_ENGINE_DEBUG_ << "Begin StartMergeTask";
+DBImpl::StartMergeTask(const std::set<int64_t>& collection_ids, bool force_merge_all) {
     // merge task has been finished?
     {
         std::lock_guard<std::mutex> lck(merge_result_mutex_);
@@ -1075,28 +1063,26 @@ DBImpl::StartMergeTask(const std::set<std::string>& collection_names, bool force
         if (merge_thread_results_.empty()) {
             // start merge file thread
             merge_thread_results_.push_back(
-                merge_thread_pool_.enqueue(&DBImpl::BackgroundMerge, this, collection_names, force_merge_all));
+                merge_thread_pool_.enqueue(&DBImpl::BackgroundMerge, this, collection_ids, force_merge_all));
         }
     }
-
-    // LOG_ENGINE_DEBUG_ << "End StartMergeTask";
 }
 
 void
-DBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all) {
+DBImpl::BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all) {
     SetThreadName("merge");
 
-    for (auto& collection_name : collection_names) {
+    for (auto& collection_id : collection_ids) {
         const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-        auto status = merge_mgr_ptr_->MergeFiles(collection_name);
+        auto status = merge_mgr_ptr_->MergeFiles(collection_id);
         if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_name
+            LOG_ENGINE_ERROR_ << "Failed to get merge files for collection id: " << collection_id
                               << " reason:" << status.message();
         }
 
         if (!initialized_.load(std::memory_order_acquire)) {
-            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection: " << collection_name;
+            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection id: " << collection_id;
             break;
         }
     }
