@@ -91,9 +91,7 @@ class EventExecutor {
     }
 
  private:
-    EventExecutor() {
-        queue_.SetCapacity(10000);
-    }
+    EventExecutor() = default;
 
     static EventExecutor&
     GetInstanceImpl() {
