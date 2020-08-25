@@ -240,9 +240,9 @@ LogMgr::parse_level(const std::string& level) {
 
 void
 LogMgr::set_level(el::Configurations& default_conf, el::Level level, bool enable, const std::string& log_path) {
-    default_conf.set(el::Level::Info, el::ConfigurationType::Filename, log_path.c_str());
+    default_conf.set(level, el::ConfigurationType::Filename, log_path.c_str());
     if (enable) {
-        default_conf.set(level, el::ConfigurationType::Enabled, "true");
+        default_conf.set(level, el::ConfigurationType::Enabled, log_path);
     } else {
         default_conf.set(level, el::ConfigurationType::Enabled, "false");
     }
