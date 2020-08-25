@@ -41,6 +41,8 @@
 
 #include <fiu/fiu-local.h>
 #include <src/scheduler/job/BuildIndexJob.h>
+#include <algorithm>
+#include <functional>
 #include <limits>
 #include <utility>
 
