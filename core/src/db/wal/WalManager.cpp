@@ -11,9 +11,6 @@
 
 #include "db/wal/WalManager.h"
 #include "db/Utils.h"
-#include "db/snapshot/ResourceHelper.h"
-#include "db/snapshot/ResourceTypes.h"
-#include "db/snapshot/Snapshots.h"
 #include "db/wal/WalOperationCodec.h"
 #include "utils/CommonUtil.h"
 
@@ -367,28 +364,14 @@ WalManager::RecordDeleteOperation(const DeleteEntityOperationPtr& operation, con
 
 std::string
 WalManager::ConstructFilePath(const std::string& collection_name, const std::string& file_name) {
-    // use snapshot to construct wal path
-    // typically, the wal file path is like: /xxx/xxx/wal/C_1/xxxxxxxxxx
-    // if the snapshot not work, use collection name to construct path
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (status.ok() && ss->GetCollection() != nullptr) {
-        std::experimental::filesystem::path full_path(wal_path_);
-        full_path.append(collection_name);
-        std::experimental::filesystem::create_directory(full_path);
-        full_path.append(file_name);
+    // typically, the wal file path is like: /xxx/milvus/wal/[collection_name]/xxxxxxxxxx
+    std::experimental::filesystem::path full_path(wal_path_);
+    full_path.append(collection_name);
+    std::experimental::filesystem::create_directory(full_path);
+    full_path.append(file_name);
 
-        std::string path(full_path.c_str());
-        return path;
-    } else {
-        std::experimental::filesystem::path full_path(wal_path_);
-        full_path.append(collection_name);
-        std::experimental::filesystem::create_directory(full_path);
-        full_path.append(file_name);
-
-        std::string path(full_path.c_str());
-        return path;
-    }
+    std::string path(full_path.c_str());
+    return path;
 }
 
 void
