@@ -288,7 +288,8 @@ class TestClient : public oatpp::web::client::ApiClient {
              PATH(String, collection_name, "collection_name"))
 
     API_CALL("GET", "/collections/{collection_name}/entities", getEntity,
-             PATH(String, collection_name, "collection_name"), QUERY(String, offset), QUERY(String, page_size))
+             PATH(String, collection_name, "collection_name"), QUERY(String, offset), QUERY(String, page_size),
+             QUERY(String, partition_tag))
 
     API_CALL("GET", "/collections/{collection_name}/entities", getEntityByID,
              PATH(String, collection_name, "collection_name"), QUERY(String, ids))
@@ -717,7 +718,7 @@ TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
 
     std::string offset = "0";
     std::string page_size = "10";
-    response = client_ptr->getEntity(collection_name.c_str(), offset.c_str(), page_size.c_str(), connection_ptr);
+    response = client_ptr->getEntity(collection_name.c_str(), offset.c_str(), page_size.c_str(), "", connection_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 
     //    offset = "10";
@@ -727,7 +728,13 @@ TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
 }
 
 TEST_F(WebControllerTest, SYSTEM_INFO) {
-    auto response = client_ptr->cmd("config", "", "", connection_ptr);
+    std::string req = R"(
+    {
+        "cache.cache_size": "3221225472b"
+    })";
+    auto response = client_ptr->op("config", req.c_str(), connection_ptr);
+
+    response = client_ptr->cmd("config", "", "", connection_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
     auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
     ASSERT_TRUE(result_json.contains("cluster.enable"));

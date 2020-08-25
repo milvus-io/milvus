@@ -1,11 +1,10 @@
 package com;
 
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
-import java.nio.ByteBuffer;
-import java.util.List;
-import java.util.Map;
 import java.util.logging.Logger;
 
 public class TestIndex {
@@ -17,7 +16,13 @@ public class TestIndex {
         Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
+        Response statsResponse = client.getCollectionStats(collectionName);
         // TODO: should check getCollectionStats
+        if(statsResponse.ok()) {
+            JSONArray filesJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "files");
+            filesJsonArray.stream().map(item-> (JSONObject)item).filter(item->item.containsKey("index_type")).forEach(file->
+                    Assert.assertEquals(file.get("index_type"), Constants.indexType));
+        }
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
@@ -27,6 +32,13 @@ public class TestIndex {
         Index index = new Index.Builder(collectionName, Constants.binaryFieldName).withParamsInJson(Constants.binaryIndexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
+        Response statsResponse = client.getCollectionStats(collectionName);
+        // TODO: should check getCollectionStats
+        if(statsResponse.ok()) {
+            JSONArray filesJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "files");
+            filesJsonArray.stream().map(item-> (JSONObject)item).filter(item->item.containsKey("index_type")).forEach(file->
+                    Assert.assertEquals(file.get("index_type"), Constants.defaultBinaryIndexType));
+        }
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -91,9 +103,16 @@ public class TestIndex {
         Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
-//        Response res_drop = client.dropIndex(collectionName, Constants.floatFieldName);
-//        assert(res_drop.ok());
-        // TODO: getCollectionStats
+        Response res_drop = client.dropIndex(collectionName, Constants.floatFieldName);
+        assert(res_drop.ok());
+        Response statsResponse = client.getCollectionStats(collectionName);
+        // TODO: should check getCollectionStats
+        if(statsResponse.ok()) {
+            JSONArray filesJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "files");
+            filesJsonArray.stream().map(item -> (JSONObject) item).forEach(file->{
+                assert (!file.containsKey("index_type"));
+            });
+        }
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
@@ -103,22 +122,29 @@ public class TestIndex {
         Index index = new Index.Builder(collectionName, Constants.binaryFieldName).withParamsInJson(Constants.binaryIndexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
-//        Response res_drop = client.dropIndex(collectionName, Constants.binaryFieldName);
-//        assert(res_drop.ok());
-        // TODO: getCollectionStats
+        Response res_drop = client.dropIndex(collectionName, Constants.binaryFieldName);
+        assert(res_drop.ok());
+        Response statsResponse = client.getCollectionStats(collectionName);
+        // TODO: should check getCollectionStats
+        if(statsResponse.ok()) {
+            JSONArray filesJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "files");
+            filesJsonArray.stream().map(item -> (JSONObject) item).forEach(file->{
+                assert (!file.containsKey("index_type"));
+            });
+        }
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testDropIndexTableNotExisted(MilvusClient client, String collectionName) {
         String collectionNameNew = Utils.genUniqueStr(collectionName);
-//        Response res_drop = client.dropIndex(collectionNameNew, Constants.floatFieldName);
-//        assert(!res_drop.ok());
+        Response res_drop = client.dropIndex(collectionNameNew, Constants.floatFieldName);
+        assert(!res_drop.ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void testDropIndexWithoutConnect(MilvusClient client, String collectionName) {
-//        Response res_drop = client.dropIndex(collectionNameNew, Constants.floatFieldName);
-//        assert(!res_drop.ok());
+        Response res_drop = client.dropIndex(collectionName, Constants.floatFieldName);
+        assert(!res_drop.ok());
     }
 
 }
