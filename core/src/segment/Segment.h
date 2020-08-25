@@ -49,6 +49,15 @@ class Segment {
     Status
     AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
 
+    // reserve chunk data capacity to specify count
+    // this method should only be used on an empty segment
+    Status
+    Reserve(const std::vector<std::string>& field_names, int64_t count);
+
+    // copy part of chunk data into this segment and append to tail
+    Status
+    AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
+
     Status
     DeleteEntity(std::vector<offset_t>& offsets);
 
