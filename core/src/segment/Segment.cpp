@@ -158,9 +158,62 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
     }
 
     // consume
+    AppendChunk(chunk_ptr, from, to);
+
+    return Status::OK();
+}
+
+Status
+Segment::Reserve(const std::vector<std::string>& field_names, int64_t count) {
+    if (count <= 0) {
+        return Status(DB_ERROR, "Invalid input fot segment resize");
+    }
+
+    if (field_names.empty()) {
+        for (auto& width_iter : fixed_fields_width_) {
+            int64_t resize_bytes = count * width_iter.second;
+
+            auto& data = fixed_fields_[width_iter.first];
+            if (data == nullptr) {
+                data = std::make_shared<BinaryData>();
+            }
+            data->data_.resize(resize_bytes);
+        }
+    } else {
+        for (const auto& name : field_names) {
+            auto iter_width = fixed_fields_width_.find(name);
+            if (iter_width == fixed_fields_width_.end()) {
+                return Status(DB_ERROR, "Invalid input fot segment resize");
+            }
+
+            int64_t resize_bytes = count * iter_width->second;
+
+            auto& data = fixed_fields_[name];
+            if (data == nullptr) {
+                data = std::make_shared<BinaryData>();
+            }
+            data->data_.resize(resize_bytes);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+Segment::AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
+    if (chunk_ptr == nullptr || from < 0 || to < 0 || from > to) {
+        return Status(DB_ERROR, "Invalid input fot segment append");
+    }
+
     int64_t add_count = to - from;
+    if (add_count == 0) {
+        add_count = 1;  // n ~ n also means append the No.n
+    }
     for (auto& width_iter : fixed_fields_width_) {
         auto input = chunk_ptr->fixed_fields_.find(width_iter.first);
+        if (input == chunk_ptr->fixed_fields_.end()) {
+            continue;
+        }
         auto& data = fixed_fields_[width_iter.first];
         if (data == nullptr) {
             fixed_fields_[width_iter.first] = input->second;
@@ -171,7 +224,9 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
         int64_t add_bytes = add_count * width_iter.second;
         int64_t previous_bytes = row_count_ * width_iter.second;
         int64_t target_bytes = previous_bytes + add_bytes;
-        data->data_.resize(target_bytes);
+        if (data->data_.size() < target_bytes) {
+            data->data_.resize(target_bytes);
+        }
         if (input == chunk_ptr->fixed_fields_.end()) {
             // this field is not provided, complicate by 0
             memset(data->data_.data() + origin_bytes, 0, target_bytes - origin_bytes);

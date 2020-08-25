@@ -240,8 +240,8 @@ MemSegment::ApplyDeleteToMem() {
 
             // delete entities from chunks
             Segment temp_set;
-            temp_set.SetFields(collection_id_);
-            temp_set.AddChunk(chunk);
+            STATUS_CHECK(temp_set.SetFields(collection_id_));
+            STATUS_CHECK(temp_set.AddChunk(chunk));
             temp_set.DeleteEntity(offsets);
             chunk->count_ = temp_set.GetRowCount();
         }
