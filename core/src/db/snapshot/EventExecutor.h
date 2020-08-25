@@ -57,11 +57,11 @@ class EventExecutor {
     }
 
     Status
-    Submit(const EventPtr& evt) {
+    Submit(const EventPtr& evt, bool flush=false) {
         if (evt == nullptr) {
             return Status(SS_INVALID_ARGUMENT_ERROR, "Invalid Resource");
         }
-        Enqueue(evt);
+        Enqueue(evt, flush);
         return Status::OK();
     }
 
@@ -143,12 +143,13 @@ class EventExecutor {
     }
 
     void
-    Enqueue(const EventPtr& evt) {
+    Enqueue(const EventPtr& evt, bool flush=false) {
         if (!initialized_.load()) {
             LOG_ENGINE_WARNING_ << "GcEvent exit" << std::endl;
+            return ;
         }
 
-        bool need_notify = false;
+        bool need_notify = flush;
         {
             std::unique_lock<std::mutex> lock(mutex_);
             if (queue_ == nullptr) {

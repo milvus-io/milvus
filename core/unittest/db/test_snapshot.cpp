@@ -32,6 +32,7 @@ GetFirstCollectionID(ID_TYPE& result_id) {
 }
 
 TEST_F(SnapshotTest, ResourcesTest) {
+    tr_.RecordSection("Start ResourcesTest");
     int nprobe = 16;
     milvus::json params = {{"nprobe", nprobe}};
     ParamsField p_field(params);
@@ -39,6 +40,7 @@ TEST_F(SnapshotTest, ResourcesTest) {
 
     auto nprobe_real = p_field.GetParams().at("nprobe").get<int>();
     ASSERT_EQ(nprobe, nprobe_real);
+    tr_.RecordSection("ResourcesTest done");
 }
 
 TEST_F(SnapshotTest, ReferenceProxyTest) {
