@@ -233,7 +233,7 @@ WalManager::Init() {
                 file_path.append(WAL_MAX_OP_FILE_NAME);
                 if (std::experimental::filesystem::is_regular_file(file_path)) {
                     WalFile file;
-                    file.OpenFile(path.c_str(), WalFile::READ);
+                    file.OpenFile(file_path.c_str(), WalFile::READ);
                     idx_t max_op = 0;
                     file.Read(&max_op);
 
@@ -373,9 +373,8 @@ WalManager::ConstructFilePath(const std::string& collection_name, const std::str
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
     if (status.ok() && ss->GetCollection() != nullptr) {
-        std::string col_path = snapshot::GetResPath<snapshot::Collection>(wal_path_, ss->GetCollection());
-
-        std::experimental::filesystem::path full_path(col_path);
+        std::experimental::filesystem::path full_path(wal_path_);
+        full_path.append(collection_name);
         std::experimental::filesystem::create_directory(full_path);
         full_path.append(file_name);
 
