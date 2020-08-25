@@ -39,19 +39,18 @@ type storeEngine interface {
 }
 
 type Store interface {
-	put(ctx context.Context, key Key, value Value, timestamp Timestamp, suffix string) error
-	scanLE(ctx context.Context, key Key, timestamp Timestamp, keyOnly bool) ([]Timestamp, []Key, []Value, error)
-	scanGE(ctx context.Context, key Key, timestamp Timestamp, keyOnly bool) ([]Timestamp, []Key, []Value, error)
-	//scan(ctx context.Context, key Key, start Timestamp, end Timestamp, keyOnly bool) ([]Timestamp, []Key, []Value, error)
-	deleteLE(ctx context.Context, key Key, timestamp Timestamp) error
-	deleteGE(ctx context.Context, key Key, timestamp Timestamp) error
-	deleteRange(ctx context.Context, key Key, start Timestamp, end Timestamp) error
+	//put(ctx context.Context, key Key, value Value, timestamp Timestamp, suffix string) error
+	//scanLE(ctx context.Context, key Key, timestamp Timestamp, keyOnly bool) ([]Timestamp, []Key, []Value, error)
+	//scanGE(ctx context.Context, key Key, timestamp Timestamp, keyOnly bool) ([]Timestamp, []Key, []Value, error)
+	//deleteLE(ctx context.Context, key Key, timestamp Timestamp) error
+	//deleteGE(ctx context.Context, key Key, timestamp Timestamp) error
+	//deleteRange(ctx context.Context, key Key, start Timestamp, end Timestamp) error
 
 	GetRow(ctx context.Context, key Key, timestamp Timestamp) (Value, error)
 	GetRows(ctx context.Context, keys []Key, timestamp Timestamp) ([]Value, error)
 
 	PutRow(ctx context.Context, key Key, value Value, segment string, timestamp Timestamp) error
-	PutRows(ctx context.Context, keys []Key, values []Value, segments []string, timestamp Timestamp) error
+	PutRows(ctx context.Context, keys []Key, values []Value, segment string, timestamp Timestamp) error
 
 	DeleteRow(ctx context.Context, key Key, timestamp Timestamp) error
 	DeleteRows(ctx context.Context, keys []Key, timestamp Timestamp) error

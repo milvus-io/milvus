@@ -188,99 +188,56 @@ func TestTikvStore_Log(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-//func TestTikvStore_PrefixKey(t *testing.T) {
-//	ctx := context.Background()
-//	key := Key("key")
-//	key1 := Key("key_1")
-//
-//	// Clean kv data
-//	err := store.Delete(ctx, key, math.MaxUint64)
-//	assert.Nil(t, err)
-//
-//	// Ensure test data is not exist
-//	v, err := store.Get(ctx, key, math.MaxUint64)
-//	assert.Nil(t, v)
-//	assert.Nil(t, err)
-//	v, err = store.Get(ctx, key1, math.MaxUint64)
-//	assert.Nil(t, v)
-//	assert.Nil(t, err)
-//
-//	// Set some value for test key
-//	err = store.Set(ctx, key, Value("key_1"), 1)
-//	assert.Nil(t, err)
-//	err = store.Set(ctx, key1, Value("key1_1"), 1)
-//	assert.Nil(t, err)
-//
-//	// Get Value
-//	v, err = store.Get(ctx, key, 1)
-//	assert.Nil(t, err)
-//	assert.Equal(t, Value("key_1"), v)
-//
-//	v, err = store.Get(ctx, key1, 1)
-//	assert.Nil(t, err)
-//	assert.Equal(t, Value("key1_1"), v)
-//
-//	// Delete key, value for "key" should nil
-//	err = store.Delete(ctx, key, 1)
-//	v, err = store.Get(ctx, key, 1)
-//	assert.Nil(t, v)
-//	assert.Nil(t, err)
-//
-//	// Delete all test data
-//	err = store.Delete(ctx, key1, 1)
-//	assert.Nil(t, err)
-//
-//}
-//
-//func TestTikvStore_Batch(t *testing.T) {
-//	ctx := context.Background()
-//
-//	// Prepare test data
-//	size := 0
-//	var testKeys []Key
-//	var testValues []Value
-//	for i := 0; size/conf.Raw.MaxBatchPutSize < 1; i++ {
-//		key := fmt.Sprint("key", i)
-//		size += len(key)
-//		testKeys = append(testKeys, []byte(key))
-//		value := fmt.Sprint("value", i)
-//		size += len(value)
-//		testValues = append(testValues, []byte(value))
-//		v, err := store.Get(ctx, Key(key), math.MaxUint64)
-//		assert.Nil(t, v)
-//		assert.Nil(t, err)
-//	}
-//
-//	// Set kv data
-//	err := store.BatchSet(ctx, testKeys, testValues, 1)
-//	assert.Nil(t, err)
-//
-//	// Get value
-//	checkValues, err := store.BatchGet(ctx, testKeys, 2)
-//	assert.NotNil(t, checkValues)
-//	assert.Nil(t, err)
-//	assert.Equal(t, len(checkValues), len(testValues))
-//	for i := range testKeys {
-//		assert.Equal(t, testValues[i], checkValues[i])
-//	}
-//
-//	// Delete test data using multi go routine
-//	err = store.BatchDeleteMultiRoutine(ctx, testKeys, math.MaxUint64)
-//	assert.Nil(t, err)
-//	// Ensure all test key is deleted
-//	checkValues, err = store.BatchGet(ctx, testKeys, math.MaxUint64)
-//	assert.Nil(t, err)
-//	for _, value := range checkValues {
-//		assert.Nil(t, value)
-//	}
-//
-//	// Delete test data
-//	err = store.BatchDelete(ctx, testKeys, math.MaxUint64)
-//	assert.Nil(t, err)
-//	// Ensure all test key is deleted
-//	checkValues, err = store.BatchGet(ctx, testKeys, math.MaxUint64)
-//	assert.Nil(t, err)
-//	for _, value := range checkValues {
-//		assert.Nil(t, value)
-//	}
-//}
+func TestTikvStore_SegmentIndex(t *testing.T) {
+	ctx := context.Background()
+
+	// Put segment index
+	err := store.PutSegmentIndex(ctx, "segment0", []byte("index0"))
+	assert.Nil(t, err)
+	err = store.PutSegmentIndex(ctx, "segment1", []byte("index1"))
+	assert.Nil(t, err)
+
+	// Get segment index
+	index , err := store.GetSegmentIndex(ctx, "segment0")
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("index0"), index)
+	index , err = store.GetSegmentIndex(ctx, "segment1")
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("index1"), index)
+
+	// Delete segment index
+	err = store.DeleteSegmentIndex(ctx, "segment0")
+	assert.Nil(t, err)
+	err = store.DeleteSegmentIndex(ctx, "segment1")
+	assert.Nil(t, err)
+	index , err = store.GetSegmentIndex(ctx, "segment0")
+	assert.Nil(t, err)
+	assert.Nil(t, index)
+}
+
+func TestTikvStore_DeleteSegmentDL(t *testing.T) {
+	ctx := context.Background()
+
+	// Put segment delete log
+	err := store.PutSegmentDL(ctx, "segment0", []byte("index0"))
+	assert.Nil(t, err)
+	err = store.PutSegmentDL(ctx, "segment1", []byte("index1"))
+	assert.Nil(t, err)
+
+	// Get segment delete log
+	index , err := store.GetSegmentDL(ctx, "segment0")
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("index0"), index)
+	index , err = store.GetSegmentDL(ctx, "segment1")
+	assert.Nil(t, err)
+	assert.Equal(t, []byte("index1"), index)
+
+	// Delete segment delete log
+	err = store.DeleteSegmentDL(ctx, "segment0")
+	assert.Nil(t, err)
+	err = store.DeleteSegmentDL(ctx, "segment1")
+	assert.Nil(t, err)
+	index , err = store.GetSegmentDL(ctx, "segment0")
+	assert.Nil(t, err)
+	assert.Nil(t, index)
+}
