@@ -103,8 +103,8 @@ class WebRequestHandler {
                       nlohmann::json& json_out);
 
     Status
-    GetPageEntities(const std::string& collection_name, const int64_t page_size, const int64_t offset,
-                    nlohmann::json& json_out);
+    GetPageEntities(const std::string& collection_name, const std::string& partition_tag, const int64_t page_size,
+                    const int64_t offset, nlohmann::json& json_out);
 
     Status
     GetSegmentIds(const std::string& collection_name, int64_t segment_id, int64_t page_size, int64_t offset,

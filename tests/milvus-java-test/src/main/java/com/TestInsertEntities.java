@@ -1,5 +1,7 @@
 package com;
 
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import io.milvus.client.*;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
@@ -11,33 +13,29 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 public class TestInsertEntities {
-    int dimension = 128;
+    int dimension = Constants.dimension;
     String tag = "tag";
-    int nb = 8000;
-    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
-    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
-    List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension,nb,vectors);
-    List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultBinaryEntities(dimension,nb,vectorsBinary);
+    int nb = Constants.nb;
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testInsertEntitiesCollectionNotExisted(MilvusClient client, String collectionName) throws InterruptedException {
+    public void testInsertEntitiesCollectionNotExisted(MilvusClient client, String collectionName) {
         String collectionNameNew = collectionName + "_";
         InsertParam insertParam = new InsertParam.Builder(collectionNameNew)
-                .withFields(defaultEntities).build();
+                .withFields(Constants.defaultEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void testInsertEntitiesWithoutConnect(MilvusClient client, String collectionName) throws InterruptedException {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultEntities).build();
+    public void testInsertEntitiesWithoutConnect(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testInsertEntities(MilvusClient client, String collectionName)  {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultEntities).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
         Response res_flush = client.flush(collectionName);
@@ -51,14 +49,15 @@ public class TestInsertEntities {
         // Add vectors with ids
         List<Long> entityIds = LongStream.range(0, nb).boxed().collect(Collectors.toList());
         InsertParam insertParam = new InsertParam.Builder(collectionName)
-                .withFields(defaultEntities)
+                .withFields(Constants.defaultEntities)
                 .withEntityIds(entityIds)
                 .build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
-        // Assert collection row count
+        // Assert ids and collection row count
+        Assert.assertEquals(res.getEntityIds(), entityIds);
         Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
@@ -66,29 +65,23 @@ public class TestInsertEntities {
     public void testInsertEntityWithInvalidIds(MilvusClient client, String collectionName) {
         // Add vectors with ids
         List<Long> entityIds = LongStream.range(0, nb+1).boxed().collect(Collectors.toList());
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultEntities).withEntityIds(entityIds).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).withEntityIds(entityIds).build();
         InsertResponse res = client.insert(insertParam);
         assert(!res.getResponse().ok());
     }
 
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void testInsertEntityWithInvalidDimension(MilvusClient client, String collectionName) {
-////        vectors.get(0).add((float) 0);
-//        List<Map<String,Object>> entities = Utils.genDefaultEntities(dimension+1,nb,vectors);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(entities).build();
-//        InsertResponse res = client.insert(insertParam);
-//        assert(!res.getResponse().ok());
-//    }
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testInsertEntityWithInvalidDimension(MilvusClient client, String collectionName) {
+        List<List<Float>> vectors = Utils.genVectors(nb, dimension+1, true);
+        List<Map<String,Object>> entities = Utils.genDefaultEntities(dimension+1,nb,vectors);
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(entities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(!res.getResponse().ok());
+    }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testInsertEntityWithInvalidVectors(MilvusClient client, String collectionName) {
-//        vectors.set(0, new ArrayList<>());
         List<Map<String,Object>> invalidEntities = Utils.genDefaultEntities(dimension,nb,new ArrayList<>());
-        invalidEntities.forEach(entity ->{
-            if("float_vector".equals(entity.get("field"))){
-                entity.put("values",new ArrayList<>());
-            }
-        });
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(invalidEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(!res.getResponse().ok());
@@ -100,13 +93,20 @@ public class TestInsertEntities {
     public void testInsertEntityPartition(MilvusClient client, String collectionName) {
         Response createpResponse = client.createPartition(collectionName, tag);
         assert(createpResponse.ok());
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultEntities).withPartitionTag(tag).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).withPartitionTag(tag).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
-        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
+        Response statsResponse = client.getCollectionStats(collectionName);
+        if(statsResponse.ok()) {
+            JSONArray partitionsJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "partitions");
+            partitionsJsonArray.stream().map(item -> (JSONObject) item).filter(item->item.containsValue(tag)).forEach(obj -> {
+                Assert.assertEquals(obj.get("row_count"), nb);
+                Assert.assertEquals(obj.get("tag"), tag);
+            });
+        }
     }
 
     // Add vectors into collection, which tag not existed
@@ -115,7 +115,7 @@ public class TestInsertEntities {
         Response createpResponse = client.createPartition(collectionName, tag);
         assert(createpResponse.ok());
         String tag = RandomStringUtils.randomAlphabetic(10);
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultEntities).withPartitionTag(tag).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).withPartitionTag(tag).build();
         InsertResponse res = client.insert(insertParam);
         assert(!res.getResponse().ok());
     }
@@ -124,19 +124,26 @@ public class TestInsertEntities {
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testInsertEntityPartitionABinary(MilvusClient client, String collectionName) {
         Response createpResponse = client.createPartition(collectionName, tag);
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultBinaryEntities).withPartitionTag(tag).build();
+        assert (createpResponse.ok());
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).withPartitionTag(tag).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
-        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
+        Response statsResponse = client.getCollectionStats(collectionName);
+        if(statsResponse.ok()) {
+            JSONArray partitionsJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "partitions");
+            partitionsJsonArray.stream().map(item -> (JSONObject) item).filter(item->item.containsValue(tag)).forEach(obj -> {
+                Assert.assertEquals(obj.get("tag"), tag);
+                Assert.assertEquals(obj.get("row_count"), nb);
+            });
+        }
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testInsertEntityBinary(MilvusClient client, String collectionName)  {
-        System.out.println(collectionName);
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultBinaryEntities).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
         Response res_flush = client.flush(collectionName);
@@ -149,12 +156,13 @@ public class TestInsertEntities {
     public void testInsertBinaryEntityWithIds(MilvusClient client, String collectionName) {
         // Add vectors with ids
         List<Long> entityIds = LongStream.range(0, nb).boxed().collect(Collectors.toList());
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultBinaryEntities).withEntityIds(entityIds).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).withEntityIds(entityIds).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
+        Assert.assertEquals(entityIds, res.getEntityIds());
         Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
@@ -162,7 +170,7 @@ public class TestInsertEntities {
     public void testInsertBinaryEntityWithInvalidIds(MilvusClient client, String collectionName) {
         // Add vectors with ids
         List<Long> invalidEntityIds = LongStream.range(0, nb+1).boxed().collect(Collectors.toList());
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(defaultBinaryEntities).withEntityIds(invalidEntityIds).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).withEntityIds(invalidEntityIds).build();
         InsertResponse res = client.insert(insertParam);
         assert(!res.getResponse().ok());
     }

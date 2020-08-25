@@ -362,15 +362,15 @@ ValidateIndexMetricType(const std::string& metric_type, const std::string& index
         milvus::knowhere::Metric::SUPERSTRUCTURE,
     };
 
-    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
-        index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP) {
         if (s_valid_metric.find(metric_type) == s_valid_metric.end()) {
             std::string msg =
                 "Invalid index metric type: " + metric_type + ". " + "Make sure the metric type is in MetricType list.";
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
         }
-    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT ||
+               index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
         // binary
         if (metric_type != knowhere::Metric::HAMMING && metric_type != knowhere::Metric::JACCARD &&
             metric_type != knowhere::Metric::TANIMOTO) {

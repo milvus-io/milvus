@@ -9,6 +9,7 @@ import org.apache.commons.lang3.RandomStringUtils;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class Utils {
 
@@ -89,8 +90,6 @@ public class Utils {
         List<Map<String,Object>> fieldsMap = genDefaultFields(dimension, false);
         List<Long> intValues = new ArrayList<>(vectorCount);
         List<Float> floatValues = new ArrayList<>(vectorCount);
-//        List<List<Float>> vectors = genVectors(vectorCount,dimension,false);
-//        List<ByteBuffer> binaryVectors = genBinaryVectors(vectorCount,dimension);
         for (int i = 0; i < vectorCount; ++i) {
             intValues.add((long) i);
             floatValues.add((float) i);
@@ -225,4 +224,19 @@ public class Utils {
         });
         return vector;
     }
+
+    public static JSONArray parseJsonArray(String message, String type) {
+        JSONObject jsonObject = JSONObject.parseObject(message);
+        JSONArray partitionsJsonArray = jsonObject.getJSONArray("partitions");
+        if ("partitions".equals(type))
+            return partitionsJsonArray;
+        JSONArray segmentsJsonArray = ((JSONObject)partitionsJsonArray.get(0)).getJSONArray("segments");
+        if ("segments".equals(type))
+            return segmentsJsonArray;
+        JSONArray filesJsonArray = ((JSONObject)segmentsJsonArray.get(0)).getJSONArray("files");
+        if ("files".equals(type))
+            return filesJsonArray;
+        throw  new RuntimeException("unsupported type");
+    }
+
 }
