@@ -32,6 +32,7 @@
 #include "db/snapshot/Snapshots.h"
 #include "db/snapshot/Store.h"
 #include "db/snapshot/WrappedTypes.h"
+#include "utils/TimeRecorder.h"
 
 using ID_TYPE = milvus::engine::snapshot::ID_TYPE;
 using IDS_TYPE = milvus::engine::snapshot::IDS_TYPE;
@@ -345,6 +346,9 @@ class SnapshotTest : public BaseTest {
     SetUp() override;
     void
     TearDown() override;
+
+ protected:
+    milvus::TimeRecorder tr_ = milvus::TimeRecorder("");
 };
 
 ///////////////////////////////////////////////////////////////////////////////
