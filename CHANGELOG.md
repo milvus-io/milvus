@@ -29,6 +29,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2869 Create index failed with binary vectors
 -   \#2893 Insert binary data failed
 -   \#2957 There is no exisitence check of annoy search parameter
+-   \#3265 Memory leak during searching
 -   \#3406 No debug and info log generated after server started
 -   \#3407 Server get stuck if create index after entities inserted with no manual flush
 
