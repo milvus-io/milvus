@@ -403,8 +403,8 @@ CreateCollection(const TestClientP& client_ptr, const TestConnP& connection_ptr,
             {
                 "field_name": "field_vec",
                 "field_type": "VECTOR_FLOAT",
-                "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
-                "extra_params": {"dim": 4}
+                "index_params": {},
+                "extra_params": {"dim": 128}
             },
             {
                 "field_name": "int64",
@@ -857,7 +857,7 @@ TEST_F(WebControllerTest, DELETE_BY_ID) {
     CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
 
     nlohmann::json insert_json;
-    GenEntities(NB, 4, insert_json);
+    GenEntities(NB, DIM, insert_json);
     auto response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
 
@@ -878,7 +878,6 @@ TEST_F(WebControllerTest, DELETE_BY_ID) {
     std::string page_size = "10";
     response = client_ptr->getEntity(collection_name.c_str(), offset.c_str(), page_size.c_str(), "", connection_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
-    std::cout << response->readBodyToString()->std_str() << std::endl;
 
     auto delete_ids = std::vector<std::string>(ids.begin(), ids.begin() + 10);
 
@@ -892,6 +891,5 @@ TEST_F(WebControllerTest, DELETE_BY_ID) {
     ASSERT_TRUE(status.ok());
 
     response = client_ptr->getEntity(collection_name.c_str(), offset.c_str(), page_size.c_str(), "", connection_ptr);
-    std::cout << response->readBodyToString()->std_str() << std::endl;
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
