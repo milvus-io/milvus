@@ -14,7 +14,7 @@ import java.util.stream.LongStream;
 public class TestDeleteEntities {
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testDeleteVectors(MilvusClient client, String collectionName) {
+    public void testDeleteEntities(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
@@ -28,7 +28,7 @@ public class TestDeleteEntities {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testDeleteSingleVector(MilvusClient client, String collectionName) {
+    public void testDeleteSingleEntity(MilvusClient client, String collectionName) {
         List<List<Float>> del_vector = new ArrayList<>();
         del_vector.add(Constants.vectors.get(0));
         List<Long> del_ids = new ArrayList<>();
@@ -50,7 +50,7 @@ public class TestDeleteEntities {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testDeleteVectorsCollectionNotExisted(MilvusClient client, String collectionName) {
+    public void testDeleteEntitiesCollectionNotExisted(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
@@ -62,7 +62,7 @@ public class TestDeleteEntities {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testDeleteVectorsEmptyCollection(MilvusClient client, String collectionName) {
+    public void testDeleteEntitiesEmptyCollection(MilvusClient client, String collectionName) {
         String collectionNameNew = Utils.genUniqueStr(collectionName);
         List<Long> entityIds = LongStream.range(0, Constants.nb).boxed().collect(Collectors.toList());
         Response res_delete = client.deleteEntityByID(collectionNameNew, entityIds);
@@ -70,7 +70,7 @@ public class TestDeleteEntities {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_delete_vector_id_not_existed(MilvusClient client, String collectionName) {
+    public void testDeleteEntityIdNotExisted(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
@@ -87,7 +87,7 @@ public class TestDeleteEntities {
 
     // Below tests binary vectors
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-    public void test_delete_vectors_binary(MilvusClient client, String collectionName) {
+    public void testDeleteEntitiesBinary(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
