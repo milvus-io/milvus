@@ -32,6 +32,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3265 Memory leak during searching
 -   \#3406 No debug and info log generated after server started
 -   \#3407 Server get stuck if create index after entities inserted with no manual flush
+-   \#3446 ListIDInSegment get wrong result when delete more than one ids
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
