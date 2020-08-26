@@ -12,15 +12,16 @@
 #pragma once
 
 #include <condition_variable>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <utility>
 
 #include "db/SimpleWaitNotify.h"
 #include "db/snapshot/MetaEvent.h"
 #include "utils/BlockingQueue.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus::engine::snapshot {
 
@@ -78,12 +79,18 @@ class EventExecutor {
 
     void
     Stop() {
-        initialized_.store(false);
+        if (!initialized_.exchange(false)) {
+            // executor has been stopped, just return
+            return;
+        }
+
         timing_.Notify();
+
         if (timing_thread_ptr_ != nullptr) {
             timing_thread_ptr_->join();
             timing_thread_ptr_ = nullptr;
         }
+
         if (gc_thread_ptr_ != nullptr) {
             gc_thread_ptr_->join();
             gc_thread_ptr_ = nullptr;
@@ -129,14 +136,21 @@ class EventExecutor {
     TimingThread() {
         while (true) {
             timing_.Wait_For(std::chrono::seconds(EVENT_TIMINT_INTERVAL));
-            std::unique_lock<std::mutex> lock(mutex_);
-            if (queue_ != nullptr && !queue_->empty()) {
-                cache_queues_.Put(queue_);
-                queue_ = nullptr;
+
+            std::shared_ptr<EventQueue> queue;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                if (queue_ != nullptr && !queue_->empty()) {
+                    queue = std::move(queue_);
+                    queue_ = nullptr;
+                }
+            }
+
+            if (queue) {
+                cache_queues_.Put(queue);
             }
 
             if (!initialized_.load()) {
-                cache_queues_.Put(nullptr);
                 break;
             }
         }

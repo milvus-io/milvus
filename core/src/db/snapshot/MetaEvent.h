@@ -44,7 +44,7 @@ class GCEvent : virtual public MetaEvent {
                 return;
             }
         }
-        std::cout << "[GC] Remove STALE OBJECT " << path << " for " << res->ToString() << std::endl;
+        LOG_ENGINE_DEBUG_ << "[GC] Remove STALE OBJECT " << path << " for " << res->ToString();
     }
 };
 

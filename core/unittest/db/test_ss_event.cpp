@@ -109,8 +109,6 @@ TEST_F(EventTest, TestInActiveResGcEvent) {
     auto event = std::make_shared<InActiveResourcesGCEvent>();
     EventExecutor::GetInstance().Submit(event, true);
     status = event->WaitToFinish();
-//    milvus::engine::snapshot::EventExecutor::GetInstance().Submit(event);
-//    status = event->WaitToFinish();
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     std::vector<FieldElementPtr> field_elements;
@@ -159,7 +157,7 @@ TEST_F(EventTest, TestInActiveResGcEvent) {
 }
 
 TEST_F(EventTest, GcBlockingTest) {
-    size_t max_count = 10000;
+    size_t max_count = 1000;
 
     std::vector<CollectionPtr> collections;
     for (size_t i = 0; i < max_count; i++) {
