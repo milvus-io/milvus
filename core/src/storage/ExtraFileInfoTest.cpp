@@ -64,7 +64,7 @@ TEST_F(ExtraFileInfoTest, WriteFileTest) {
 
     ASSERT_TRUE(WriteHeaderValue(fs_ptr, file_path, "github", "github"));
     ASSERT_EQ(ReadHeaderValue(fs_ptr, file_path, "github"), "github");
-    result_sum = CalculateSum(fs_ptr, file_path);
+    result_sum = CalculateSum(fs_ptr, file_path, true);
     WriteSum(fs_ptr, file_path, result_sum, true);
     ASSERT_TRUE(CheckMagic(fs_ptr, file_path));
     ASSERT_TRUE(CheckSum(fs_ptr, file_path));
