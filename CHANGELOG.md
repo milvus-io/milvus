@@ -30,6 +30,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2893 Insert binary data failed
 -   \#2957 There is no exisitence check of annoy search parameter
 -   \#3407 Server get stuck if create index after entities inserted with no manual flush
+-   \#3446 ListIDInSegment get wrong result when delete more than one ids
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
