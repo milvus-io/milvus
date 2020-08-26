@@ -80,6 +80,10 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
         }
 
         LOG_ENGINE_ERROR_ << s.message();
+
+        auto build_job = static_cast<scheduler::BuildIndexJob*>(job_);
+        build_job->FailedSegments().push_back(segment_id_);
+
         return s;
     }
 
@@ -100,9 +104,14 @@ BuildIndexTask::OnExecute() {
     } catch (std::exception& e) {
         status = Status(DB_ERROR, e.what());
     }
+
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to build index: " << status.ToString();
         execution_engine_ = nullptr;
+
+        auto build_job = static_cast<scheduler::BuildIndexJob*>(job_);
+        build_job->FailedSegments().push_back(segment_id_);
+
         return status;
     }
 
