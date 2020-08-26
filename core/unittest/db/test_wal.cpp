@@ -403,7 +403,7 @@ TEST_F(WalTest, WalManagerTest) {
 
     // construct mock db
     DBOptions options;
-    options.meta_.path_ = "/tmp/milvus_wal";
+    options.wal_path_ = "/tmp/milvus_wal";
     options.wal_enable_ = true;
     DummyDBPtr db_1 = std::make_shared<DummyDB>(options);
 

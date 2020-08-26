@@ -42,7 +42,6 @@ DBWrapper::StartService() {
 
     opt.auto_flush_interval_ = config.storage.auto_flush_interval();
     opt.metric_enable_ = config.metric.enable();
-    opt.insert_cache_immediately_ = config.cache.cache_insert_data();
     opt.insert_buffer_size_ = config.cache.insert_buffer_size();
 
     if (not config.cluster.enable()) {
@@ -57,11 +56,7 @@ DBWrapper::StartService() {
     }
 
     opt.wal_enable_ = config.wal.enable();
-
     if (opt.wal_enable_) {
-        int64_t wal_buffer_size = config.wal.buffer_size();
-        wal_buffer_size /= (1024 * 1024);
-        opt.buffer_size_ = wal_buffer_size;
         opt.wal_path_ = config.wal.path();
     }
 
