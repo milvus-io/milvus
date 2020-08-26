@@ -61,7 +61,7 @@ SetSnapshotIndex(const std::string& collection_name, const std::string& field_na
         json[engine::PARAM_INDEX_EXTRA_PARAMS] = index_info.extra_params_;
         index_element->SetParams(json);
 
-        if (index_info.index_type_ == knowhere::IndexEnum::INDEX_RHNSWSQ) {
+        if (utils::RequireCompressFile(index_info.index_type_)) {
             auto compress_element =
                 std::make_shared<snapshot::FieldElement>(ss->GetCollectionId(), field->GetID(), ELEMENT_INDEX_COMPRESS,
                                                          milvus::engine::FieldElementType::FET_COMPRESS);
