@@ -1,6 +1,9 @@
 package schema
 
-import "bytes"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 type ErrorCode int32
 
@@ -110,7 +113,7 @@ type InsertMsg struct {
 type DeleteMsg struct {
 	CollectionName string
 	EntityId       int64
-	Timestamp      int64
+	Timestamp      uint64
 	ClientId       int64
 	MsgType        OpType
 }
@@ -141,8 +144,11 @@ func (ims *InsertMsg) GetType() OpType {
 }
 
 func (ims *InsertMsg) Serialization() []byte {
-	var serialization_data bytes.Buffer
-	return serialization_data.Bytes()
+	data, err := json.Marshal(ims)
+	if err != nil {
+		fmt.Println("Can't serialization")
+	}
+	return data
 }
 
 func (ims *InsertMsg) Deserialization(serializationData []byte) {
