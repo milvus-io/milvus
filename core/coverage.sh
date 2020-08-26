@@ -22,8 +22,6 @@ rm -f FILE_INFO_OUTPUT_NEW
 rm -rf lcov_out
 rm -f FILE_INFO_BASE FILE_INFO_MILVUS FILE_INFO_OUTPUT FILE_INFO_OUTPUT_NEW
 
-MYSQL_DB_NAME=milvus_`date +%s%N`
-
 # get baseline
 ${LCOV_CMD} -c -i -d ${DIR_GCNO} -o "${FILE_INFO_BASE}"
 if [ $? -ne 0 ]; then
@@ -40,8 +38,6 @@ for test in `ls ${DIR_UNITTEST}`; do
         exit -1
     fi
 done
-
-mysql_exc "DROP DATABASE IF EXISTS ${MYSQL_DB_NAME};"
 
 # gen code coverage
 ${LCOV_CMD} -d ${DIR_GCNO} -o "${FILE_INFO_MILVUS}" -c
