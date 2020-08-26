@@ -147,6 +147,9 @@ TEST_F(WalTest, WalFileTest) {
 
         ASSERT_TRUE(file.ExceedMaxSize(max_size));
 
+        bytes = file.Write(path.data(), 0);
+        ASSERT_EQ(bytes, 0);
+
         bytes = file.Write(path.data(), len);
         ASSERT_EQ(bytes, len);
         total_bytes += bytes;
@@ -176,6 +179,9 @@ TEST_F(WalTest, WalFileTest) {
         ASSERT_EQ(bytes, sizeof(int8_t));
 
         std::string str;
+        bytes = file.ReadStr(str, 0);
+        ASSERT_EQ(bytes, 0);
+
         bytes = file.ReadStr(str, len);
         ASSERT_EQ(bytes, len);
         ASSERT_EQ(str, path);
