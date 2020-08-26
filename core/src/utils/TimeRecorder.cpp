@@ -39,8 +39,6 @@ TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
     str_log += TimeRecorder::GetTimeSpanStr(span);
     str_log += ")";
 
-    std::cout << str_log << std::endl;
-    return;
     switch (log_level_) {
         case 0:
             LOG_SERVER_TRACE_ << str_log;

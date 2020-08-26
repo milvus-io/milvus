@@ -13,11 +13,8 @@
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
-#include "utils/TimeRecorder.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 /* Status */
 /* Snapshots::DropAll() { */
@@ -128,11 +125,9 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
 
 Status
 Snapshots::Init(StorePtr store) {
-    TimeRecorder tr("Snapshots::Init");
     auto event = std::make_shared<InActiveResourcesGCEvent>();
     EventExecutor::GetInstance().Submit(event, true);
     STATUS_CHECK(event->WaitToFinish());
-    tr.RecordSection("InactivateEvent done");
     auto op = std::make_shared<GetCollectionIDsOperation>();
     STATUS_CHECK((*op)(store));
     auto& collection_ids = op->GetIDs();
@@ -216,6 +211,4 @@ Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
               << std::endl;
 }
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot

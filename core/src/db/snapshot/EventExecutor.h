@@ -57,7 +57,7 @@ class EventExecutor {
     }
 
     Status
-    Submit(const EventPtr& evt, bool flush=false) {
+    Submit(const EventPtr& evt, bool flush = false) {
         if (evt == nullptr) {
             return Status(SS_INVALID_ARGUMENT_ERROR, "Invalid Resource");
         }
@@ -120,7 +120,7 @@ class EventExecutor {
             }
 
             if (!initialized_.load() && cache_queues_.Empty()) {
-                    break;
+                break;
             }
         }
     }
@@ -143,10 +143,10 @@ class EventExecutor {
     }
 
     void
-    Enqueue(const EventPtr& evt, bool flush=false) {
+    Enqueue(const EventPtr& evt, bool flush = false) {
         if (!initialized_.load()) {
-            LOG_ENGINE_WARNING_ << "GcEvent exit" << std::endl;
-            return ;
+            LOG_ENGINE_WARNING_ << "GcEvent exiting ...";
+            return;
         }
 
         bool need_notify = flush;
@@ -182,4 +182,4 @@ class EventExecutor {
     StorePtr store_;
 };
 
-}  // namespace milvus::snapshot::engine
+}  // namespace milvus::engine::snapshot
