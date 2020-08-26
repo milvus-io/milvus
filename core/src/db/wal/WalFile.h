@@ -50,7 +50,7 @@ class WalFile {
     template <typename T>
     inline int64_t
     Write(T* value) {
-        if (file_ == nullptr) {
+        if (file_ == nullptr || value == nullptr) {
             return 0;
         }
 
@@ -61,7 +61,7 @@ class WalFile {
 
     inline int64_t
     Write(const void* data, int64_t length) {
-        if (file_ == nullptr) {
+        if (file_ == nullptr || data == nullptr || length <= 0) {
             return 0;
         }
 
@@ -83,7 +83,7 @@ class WalFile {
 
     inline int64_t
     Read(void* data, int64_t length) {
-        if (file_ == nullptr) {
+        if (file_ == nullptr || length <= 0) {
             return 0;
         }
 

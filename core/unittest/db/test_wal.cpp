@@ -35,7 +35,9 @@ using WalOperationPtr = milvus::engine::WalOperationPtr;
 using WalOperationType = milvus::engine::WalOperationType;
 using WalOperationCodec = milvus::engine::WalOperationCodec;
 using InsertEntityOperation = milvus::engine::InsertEntityOperation;
+using InsertEntityOperationPtr = milvus::engine::InsertEntityOperationPtr;
 using DeleteEntityOperation = milvus::engine::DeleteEntityOperation;
+using DeleteEntityOperationPtr = milvus::engine::DeleteEntityOperationPtr;
 using WalProxy = milvus::engine::WalProxy;
 
 void CreateChunk(DataChunkPtr& chunk, int64_t row_count, int64_t& chunk_size) {
@@ -145,6 +147,9 @@ TEST_F(WalTest, WalFileTest) {
 
         ASSERT_TRUE(file.ExceedMaxSize(max_size));
 
+        bytes = file.Write(path.data(), 0);
+        ASSERT_EQ(bytes, 0);
+
         bytes = file.Write(path.data(), len);
         ASSERT_EQ(bytes, len);
         total_bytes += bytes;
@@ -174,6 +179,9 @@ TEST_F(WalTest, WalFileTest) {
         ASSERT_EQ(bytes, sizeof(int8_t));
 
         std::string str;
+        bytes = file.ReadStr(str, 0);
+        ASSERT_EQ(bytes, 0);
+
         bytes = file.ReadStr(str, len);
         ASSERT_EQ(bytes, len);
         ASSERT_EQ(str, path);
@@ -191,65 +199,76 @@ TEST_F(WalTest, WalFileTest) {
 }
 
 TEST_F(WalTest, WalFileCodecTest) {
-    std::string path = "/tmp/milvus_wal/test_file";
+    std::string collection_name = "c1";
+    std::string partition_name = "p1";
+    std::string file_path = "/tmp/milvus_wal/test_file";
     auto file = std::make_shared<WalFile>();
 
-    IDNumbers op_ids;
-    std::vector<WalOperationType> op_types;
-    // insert operation
-    {
-        auto status = file->OpenFile(path, WalFile::APPEND_WRITE);
-        ASSERT_TRUE(status.ok());
+    // record 100 operations
+    std::vector<WalOperationPtr> operations;
+    for (int64_t i = 1; i <= 100; ++i) {
+        if (i % 5 == 0) {
+            // delete operation
+            auto status = file->OpenFile(file_path, WalFile::APPEND_WRITE);
+            ASSERT_TRUE(status.ok());
 
-        DataChunkPtr chunk;
-        int64_t chunk_size = 0;
-        CreateChunk(chunk, 1000, chunk_size);
+            auto pre_size = file->Size();
 
-        std::string partition_name = "p1";
-        idx_t op_id = 100;
-        op_ids.push_back(op_id);
-        op_types.push_back(WalOperationType::INSERT_ENTITY);
-        WalOperationCodec::WriteInsertOperation(file, partition_name, chunk, op_id);
+            DeleteEntityOperationPtr operation = std::make_shared<DeleteEntityOperation>();
+            operation->collection_name_ = collection_name;
+            IDNumbers ids = {i + 1, i + 2, i + 3};
+            operation->entity_ids_ = ids;
+            idx_t op_id = i + 10000;
+            operation->SetID(op_id);
+            operations.emplace_back(operation);
 
-        ASSERT_GE(file->Size(), chunk_size);
+            status = WalOperationCodec::WriteDeleteOperation(file, ids, op_id);
+            ASSERT_TRUE(status.ok());
 
-        file->CloseFile();
+            auto post_size = file->Size();
+            ASSERT_GE(post_size - pre_size, ids.size() * sizeof(idx_t));
 
-        WalFile file_read;
-        file_read.OpenFile(path, WalFile::READ);
-        idx_t last_id = 0;
-        file_read.ReadLastOpId(last_id);
-        ASSERT_EQ(last_id, op_id);
-    }
+            file->CloseFile();
 
-    // delete operation
-    {
-        auto status = file->OpenFile(path, WalFile::APPEND_WRITE);
-        ASSERT_TRUE(status.ok());
+            WalFile file_read;
+            file_read.OpenFile(file_path, WalFile::READ);
+            idx_t last_id = 0;
+            file_read.ReadLastOpId(last_id);
+            ASSERT_EQ(last_id, op_id);
+        } else {
+            // insert operation
+            auto status = file->OpenFile(file_path, WalFile::APPEND_WRITE);
+            ASSERT_TRUE(status.ok());
 
-        auto pre_size = file->Size();
+            InsertEntityOperationPtr operation = std::make_shared<InsertEntityOperation>();
+            operation->collection_name_ = collection_name;
+            operation->partition_name = partition_name;
 
-        IDNumbers ids = {1, 2, 3};
-        idx_t op_id = 200;
-        op_ids.push_back(op_id);
-        op_types.push_back(WalOperationType::DELETE_ENTITY);
-        WalOperationCodec::WriteDeleteOperation(file, ids, op_id);
+            DataChunkPtr chunk;
+            int64_t chunk_size = 0;
+            CreateChunk(chunk, 100, chunk_size);
+            operation->data_chunk_ = chunk;
 
-        auto post_size = file->Size();
-        ASSERT_GE(post_size - pre_size, ids.size() * sizeof(idx_t));
+            idx_t op_id = i + 10000;
+            operation->SetID(op_id);
+            operations.emplace_back(operation);
 
-        file->CloseFile();
+            status = WalOperationCodec::WriteInsertOperation(file, partition_name, chunk, op_id);
+            ASSERT_TRUE(status.ok());
+            ASSERT_GE(file->Size(), chunk_size);
+            file->CloseFile();
 
-        WalFile file_read;
-        file_read.OpenFile(path, WalFile::READ);
-        idx_t last_id = 0;
-        file_read.ReadLastOpId(last_id);
-        ASSERT_EQ(last_id, op_id);
+            WalFile file_read;
+            file_read.OpenFile(file_path, WalFile::READ);
+            idx_t last_id = 0;
+            file_read.ReadLastOpId(last_id);
+            ASSERT_EQ(last_id, op_id);
+        }
     }
 
     // iterate operations
     {
-        auto status = file->OpenFile(path, WalFile::READ);
+        auto status = file->OpenFile(file_path, WalFile::READ);
         ASSERT_TRUE(status.ok());
 
         Status iter_status;
@@ -261,11 +280,48 @@ TEST_F(WalTest, WalFileCodecTest) {
                 continue;
             }
 
-            ASSERT_EQ(operation->ID(), op_ids[op_index]);
-            ASSERT_EQ(operation->Type(), op_types[op_index]);
+            if (op_index >= operations.size()) {
+                ASSERT_TRUE(false);
+            }
+
+            // validate operation data is correct
+            WalOperationPtr compare_operation = operations[op_index];
+            ASSERT_EQ(operation->ID(), compare_operation->ID());
+            ASSERT_EQ(operation->Type(), compare_operation->Type());
+
+            if (operation->Type() == WalOperationType::INSERT_ENTITY) {
+                InsertEntityOperationPtr op_1 = std::static_pointer_cast<InsertEntityOperation>(operation);
+                InsertEntityOperationPtr op_2 = std::static_pointer_cast<InsertEntityOperation>(compare_operation);
+                ASSERT_EQ(op_1->partition_name, op_2->partition_name);
+                DataChunkPtr chunk_1 = op_1->data_chunk_;
+                DataChunkPtr chunk_2 = op_2->data_chunk_;
+                ASSERT_NE(chunk_1, nullptr);
+                ASSERT_NE(chunk_2, nullptr);
+                ASSERT_EQ(chunk_1->count_, chunk_2->count_);
+
+                for (auto& pair : chunk_1->fixed_fields_) {
+                    auto iter = chunk_2->fixed_fields_.find(pair.first);
+                    ASSERT_NE(iter, chunk_2->fixed_fields_.end());
+                    ASSERT_NE(pair.second, nullptr);
+                    ASSERT_NE(iter->second, nullptr);
+                    ASSERT_EQ(pair.second->data_, iter->second->data_);
+                }
+                for (auto& pair : chunk_1->variable_fields_) {
+                    auto iter = chunk_2->variable_fields_.find(pair.first);
+                    ASSERT_NE(iter, chunk_2->variable_fields_.end());
+                    ASSERT_NE(pair.second, nullptr);
+                    ASSERT_NE(iter->second, nullptr);
+                    ASSERT_EQ(pair.second->data_, iter->second->data_);
+                }
+            } else if(operation->Type() == WalOperationType::DELETE_ENTITY) {
+                DeleteEntityOperationPtr op_1 = std::static_pointer_cast<DeleteEntityOperation>(operation);
+                DeleteEntityOperationPtr op_2 = std::static_pointer_cast<DeleteEntityOperation>(compare_operation);
+                ASSERT_EQ(op_1->entity_ids_, op_2->entity_ids_);
+            }
+
             ++op_index;
         }
-        ASSERT_EQ(op_index, op_ids.size());
+        ASSERT_EQ(op_index, operations.size());
     }
 }
 
@@ -291,8 +347,7 @@ TEST_F(WalTest, WalProxyTest) {
 
     // find out the wal files
     DBOptions opt = GetOptions();
-    std::experimental::filesystem::path collection_path = opt.meta_.path_;
-    collection_path.append(milvus::engine::WAL_DATA_FOLDER);
+    std::experimental::filesystem::path collection_path = opt.wal_path_;
     collection_path.append(collection_name);
 
     using DirectoryIterator = std::experimental::filesystem::recursive_directory_iterator;
@@ -354,7 +409,7 @@ TEST_F(WalTest, WalManagerTest) {
 
     // construct mock db
     DBOptions options;
-    options.meta_.path_ = "/tmp/milvus_wal";
+    options.wal_path_ = "/tmp/milvus_wal";
     options.wal_enable_ = true;
     DummyDBPtr db_1 = std::make_shared<DummyDB>(options);
 

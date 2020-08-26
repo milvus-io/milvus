@@ -42,6 +42,7 @@
 #include <fiu/fiu-local.h>
 #include <src/scheduler/job/BuildIndexJob.h>
 #include <limits>
+#include <unordered_set>
 #include <utility>
 
 namespace milvus {
@@ -168,8 +169,8 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     auto params = ctx.collection->GetParams();
     if (params.find(PARAM_UID_AUTOGEN) == params.end()) {
         params[PARAM_UID_AUTOGEN] = true;
-        ctx.collection->SetParams(params);
     }
+    ctx.collection->SetParams(params);
 
     // check uid existence
     snapshot::FieldPtr uid_field;
@@ -367,7 +368,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
     // step 5: start background build index thread
     std::vector<std::string> collection_names = {collection_name};
     WaitBuildIndexFinish();
-    StartBuildIndexTask(collection_names);
+    StartBuildIndexTask(collection_names, true);
 
     // step 6: iterate segments need to be build index, wait until all segments are built
     while (true) {
@@ -375,7 +376,14 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
         snapshot::IDS_TYPE segment_ids;
         ss_visitor.SegmentsToIndex(field_name, segment_ids);
         if (segment_ids.empty()) {
-            break;
+            break;  // all segments build index finished
+        }
+
+        snapshot::ScopedSnapshotT ss;
+        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+        IgnoreIndexFailedSegments(ss->GetCollectionId(), segment_ids);
+        if (segment_ids.empty()) {
+            break;  // some segments failed to build index, and ignored
         }
 
         index_req_swn_.Wait_For(std::chrono::seconds(1));
@@ -398,8 +406,10 @@ DBImpl::DropIndex(const std::string& collection_name, const std::string& field_n
 
     STATUS_CHECK(DeleteSnapshotIndex(collection_name, field_name));
 
-    std::set<std::string> merge_collection_names = {collection_name};
-    StartMergeTask(merge_collection_names, true);
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+    std::set<int64_t> collection_ids = {ss->GetCollectionId()};
+    StartMergeTask(collection_ids, true);
 
     return Status::OK();
 }
@@ -427,8 +437,8 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    auto partition_ptr = ss->GetPartition(partition_name);
-    if (partition_ptr == nullptr) {
+    auto partition = ss->GetPartition(partition_name);
+    if (partition == nullptr) {
         return Status(DB_NOT_FOUND, "Fail to get partition " + partition_name);
     }
 
@@ -437,6 +447,37 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         return Status(DB_ERROR, "Field '_id' not found");
     }
 
+    // check field names
+    auto field_names = ss->GetFieldNames();
+    std::unordered_set<std::string> collection_field_names;
+    for (auto& name : field_names) {
+        collection_field_names.insert(name);
+    }
+    collection_field_names.erase(engine::FIELD_UID);
+
+    std::unordered_set<std::string> chunk_field_names;
+    for (auto& pair : data_chunk->fixed_fields_) {
+        chunk_field_names.insert(pair.first);
+    }
+    for (auto& pair : data_chunk->variable_fields_) {
+        chunk_field_names.insert(pair.first);
+    }
+    chunk_field_names.erase(engine::FIELD_UID);
+
+    if (collection_field_names.size() != chunk_field_names.size()) {
+        std::string msg = "Collection has " + std::to_string(collection_field_names.size()) +
+                          " fields while the insert data has " + std::to_string(chunk_field_names.size()) + " fields";
+        return Status(DB_ERROR, msg);
+    } else {
+        for (auto& name : chunk_field_names) {
+            if (collection_field_names.find(name) == collection_field_names.end()) {
+                std::string msg = "The field " + name + " is not defined in collection mapping";
+                return Status(DB_ERROR, msg);
+            }
+        }
+    }
+
+    // check id field existence
     auto& params = ss->GetCollection()->GetParams();
     bool auto_increment = true;
     if (params.find(PARAM_UID_AUTOGEN) != params.end()) {
@@ -446,39 +487,44 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     FIXEDX_FIELD_MAP& fields = data_chunk->fixed_fields_;
     auto pair = fields.find(engine::FIELD_UID);
     if (auto_increment) {
-        // id is auto increment, but client provides id, return error
+        // id is auto generated, but client provides id, return error
         if (pair != fields.end() && pair->second != nullptr) {
             return Status(DB_ERROR, "Field '_id' is auto increment, no need to provide id");
         }
     } else {
-        // id is not auto increment, but client doesn't provide id, return error
+        // id is not auto generated, but client doesn't provide id, return error
         if (pair == fields.end() || pair->second == nullptr) {
             return Status(DB_ERROR, "Field '_id' is user defined");
         }
     }
 
+    // consume the data chunk
+    DataChunkPtr consume_chunk = std::make_shared<DataChunk>();
+    consume_chunk->count_ = data_chunk->count_;
+    consume_chunk->fixed_fields_.swap(data_chunk->fixed_fields_);
+    consume_chunk->variable_fields_.swap(data_chunk->variable_fields_);
+
     // generate id
     if (auto_increment) {
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         IDNumbers ids;
-        STATUS_CHECK(id_generator.GetNextIDNumbers(data_chunk->count_, ids));
+        STATUS_CHECK(id_generator.GetNextIDNumbers(consume_chunk->count_, ids));
         BinaryDataPtr id_data = std::make_shared<BinaryData>();
         id_data->data_.resize(ids.size() * sizeof(int64_t));
         memcpy(id_data->data_.data(), ids.data(), ids.size() * sizeof(int64_t));
-        data_chunk->fixed_fields_[engine::FIELD_UID] = id_data;
+        consume_chunk->fixed_fields_[engine::FIELD_UID] = id_data;
+        data_chunk->fixed_fields_[engine::FIELD_UID] = id_data;  // return generated id to customer;
+    } else {
+        BinaryDataPtr id_data = std::make_shared<BinaryData>();
+        id_data->data_ = consume_chunk->fixed_fields_[engine::FIELD_UID]->data_;
+        data_chunk->fixed_fields_[engine::FIELD_UID] = id_data;  // return the id created by client
     }
 
-    // insert entities: collection_name is field id
-    snapshot::PartitionPtr part = ss->GetPartition(partition_name);
-    if (part == nullptr) {
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << partition_name;
-        return Status(DB_ERROR, "Invalid partiiton name");
-    }
-
+    // do insert
     int64_t collection_id = ss->GetCollectionId();
-    int64_t partition_id = part->GetID();
+    int64_t partition_id = partition->GetID();
 
-    auto status = mem_mgr_->InsertEntities(collection_id, partition_id, data_chunk, op_id);
+    auto status = mem_mgr_->InsertEntities(collection_id, partition_id, consume_chunk, op_id);
     if (!status.ok()) {
         return status;
     }
@@ -793,7 +839,7 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
 void
 DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
     Status status;
-    std::set<std::string> flushed_collections;
+    std::set<int64_t> flushed_collection_ids;
     if (!collection_name.empty()) {
         // flush one collection
         snapshot::ScopedSnapshotT ss;
@@ -810,34 +856,21 @@ DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
             if (!status.ok()) {
                 return;
             }
+            flushed_collection_ids.insert(collection_id);
         }
-
-        flushed_collections.insert(collection_name);
     } else {
         // flush all collections
-        std::set<int64_t> collection_ids;
         {
             const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-            status = mem_mgr_->Flush(collection_ids);
+            status = mem_mgr_->Flush(flushed_collection_ids);
             if (!status.ok()) {
                 return;
             }
-        }
-
-        for (auto id : collection_ids) {
-            snapshot::ScopedSnapshotT ss;
-            status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, id);
-            if (!status.ok()) {
-                LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
-                return;
-            }
-
-            flushed_collections.insert(ss->GetName());
         }
     }
 
     if (merge) {
-        StartMergeTask(flushed_collections);
+        StartMergeTask(flushed_collection_ids);
     }
 }
 
@@ -907,7 +940,7 @@ DBImpl::TimingMetricThread() {
 }
 
 void
-DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names) {
+DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names, bool reset_retry_times) {
     // build index has been finished?
     {
         std::lock_guard<std::mutex> lck(index_result_mutex_);
@@ -923,6 +956,11 @@ DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names) {
     {
         std::lock_guard<std::mutex> lck(index_result_mutex_);
         if (index_thread_results_.empty()) {
+            if (reset_retry_times) {
+                std::lock_guard<std::mutex> lock(index_retry_mutex_);
+                index_retry_map_.clear();  // reset index retry times
+            }
+
             index_thread_results_.push_back(
                 index_thread_pool_.enqueue(&DBImpl::BackgroundBuildIndexTask, this, collection_names));
         }
@@ -949,6 +987,14 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
             continue;
         }
 
+        // check index retry times
+        snapshot::ID_TYPE collection_id = latest_ss->GetCollectionId();
+        IgnoreIndexFailedSegments(collection_id, segment_ids);
+        if (segment_ids.empty()) {
+            continue;
+        }
+
+        // start build index job
         LOG_ENGINE_DEBUG_ << "Create BuildIndexJob for " << segment_ids.size() << " segments of " << collection_name;
         cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before build index
         scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_ids);
@@ -956,9 +1002,12 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
         job->WaitFinish();
         cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after build index
 
+        // record failed segments, avoid build index hang
+        snapshot::IDS_TYPE& failed_ids = job->FailedSegments();
+        MarkIndexFailedSegments(collection_id, failed_ids);
+
         if (!job->status().ok()) {
             LOG_ENGINE_ERROR_ << job->status().message();
-            break;
         }
     }
 }
@@ -981,7 +1030,7 @@ DBImpl::TimingIndexThread() {
         std::vector<std::string> collection_names;
         snapshot::Snapshots::GetInstance().GetCollectionNames(collection_names);
         WaitMergeFileFinish();
-        StartBuildIndexTask(collection_names);
+        StartBuildIndexTask(collection_names, false);
     }
 }
 
@@ -996,8 +1045,7 @@ DBImpl::WaitBuildIndexFinish() {
 }
 
 void
-DBImpl::StartMergeTask(const std::set<std::string>& collection_names, bool force_merge_all) {
-    // LOG_ENGINE_DEBUG_ << "Begin StartMergeTask";
+DBImpl::StartMergeTask(const std::set<int64_t>& collection_ids, bool force_merge_all) {
     // merge task has been finished?
     {
         std::lock_guard<std::mutex> lck(merge_result_mutex_);
@@ -1015,28 +1063,26 @@ DBImpl::StartMergeTask(const std::set<std::string>& collection_names, bool force
         if (merge_thread_results_.empty()) {
             // start merge file thread
             merge_thread_results_.push_back(
-                merge_thread_pool_.enqueue(&DBImpl::BackgroundMerge, this, collection_names, force_merge_all));
+                merge_thread_pool_.enqueue(&DBImpl::BackgroundMerge, this, collection_ids, force_merge_all));
         }
     }
-
-    // LOG_ENGINE_DEBUG_ << "End StartMergeTask";
 }
 
 void
-DBImpl::BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all) {
+DBImpl::BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all) {
     SetThreadName("merge");
 
-    for (auto& collection_name : collection_names) {
+    for (auto& collection_id : collection_ids) {
         const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-        auto status = merge_mgr_ptr_->MergeFiles(collection_name);
+        auto status = merge_mgr_ptr_->MergeFiles(collection_id);
         if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_name
+            LOG_ENGINE_ERROR_ << "Failed to get merge files for collection id: " << collection_id
                               << " reason:" << status.message();
         }
 
         if (!initialized_.load(std::memory_order_acquire)) {
-            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection: " << collection_name;
+            LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection id: " << collection_id;
             break;
         }
     }
@@ -1075,6 +1121,28 @@ DBImpl::ConfigUpdate(const std::string& name) {
     if (name == "storage.auto_flush_interval") {
         options_.auto_flush_interval_ = config.storage.auto_flush_interval();
     }
+}
+
+void
+DBImpl::MarkIndexFailedSegments(snapshot::ID_TYPE collection_id, const snapshot::IDS_TYPE& failed_ids) {
+    std::lock_guard<std::mutex> lock(index_retry_mutex_);
+    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_id];
+    for (auto& id : failed_ids) {
+        retry_map[id]++;
+    }
+}
+
+void
+DBImpl::IgnoreIndexFailedSegments(snapshot::ID_TYPE collection_id, snapshot::IDS_TYPE& segment_ids) {
+    std::lock_guard<std::mutex> lock(index_retry_mutex_);
+    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_id];
+    snapshot::IDS_TYPE segment_ids_to_build;
+    for (auto id : segment_ids) {
+        if (retry_map[id] < BUILD_INEDX_RETRY_TIMES) {
+            segment_ids_to_build.push_back(id);
+        }
+    }
+    segment_ids.swap(segment_ids_to_build);
 }
 
 }  // namespace engine
