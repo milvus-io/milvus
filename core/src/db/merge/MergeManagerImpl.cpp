@@ -44,7 +44,7 @@ MergeManagerImpl::CreateStrategy(MergeStrategyType type, MergeStrategyPtr& strat
 }
 
 Status
-MergeManagerImpl::MergeFiles(const std::string& collection_name, MergeStrategyType type) {
+MergeManagerImpl::MergeFiles(int64_t collection_id, MergeStrategyType type) {
     MergeStrategyPtr strategy;
     auto status = CreateStrategy(type, strategy);
     if (!status.ok()) {
@@ -53,7 +53,7 @@ MergeManagerImpl::MergeFiles(const std::string& collection_name, MergeStrategyTy
 
     while (true) {
         snapshot::ScopedSnapshotT latest_ss;
-        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
+        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_id));
 
         // collect all segments
         Partition2SegmentsMap part2seg;
@@ -66,7 +66,7 @@ MergeManagerImpl::MergeFiles(const std::string& collection_name, MergeStrategyTy
         SegmentGroups segment_groups;
         auto status = strategy->RegroupSegments(latest_ss, part2seg, segment_groups);
         if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Failed to regroup segments for: " << collection_name
+            LOG_ENGINE_ERROR_ << "Failed to regroup segments for collection: " << latest_ss->GetName()
                               << ", continue to merge all files into one";
             return status;
         }

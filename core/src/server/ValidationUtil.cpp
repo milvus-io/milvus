@@ -97,9 +97,10 @@ ValidateCollectionName(const std::string& collection_name) {
     }
 
     std::string invalid_msg = "Invalid collection name: " + collection_name + ". ";
-    // Collection name size shouldn't exceed 255.
+    // Collection name size shouldn't exceed engine::MAX_NAME_LENGTH.
     if (collection_name.size() > engine::MAX_NAME_LENGTH) {
-        std::string msg = invalid_msg + "The length of a collection name must be less than 255 characters.";
+        std::string msg = invalid_msg + "The length of a collection name must be less than " +
+                          std::to_string(engine::MAX_NAME_LENGTH) + " characters.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
     }
@@ -135,9 +136,10 @@ ValidateFieldName(const std::string& field_name) {
     }
 
     std::string invalid_msg = "Invalid field name: " + field_name + ". ";
-    // Field name size shouldn't exceed 255.
+    // Field name size shouldn't exceed engine::MAX_NAME_LENGTH.
     if (field_name.size() > engine::MAX_NAME_LENGTH) {
-        std::string msg = invalid_msg + "The length of a field name must be less than 255 characters.";
+        std::string msg = invalid_msg + "The length of a field name must be less than " +
+                          std::to_string(engine::MAX_NAME_LENGTH) + " characters.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_FIELD_NAME, msg);
     }
@@ -438,8 +440,9 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
         }
 
         // max length of partition tag
-        if (valid_tag.length() > 255) {
-            std::string msg = "Invalid partition tag: " + valid_tag + ". " + "Partition tag exceed max length(255).";
+        if (valid_tag.length() > engine::MAX_NAME_LENGTH) {
+            std::string msg = "Invalid partition tag: " + valid_tag + ". " +
+                              "Partition tag exceed max length: " + std::to_string(engine::MAX_NAME_LENGTH);
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_PARTITION_TAG, msg);
         }
@@ -450,24 +453,8 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
 
 Status
 ValidateInsertDataSize(const engine::DataChunkPtr& data) {
-    int64_t total_size = 0;
-    for (auto& pair : data->fixed_fields_) {
-        if (pair.second == nullptr) {
-            continue;
-        }
-
-        total_size += pair.second->Size();
-    }
-
-    for (auto& pair : data->variable_fields_) {
-        if (pair.second == nullptr) {
-            continue;
-        }
-
-        total_size += pair.second->Size();
-    }
-
-    if (total_size > engine::MAX_INSERT_DATA_SIZE) {
+    int64_t chunk_size = engine::utils::GetSizeOfChunk(data);
+    if (chunk_size > engine::MAX_INSERT_DATA_SIZE) {
         std::string msg = "The amount of data inserted each time cannot exceed " +
                           std::to_string(engine::MAX_INSERT_DATA_SIZE / engine::MB) + " MB";
         return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);

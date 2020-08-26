@@ -44,7 +44,6 @@ jobs:
       - name: Docker Pull
         shell: bash
         run: |
-          docker-compose pull --ignore-pull-failures db
           docker-compose pull --ignore-pull-failures ubuntu-core
       - name: Docker Build
         shell: bash
@@ -53,7 +52,6 @@ jobs:
           docker rmi $(docker images | grep '<none>' | awk '{print $3}') || exit 0
       - name: Docker Run
         run: |
-          docker-compose run --use-aliases -d db
           docker-compose run ubuntu-core
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
@@ -92,7 +90,6 @@ jobs:
       - name: Docker Pull
         shell: bash
         run: |
-          docker-compose pull --ignore-pull-failures db
           docker-compose pull --ignore-pull-failures centos-core
       - name: Docker Build
         shell: bash
@@ -101,7 +98,6 @@ jobs:
           docker rmi $(docker images | grep '<none>' | awk '{print $3}') || exit 0
       - name: Docker Run
         run: |
-          docker-compose run --use-aliases -d db
           docker-compose run centos-core
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'

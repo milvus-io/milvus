@@ -20,6 +20,8 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace milvus {
@@ -61,12 +63,20 @@ struct GetEntityByIdSegmentHandler : public snapshot::SegmentIterator {
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
+    Status
+    PostIterate() override;
+
     const server::ContextPtr context_;
     const std::string dir_root_;
     const engine::IDNumbers ids_;
     const std::vector<std::string> field_names_;
     engine::DataChunkPtr data_chunk_;
     std::vector<bool>& valid_row_;
+
+ private:
+    engine::IDNumbers ids_left_;
+    using IDChunkMap = std::unordered_map<idx_t, std::pair<engine::DataChunkPtr, int64_t>>;
+    IDChunkMap result_map_;  // record id in which chunk, and its position within the chunk
 };
 
 ///////////////////////////////////////////////////////////////////////////////
