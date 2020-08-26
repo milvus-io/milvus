@@ -77,9 +77,9 @@ bool
 CheckSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path);
 
 void
-WriteSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int result, bool written = false);
+WriteSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, uint32_t result, bool written = false);
 
-std::uint8_t
+std::uint32_t
 CalculateSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, bool written = false);
 
 std::string

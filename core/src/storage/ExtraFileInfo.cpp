@@ -94,7 +94,7 @@ ReadHeaderValue(const storage::FSHandlerPtr& fs_ptr, const std::string& file_pat
     return kv.at(key);
 }
 
-std::uint8_t
+std::uint32_t
 CalculateSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, bool written) {
     if (!fs_ptr->reader_ptr_->Open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
@@ -108,14 +108,14 @@ CalculateSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, 
     }
     char* ch = static_cast<char*>(malloc(size));
     fs_ptr->reader_ptr_->Read(ch, size);
-    std::uint8_t result = crc32c::Crc32c(ch, size);
+    std::uint32_t result = crc32c::Crc32c(ch, size);
     fs_ptr->reader_ptr_->Close();
     free(ch);
     return result;
 }
 
 void
-WriteSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int result, bool written) {
+WriteSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, uint32_t result, bool written) {
     if (!fs_ptr->writer_ptr_->InOpen(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
@@ -128,29 +128,25 @@ WriteSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int 
         fs_ptr->writer_ptr_->Seekp(0, std::ios_base::end);
     }
 
-    std::string sum = std::to_string(result);
-    sum.resize(SUM_SIZE, '\0');
-    fs_ptr->writer_ptr_->Write(sum.data(), SUM_SIZE);
+    fs_ptr->writer_ptr_->Write(&result, SUM_SIZE);
     fs_ptr->writer_ptr_->Close();
 }
 
 bool
 CheckSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path) {
-    int result = CalculateSum(fs_ptr, file_path, true);
+    uint32_t result = CalculateSum(fs_ptr, file_path, true);
     if (!fs_ptr->reader_ptr_->Open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
     fs_ptr->reader_ptr_->Seekg(-SUM_SIZE, std::ios_base::end);
-    char* record = static_cast<char*>(malloc(SUM_SIZE));
-    fs_ptr->reader_ptr_->Read(record, SUM_SIZE);
+    uint32_t record;
+    fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
 
     fs_ptr->reader_ptr_->Close();
 
-    auto sum = static_cast<uint8_t>(atoi(record));
-    free(record);
-    return sum == result;
+    return record == result;
 }
 
 bool
