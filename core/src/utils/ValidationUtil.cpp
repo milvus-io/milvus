@@ -221,6 +221,21 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_COLLECTION_DIMENSION, msg);
             }
+
+            /* auto iter = std::find(std::begin(resset), std::end(resset), m_value);
+            if (iter == std::end(resset)) {
+                std::string msg =
+                    "Invalid " + std::string(knowhere::IndexParams::m) + ", must be one of the following values: ";
+                for (size_t i = 0; i < resset.size(); i++) {
+                    if (i != 0) {
+                        msg += ",";
+                    }
+                    msg += std::to_string(resset[i]);
+                }
+
+                LOG_SERVER_ERROR_ << msg;
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }*/
             break;
         }
         case (int32_t)engine::EngineType::NSG_MIX: {

@@ -470,7 +470,6 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     return Status(DB_ERROR, msg);
                 } else {
                     bool gpu_enable = false;
-
 #ifdef MILVUS_GPU_VERSION
                     server::Config& config = server::Config::GetInstance();
                     STATUS_CHECK(config.GetGpuResourceConfigEnable(gpu_enable));
@@ -574,7 +573,6 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 #endif
 
 #ifdef MILVUS_GPU_VERSION
-    printf("copy to gpu function\n");
     auto data_obj_ptr = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
     auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
     bool already_in_cache = (index != nullptr);
@@ -1165,6 +1163,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     }
 #endif
     TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search float", "search", 0));
+
     if (index_ == nullptr) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
         return Status(DB_ERROR, "index is null");
@@ -1206,6 +1205,7 @@ Status
 ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params,
                             float* distances, int64_t* labels, bool hybrid) {
     TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search uint8", "search", 0));
+
     if (index_ == nullptr) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
         return Status(DB_ERROR, "index is null");
