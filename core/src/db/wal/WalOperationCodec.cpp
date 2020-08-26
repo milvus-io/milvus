@@ -201,7 +201,7 @@ WalOperationCodec::IterateOperation(const WalFilePtr& file, WalOperationPtr& ope
             }
         }
 
-        // read chunk entity countint64_t total_bytes = 0;
+        // read chunk entity count
         DataChunkPtr chunk = std::make_shared<DataChunk>();
         read_bytes = file->Read<int64_t>(&(chunk->count_));
         if (read_bytes <= 0) {

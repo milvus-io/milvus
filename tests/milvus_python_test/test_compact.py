@@ -83,6 +83,14 @@ class TestCompactBase:
     def get_collection_name(self, request):
         yield request.param
 
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_ints()
+    )
+    def get_threshold(self, request):
+        yield request.param
+
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_compact_collection_name_invalid(self, connect, get_collection_name):
         '''
@@ -94,7 +102,20 @@ class TestCompactBase:
         with pytest.raises(Exception) as e:
             status = connect.compact(collection_name)
             # assert not status.OK()
-    
+
+    @pytest.mark.level(2)
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_compact_threshold_invalid(self, connect, collection, get_threshold):
+        '''
+        target: compact collection with invalid name
+        method: compact with invalid threshold
+        expected: exception raised
+        '''
+        threshold = get_threshold
+        if threshold != None:
+            with pytest.raises(Exception) as e:
+                status = connect.compact(collection, threshold)
+
     @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_entity_and_compact(self, connect, collection):
@@ -167,7 +188,35 @@ class TestCompactBase:
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         logging.getLogger().info(size_after)
         assert(size_before >= size_after)
-    
+
+    @pytest.mark.timeout(COMPACT_TIMEOUT)
+    def test_insert_delete_part_and_compact_threshold(self, connect, collection):
+        '''
+        target: test add entities, delete part of them and compact
+        method: add entities, delete a few and compact collection
+        expected: status ok, data size maybe is smaller after compact
+        '''
+        ids = connect.insert(collection, entities)
+        assert len(ids) == nb
+        connect.flush([collection])
+        delete_ids = [ids[0], ids[-1]]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        assert status.OK()
+        connect.flush([collection])
+        # get collection info before compact
+        info = connect.get_collection_stats(collection)
+        logging.getLogger().info(info["partitions"])
+        size_before = info["partitions"][0]["segments"][0]["data_size"]
+        logging.getLogger().info(size_before)
+        status = connect.compact(collection, 0.1)
+        assert status.OK()
+        # get collection info after compact
+        info = connect.get_collection_stats(collection)
+        logging.getLogger().info(info["partitions"])
+        size_after = info["partitions"][0]["segments"][0]["data_size"]
+        logging.getLogger().info(size_after)
+        assert(size_before >= size_after)
+
     @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_insert_delete_all_and_compact(self, connect, collection):
