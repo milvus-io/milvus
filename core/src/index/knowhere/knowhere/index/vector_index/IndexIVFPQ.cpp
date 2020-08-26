@@ -52,7 +52,7 @@ IVFPQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
     auto ivfpq_index = dynamic_cast<faiss::IndexIVFPQ*>(index_.get());
     int64_t dim = ivfpq_index->d;
     int64_t m = ivfpq_index->pq.M;
-    if (!knowhere::IVFPQConfAdapter::GetValidGPUM(dim, m)) {
+    if (!IVFPQConfAdapter::GetValidGPUM(dim, m)) {
         return nullptr;
     }
 
