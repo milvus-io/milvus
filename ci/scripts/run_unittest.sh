@@ -78,7 +78,7 @@ if [ -d ${INSTALL_PREFIX}/lib ]; then
 	export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${INSTALL_PREFIX}/lib
 fi
 
-if [ ! -d ${DIR_UNITTEST} ]; then
+if [ ! -d ${UNITTEST_DIR} ]; then
 	echo "The unittest folder does not exist!"
     exit 1
 fi
@@ -97,12 +97,12 @@ if [ $? -ne 0 ]; then
 fi
 
 # run unittest
-for test in `ls ${DIR_UNITTEST}`; do
+for test in `ls ${UNITTEST_DIR}`; do
     echo $test " running..."
     # run unittest
-    ${DIR_UNITTEST}/${test}
+    ${UNITTEST_DIR}/${test}
     if [ $? -ne 0 ]; then
-        echo ${DIR_UNITTEST}/${test} "run failed"
+        echo ${UNITTEST_DIR}/${test} "run failed"
         exit 1
     fi
 done
