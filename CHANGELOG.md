@@ -56,6 +56,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2858 Unify index name in db
 -   \#2884 Using BlockingQueue in JobMgr
 -   \#3220 Enable -Werror to improve code quality
+-   \#3465 Optimize gc event executor
 
 ## Task
 
