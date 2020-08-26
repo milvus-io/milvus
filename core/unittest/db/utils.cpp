@@ -42,7 +42,6 @@
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
 #include "utils/CommonUtil.h"
-#include "utils/TimeRecorder.h"
 
 
 INITIALIZE_EASYLOGGINGPP
@@ -83,7 +82,6 @@ BaseTest::InitLog() {
 
 void
 BaseTest::SnapshotStart(bool mock_store, DBOptions options) {
-    milvus::TimeRecorder tr("BaseTest::SnapshotStart");
     auto store = Store::Build(options.meta_.backend_uri_, options.meta_.path_,
             milvus::codec::Codec::instance().GetSuffixSet());
 
@@ -104,7 +102,6 @@ BaseTest::SnapshotStart(bool mock_store, DBOptions options) {
     milvus::engine::snapshot::SegmentCommitsHolder::GetInstance().Reset();
     milvus::engine::snapshot::SegmentFilesHolder::GetInstance().Reset();
 
-    tr.RecordSection("Holder start");
     if (mock_store) {
         store->Mock();
     } else {
@@ -112,9 +109,7 @@ BaseTest::SnapshotStart(bool mock_store, DBOptions options) {
     }
 
     milvus::engine::snapshot::Snapshots::GetInstance().Reset();
-    tr.RecordSection("Reset");
     milvus::engine::snapshot::Snapshots::GetInstance().Init(store);
-    tr.RecordSection("Init");
 }
 
 void
@@ -140,23 +135,18 @@ BaseTest::TearDown() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 SnapshotTest::SetUp() {
-    tr_ = milvus::TimeRecorder("SnapshotTest");
     BaseTest::SetUp();
     DBOptions options;
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(true, options);
-    tr_.RecordSection("Setup Done");
 }
 
 void
 SnapshotTest::TearDown() {
-    tr_.RecordSection("Start TearDown");
     BaseTest::SnapshotStop();
     BaseTest::TearDown();
-    tr_.ElapseFromBegin("TearDown");
-
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -216,7 +206,7 @@ DBTest::TearDown() {
     milvus::scheduler::ResMgrInst::GetInstance()->Stop();
     milvus::scheduler::ResMgrInst::GetInstance()->Clear();
 
-    BaseTest::SnapshotStop();
+//    BaseTest::SnapshotStop();
     auto options = GetOptions();
     /* boost::filesystem::remove_all(options.meta_.path_); */
     std::experimental::filesystem::remove_all(options.meta_.path_);
@@ -242,7 +232,7 @@ void
 SegmentTest::TearDown() {
     db_->Stop();
     db_ = nullptr;
-    BaseTest::SnapshotStop();
+//    BaseTest::SnapshotStop();
     BaseTest::TearDown();
 }
 
