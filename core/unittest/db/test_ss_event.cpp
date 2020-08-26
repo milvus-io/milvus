@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <chrono>
+
 #include <gtest/gtest.h>
 
 #include "db/snapshot/InActiveResourcesGCEvent.h"
@@ -27,6 +29,9 @@ using FType = milvus::engine::DataType;
 using FEType = milvus::engine::FieldElementType;
 
 using InActiveResourcesGCEvent = milvus::engine::snapshot::InActiveResourcesGCEvent;
+template<typename T>
+using ResourceGCEvent = milvus::engine::snapshot::ResourceGCEvent<T>;
+using EventExecutor = milvus::engine::snapshot::EventExecutor;
 
 TEST_F(EventTest, TestInActiveResGcEvent) {
     CollectionPtr collection;
@@ -101,9 +106,9 @@ TEST_F(EventTest, TestInActiveResGcEvent) {
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     // TODO(yhz): Check if disk file has been deleted
-
     auto event = std::make_shared<InActiveResourcesGCEvent>();
-    status = event->Process(store_);
+    EventExecutor::GetInstance().Submit(event, true);
+    status = event->WaitToFinish();
 //    milvus::engine::snapshot::EventExecutor::GetInstance().Submit(event);
 //    status = event->WaitToFinish();
     ASSERT_TRUE(status.ok()) << status.ToString();
@@ -151,4 +156,26 @@ TEST_F(EventTest, TestInActiveResGcEvent) {
     std::vector<CollectionCommitPtr> collection_commits;
     ASSERT_TRUE(store_->GetInActiveResources<CollectionCommit>(collection_commits).ok());
     ASSERT_TRUE(collection_commits.empty());
+}
+
+TEST_F(EventTest, GcBlockingTest) {
+    size_t max_count = 10000;
+
+    std::vector<CollectionPtr> collections;
+    for (size_t i = 0; i < max_count; i++) {
+        CollectionPtr collection;
+        std::string name = "test_gc_c_" + std::to_string(i);
+        auto status = store_->CreateResource(Collection(name), collection);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        collections.push_back(collection);
+    }
+
+    auto start = std::chrono::system_clock::now();
+    for (auto& collection : collections) {
+        auto gc_event = std::make_shared<ResourceGCEvent<Collection>>(collection);
+        EventExecutor::GetInstance().Submit(gc_event);
+    }
+    auto end = std::chrono::system_clock::now();
+    auto count = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    ASSERT_LT(count, 1000);
 }

@@ -303,10 +303,17 @@ EventTest::SetUp() {
     auto uri = "mock://:@:/";
     store_ = Store::Build(uri, "/tmp/milvus_ss/db");
     store_->DoReset();
+
+    milvus::engine::snapshot::OperationExecutor::Init(store_);
+    milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
+    milvus::engine::snapshot::EventExecutor::Init(store_);
+    milvus::engine::snapshot::EventExecutor::GetInstance().Start();
 }
 
 void
 EventTest::TearDown() {
+    milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
+    milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
