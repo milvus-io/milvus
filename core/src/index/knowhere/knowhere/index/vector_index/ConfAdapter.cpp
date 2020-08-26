@@ -46,7 +46,6 @@ namespace knowhere {
         }                                                                                                \
     }
 
-
 #define CheckStrByValues(key, container)                                                                     \
     if (!oricfg.contains(key) || !oricfg[key].is_string()) {                                                 \
         return false;                                                                                        \
@@ -161,17 +160,16 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     int64_t m = oricfg[knowhere::IndexParams::m].get<int64_t>();
     IndexMode IVFPQ_mode = mode;
     return GetValidM(dimension, m, IVFPQ_mode);
-
 }
 
 bool
-IVFPQConfAdapter::GetValidM(int64_t dimension, int64_t m ,IndexMode& mode) {
+IVFPQConfAdapter::GetValidM(int64_t dimension, int64_t m, IndexMode& mode) {
 #ifdef MILVUS_GPU_VERSION
-    if(mode == knowhere::IndexMode::MODE_GPU && !IVFPQConfAdapter::GetValidGPUM(dimension, m)) {
+    if (mode == knowhere::IndexMode::MODE_GPU && !IVFPQConfAdapter::GetValidGPUM(dimension, m)) {
         mode = knowhere::IndexMode::MODE_CPU;
     }
 #endif
-    if(mode == knowhere::IndexMode::MODE_CPU && !IVFPQConfAdapter::GetValidCPUM(dimension, m)) {
+    if (mode == knowhere::IndexMode::MODE_CPU && !IVFPQConfAdapter::GetValidCPUM(dimension, m)) {
         return false;
     }
 
@@ -193,26 +191,24 @@ IVFPQConfAdapter::GetValidGPUM(int64_t dimension, int64_t m) {
     }
 
     int64_t sub_dim = dimension / m;
-    return (std::find(std::begin(support_subquantizer),
-                      std::end(support_subquantizer),
-                      m) != support_subquantizer.end()) &&
-           (std::find(std::begin(support_dim_per_subquantizer),
-                      std::end(support_dim_per_subquantizer),
-                      sub_dim) != support_dim_per_subquantizer.end());
+    return (std::find(std::begin(support_subquantizer), std::end(support_subquantizer), m) !=
+            support_subquantizer.end()) &&
+           (std::find(std::begin(support_dim_per_subquantizer), std::end(support_dim_per_subquantizer), sub_dim) !=
+            support_dim_per_subquantizer.end());
 
-/*
-    std::vector<int64_t> resset;
-    resset.clear();
-    for (const auto& dimperquantizer : support_dim_per_subquantizer) {
-        if (!(dimension % dimperquantizer)) {
-            auto subquantzier_num = dimension / dimperquantizer;
-            auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
-            if (finder != support_subquantizer.end()) {
-                resset.push_back(subquantzier_num);
+    /*
+        std::vector<int64_t> resset;
+        resset.clear();
+        for (const auto& dimperquantizer : support_dim_per_subquantizer) {
+            if (!(dimension % dimperquantizer)) {
+                auto subquantzier_num = dimension / dimperquantizer;
+                auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
+                if (finder != support_subquantizer.end()) {
+                    resset.push_back(subquantzier_num);
+                }
             }
         }
-    }
-*/
+    */
 }
 
 bool

@@ -52,7 +52,7 @@ class IVFPQConfAdapter : public IVFConfAdapter {
     CheckTrain(Config& oricfg, const IndexMode mode) override;
 
     static bool
-    GetValidM(int64_t dimension, int64_t m ,IndexMode& mode);
+    GetValidM(int64_t dimension, int64_t m, IndexMode& mode);
 
     static bool
     GetValidGPUM(int64_t dimension, int64_t m);

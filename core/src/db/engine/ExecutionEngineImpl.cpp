@@ -183,9 +183,9 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         }
         case EngineType::FAISS_PQ: {
             auto m = index_params_[knowhere::IndexParams::m];
-            if (!m.is_null() && !milvus::knowhere::IVFPQConfAdapter::GetValidM(dim_, m.get<int64_t>(), mode)){
-                std::string err_msg = "dimension " + std::to_string(dim_) +
-                                      " can't not be divided by m " + std::to_string(m.get<int64_t>());
+            if (!m.is_null() && !milvus::knowhere::IVFPQConfAdapter::GetValidM(dim_, m.get<int64_t>(), mode)) {
+                std::string err_msg = "dimension " + std::to_string(dim_) + " can't not be divided by m " +
+                                      std::to_string(m.get<int64_t>());
                 LOG_ENGINE_ERROR_ << err_msg;
                 break;
             }
@@ -610,7 +610,6 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
                 LOG_ENGINE_DEBUG_ << "copy to GPU faied, search on CPU";
                 index_ = index_reserve_;
             } else {
-
                 if (gpu_cache_enable) {
                     gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
                 }
