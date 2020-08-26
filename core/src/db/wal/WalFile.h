@@ -54,8 +54,7 @@ class WalFile {
             return 0;
         }
 
-        int64_t bytes = fwrite(value, sizeof(T), 1, file_);
-        bytes *= sizeof(T);
+        int64_t bytes = fwrite(value, 1, sizeof(T), file_);
         file_size_ += bytes;
         return bytes;
     }
@@ -66,22 +65,7 @@ class WalFile {
             return 0;
         }
 
-        // use 1k buffer to write file, to replace fwrite(data, 1, length, file_)
-        // this can improve performance by 20%
-        int64_t bytes = 0;
-        int64_t buf_size = 1024;
-        int64_t modulus = length % buf_size;
-        if (modulus == 0) {
-            int64_t n = fwrite(data, buf_size, length / buf_size, file_);
-            bytes = n * buf_size;
-        } else {
-            int64_t n = fwrite(data, buf_size, (length - modulus) / buf_size, file_);
-            bytes = n * buf_size;
-
-            n = fwrite((char*)data + bytes, modulus, 1, file_);
-            bytes = n * modulus;
-        }
-
+        int64_t bytes = fwrite(data, 1, length, file_);
         file_size_ += bytes;
         return bytes;
     }
