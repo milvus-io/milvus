@@ -21,7 +21,7 @@ constexpr int64_t MB = 1LL << 20;
 constexpr int64_t GB = 1LL << 30;
 constexpr int64_t TB = 1LL << 40;
 
-constexpr int64_t MAX_TABLE_FILE_MEM = 128 * MB;
+constexpr int64_t MAX_MEM_SEGMENT_SIZE = 128 * MB;
 
 constexpr int64_t MAX_NAME_LENGTH = 255;
 constexpr int64_t MAX_DIMENSION = 32768;
@@ -29,6 +29,8 @@ constexpr int32_t MAX_SEGMENT_ROW_COUNT = 4 * 1024 * 1024;
 constexpr int64_t DEFAULT_SEGMENT_ROW_COUNT = 100000;  // default row count per segment when creating collection
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * MB;
 constexpr int64_t MAX_WAL_FILE_SIZE = 256 * MB;
+
+constexpr int64_t BUILD_INEDX_RETRY_TIMES = 3;
 
 }  // namespace engine
 }  // namespace milvus
