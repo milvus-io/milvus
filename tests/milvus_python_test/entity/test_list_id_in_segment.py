@@ -183,7 +183,6 @@ class TestListIdInSegmentBase:
         # vector_ids should match ids
         # TODO
 
-    @pytest.mark.level(2)
     def test_list_id_in_segment_after_delete_vectors(self, connect, collection):
         '''
         target: get vector ids after vectors are deleted
@@ -199,6 +198,24 @@ class TestListIdInSegmentBase:
         vector_ids = connect.list_id_in_segment(collection, stats["partitions"][0]["segments"][0]["id"])
         assert len(vector_ids) == 1
         assert vector_ids[0] == ids[1]
+
+    @pytest.mark.level(2)
+    def test_list_id_in_segment_after_delete_vectors(self, connect, collection):
+        '''
+        target: get vector ids after vectors are deleted
+        method: add vectors and delete a few, call list_id_in_segment
+        expected: vector_ids decreased after vectors deleted
+        '''
+        nb = 60
+        delete_length = 10
+        ids, seg_id = get_segment_id(connect, collection, nb=nb)
+        delete_ids = ids[:delete_length]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        connect.flush([collection])
+        stats = connect.get_collection_stats(collection)
+        vector_ids = connect.list_id_in_segment(collection, stats["partitions"][0]["segments"][0]["id"])
+        assert len(vector_ids) == nb - delete_length
+        assert vector_ids[0] == ids[delete_length]
 
     @pytest.mark.level(2)
     def test_list_id_in_segment_with_index_ip(self, connect, collection, get_simple_index):
