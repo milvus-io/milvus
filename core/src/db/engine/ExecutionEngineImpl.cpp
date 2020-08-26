@@ -182,6 +182,13 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         case EngineType::FAISS_PQ: {
+            auto m = index_params_[knowhere::IndexParams::m];
+            if (!m.is_null() && !milvus::knowhere::IVFPQConfAdapter::GetValidM(dim_, m.get<int64_t>(), mode)){
+                std::string err_msg = "dimension " + std::to_string(dim_) +
+                                      " can't not be divided by m " + std::to_string(m.get<int64_t>());
+                LOG_ENGINE_ERROR_ << err_msg;
+                break;
+            }
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFPQ, mode);
             break;
         }
@@ -463,6 +470,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     return Status(DB_ERROR, msg);
                 } else {
                     bool gpu_enable = false;
+
 #ifdef MILVUS_GPU_VERSION
                     server::Config& config = server::Config::GetInstance();
                     STATUS_CHECK(config.GetGpuResourceConfigEnable(gpu_enable));
@@ -566,6 +574,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
 #endif
 
 #ifdef MILVUS_GPU_VERSION
+    printf("copy to gpu function\n");
     auto data_obj_ptr = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
     auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
     bool already_in_cache = (index != nullptr);
@@ -595,12 +604,18 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
             index_reserve_ = index_;
             if (gpu_cache_enable) {
                 gpu_cache_mgr->Reserve(index_->Size());
-                index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
-                gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
-            } else {
-                index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
             }
-            LOG_ENGINE_DEBUG_ << "CPU to GPU" << device_id << " finished";
+            index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
+            if (index_ == nullptr) {
+                LOG_ENGINE_DEBUG_ << "copy to GPU faied, search on CPU";
+                index_ = index_reserve_;
+            } else {
+
+                if (gpu_cache_enable) {
+                    gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
+                }
+                LOG_ENGINE_DEBUG_ << "CPU to GPU" << device_id << " finished";
+            }
         } catch (std::exception& e) {
             LOG_ENGINE_ERROR_ << e.what();
             return Status(DB_ERROR, e.what());
@@ -1151,7 +1166,6 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     }
 #endif
     TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search float", "search", 0));
-
     if (index_ == nullptr) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
         return Status(DB_ERROR, "index is null");
@@ -1193,7 +1207,6 @@ Status
 ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params,
                             float* distances, int64_t* labels, bool hybrid) {
     TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search uint8", "search", 0));
-
     if (index_ == nullptr) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
         return Status(DB_ERROR, "index is null");
