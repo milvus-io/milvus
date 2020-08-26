@@ -88,15 +88,9 @@ ${LCOV_CMD} -a ${FILE_INFO_BASE} -a ${FILE_INFO_MILVUS} -o "${FILE_INFO_OUTPUT}"
 # remove third party from tracefiles
 ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "/usr/*" \
-    "*/boost/*" \
-    "*/cmake_build/*_ep-prefix/*" \
-    "*/src/index/cmake_build*" \
+    "*/cmake_build/*" \
     "*/src/index/thirdparty*" \
     "*/src/grpc*" \
-    "*/src/metrics/MetricBase.h" \
-    "*/src/server/Server.cpp" \
-    "*/src/server/DBWrapper.cpp" \
-    "*/src/server/grpc_impl/GrpcServer.cpp" \
     "*/thirdparty/*"
 
 if [ $? -ne 0 ]; then
