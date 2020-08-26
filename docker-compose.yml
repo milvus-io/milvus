@@ -14,17 +14,6 @@ x-ccache: &ccache
   CCACHE_DIR: /build/ccache
 
 services:
-  db:
-    image: mysql:5.6
-    ports:
-      - "3306:3306"
-    environment:
-      MYSQL_ROOT_PASSWORD: 123456
-    networks:
-      milvus:
-        aliases:
-          - "mysql"
-
   ubuntu-core:
     image: ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
     build:
@@ -42,7 +31,7 @@ services:
       - milvus
     command: &ubuntu-command
       ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
-        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} --mysql_user=root --mysql_password=123456 --mysql_host=mysql &&
+        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} &&
         /milvus/ci/scripts/coverage.sh"]
 
   centos-core:
@@ -62,7 +51,7 @@ services:
       - milvus
     command: &centos-command
       ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
-        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} --mysql_user=root --mysql_password=123456 --mysql_host=mysql &&
+        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} &&
         /milvus/ci/scripts/coverage.sh"]
 
   ubuntu-cuda-core:
