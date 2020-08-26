@@ -1,5 +1,6 @@
 #proxy
 proxy/cmake_build
+proxy/cmake-build-debug
 proxy/thirdparty/grpc-src
 proxy/thirdparty/grpc-build
 .idea/
