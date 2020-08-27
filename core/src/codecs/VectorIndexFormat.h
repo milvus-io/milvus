@@ -23,6 +23,7 @@
 
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "storage/FSHandler.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace codec {
@@ -34,26 +35,26 @@ class VectorIndexFormat {
     static std::string
     FilePostfix();
 
-    void
+    Status
     ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinaryPtr& data);
 
-    void
+    Status
     ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinarySet& data);
 
-    void
+    Status
     ReadCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinaryPtr& data);
 
-    void
+    Status
     ConvertRaw(const engine::BinaryDataPtr& raw, knowhere::BinaryPtr& data);
 
-    void
+    Status
     ConstructIndex(const std::string& index_name, knowhere::BinarySet& index_data, knowhere::BinaryPtr& raw_data,
                    knowhere::BinaryPtr& compress_data, knowhere::VecIndexPtr& index);
 
-    void
+    Status
     WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const knowhere::VecIndexPtr& index);
 
-    void
+    Status
     WriteCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                   const knowhere::VecIndexPtr& index);
 

@@ -38,38 +38,62 @@ IdBloomFilterFormat::FilePostfix() {
     return str;
 }
 
-void
+Status
 IdBloomFilterFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                           segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
-    scaling_bloom_t* bloom_filter =
-        new_scaling_bloom_from_file(BLOOM_FILTER_CAPACITY, BLOOM_FILTER_ERROR_RATE, full_file_path.c_str());
-    fiu_do_on("bloom_filter_nullptr", bloom_filter = nullptr);
-    if (bloom_filter == nullptr) {
-        THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Fail to read bloom filter from file: " + full_file_path);
+    try {
+        const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
+        scaling_bloom_t* bloom_filter =
+            new_scaling_bloom_from_file(BLOOM_FILTER_CAPACITY, BLOOM_FILTER_ERROR_RATE, full_file_path.c_str());
+        fiu_do_on("bloom_filter_nullptr", bloom_filter = nullptr);
+        if (bloom_filter == nullptr) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Fail to read bloom filter from file: " + full_file_path);
+        }
+        id_bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(bloom_filter);
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to read bloom filter file, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_UNEXPECTED_ERROR, msg);
     }
-    id_bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(bloom_filter);
+
+    return Status::OK();
 }
 
-void
+Status
 IdBloomFilterFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                            const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
-    if (scaling_bloom_flush(id_bloom_filter_ptr->GetBloomFilter()) == -1) {
-        THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Fail to write bloom filter to file: " + full_file_path);
+    try {
+        const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
+        if (scaling_bloom_flush(id_bloom_filter_ptr->GetBloomFilter()) == -1) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Fail to write bloom filter to file: " + full_file_path);
+        }
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to write bloom filter file, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_UNEXPECTED_ERROR, msg);
     }
+
+    return Status::OK();
 }
 
-void
+Status
 IdBloomFilterFormat::Create(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                             segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
-    scaling_bloom_t* bloom_filter =
-        new_scaling_bloom(BLOOM_FILTER_CAPACITY, BLOOM_FILTER_ERROR_RATE, full_file_path.c_str());
-    if (bloom_filter == nullptr) {
-        THROW_ERROR(SERVER_UNEXPECTED_ERROR, "Failed to read bloom filter from file: " + full_file_path);
+    try {
+        const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
+        scaling_bloom_t* bloom_filter =
+            new_scaling_bloom(BLOOM_FILTER_CAPACITY, BLOOM_FILTER_ERROR_RATE, full_file_path.c_str());
+        if (bloom_filter == nullptr) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Failed to read bloom filter from file: " + full_file_path);
+        }
+        id_bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(bloom_filter);
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to create bloom filter file, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_UNEXPECTED_ERROR, msg);
     }
-    id_bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(bloom_filter);
+
+    return Status::OK();
 }
 
 }  // namespace codec
