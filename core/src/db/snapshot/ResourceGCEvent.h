@@ -51,7 +51,7 @@ class ResourceGCEvent : public GCEvent {
                     LOG_ENGINE_DEBUG_ << "[GC] Remove DIR " << res_->ToString() << " " << res_path;
                     auto ok = std::experimental::filesystem::remove_all(res_path);
                 } else if (std::experimental::filesystem::is_regular_file(res_path)) {
-                    std::cout << "[GC] Remove FILE " << res_->ToString() << " " << res_path << std::endl;
+                    LOG_ENGINE_DEBUG_ << "[GC] Remove FILE " << res_->ToString() << " " << res_path;
                     auto ok = std::experimental::filesystem::remove(res_path);
                 } else {
                     RemoveWithSuffix<ResourceT>(res_, res_path, store->GetSuffixSet());

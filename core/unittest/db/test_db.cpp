@@ -24,12 +24,14 @@
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/snapshot/IterateHandler.h"
+#include "db/snapshot/InActiveResourcesGCEvent.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/utils.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/Segment.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
+using InActiveResourcesGCEvent = milvus::engine::snapshot::InActiveResourcesGCEvent;
 
 namespace {
 const char* VECTOR_FIELD_NAME = "vector";
@@ -661,6 +663,9 @@ TEST_F(DBTest, MergeTest) {
 
     // wait to merge finished
     sleep(2);
+    auto event = std::make_shared<InActiveResourcesGCEvent>();
+    milvus::engine::snapshot::EventExecutor::GetInstance().Submit(event, true);
+    event->WaitToFinish();
 
     // validate entities count
     int64_t row_count = 0;
