@@ -19,6 +19,8 @@
 #include <experimental/filesystem>
 #include <src/cache/CpuCacheMgr.h>
 
+#include "db/merge/MergeLayerStrategy.h"
+#include "db/merge/MergeSimpleStrategy.h"
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/snapshot/IterateHandler.h"
@@ -574,6 +576,49 @@ TEST_F(DBTest, InsertTest) {
 
     // create collection without auto-generate id, insert entities without user id, insert action failed
     do_insert(false, false);
+}
+
+TEST(MergeTest, MergeStrategyTest) {
+    milvus::engine::Partition2SegmentsMap part2segments;
+    milvus::engine::SegmentsRowList segmet_list_1 = {
+        {1, 100},
+        {2, 2500},
+        {3, 300},
+        {4, 5},
+        {5, 60000},
+        {6, 100000},
+        {7, 60},
+        {8, 800},
+        {9, 6600},
+        {10, 110000},
+    };
+    milvus::engine::SegmentsRowList segmet_list_2 = {
+        {11, 9000},
+        {12, 1500},
+        {13, 20},
+        {14, 1},
+        {15, 70000},
+        {16, 15000},
+    };
+    part2segments.insert(std::make_pair(1, segmet_list_1));
+    part2segments.insert(std::make_pair(2, segmet_list_2));
+
+    int64_t row_per_segment = 100000;
+    {
+        milvus::engine::SegmentGroups groups;
+        milvus::engine::MergeSimpleStrategy strategy;
+        auto status = strategy.RegroupSegments(part2segments, row_per_segment, groups);
+        ASSERT_TRUE(status.ok());
+        ASSERT_FALSE(groups.empty());
+    }
+
+    {
+        milvus::engine::SegmentGroups groups;
+        milvus::engine::MergeLayerStrategy strategy;
+        auto status = strategy.RegroupSegments(part2segments, row_per_segment, groups);
+        ASSERT_TRUE(status.ok());
+        ASSERT_FALSE(groups.empty());
+    }
 }
 
 TEST_F(DBTest, MergeTest) {

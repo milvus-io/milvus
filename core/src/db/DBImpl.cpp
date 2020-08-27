@@ -1075,7 +1075,8 @@ DBImpl::BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all) 
     for (auto& collection_id : collection_ids) {
         const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-        auto status = merge_mgr_ptr_->MergeFiles(collection_id);
+        MergeStrategyType type = force_merge_all ? MergeStrategyType::SIMPLE : MergeStrategyType::LAYERED;
+        auto status = merge_mgr_ptr_->MergeSegments(collection_id, type);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to get merge files for collection id: " << collection_id
                               << " reason:" << status.message();

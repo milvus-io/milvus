@@ -20,7 +20,7 @@
 namespace milvus {
 namespace engine {
 
-class MergeSimpleStrategy : public MergeStrategy {
+class MergeLayerStrategy : public MergeStrategy {
  public:
     Status
     RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t rwo_per_segment, SegmentGroups& groups) override;
