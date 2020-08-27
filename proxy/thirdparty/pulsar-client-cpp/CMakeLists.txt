@@ -20,27 +20,38 @@ endif ()
 
 message(STATUS "Building pulsar-client-cpp-${PULSAR_CLIENT_CPP_VERSION} from source")
 
-FetchContent_Declare(
+include(ExternalProject)
+ExternalProject_Add(
         pulsar
         URL ${PULSAR_URL}
-        #        URL_MD5 "f9137c5bc18b7d74027936f0f1bfa5c8"
-        DOWNLOAD_DIR ${MILVUS_BINARY_DIR}/3rdparty_download/download
+        PREFIX ${pulsar_ROOT}
+        CONFIGURE_COMMAND cd ${pulsar_ROOT}/src/pulsar/pulsar-client-cpp && cmake -DBUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=${pulsar_ROOT}/build .
+        BUILD_COMMAND cd ${pulsar_ROOT}/src/pulsar/pulsar-client-cpp && make -j8
+        BUILD_IN_SOURCE true
+        INSTALL_COMMAND cd ${pulsar_ROOT}/src/pulsar/pulsar-client-cpp && make install
 )
-
-
-if (NOT pulsar_POPULATED)
-    FetchContent_Populate(pulsar)
-
-    # Adding the following targets:
-    # pulsar-client-cpp
-    add_subdirectory(${pulsar_SOURCE_DIR}/pulsar-client-cpp
-            ${pulsar_BINARY_DIR}
-            EXCLUDE_FROM_ALL)
-endif ()
-
-
-#get_target_property( YAML_CPP_INCLUDE_DIR pulsar-client-cpp INTERFACE_INCLUDE_DIRECTORIES )
-#message( STATUS ${YAML_CPP_INCLUDE_DIR} )
-
-get_property(var DIRECTORY "${pulsar_SOURCE_DIR}/pulsar-client-cpp" PROPERTY COMPILE_OPTIONS)
-message(STATUS "pulsar-client-cpp compile options: ${var}")
+#FetchContent_Declare(
+#        pulsar
+#        URL ${PULSAR_URL}
+#        #        URL_MD5 "f9137c5bc18b7d74027936f0f1bfa5c8"
+#        DOWNLOAD_DIR ${MILVUS_BINARY_DIR}/3rdparty_download/download
+#        SOURCE_DIR  ${CMAKE_CURRENT_BINARY_DIR}/pulsar-client-cpp-src
+#        BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/pulsar-client-cpp-build
+#)
+#
+#include(FetchContent)
+#FetchContent_GetProperties( pulsar )
+#SET(BUILD_TESTS CACHE BOOL OFF FORCE)
+#if (NOT pulsar_POPULATED)
+#    FetchContent_Populate(pulsar)
+#
+#    # Adding the following targets:
+#    # pulsar-client-cpp
+#    add_subdirectory(${pulsar_SOURCE_DIR}/pulsar-client-cpp
+#            ${pulsar_BINARY_DIR}/pulsar-client-cpp
+#            EXCLUDE_FROM_ALL)
+#endif ()
+#
+#include_directories(${pulsar_SOURCE_DIR}/pulsar-client-cpp/include)
+#get_property(var DIRECTORY "${pulsar_SOURCE_DIR}/pulsar-client-cpp" PROPERTY COMPILE_OPTIONS)
+#message(STATUS "pulsar-client-cpp compile options: ${var}")

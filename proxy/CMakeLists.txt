@@ -21,11 +21,11 @@ include( Utils )
 get_current_time( BUILD_TIME )
 message( STATUS "Build time = ${BUILD_TIME}" )
 
-get_build_type( TARGET  BUILD_TYPE 
+get_build_type( TARGET  BUILD_TYPE
                         DEFAULT "Release" )
 message( STATUS "Build type = ${BUILD_TYPE}" )
 
-get_milvus_version( TARGET  MILVUS_VERSION 
+get_milvus_version( TARGET  MILVUS_VERSION
                             DEFAULT "0.10.0" )
 message( STATUS "Build version = ${MILVUS_VERSION}" )
 
@@ -48,6 +48,7 @@ set( MILVUS_SOURCE_DIR      ${PROJECT_SOURCE_DIR} )
 set( MILVUS_BINARY_DIR      ${PROJECT_BINARY_DIR} )
 set( MILVUS_ENGINE_SRC      ${PROJECT_SOURCE_DIR}/src )
 set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
+set(pulsar_ROOT "${MILVUS_BINARY_DIR}/thirdparty/pulsar" CACHE STRING "")
 
 # This will set RPATH to all excutable TARGET
 # self-installed dynamic libraries will be correctly linked by excutable

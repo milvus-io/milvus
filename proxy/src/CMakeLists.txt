@@ -18,6 +18,9 @@ include_directories(${MILVUS_THIRDPARTY_SRC})
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
+include_directories(${pulsar_ROOT}/build/include)
+link_directories(${pulsar_ROOT}/build/lib)
+
 add_subdirectory( tracing )
 add_subdirectory( utils )
 add_subdirectory( config )
@@ -60,6 +63,7 @@ set( THIRD_PARTY_LIBS
 target_link_libraries( server
                 PUBLIC ${link_lib}
                 tracing
+				libpulsar
                 ${THIRD_PARTY_LIBS}
                 ${BOOST_LIB}
                        )
