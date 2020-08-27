@@ -31,8 +31,7 @@ services:
       - milvus
     command: &ubuntu-command
       ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
-        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} &&
-        /milvus/ci/scripts/coverage.sh"]
+        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX}"]
 
   centos-core:
     image: ${REPO}:${ARCH}-centos-${CENTOS}-core
@@ -51,8 +50,7 @@ services:
       - milvus
     command: &centos-command
       ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
-        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} &&
-        /milvus/ci/scripts/coverage.sh"]
+        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX}"]
 
   ubuntu-cuda-core:
     image: ${REPO}:${ARCH}-ubuntu-${UBUNTU}-cuda-core
