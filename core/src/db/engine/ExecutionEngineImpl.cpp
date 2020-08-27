@@ -727,9 +727,8 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
     }
 
     // create snapshot compress file
-    std::string index_name = index_element->GetName();
-    if (index_name == knowhere::IndexEnum::INDEX_RHNSWSQ) {
-        auto compress_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+    if (utils::RequireCompressFile(index_info.index_type_)) {
+        auto compress_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS);
         if (compress_visitor == nullptr) {
             return Status(DB_ERROR,
                           "Could not build index: compress element not exist");  // something wrong in CreateIndex

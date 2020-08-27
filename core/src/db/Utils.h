@@ -58,6 +58,12 @@ GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids);
 int64_t
 GetSizeOfChunk(const engine::DataChunkPtr& chunk);
 
+bool
+RequireRawFile(const std::string& index_type);
+
+bool
+RequireCompressFile(const std::string& index_type);
+
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus

@@ -25,11 +25,11 @@
 #include "codecs/Codec.h"
 #include "db/SnapshotUtils.h"
 #include "db/Types.h"
+#include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
@@ -342,8 +342,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
 
         // for some kinds index(IVF), read raw file
         auto index_type = index_visitor->GetElement()->GetTypeName();
-        if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_type == knowhere::IndexEnum::INDEX_NSG ||
-            index_type == knowhere::IndexEnum::INDEX_HNSW) {
+        if (engine::utils::RequireRawFile(index_type)) {
             engine::BinaryDataPtr fixed_data;
             auto status = segment_ptr_->GetFixedFieldData(field_name, fixed_data);
             if (status.ok()) {
@@ -355,9 +354,9 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             }
         }
 
-        // for some kinds index(SQ8), read compress file
-        if (index_type == knowhere::IndexEnum::INDEX_RHNSWSQ) {
-            if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8)) {
+        // for some kinds index(RHNSWSQ), read compress file
+        if (engine::utils::RequireCompressFile(index_type)) {
+            if (auto visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS)) {
                 auto file_path =
                     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
                 ss_codec.GetVectorIndexFormat()->ReadCompress(fs_ptr_, file_path, compress_data);
