@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -21,7 +20,6 @@
 #include "db/SimpleWaitNotify.h"
 #include "db/snapshot/MetaEvent.h"
 #include "utils/BlockingQueue.h"
-#include "utils/TimeRecorder.h"
 
 namespace milvus::engine::snapshot {
 
@@ -30,7 +28,7 @@ using ThreadPtr = std::shared_ptr<std::thread>;
 using EventQueue = std::queue<EventPtr>;
 
 constexpr size_t EVENT_QUEUE_SIZE = 4096;
-constexpr size_t EVENT_TIMINT_INTERVAL = 5;
+constexpr size_t EVENT_TIMING_INTERVAL = 5;
 
 class EventExecutor {
  public:
@@ -80,7 +78,7 @@ class EventExecutor {
     void
     Stop() {
         if (!initialized_.exchange(false)) {
-            // executor has been stopped, just return
+            //             executor has been stopped, just return
             return;
         }
 
@@ -112,7 +110,7 @@ class EventExecutor {
         while (true) {
             auto front = cache_queues_.Take();
 
-            while (front != nullptr && !front->empty()) {
+            while (front && !front->empty()) {
                 EventPtr event_front(front->front());
                 front->pop();
                 if (event_front == nullptr) {
@@ -135,7 +133,7 @@ class EventExecutor {
     void
     TimingThread() {
         while (true) {
-            timing_.Wait_For(std::chrono::seconds(EVENT_TIMINT_INTERVAL));
+            timing_.Wait_For(std::chrono::seconds(EVENT_TIMING_INTERVAL));
 
             std::shared_ptr<EventQueue> queue;
             {
@@ -151,6 +149,7 @@ class EventExecutor {
             }
 
             if (!initialized_.load()) {
+                cache_queues_.Put(nullptr);
                 break;
             }
         }
