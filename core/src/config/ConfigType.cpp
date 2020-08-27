@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "config/ConfigType.h"
-#include "config/ServerConfig.h"
 
 #include <strings.h>
 #include <algorithm>
@@ -532,7 +531,18 @@ SizeConfig::Set(const std::string& val, bool update) {
 std::string
 SizeConfig::Get() {
     assertm(inited_, "uninitialized");
-    return std::to_string(*config_);
+    const int64_t gb = 1024ll * 1024 * 1024;
+    const int64_t mb = 1024ll * 1024;
+    const int64_t kb = 1024ll;
+    if (*config_ % gb == 0) {
+        return std::to_string(*config_ / gb) + "GB";
+    } else if (*config_ % mb == 0) {
+        return std::to_string(*config_ / mb) + "MB";
+    } else if (*config_ % kb == 0) {
+        return std::to_string(*config_ / kb) + "KB";
+    } else {
+        return std::to_string(*config_);
+    }
 }
 
 }  // namespace milvus

@@ -67,8 +67,8 @@ CmdReq::OnExecute() {
             } else {
                 stat = Status(SERVER_UNEXPECTED_ERROR, "Wrong parameter size ");
             }
-        } catch (ConfigStatus& cs) {
-            stat = Status(SERVER_UNEXPECTED_ERROR, cs.message);
+        } catch (std::exception& ex) {
+            stat = Status(SERVER_UNEXPECTED_ERROR, ex.what());
         } catch (...) {
             stat = Status(SERVER_UNEXPECTED_ERROR, "Unknown exception happened on GET command.");
         }
@@ -80,8 +80,8 @@ CmdReq::OnExecute() {
             } else {
                 stat = Status(SERVER_UNEXPECTED_ERROR, "Wrong parameter size ");
             }
-        } catch (ConfigStatus& cs) {
-            stat = Status(SERVER_UNEXPECTED_ERROR, cs.message);
+        } catch (std::exception& ex) {
+            stat = Status(SERVER_UNEXPECTED_ERROR, ex.what());
         } catch (...) {
             stat = Status(SERVER_UNEXPECTED_ERROR, "Unknown exception happened on SET command.");
         }
