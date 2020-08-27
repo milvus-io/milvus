@@ -25,8 +25,11 @@
 #include "db/Types.h"
 
 #ifdef MILVUS_GPU_VERSION
+
 #include "cache/GpuCacheMgr.h"
+
 #endif
+
 #include "config/ServerConfig.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -167,6 +170,17 @@ GetSizeOfChunk(const engine::DataChunkPtr& chunk) {
     }
 
     return total_size;
+}
+
+bool
+RequireRawFile(const std::string& index_type) {
+    return index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_type == knowhere::IndexEnum::INDEX_NSG ||
+           index_type == knowhere::IndexEnum::INDEX_HNSW;
+}
+
+bool
+RequireCompressFile(const std::string& index_type) {
+    return index_type == knowhere::IndexEnum::INDEX_RHNSWSQ;
 }
 
 }  // namespace utils
