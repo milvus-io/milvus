@@ -94,6 +94,8 @@ IndexNGT::Load(const BinarySet& index_binary) {
 
 void
 IndexNGT::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+    KNOWHERE_THROW_MSG("IndexNGT has no implementation of Train, please use IndexNGT(PANNG/ONNG) instead!");
+#if 0
     GET_TENSOR_DATA_DIM(dataset_ptr);
 
     NGT::Property prop;
@@ -112,6 +114,7 @@ IndexNGT::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
     index_ =
         std::shared_ptr<NGT::Index>(NGT::Index::createGraphAndTree(reinterpret_cast<const float*>(p_data), prop, rows));
+#endif
 }
 
 void

@@ -376,5 +376,37 @@ ANNOYConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexM
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 
+bool
+NGTPANNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
+    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::HAMMING, knowhere::Metric::JACCARD};
+
+    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
+    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
+
+    return true;
+}
+
+bool
+NGTPANNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    return ConfAdapter::CheckSearch(oricfg, type, mode);
+}
+
+bool
+NGTONNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
+    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::HAMMING, knowhere::Metric::JACCARD};
+
+    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
+    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
+    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
+
+    return true;
+}
+
+bool
+NGTONNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    return ConfAdapter::CheckSearch(oricfg, type, mode);
+}
+
 }  // namespace knowhere
 }  // namespace milvus

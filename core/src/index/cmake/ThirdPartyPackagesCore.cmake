@@ -653,3 +653,5 @@ if (KNOWHERE_WITH_FAISS AND NOT TARGET faiss_ep)
     include_directories(SYSTEM "${FAISS_INCLUDE_DIR}")
     link_directories(SYSTEM ${FAISS_PREFIX}/lib/)
 endif ()
+
+add_subdirectory(thirdparty/NGT)

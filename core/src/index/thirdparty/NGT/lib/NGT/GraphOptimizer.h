@@ -226,6 +226,146 @@ namespace NGT {
       return std::make_pair(prefetchOffset, prefetchSize);
     }
 
+    void execute(NGT::Index & index_)
+    {
+        NGT::GraphIndex & graphIndex = static_cast<NGT::GraphIndex &>(index_.getIndex());
+        if (numOfOutgoingEdges > 0 || numOfIncomingEdges > 0)
+        {
+            if (!logDisabled)
+            {
+                std::cerr << "GraphOptimizer: adjusting outgoing and incoming edges..." << std::endl;
+            }
+            NGT::Timer timer;
+            timer.start();
+            std::vector<NGT::ObjectDistances> graph;
+            try
+            {
+                std::cerr << "Optimizer::execute: Extract the graph data." << std::endl;
+                // extract only edges from the index to reduce the memory usage.
+                NGT::GraphReconstructor::extractGraph(graph, graphIndex);
+                NeighborhoodGraph::Property & prop = graphIndex.getGraphProperty();
+                if (prop.graphType != NGT::NeighborhoodGraph::GraphTypeANNG)
+                {
+                    NGT::GraphReconstructor::convertToANNG(graph);
+                }
+                NGT::GraphReconstructor::reconstructGraph(graph, graphIndex, numOfOutgoingEdges, numOfIncomingEdges);
+                timer.stop();
+                std::cerr << "Optimizer::execute: Graph reconstruction time=" << timer.time << " (sec) " << std::endl;
+                prop.graphType = NGT::NeighborhoodGraph::GraphTypeONNG;
+            }
+            catch (NGT::Exception & err)
+            {
+                throw(err);
+            }
+        }
+
+        if (shortcutReduction)
+        {
+            if (!logDisabled)
+            {
+                std::cerr << "GraphOptimizer: redusing shortcut edges..." << std::endl;
+            }
+            try
+            {
+                NGT::Timer timer;
+                timer.start();
+                NGT::GraphReconstructor::adjustPathsEffectively(graphIndex);
+                timer.stop();
+                std::cerr << "Optimizer::execute: Path adjustment time=" << timer.time << " (sec) " << std::endl;
+            }
+            catch (NGT::Exception & err)
+            {
+                throw(err);
+            }
+        }
+
+        optimizeSearchParameters(index_);
+    }
+
+    void optimizeSearchParameters(NGT::Index & outIndex)
+    {
+        if (searchParameterOptimization)
+        {
+            if (!logDisabled)
+            {
+                std::cerr << "GraphOptimizer: optimizing search parameters..." << std::endl;
+            }
+            NGT::GraphIndex & outGraph = static_cast<NGT::GraphIndex &>(outIndex.getIndex());
+            NGT::Optimizer optimizer(outIndex);
+            if (logDisabled)
+            {
+                optimizer.disableLog();
+            }
+            else
+            {
+                optimizer.enableLog();
+            }
+            try
+            {
+                auto coefficients = optimizer.adjustSearchEdgeSize(baseAccuracyRange, rateAccuracyRange, numOfQueries, gtEpsilon, margin);
+                NGT::NeighborhoodGraph::Property & prop = outGraph.getGraphProperty();
+                prop.dynamicEdgeSizeBase = coefficients.first;
+                prop.dynamicEdgeSizeRate = coefficients.second;
+                prop.edgeSizeForSearch = -2;
+            }
+            catch (NGT::Exception & err)
+            {
+                std::stringstream msg;
+                msg << "Optimizer::execute: Cannot adjust the search coefficients. " << err.what();
+                NGTThrowException(msg);
+            }
+        }
+
+        if (searchParameterOptimization || prefetchParameterOptimization || accuracyTableGeneration)
+        {
+            // NGT::GraphIndex & outGraph = static_cast<NGT::GraphIndex &>(*outIndex.getIndex());
+            if (prefetchParameterOptimization)
+            {
+                if (!logDisabled)
+                {
+                    std::cerr << "GraphOptimizer: optimizing prefetch parameters..." << std::endl;
+                }
+                try
+                {
+                    auto prefetch = adjustPrefetchParameters(outIndex);
+                    NGT::Property prop;
+                    outIndex.getProperty(prop);
+                    prop.prefetchOffset = prefetch.first;
+                    prop.prefetchSize = prefetch.second;
+                    outIndex.setProperty(prop);
+                }
+                catch (NGT::Exception & err)
+                {
+                    std::stringstream msg;
+                    msg << "Optimizer::execute: Cannot adjust prefetch parameters. " << err.what();
+                    NGTThrowException(msg);
+                }
+            }
+            if (accuracyTableGeneration)
+            {
+                if (!logDisabled)
+                {
+                    std::cerr << "GraphOptimizer: generating the accuracy table..." << std::endl;
+                }
+                try
+                {
+                    auto table = NGT::Optimizer::generateAccuracyTable(outIndex, numOfResults, numOfQueries);
+                    NGT::Index::AccuracyTable accuracyTable(table);
+                    NGT::Property prop;
+                    outIndex.getProperty(prop);
+                    prop.accuracyTable = accuracyTable.getString();
+                    outIndex.setProperty(prop);
+                }
+                catch (NGT::Exception & err)
+                {
+                    std::stringstream msg;
+                    msg << "Optimizer::execute: Cannot generate the accuracy table. " << err.what();
+                    NGTThrowException(msg);
+                }
+            }
+        }
+    }
+
     void execute(
 		 const std::string inIndexPath,
 		 const std::string outIndexPath

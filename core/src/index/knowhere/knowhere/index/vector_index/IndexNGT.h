@@ -1,8 +1,8 @@
 #pragma once
 
-#include <NGT/Command.h>
-#include <NGT/Common.h>
-#include <NGT/Index.h>
+#include <NGT/lib/NGT/Command.h>
+#include <NGT/lib/NGT/Common.h>
+#include <NGT/lib/NGT/Index.h>
 
 #include <knowhere/common/Exception.h>
 #include <knowhere/index/IndexType.h>
@@ -15,7 +15,7 @@ namespace knowhere {
 class IndexNGT : public VecIndex {
  public:
     IndexNGT() {
-        index_type_ = IndexEnum::INDEX_NGT;
+        index_type_ = IndexEnum::INVALID;
     }
 
     BinarySet
@@ -44,7 +44,6 @@ class IndexNGT : public VecIndex {
     int64_t
     Dim() override;
 
- private:
     std::shared_ptr<NGT::Index> index_ = nullptr;
 };
 
