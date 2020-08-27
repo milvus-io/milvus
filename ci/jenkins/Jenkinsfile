@@ -66,7 +66,6 @@ pipeline {
                             container("milvus-${BINARY_VERSION}-build-env") {
                                 MPLModule('Milvus Build')
                                 MPLModule('Unittest')
-                                MPLModule('Coverage')
                                 MPLModule('Package Build')
                             }
                         }
