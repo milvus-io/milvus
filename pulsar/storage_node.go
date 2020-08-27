@@ -1,27 +1,52 @@
 package pulsar
 
 import (
+	"fmt"
 	"suvlim/pulsar/schema"
 	"sync"
+	"time"
 )
 
-func BeforeSend() schema.Message {
-	segs := make([]string, 2, 2)
-	segs[0] = "seg1"
-	segs[1] = "seg2"
-	var msg schema.Message = &schema.Key2SegMsg{EntityId: 1, Segments: segs, MsgType: schema.OpType(4)}
-	return msg
+type WriteNode struct {
+	mc MessageClient
 }
 
-func insert([]*schema.InsertMsg) schema.Status{
+func (wn *WriteNode)doWriteNode(wg sync.WaitGroup) {
+	wg.Add(2)
+	go wn.insert_write(wn.mc.insertMsg, wg)
+	go wn.delete_write(wn.mc.deleteMsg, wg)
+	wg.Wait()
+}
+
+
+func (wn *WriteNode) PrepareBatchMsg() {
+	wn.mc.PrepareBatchMsg(JobType(1))
+}
+func main() {
+
+	mc := MessageClient{}
+	topics := []string{"insert", "delete"}
+	mc.InitClient("pulsar://localhost:6650", topics)
+
+	go mc.ReceiveMessage()
+
+	wn := WriteNode{mc}
+
+	for {
+		time.Sleep(200 * time.Millisecond)
+		wn.PrepareBatchMsg()
+		wn.doWriteNode(wg)
+		fmt.Println("do a batch in 200ms")
+	}
+}
+
+func (wn *WriteNode) insert_write(data []*schema.InsertMsg, wg sync.WaitGroup) schema.Status{
+	wg.Done()
 	return schema.Status{schema.ErrorCode_SUCCESS, ""}
 }
 
-var wg sync.WaitGroup
-func delete([]*schema.DeleteMsg) schema.Status{
-	msg := BeforeSend()
-	go Send(msg)
-	wg.Wait()
+func (wn *WriteNode) delete_write(data []*schema.DeleteMsg, wg sync.WaitGroup) schema.Status{
+	wg.Done()
 	return schema.Status{schema.ErrorCode_SUCCESS, ""}
 }
 

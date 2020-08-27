@@ -83,6 +83,10 @@ type VectorParam struct {
 	RowRecord *VectorRecord
 }
 
+type SegmentRecord struct {
+	segInfo []string
+}
+
 type OpType int
 
 const (
@@ -92,7 +96,20 @@ const (
 	TimeSync   OpType = 3
 	Key2Seg    OpType = 4
 	Statistics OpType = 5
+	EOF        OpType = 6
 )
+
+type PulsarMessage struct {
+	CollectionName string
+	Fields []*FieldValue
+	EntityId int64
+	PartitionTag string
+	VectorParam *VectorParam
+	Segments []*SegmentRecord
+	Timestamp int64
+	ClientId int64
+	MsgType OpType
+}
 
 type Message interface {
 	GetType() OpType
@@ -135,7 +152,7 @@ type TimeSyncMsg struct {
 
 type Key2SegMsg struct {
 	EntityId int64
-	Segments []string
+	Segments []*SegmentRecord
 	MsgType  OpType
 }
 
@@ -169,4 +186,8 @@ func (tms *TimeSyncMsg) GetType() OpType {
 
 func (kms *Key2SegMsg) GetType() OpType {
 	return kms.MsgType
+}
+
+type SyncEofMsg struct {
+	MsgType  OpType
 }
