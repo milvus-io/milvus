@@ -22,6 +22,7 @@
 
 #include "segment/DeletedDocs.h"
 #include "storage/FSHandler.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace codec {
@@ -33,14 +34,14 @@ class DeletedDocsFormat {
     static std::string
     FilePostfix();
 
-    void
+    Status
     Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, segment::DeletedDocsPtr& deleted_docs);
 
-    void
+    Status
     Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
           const segment::DeletedDocsPtr& deleted_docs);
 
-    void
+    Status
     ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, size_t& size);
 
     // No copy and move

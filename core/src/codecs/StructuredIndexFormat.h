@@ -24,6 +24,7 @@
 #include "db/Types.h"
 #include "knowhere/index/Index.h"
 #include "storage/FSHandler.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace codec {
@@ -35,10 +36,10 @@ class StructuredIndexFormat {
     static std::string
     FilePostfix();
 
-    void
+    Status
     Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::IndexPtr& index);
 
-    void
+    Status
     Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::DataType data_type,
           const knowhere::IndexPtr& index);
 

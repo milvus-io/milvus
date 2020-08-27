@@ -25,7 +25,6 @@
 namespace milvus {
 namespace knowhere {
 
-#define INDEX_DATA "INDEX_DATA"
 #define RAW_DATA "RAW_DATA"
 #define QUANTIZATION_DATA "QUANTIZATION_DATA"
 
