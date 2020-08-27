@@ -64,7 +64,7 @@ DescribeIndexReq::OnExecute() {
             }
         }
 
-        json_params_[engine::PARAM_INDEX_TYPE] = index.index_name_;
+        json_params_[engine::PARAM_INDEX_TYPE] = index.index_type_;
         json_params_[engine::PARAM_INDEX_METRIC_TYPE] = index.metric_name_;
         json_params_[engine::PARAM_INDEX_EXTRA_PARAMS] = index.extra_params_;
     } catch (std::exception& ex) {

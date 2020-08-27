@@ -12,16 +12,17 @@
 #pragma once
 
 #include <atomic>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "config/ConfigMgr.h"
 #include "db/insert/MemSegment.h"
-#include "db/insert/VectorSource.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -37,16 +38,16 @@ class MemCollection {
     ~MemCollection() = default;
 
     Status
-    Add(int64_t partition_id, const VectorSourcePtr& source);
+    Add(int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id);
 
     Status
-    Delete(const std::vector<id_t>& ids);
+    Delete(const std::vector<idx_t>& ids, idx_t op_id);
 
     Status
     EraseMem(int64_t partition_id);
 
     Status
-    Serialize(uint64_t wal_lsn);
+    Serialize();
 
     int64_t
     GetCollectionId() const;
@@ -54,29 +55,19 @@ class MemCollection {
     size_t
     GetCurrentMem();
 
-    uint64_t
-    GetLSN();
-
-    void
-    SetLSN(uint64_t lsn);
-
  private:
     Status
-    ApplyDeletes();
+    ApplyDeleteToFile();
 
  private:
     int64_t collection_id_;
-
-    MemSegmentMap mem_segments_;
-
     DBOptions options_;
 
-    std::mutex mutex_;
+    MemSegmentMap mem_segments_;
+    std::mutex mem_mutex_;
 
-    std::set<id_t> doc_ids_to_delete_;
-
-    std::atomic<uint64_t> lsn_;
-};  // SSMemCollection
+    std::unordered_set<idx_t> ids_to_delete_;
+};
 
 using MemCollectionPtr = std::shared_ptr<MemCollection>;
 

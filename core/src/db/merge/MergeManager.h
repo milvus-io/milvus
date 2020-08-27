@@ -46,7 +46,7 @@ enum class MergeStrategyType {
 class MergeManager {
  public:
     virtual Status
-    MergeFiles(const std::string& collection_id, MergeStrategyType type = MergeStrategyType::SIMPLE) = 0;
+    MergeFiles(int64_t collection_id, MergeStrategyType type = MergeStrategyType::SIMPLE) = 0;
 };  // MergeManager
 
 using MergeManagerPtr = std::shared_ptr<MergeManager>;

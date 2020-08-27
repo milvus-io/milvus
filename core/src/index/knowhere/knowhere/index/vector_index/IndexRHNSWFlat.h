@@ -35,7 +35,7 @@ class IndexRHNSWFlat : public IndexRHNSW {
     IndexRHNSWFlat(int d, int M, MetricType metric = Metric::L2);
 
     BinarySet
-    Serialize(const Config& config = Config()) override;
+    Serialize(const Config& config) override;
 
     void
     Load(const BinarySet& index_binary) override;

@@ -45,9 +45,9 @@ class BuildIndexJob : public Job {
         return options_;
     }
 
-    const engine::snapshot::IDS_TYPE&
-    segment_ids() {
-        return segment_ids_;
+    engine::snapshot::IDS_TYPE&
+    FailedSegments() {
+        return failed_segment_ids_;
     }
 
  protected:
@@ -58,6 +58,7 @@ class BuildIndexJob : public Job {
     engine::snapshot::ScopedSnapshotT snapshot_;
     engine::DBOptions options_;
     engine::snapshot::IDS_TYPE segment_ids_;
+    engine::snapshot::IDS_TYPE failed_segment_ids_;
 };
 
 using BuildIndexJobPtr = std::shared_ptr<BuildIndexJob>;

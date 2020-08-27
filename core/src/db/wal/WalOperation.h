@@ -32,10 +32,10 @@ class WalOperation {
     explicit WalOperation(WalOperationType type);
 
     void
-    SetID(id_t id) {
+    SetID(idx_t id) {
         id_ = id;
     }
-    id_t
+    idx_t
     ID() const {
         return id_;
     }
@@ -46,8 +46,11 @@ class WalOperation {
     }
 
  protected:
-    id_t id_ = 0;
+    idx_t id_ = 0;
     WalOperationType type_ = WalOperationType::INVALID;
+
+ public:
+    std::string collection_name_;
 };
 
 using WalOperationPtr = std::shared_ptr<WalOperation>;
@@ -58,7 +61,6 @@ class InsertEntityOperation : public WalOperation {
     InsertEntityOperation();
 
  public:
-    std::string collection_name_;
     std::string partition_name;
     DataChunkPtr data_chunk_;
 };
@@ -71,8 +73,7 @@ class DeleteEntityOperation : public WalOperation {
     DeleteEntityOperation();
 
  public:
-    std::string collection_name_;
-    engine::IDNumbers entity_ids_;
+    IDNumbers entity_ids_;
 };
 
 using DeleteEntityOperationPtr = std::shared_ptr<DeleteEntityOperation>;

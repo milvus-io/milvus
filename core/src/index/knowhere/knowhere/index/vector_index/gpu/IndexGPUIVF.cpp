@@ -42,7 +42,7 @@ GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
         auto device_index =
             new faiss::gpu::GpuIndexIVFFlat(gpu_res->faiss_res.get(), dim, nlist, metric_type, idx_config);
-        device_index->train(rows, (float*)p_data);
+        device_index->train(rows, reinterpret_cast<const float*>(p_data));
 
         index_.reset(device_index);
         res_ = gpu_res;
@@ -53,7 +53,8 @@ GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
 void
 GPUIVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (auto spt = res_.lock()) {
+    auto spt = res_.lock();
+    if (spt != nullptr) {
         ResScope rs(res_, gpu_id_);
         IVF::Add(dataset_ptr, config);
     } else {
@@ -65,7 +66,8 @@ VecIndexPtr
 GPUIVF::CopyGpuToCpu(const Config& config) {
     std::lock_guard<std::mutex> lk(mutex_);
 
-    if (auto device_idx = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
+    auto device_idx = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
+    if (device_idx != nullptr) {
         faiss::Index* device_index = index_.get();
         faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
 
@@ -148,7 +150,8 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
         int64_t dim = device_index->d;
         for (int64_t i = 0; i < n; i += block_size) {
             int64_t search_size = (n - i > block_size) ? block_size : (n - i);
-            device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k, bitset_);
+            device_index->search(search_size, reinterpret_cast<const float*>(data) + i * dim, k, distances + i * k,
+                                 labels + i * k, bitset_);
         }
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");

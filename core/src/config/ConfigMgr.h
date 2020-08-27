@@ -24,8 +24,7 @@ namespace milvus {
 
 class ConfigObserver {
  public:
-    virtual ~ConfigObserver() {
-    }
+    virtual ~ConfigObserver() = default;
 
     virtual void
     ConfigUpdate(const std::string& name) = 0;
@@ -68,6 +67,8 @@ class ConfigMgr {
 
     std::string
     Dump() const;
+    std::string
+    JsonDump() const;
 
  public:
     // Shared pointer should not be used here

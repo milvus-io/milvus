@@ -26,7 +26,6 @@
 #include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
@@ -61,27 +60,7 @@ SegmentWriter::Initialize() {
     const engine::SegmentVisitor::IdMapT& field_map = segment_visitor_->GetFieldVisitors();
     for (auto& iter : field_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
-        std::string name = field->GetName();
-        engine::DataType ftype = static_cast<engine::DataType>(field->GetFtype());
-        if (engine::IsVectorField(field)) {
-            json params = field->GetParams();
-            if (params.find(knowhere::meta::DIM) == params.end()) {
-                std::string msg = "Vector field params must contain: dimension";
-                LOG_SERVER_ERROR_ << msg;
-                return Status(DB_ERROR, msg);
-            }
-
-            int64_t field_width = 0;
-            int64_t dimension = params[knowhere::meta::DIM];
-            if (ftype == engine::DataType::VECTOR_BINARY) {
-                field_width += (dimension / 8);
-            } else {
-                field_width += (dimension * sizeof(float));
-            }
-            segment_ptr_->AddField(name, ftype, field_width);
-        } else {
-            segment_ptr_->AddField(name, ftype);
-        }
+        STATUS_CHECK(segment_ptr_->AddField(field));
     }
 
     return Status::OK();
@@ -179,7 +158,7 @@ SegmentWriter::WriteBloomFilter() {
             segment::IdBloomFilterPtr bloom_filter_ptr;
             ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
 
-            int64_t* uids = (int64_t*)(uid_data->data_.data());
+            auto uids = reinterpret_cast<int64_t*>(uid_data->data_.data());
             int64_t row_count = segment_ptr_->GetRowCount();
             for (int64_t i = 0; i < row_count; i++) {
                 bloom_filter_ptr->Add(uids[i]);
@@ -359,7 +338,7 @@ SegmentWriter::RowCount() {
 }
 
 Status
-SegmentWriter::LoadUids(std::vector<engine::id_t>& uids) {
+SegmentWriter::LoadUids(std::vector<engine::idx_t>& uids) {
     engine::BinaryDataPtr raw;
     auto status = segment_ptr_->GetFixedFieldData(engine::FIELD_UID, raw);
     if (!status.ok()) {
@@ -371,14 +350,14 @@ SegmentWriter::LoadUids(std::vector<engine::id_t>& uids) {
         return Status(DB_ERROR, "Invalid id field");
     }
 
-    if (raw->data_.size() % sizeof(engine::id_t) != 0) {
+    if (raw->data_.size() % sizeof(engine::idx_t) != 0) {
         std::string err_msg = "Failed to load uids: illegal file size";
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
     uids.clear();
-    uids.resize(raw->data_.size() / sizeof(engine::id_t));
+    uids.resize(raw->data_.size() / sizeof(engine::idx_t));
     memcpy(uids.data(), raw->data_.data(), raw->data_.size());
 
     return Status::OK();
@@ -422,7 +401,7 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
 
         // serialize compress file
         {
-            auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+            auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS);
             if (element_visitor && element_visitor->GetFile()) {
                 auto segment_file = element_visitor->GetFile();
                 std::string file_path =

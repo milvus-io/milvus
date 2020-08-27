@@ -33,8 +33,7 @@ namespace milvus::server::web {
 
 #define WEB_LOG_PREFIX "[Web] "
 
-#define ADD_DEFAULT_CORS(endpoint) \
-    ADD_CORS(endpoint, "*", "OPTIONS, GET, POST, PUT, DELETE")
+#define ADD_DEFAULT_CORS(endpoint) ADD_CORS(endpoint, "*", "OPTIONS, GET, POST, PUT, DELETE")
 
 class WebController : public oatpp::web::server::api::ApiController {
  public:
@@ -280,7 +279,6 @@ class WebController : public oatpp::web::server::api::ApiController {
         //            "count": 58
         //        })";
 
-        response = createResponse(Status::CODE_200, result);
         return response;
     }
 
@@ -364,16 +362,16 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_DEFAULT_CORS(IndexOptions)
 
-    ENDPOINT("OPTIONS", "/collections/{collection_name}/indexes", IndexOptions) {
+    ENDPOINT("OPTIONS", "/collections/{collection_name}/fields/{field_name}/indexes", IndexOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
     ADD_DEFAULT_CORS(CreateIndex)
 
-    ENDPOINT("POST", "/collections/{collection_name}/fields/{field_name}/indexes/{index_name}", CreateIndex,
-             PATH(String, collection_name), PATH(String, field_name), PATH(String, index_name),
-             BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/tables/" + collection_name->std_str() + "/indexes\'");
+    ENDPOINT("POST", "/collections/{collection_name}/fields/{field_name}/indexes", CreateIndex,
+             PATH(String, collection_name), PATH(String, field_name), BODY_STRING(String, body)) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections/" + collection_name->std_str() +
+                        "/indexes\'");
         tr.RecordSection("Received request.");
 
         auto handler = WebRequestHandler();
@@ -432,10 +430,10 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_DEFAULT_CORS(DropIndex)
 
-    ENDPOINT("DELETE", "/collections/{collection_name}/fields/{field_name}/indexes/{index_name}", DropIndex,
-             PATH(String, collection_name), PATH(String, field_name), PATH(String, index_name)) {
+    ENDPOINT("DELETE", "/collections/{collection_name}/fields/{field_name}/indexes", DropIndex,
+             PATH(String, collection_name), PATH(String, field_name)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "DELETE \'/collections/" + collection_name->std_str() +
-                        "/indexes\'");
+                        "/fields/" + field_name->std_str() + "/indexes\'");
         tr.RecordSection("Received request.");
 
         auto handler = WebRequestHandler();
@@ -559,12 +557,12 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_DEFAULT_CORS(GetEntities)
 
-    ENDPOINT("GET", "/collections/{collection_name}/partitions/{partition_tag}/entities", GetEntities,
-             PATH(String, collection_name), PATH(String, partition_tag), QUERIES(QueryParams, query_params),
-             BODY_STRING(String, body)) {
+    ENDPOINT("GET", "/collections/{collection_name}/entities", GetEntities, PATH(String, collection_name),
+             QUERIES(QueryParams, query_params)) {
         auto handler = WebRequestHandler();
 
-        String response;
+
+         String response;
         auto status_dto = handler.GetEntity(collection_name, query_params, response);
         switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:
@@ -622,21 +620,21 @@ class WebController : public oatpp::web::server::api::ApiController {
         }
     }
 
-    ADD_DEFAULT_CORS(VectorsOptions)
+    ADD_CORS(EntityOptions)
 
-    ENDPOINT("OPTIONS", "/collections/{collection_name}/entities", VectorsOptions) {
+    ENDPOINT("OPTIONS", "/collections/{collection_name}/entities", EntityOptions) {
         return createResponse(Status::CODE_204, "No Content");
     }
 
-    ADD_DEFAULT_CORS(InsertEntity)
+    ADD_DEFAULT_CORS(Insert)
 
-    ENDPOINT("POST", "/hybrid_collections/{collection_name}/entities", InsertEntity, PATH(String, collection_name),
+    ENDPOINT("POST", "/collections/{collection_name}/entities", Insert, PATH(String, collection_name),
              BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/hybrid_collections/" + collection_name->std_str() +
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "POST \'/collections/" + collection_name->std_str() +
                         "/entities\'");
         tr.RecordSection("Received request.");
 
-        auto ids_dto = VectorIdsDto::createShared();
+        auto ids_dto = EntityIdsDto::createShared();
         WebRequestHandler handler = WebRequestHandler();
 
         std::shared_ptr<OutgoingResponse> response;
@@ -660,7 +658,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_DEFAULT_CORS(EntityOp)
 
-    ENDPOINT("PUT", "/hybrid_collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
+    ENDPOINT("PUT", "/collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
              BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/hybrid_collections/" + collection_name->std_str() +
                         "/vectors\'");
@@ -751,4 +749,3 @@ class WebController : public oatpp::web::server::api::ApiController {
 };
 
 }  // namespace milvus::server::web
-

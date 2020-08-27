@@ -48,7 +48,7 @@ IVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFScalarQuantizer(
         coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), faiss::QuantizerType::QT_8bit, metric_type));
 
-    index_->train(rows, (float*)p_data);
+    index_->train(rows, reinterpret_cast<const float*>(p_data));
 }
 
 VecIndexPtr

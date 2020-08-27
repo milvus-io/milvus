@@ -29,6 +29,8 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2869 Create index failed with binary vectors
 -   \#2893 Insert binary data failed
 -   \#2957 There is no exisitence check of annoy search parameter
+-   \#3406 No debug and info log generated after server started
+-   \#3407 Server get stuck if create index after entities inserted with no manual flush
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
@@ -51,6 +53,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2858 Unify index name in db
 -   \#2884 Using BlockingQueue in JobMgr
 -   \#3220 Enable -Werror to improve code quality
+-   \#3449 Upgrade master version to v0.11.0
 
 ## Task
 

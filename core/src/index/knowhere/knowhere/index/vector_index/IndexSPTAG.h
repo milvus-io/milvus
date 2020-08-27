@@ -28,7 +28,7 @@ class CPUSPTAGRNG : public VecIndex {
 
  public:
     BinarySet
-    Serialize(const Config& config = Config()) override;
+    Serialize(const Config& config) override;
 
     void
     Load(const BinarySet& index_array) override;

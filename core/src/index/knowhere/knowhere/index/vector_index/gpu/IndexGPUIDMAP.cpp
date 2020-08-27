@@ -110,7 +110,7 @@ GPUIDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, i
     // assign the metric type
     auto flat_index = dynamic_cast<faiss::IndexIDMap*>(index_.get())->index;
     flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    index_->search(n, (float*)data, k, distances, labels, bitset_);
+    index_->search(n, data, k, distances, labels, bitset_);
 }
 
 void
@@ -133,8 +133,8 @@ GPUIDMAP::GenGraph(const float* data, const int64_t k, GraphType& graph, const C
         auto& res = res_vec[i];
         res.resize(K * b_size);
 
-        auto xq = data + batch_size * dim * i;
-        QueryImpl(b_size, (float*)xq, K, res_dis.data(), res.data(), config);
+        const float* xq = data + batch_size * dim * i;
+        QueryImpl(b_size, xq, K, res_dis.data(), res.data(), config);
 
         for (int j = 0; j < b_size; ++j) {
             auto& node = graph[batch_size * i + j];

@@ -48,11 +48,11 @@ extern const char* DEFAULT_STRUCTURED_INDEX;
 extern const char* DEFAULT_PARTITON_TAG;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-using id_t = int64_t;
+using idx_t = int64_t;
 using offset_t = int32_t;
 using date_t = int32_t;
 
-using IDNumbers = std::vector<id_t>;
+using IDNumbers = std::vector<idx_t>;
 
 using VectorDistance = faiss::Index::distance_t;
 using VectorDistances = std::vector<VectorDistance>;
@@ -61,7 +61,7 @@ using ResultIds = std::vector<faiss::Index::idx_t>;
 using ResultDistances = std::vector<faiss::Index::distance_t>;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-enum DataType {
+enum class DataType {
     NONE = 0,
     BOOL = 1,
     INT8 = 2,
@@ -79,13 +79,13 @@ enum DataType {
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-enum FieldElementType {
+enum class FieldElementType {
     FET_NONE = 0,
     FET_RAW = 1,
     FET_BLOOM_FILTER = 2,
     FET_DELETED_DOCS = 3,
     FET_INDEX = 4,
-    FET_COMPRESS_SQ8 = 5,
+    FET_COMPRESS = 5,
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -168,7 +168,7 @@ using QueryResultPtr = std::shared_ptr<QueryResult>;
 struct DBMetaOptions {
     std::string path_;
     std::string backend_uri_;
-};  // DBMetaOptions
+};
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 struct DBOptions {
@@ -178,7 +178,6 @@ struct DBOptions {
     int mode_ = MODE::SINGLE;
 
     size_t insert_buffer_size_ = 4 * GB;
-    bool insert_cache_immediately_ = false;
 
     int64_t auto_flush_interval_ = 1;
 
@@ -186,13 +185,12 @@ struct DBOptions {
 
     // wal relative configurations
     bool wal_enable_ = false;
-    int64_t buffer_size_ = 256;
-    std::string mxlog_path_ = "/tmp/milvus/wal/";
+    std::string wal_path_;
 
     // transcript configurations
     bool transcript_enable_ = false;
     std::string replay_script_path_;  // for replay
-};                                    // Options
+};
 
 }  // namespace engine
 }  // namespace milvus

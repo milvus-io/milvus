@@ -17,33 +17,21 @@
 
 # The checks defined here will be run and will display by default as warnings.
 Checks: >
-    -*, -clang-diagnostic-error, -clang-diagnostic-*, cppcoreguidelines-*, clang-analyzer-*, google-*, modernize-*, readability-*,
+    -*, clang-diagnostic-*, -clang-diagnostic-error,
+    clang-analyzer-*, -clang-analyzer-alpha*,
+    google-*, -google-runtime-references, -google-readability-todo,
+    modernize-*, -modernize-pass-by-value, -modernize-use-equals-default,
     performance-faster-string-find, performance-for-range-copy,
     performance-implicit-conversion-in-loop, performance-inefficient-algorithm,
-    performance-inefficient-string-concatenation, performance-trivially-destructible,
-    performance-inefficient-vector-operation, performance-move-const-arg,
-    performance-move-constructor-init, performance-noexcept-move-constructor,
-    performance-no-automatic-move, performance-unnecessary-copy-initialization,
+    performance-trivially-destructible, performance-inefficient-vector-operation,
+    performance-move-const-arg, performance-move-constructor-init,
+    performance-noexcept-move-constructor, performance-no-automatic-move,
     performance-type-promotion-in-math-fn
 
-# In order to trigger an error, you must have a rule defined both in checks and in this section.
-WarningsAsErrors: >
-    cppcoreguidelines-no-malloc, modernize-deprecated-headers,
-    modernize-loop-convert, modernize-make-shared, modernize-pass-by-value, modernize-make-unique,
-    modernize-raw-string-literal, modernize-redundant-void-arg, modernize-replace-auto-ptr,
-    modernize-replace-random-shuffle, modernize-return-braced-init-list, modernize-shrink-to-fit,
-    modernize-unary-static-assert, modernize-use-bool-literals, modernize-use-default-member-init,
-    modernize-use-emplace, modernize-use-equals-default, modernize-use-equals-delete,
-    modernize-use-noexcept, modernize-use-nullptr, modernize-use-override,
-    modernize-use-transparent-functors, modernize-use-using,
-    performance-unnecessary-copy-initialization, performance-move-const-arg
-
-# produce HeaderFilterRegex from cpp/build-support/lint_exclusions.txt with:
-# echo -n '^('; sed -e 's/*/\.*/g' cpp/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
-HeaderFilterRegex: '^(.*core/cmake-build-debug.*|.*core/cmake-build-release.*|.*core/cmake_build.*)$'
+# produce HeaderFilterRegex from core/build-support/lint_exclusions.txt with:
+# echo -n '^?!('; sed -e 's/*/\.*/g' core/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
+HeaderFilterRegex: '^?!(.*cmake-build-debug.*|.*cmake-build-release.*|.*cmake_build.*|.*thirdparty.*|.*src/grpc.*|.*milvus/include.*|.*unittest.*)$'
 AnalyzeTemporaryDtors: true
-ChainedConditionalReturn: 1
-ChainedConditionalAssignment: 1
 CheckOptions:
   - key:             google-readability-braces-around-statements.ShortStatementLines
     value:           '1'

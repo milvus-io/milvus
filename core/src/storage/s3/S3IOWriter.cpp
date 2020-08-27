@@ -24,8 +24,8 @@ S3IOWriter::open(const std::string& name) {
 }
 
 void
-S3IOWriter::write(void* ptr, int64_t size) {
-    buffer_ += std::string(reinterpret_cast<char*>(ptr), size);
+S3IOWriter::write(const void* ptr, int64_t size) {
+    buffer_ += std::string(reinterpret_cast<const char*>(ptr), size);
     len_ += size;
 }
 

@@ -9,18 +9,26 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include "scheduler/task/FinishedTask.h"
 
-#include "utils/Status.h"
+namespace milvus::scheduler {
 
-namespace milvus {
-namespace server {
+std::shared_ptr<FinishedTask>
+FinishedTask::Create() {
+    return std::make_shared<FinishedTask>();
+}
 
-class StorageChecker {
- public:
-    static Status
-    CheckStoragePermission();
-};
+FinishedTask::FinishedTask() : Task(TaskType::SearchTask, nullptr) {
+}
 
-}  // namespace server
-}  // namespace milvus
+Status
+FinishedTask::OnLoad(LoadType type, uint8_t device_id) {
+    return Status::OK();
+}
+
+Status
+FinishedTask::OnExecute() {
+    return Status::OK();
+}
+
+}  // namespace milvus::scheduler

@@ -20,6 +20,7 @@
 #include <string>
 
 #include "db/DB.h"
+#include "db/DBFactory.h"
 #include "db/meta/MetaAdapter.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Context.h"
@@ -82,12 +83,18 @@ using IterateSegmentFileHandler = milvus::engine::snapshot::IterateHandler<Segme
 using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
 using SegmentIterator = milvus::engine::snapshot::SegmentIterator;
 using SegmentFileIterator = milvus::engine::snapshot::SegmentFileIterator;
-using DB = milvus::engine::DB;
-using Status = milvus::Status;
 using Store = milvus::engine::snapshot::Store;
-
 using StorePtr = milvus::engine::snapshot::Store::Ptr;
 using MetaAdapterPtr = milvus::engine::meta::MetaAdapterPtr;
+
+using DB = milvus::engine::DB;
+using DBOptions = milvus::engine::DBOptions;
+using Status = milvus::Status;
+using idx_t = milvus::engine::idx_t;
+using IDNumbers = milvus::engine::IDNumbers;
+using DataChunk = milvus::engine::DataChunk;
+using DataChunkPtr = milvus::engine::DataChunkPtr;
+using BinaryData = milvus::engine::BinaryData;
 
 inline int
 RandomInt(int start, int end) {
@@ -321,7 +328,7 @@ class BaseTest : public ::testing::Test {
     void
     InitLog();
     void
-    SnapshotStart(bool mock_store, milvus::engine::DBOptions);
+    SnapshotStart(bool mock_store, DBOptions);
     void
     SnapshotStop();
 
@@ -345,7 +352,7 @@ class DBTest : public BaseTest {
  protected:
     std::shared_ptr<DB> db_;
 
-    milvus::engine::DBOptions
+    DBOptions
     GetOptions();
 
     void
@@ -391,11 +398,26 @@ class SchedulerTest : public BaseTest {
     TearDown() override;
 };
 
+///////////////////////////////////////////////////////////////////////////////
 class EventTest : public BaseTest {
  protected:
     StorePtr store_;
 
  protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+class WalTest : public ::testing::Test {
+ protected:
+    std::shared_ptr<DB> db_;
+
+    DBOptions
+    GetOptions();
+
     void
     SetUp() override;
     void
