@@ -452,7 +452,7 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
         int64_t tag_size = tag.size();
         for (int64_t i = 1; i < tag_size; ++i) {
             char name_char = tag[i];
-            if (name_char != '_' && std::isalnum(name_char) == 0) {
+            if (name_char != '_' && name_char != '-' && std::isalnum(name_char) == 0) {
                 std::string msg = invalid_msg + "Partition tag can only contain numbers, letters, and underscores.";
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_PARTITION_TAG, msg);
