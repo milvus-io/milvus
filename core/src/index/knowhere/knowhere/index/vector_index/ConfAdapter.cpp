@@ -182,9 +182,11 @@ IVFPQConfAdapter::GetValidGPUM(int64_t dimension, int64_t m) {
     static const std::vector<int64_t> support_dim_per_subquantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
     static const std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
 
-    int64_t dim = dimension / m;
-    return std::find(support_dim_per_subquantizer.begin(), support_dim_per_subquantizer.end(), dim) != support_dim_per_subquantizer.end()
-           && std::find(support_subquantizer.begin(), support_subquantizer.end(), m) != support_subquantizer.end();
+    int64_t sub_dim = dimension / m;
+    return (std::find(std::begin(support_subquantizer), std::end(support_subquantizer), m) !=
+            support_subquantizer.end()) &&
+           (std::find(std::begin(support_dim_per_subquantizer), std::end(support_dim_per_subquantizer), sub_dim) !=
+            support_dim_per_subquantizer.end());
 
     /*resset.clear();
       for (const auto& dimperquantizer : support_dim_per_subquantizer) {

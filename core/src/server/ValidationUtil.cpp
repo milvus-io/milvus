@@ -249,7 +249,7 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 
         // special check for 'm' parameter
         int64_t m_value = index_params[knowhere::IndexParams::m];
-        if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(dimension,m_value)) {
+        if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(dimension, m_value)) {
             std::string msg = "Invalid m, dimension can't not be divided by m ";
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);

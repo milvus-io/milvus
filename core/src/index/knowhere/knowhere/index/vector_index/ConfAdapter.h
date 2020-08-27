@@ -49,7 +49,7 @@ class IVFSQConfAdapter : public IVFConfAdapter {
 class IVFPQConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg, const IndexMode mode);
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
 
     static bool
     GetValidM(int64_t dimension, int64_t m, IndexMode& mode);
@@ -59,7 +59,6 @@ class IVFPQConfAdapter : public IVFConfAdapter {
 
     static bool
     GetValidCPUM(int64_t dimension, int64_t m);
-
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
