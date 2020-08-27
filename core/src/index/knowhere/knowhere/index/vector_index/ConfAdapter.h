@@ -49,10 +49,17 @@ class IVFSQConfAdapter : public IVFConfAdapter {
 class IVFPQConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg, const IndexMode mode) override;
+    CheckTrain(Config& oricfg, const IndexMode mode);
 
-    static void
-    GetValidMList(int64_t dimension, std::vector<int64_t>& resset);
+    static bool
+    GetValidM(int64_t dimension, int64_t m, IndexMode& mode);
+
+    static bool
+    GetValidGPUM(int64_t dimension, int64_t m);
+
+    static bool
+    GetValidCPUM(int64_t dimension, int64_t m);
+
 };
 
 class NSGConfAdapter : public IVFConfAdapter {

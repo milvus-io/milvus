@@ -69,15 +69,8 @@ ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const Segm
 }
 
 knowhere::VecIndexPtr
-ExecutionEngineImpl::CreateVecIndex(const std::string& index_name) {
+ExecutionEngineImpl::CreateVecIndex(const std::string& index_name, knowhere::IndexMode mode) {
     knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
-    knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
-#ifdef MILVUS_GPU_VERSION
-    if (gpu_enable_) {
-        mode = knowhere::IndexMode::MODE_GPU;
-    }
-#endif
-
     knowhere::VecIndexPtr index = vec_index_factory.CreateVecIndex(index_name, mode);
     if (index == nullptr) {
         std::string err_msg =
@@ -216,6 +209,9 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
     for (auto& pair : indice) {
         if (pair.second != nullptr) {
             auto gpu_index = knowhere::cloner::CopyCpuToGpu(pair.second, device_id, knowhere::Config());
+            if (gpu_index == nullptr) {
+                gpu_index = pair.second;
+            }
             new_map.insert(std::make_pair(pair.first, gpu_index));
         }
     }
@@ -771,12 +767,6 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
         throw Exception(DB_ERROR, "ExecutionEngineImpl: from_index is not IDMAP");
     }
 
-    // build index by knowhere
-    new_index = CreateVecIndex(index_info.index_type_);
-    if (!new_index) {
-        throw Exception(DB_ERROR, "Unsupported index type");
-    }
-
     auto segment_visitor = segment_reader_->GetSegmentVisitor();
     auto& snapshot = segment_visitor->GetSnapshot();
     auto& segment = segment_visitor->GetSegment();
@@ -795,11 +785,27 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     conf[knowhere::meta::DEVICEID] = gpu_num_;
     conf[knowhere::Metric::TYPE] = index_info.metric_name_;
     LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
+
+    knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
+#ifdef MILVUS_GPU_VERSION
+    if (gpu_enable_) {
+        mode = knowhere::IndexMode::MODE_GPU;
+    }
+    if (index_info.index_type_ == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ){
+        auto m = conf[knowhere::IndexParams::m].get<int64_t>();
+        knowhere::IVFPQConfAdapter::GetValidM(dimension, m, mode);
+    }
+#endif
+    new_index = CreateVecIndex(index_info.index_type_, mode);
+    if (!new_index) {
+        throw Exception(DB_ERROR, "Unsupported index type");
+    }
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(new_index->index_type());
-    if (!adapter->CheckTrain(conf, new_index->index_mode())) {
+    if (!adapter->CheckTrain(conf, mode)) {
         throw Exception(DB_ERROR, "Illegal index params");
     }
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
+    // build index by knowhere
 
     std::vector<idx_t> uids;
     faiss::ConcurrentBitsetPtr blacklist;
