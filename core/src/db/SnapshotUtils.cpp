@@ -210,7 +210,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
             const engine::snapshot::FieldPtr& field = iter.second->GetField();
 
             auto& elements = iter.second->GetElementVistors();
-            for (auto pair : elements) {
+            for (const auto& pair : elements) {
                 if (pair.second == nullptr || pair.second->GetElement() == nullptr) {
                     continue;
                 }

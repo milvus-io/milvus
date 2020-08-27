@@ -58,7 +58,10 @@ ParseGPUDevices(const std::string& str) {
         device_set.insert(std::stoll(device.substr(3)));
     }
 
-    for (auto dev : device_set) devices.push_back(dev);
+    devices.reserve(device_set.size());
+    for (auto dev : device_set) {
+        devices.push_back(dev);
+    }
     return devices;
 }
 
