@@ -6,9 +6,10 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 
 ## Feature
+-   \#3213 Allow users to specify a distance type at runtime for Flat index
+-   \#3254 Allow more choices for the parameter ‘m’ of CPU IVF_PQ
 
 ## Improvement
--   \#3213 Allow users to specify a distance type at runtime for Flat index
 
 ## Task
 

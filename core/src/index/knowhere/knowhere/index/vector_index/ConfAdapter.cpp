@@ -156,18 +156,28 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     // static int64_t MAX_POINTS_PER_CENTROID = 256;
     // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
 
-    std::vector<int64_t> resset;
     int64_t dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
-    IVFPQConfAdapter::GetValidMList(dimension, resset);
+    int64_t m = oricfg[knowhere::IndexParams::m].get<int64_t>();
+    IndexMode IVFPQ_mode = mode;
+    return GetValidM(dimension, m, IVFPQ_mode);
+}
 
-    CheckIntByValues(knowhere::IndexParams::m, resset);
+bool
+IVFPQConfAdapter::GetValidM(int64_t dimension, int64_t m, IndexMode& mode) {
+#ifdef MILVUS_GPU_VERSION
+    if (mode == knowhere::IndexMode::MODE_GPU && !IVFPQConfAdapter::GetValidGPUM(dimension, m)) {
+        mode = knowhere::IndexMode::MODE_CPU;
+    }
+#endif
+    if (mode == knowhere::IndexMode::MODE_CPU && !IVFPQConfAdapter::GetValidCPUM(dimension, m)) {
+        return false;
+    }
 
     return true;
 }
 
-void
-IVFPQConfAdapter::GetValidMList(int64_t dimension, std::vector<int64_t>& resset) {
-    resset.clear();
+bool
+IVFPQConfAdapter::GetValidGPUM(int64_t dimension, int64_t m) {
     /*
      * Faiss 1.6
      * Only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-quantizer are currently supported with
@@ -176,15 +186,34 @@ IVFPQConfAdapter::GetValidMList(int64_t dimension, std::vector<int64_t>& resset)
     static std::vector<int64_t> support_dim_per_subquantizer{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1};
     static std::vector<int64_t> support_subquantizer{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1};
 
-    for (const auto& dimperquantizer : support_dim_per_subquantizer) {
-        if (!(dimension % dimperquantizer)) {
-            auto subquantzier_num = dimension / dimperquantizer;
-            auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
-            if (finder != support_subquantizer.end()) {
-                resset.push_back(subquantzier_num);
+    if (!GetValidCPUM(dimension, m)) {
+        return false;
+    }
+
+    int64_t sub_dim = dimension / m;
+    return (std::find(std::begin(support_subquantizer), std::end(support_subquantizer), m) !=
+            support_subquantizer.end()) &&
+           (std::find(std::begin(support_dim_per_subquantizer), std::end(support_dim_per_subquantizer), sub_dim) !=
+            support_dim_per_subquantizer.end());
+
+    /*
+        std::vector<int64_t> resset;
+        resset.clear();
+        for (const auto& dimperquantizer : support_dim_per_subquantizer) {
+            if (!(dimension % dimperquantizer)) {
+                auto subquantzier_num = dimension / dimperquantizer;
+                auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
+                if (finder != support_subquantizer.end()) {
+                    resset.push_back(subquantzier_num);
+                }
             }
         }
-    }
+    */
+}
+
+bool
+IVFPQConfAdapter::GetValidCPUM(int64_t dimension, int64_t m) {
+    return (dimension % m == 0);
 }
 
 bool

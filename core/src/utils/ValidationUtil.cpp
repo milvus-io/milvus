@@ -215,16 +215,14 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
             }
 
             // special check for 'm' parameter
-            std::vector<int64_t> resset;
-            milvus::knowhere::IVFPQConfAdapter::GetValidMList(collection_schema.dimension_, resset);
             int64_t m_value = index_params[knowhere::IndexParams::m];
-            if (resset.empty()) {
-                std::string msg = "Invalid collection dimension, unable to get reasonable values for 'm'";
+            if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(collection_schema.dimension_, m_value)) {
+                std::string msg = "Invalid collection dimension, dimension can not be divided by m";
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_COLLECTION_DIMENSION, msg);
             }
 
-            auto iter = std::find(std::begin(resset), std::end(resset), m_value);
+            /* auto iter = std::find(std::begin(resset), std::end(resset), m_value);
             if (iter == std::end(resset)) {
                 std::string msg =
                     "Invalid " + std::string(knowhere::IndexParams::m) + ", must be one of the following values: ";
@@ -237,8 +235,7 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
 
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_ARGUMENT, msg);
-            }
-
+            }*/
             break;
         }
         case (int32_t)engine::EngineType::NSG_MIX: {
