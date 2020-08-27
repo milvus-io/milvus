@@ -55,6 +55,7 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
         return Status(SERVER_UNEXPECTED_ERROR, "Invalid vector compress length: " + full_file_path);
     }
 
+    compress = std::make_shared<knowhere::Binary>();
     compress->data = std::shared_ptr<uint8_t[]>(new uint8_t[length]);
     compress->size = length;
 
