@@ -22,6 +22,7 @@
 
 #include "segment/IdBloomFilter.h"
 #include "storage/FSHandler.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace codec {
@@ -33,15 +34,15 @@ class IdBloomFilterFormat {
     static std::string
     FilePostfix();
 
-    void
+    Status
     Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
          segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
-    void
+    Status
     Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
           const segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
-    void
+    Status
     Create(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
            segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
