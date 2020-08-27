@@ -180,7 +180,7 @@ RequireRawFile(const std::string& index_type) {
 
 bool
 RequireCompressFile(const std::string& index_type) {
-    return index_type == knowhere::IndexEnum::INDEX_RHNSWSQ;
+    return index_type == knowhere::IndexEnum::INDEX_RHNSWSQ || index_type == knowhere::IndexEnum::INDEX_RHNSWPQ;
 }
 
 }  // namespace utils
