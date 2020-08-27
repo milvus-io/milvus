@@ -123,7 +123,7 @@ TEST_P(RHNSWPQTest, HNSW_serialize) {
         index_->Add(base_dataset, conf);
         auto binaryset = index_->Serialize(conf);
         auto bin_idx = binaryset.GetByName(index_->index_type() + "_Index");
-        auto bin_dat = binaryset.GetByName(index_->index_type() + "_Data");
+        auto bin_dat = binaryset.GetByName(QUANTIZATION_DATA);
 
         std::string filename_idx = "/tmp/RHNSWPQ_test_serialize_idx.bin";
         std::string filename_dat = "/tmp/RHNSWPQ_test_serialize_dat.bin";
@@ -137,7 +137,7 @@ TEST_P(RHNSWPQTest, HNSW_serialize) {
         std::shared_ptr<uint8_t[]> dat(load_dat);
         std::shared_ptr<uint8_t[]> idx(load_idx);
         binaryset.Append(new_idx->index_type() + "_Index", idx, bin_idx->size);
-        binaryset.Append(new_idx->index_type() + "_Data", dat, bin_dat->size);
+        binaryset.Append(QUANTIZATION_DATA, dat, bin_dat->size);
 
         new_idx->Load(binaryset);
         EXPECT_EQ(new_idx->Count(), nb);
