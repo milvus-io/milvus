@@ -586,8 +586,11 @@ class TestIndexBinary:
         ids = connect.insert(binary_collection, binary_entities)
         connect.flush([binary_collection])
 
-        with pytest.raises(Exception) as e:
+        if get_l2_index["index_type"] == "BIN_FLAT":
             res = connect.create_index(binary_collection, binary_field_name, get_l2_index)
+        else:
+            with pytest.raises(Exception) as e:
+                res = connect.create_index(binary_collection, binary_field_name, get_l2_index)
 
     """
     ******************************************************************
