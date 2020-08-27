@@ -84,7 +84,7 @@ RemoveDirectory(const std::string& path) {
             if (strcmp(dmsg->d_name, ".") != 0 && strcmp(dmsg->d_name, "..") != 0) {
                 snprintf(file_name, buf_size, folder_name.c_str(), dmsg->d_name);
                 std::string tmp = file_name;
-                if (tmp.find(".") == std::string::npos) {
+                if (tmp.find('.') == std::string::npos) {
                     RemoveDirectory(file_name);
                 }
                 remove(file_name);

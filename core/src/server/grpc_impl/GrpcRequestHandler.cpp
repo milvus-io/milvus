@@ -367,7 +367,7 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
 
     std::string vector_field_name;
     bool set_valid_row = false;
-    for (auto field_name : field_names) {
+    for (const auto& field_name : field_names) {
         if (!attrs.empty()) {
             if (attrs[0].attr_type_.find(field_name) != attrs[0].attr_type_.end()) {
                 auto grpc_field = response->add_fields();
@@ -1252,6 +1252,7 @@ GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     std::vector<std::string> collection_names;
+    collection_names.reserve(collection_names.size());
     for (int32_t i = 0; i < request->collection_name_array().size(); i++) {
         collection_names.push_back(request->collection_name_array(i));
     }
