@@ -401,7 +401,7 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
 
         // serialize compress file
         {
-            auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+            auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS);
             if (element_visitor && element_visitor->GetFile()) {
                 auto segment_file = element_visitor->GetFile();
                 std::string file_path =

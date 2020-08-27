@@ -160,8 +160,8 @@ VectorIndexFormat::ConstructIndex(const std::string& index_name, knowhere::Binar
         }
 
         if (compress_data != nullptr) {
-            LOG_ENGINE_DEBUG_ << "load index with " << SQ8_DATA << " " << compress_data->size;
-            index_data.Append(SQ8_DATA, compress_data);
+            LOG_ENGINE_DEBUG_ << "load index with " << QUANTIZATION_DATA << " " << compress_data->size;
+            index_data.Append(QUANTIZATION_DATA, compress_data);
             length += compress_data->size;
         }
 
@@ -217,7 +217,7 @@ VectorIndexFormat::WriteCompress(const storage::FSHandlerPtr& fs_ptr, const std:
 
     auto binaryset = index->Serialize(knowhere::Config());
 
-    auto sq8_data = binaryset.Erase(SQ8_DATA);
+    auto sq8_data = binaryset.Erase(QUANTIZATION_DATA);
     if (sq8_data != nullptr) {
         auto& ss_codec = codec::Codec::instance();
         ss_codec.GetVectorCompressFormat()->Write(fs_ptr, file_path, sq8_data);
