@@ -11,9 +11,6 @@
 
 #include "db/wal/WalManager.h"
 #include "db/Utils.h"
-#include "db/snapshot/ResourceHelper.h"
-#include "db/snapshot/ResourceTypes.h"
-#include "db/snapshot/Snapshots.h"
 #include "db/wal/WalOperationCodec.h"
 #include "utils/CommonUtil.h"
 
@@ -26,7 +23,6 @@
 namespace milvus {
 namespace engine {
 
-const char* WAL_DATA_FOLDER = "wal";
 const char* WAL_MAX_OP_FILE_NAME = "max_op";
 const char* WAL_DEL_FILE_NAME = "del";
 
@@ -44,8 +40,7 @@ WalManager::Start(const DBOptions& options) {
     enable_ = options.wal_enable_;
     insert_buffer_size_ = options.insert_buffer_size_;
 
-    std::experimental::filesystem::path wal_path(options.meta_.path_);
-    wal_path.append((WAL_DATA_FOLDER));
+    std::experimental::filesystem::path wal_path(options.wal_path_);
     wal_path_ = wal_path.c_str();
     CommonUtil::CreateDirectory(wal_path_);
 
@@ -235,7 +230,7 @@ WalManager::Init() {
                 file_path.append(WAL_MAX_OP_FILE_NAME);
                 if (std::experimental::filesystem::is_regular_file(file_path)) {
                     WalFile file;
-                    file.OpenFile(path.c_str(), WalFile::READ);
+                    file.OpenFile(file_path.c_str(), WalFile::READ);
                     idx_t max_op = 0;
                     file.Read(&max_op);
 
@@ -369,29 +364,14 @@ WalManager::RecordDeleteOperation(const DeleteEntityOperationPtr& operation, con
 
 std::string
 WalManager::ConstructFilePath(const std::string& collection_name, const std::string& file_name) {
-    // use snapshot to construct wal path
-    // typically, the wal file path is like: /xxx/xxx/wal/C_1/xxxxxxxxxx
-    // if the snapshot not work, use collection name to construct path
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
-    if (status.ok() && ss->GetCollection() != nullptr) {
-        std::string col_path = snapshot::GetResPath<snapshot::Collection>(wal_path_, ss->GetCollection());
+    // typically, the wal file path is like: /xxx/milvus/wal/[collection_name]/xxxxxxxxxx
+    std::experimental::filesystem::path full_path(wal_path_);
+    full_path.append(collection_name);
+    std::experimental::filesystem::create_directory(full_path);
+    full_path.append(file_name);
 
-        std::experimental::filesystem::path full_path(col_path);
-        std::experimental::filesystem::create_directory(full_path);
-        full_path.append(file_name);
-
-        std::string path(full_path.c_str());
-        return path;
-    } else {
-        std::experimental::filesystem::path full_path(wal_path_);
-        full_path.append(collection_name);
-        std::experimental::filesystem::create_directory(full_path);
-        full_path.append(file_name);
-
-        std::string path(full_path.c_str());
-        return path;
-    }
+    std::string path(full_path.c_str());
+    return path;
 }
 
 void

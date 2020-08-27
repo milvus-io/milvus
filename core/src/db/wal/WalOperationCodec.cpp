@@ -33,6 +33,7 @@ WalOperationCodec::WriteInsertOperation(const WalFilePtr& file, const std::strin
         calculate_total_bytes += sizeof(int64_t);        // calculated total bytes
         calculate_total_bytes += sizeof(int32_t);        // partition name length
         calculate_total_bytes += partition_name.size();  // partition name
+        calculate_total_bytes += sizeof(int64_t);        // chunk entity count
         calculate_total_bytes += sizeof(int32_t);        // fixed field count
         for (auto& pair : chunk->fixed_fields_) {
             calculate_total_bytes += sizeof(int32_t);    // field name length
@@ -60,6 +61,9 @@ WalOperationCodec::WriteInsertOperation(const WalFilePtr& file, const std::strin
         if (part_name_length > 0) {
             total_bytes += file->Write(partition_name.data(), part_name_length);
         }
+
+        // write chunk entity count
+        total_bytes += file->Write<int64_t>(&(chunk->count_));
 
         // write fixed data
         int32_t field_count = chunk->fixed_fields_.size();
@@ -197,6 +201,13 @@ WalOperationCodec::IterateOperation(const WalFilePtr& file, WalOperationPtr& ope
             }
         }
 
+        // read chunk entity count
+        DataChunkPtr chunk = std::make_shared<DataChunk>();
+        read_bytes = file->Read<int64_t>(&(chunk->count_));
+        if (read_bytes <= 0) {
+            return Status(DB_ERROR, "End of file");
+        }
+
         // read fixed data
         int32_t field_count = 0;
         read_bytes = file->Read<int32_t>(&field_count);
@@ -204,7 +215,6 @@ WalOperationCodec::IterateOperation(const WalFilePtr& file, WalOperationPtr& ope
             return Status(DB_ERROR, "End of file");
         }
 
-        DataChunkPtr chunk = std::make_shared<DataChunk>();
         for (int32_t i = 0; i < field_count; i++) {
             int32_t field_name_length = 0;
             read_bytes = file->Read<int32_t>(&field_name_length);
