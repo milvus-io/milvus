@@ -13,8 +13,8 @@ type WriteNode struct {
 
 func (wn *WriteNode)doWriteNode(wg sync.WaitGroup) {
 	wg.Add(2)
-	go wn.insert_write(wn.mc.insertMsg, wg)
-	go wn.delete_write(wn.mc.deleteMsg, wg)
+	go wn.insert_write(wn.mc.InsertMsg, wg)
+	go wn.delete_write(wn.mc.DeleteMsg, wg)
 	wg.Wait()
 }
 

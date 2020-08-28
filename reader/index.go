@@ -1,6 +1,6 @@
 package reader
 
-import "../pulsar/schema"
+import "suvlim/pulsar/schema"
 
 type IndexConfig struct {}
 

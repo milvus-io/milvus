@@ -1,10 +1,28 @@
-#proxy
+# CLion generated files
+core/cmake-build-debug/
+core/cmake-build-debug/*
+core/cmake-build-release/
+core/cmake-build-release/*
+core/cmake_build/
+core/cmake_build/*
+core/build/
+core/build/*
+core/.idea/
+.idea/
+.idea/*
+
+# vscode generated files
+.vscode
+
+cmake-build-debug
+cmake-build-release
+cmake_build
+
+# proxy
 proxy/cmake_build
 proxy/cmake-build-debug
 proxy/thirdparty/grpc-src
 proxy/thirdparty/grpc-build
-.idea/
-.idea/*
 
 # Compiled source
 *.a

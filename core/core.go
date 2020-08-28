@@ -1,0 +1,3 @@
+pacakage core
+
+import "C"

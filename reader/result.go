@@ -1,8 +1,8 @@
 package reader
 
 import (
-	"../pulsar/schema"
 	"fmt"
+	"suvlim/pulsar/schema"
 )
 
 type ResultEntityIds []int64
