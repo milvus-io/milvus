@@ -50,10 +50,12 @@ type Store interface {
 	GetRows(ctx context.Context, keys []Key, timestamp Timestamp) ([]Value, error)
 
 	PutRow(ctx context.Context, key Key, value Value, segment string, timestamp Timestamp) error
-	PutRows(ctx context.Context, keys []Key, values []Value, segment string, timestamp Timestamp) error
+	PutRows(ctx context.Context, keys []Key, values []Value, segment string, timestamp []Timestamp) error
+
+	GetSegments(ctx context.Context, key Key, timestamp Timestamp) ([]string, error)
 
 	DeleteRow(ctx context.Context, key Key, timestamp Timestamp) error
-	DeleteRows(ctx context.Context, keys []Key, timestamp Timestamp) error
+	DeleteRows(ctx context.Context, keys []Key, timestamp []Timestamp) error
 
 	PutLog(ctx context.Context, key Key, value Value, timestamp Timestamp, channel int) error
 	GetLog(ctx context.Context, start Timestamp, end Timestamp, channels []int) ([]Value, error)

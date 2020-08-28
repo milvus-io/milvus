@@ -55,5 +55,5 @@ endif()
 
 # ****************************** Thirdparty pulsar-client-cpp ***************************************
 if ( MILVUS_WITH_PULSAR )
-    include(pulsar-client-cpp/CMakeLists.txt)
+    add_subdirectory(pulsar)
 endif()

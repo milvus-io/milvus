@@ -48,7 +48,6 @@ set( MILVUS_SOURCE_DIR      ${PROJECT_SOURCE_DIR} )
 set( MILVUS_BINARY_DIR      ${PROJECT_BINARY_DIR} )
 set( MILVUS_ENGINE_SRC      ${PROJECT_SOURCE_DIR}/src )
 set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
-set(pulsar_ROOT "${MILVUS_BINARY_DIR}/thirdparty/pulsar" CACHE STRING "")
 
 # This will set RPATH to all excutable TARGET
 # self-installed dynamic libraries will be correctly linked by excutable
