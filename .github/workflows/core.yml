@@ -54,8 +54,8 @@ jobs:
         uses: actions/cache@v1
         with:
           path: .docker
-          key: ${{ matrix.ubuntu }}-${{ hashFiles('core/**') }}
-          restore-keys: ${{ matrix.ubuntu }}-
+          key: ubuntu${{ matrix.ubuntu }}-${{ hashFiles('core/**') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-
       - name: Docker Run
         run: |
           docker-compose run ubuntu-core
@@ -106,8 +106,8 @@ jobs:
         uses: actions/cache@v1
         with:
           path: .docker
-          key: ${{ matrix.centos }}-${{ hashFiles('core/**') }}
-          restore-keys: ${{ matrix.centos }}-
+          key: centos${{ matrix.centos }}-${{ hashFiles('core/**') }}
+          restore-keys: centos${{ matrix.centos }}-
       - name: Docker Run
         run: |
           docker-compose run centos-core
