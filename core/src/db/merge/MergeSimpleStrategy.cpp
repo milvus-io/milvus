@@ -10,23 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/merge/MergeSimpleStrategy.h"
-#include "db/snapshot/Snapshots.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace engine {
 
 Status
-MergeSimpleStrategy::RegroupSegments(const snapshot::ScopedSnapshotT& ss, const Partition2SegmentsMap& part2segment,
+MergeSimpleStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t row_per_segment,
                                      SegmentGroups& groups) {
-    auto collection = ss->GetCollection();
-
-    int64_t row_count_per_segment = DEFAULT_SEGMENT_ROW_COUNT;
-    const json params = collection->GetParams();
-    if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
-        row_count_per_segment = params[PARAM_SEGMENT_ROW_COUNT];
-    }
-
     for (auto& kv : part2segment) {
         if (kv.second.size() <= 1) {
             continue;  // no segment or only one segment, no need to merge
@@ -34,20 +25,14 @@ MergeSimpleStrategy::RegroupSegments(const snapshot::ScopedSnapshotT& ss, const 
 
         snapshot::IDS_TYPE ids;
         int64_t row_count_sum = 0;
-        for (auto& id : kv.second) {
-            auto segment_commit = ss->GetSegmentCommitBySegmentId(id);
-            if (segment_commit == nullptr) {
-                continue;  // maybe stale
+        for (const SegmentInfo& segment_info : kv.second) {
+            if (segment_info.row_count_ <= 0 || segment_info.row_count_ >= row_per_segment) {
+                continue;  // empty segment or full segment
             }
 
-            auto segment_row = segment_commit->GetRowCount();
-            if (segment_row <= 0) {
-                continue;  // empty segment?
-            }
-
-            ids.push_back(id);
-            row_count_sum += segment_row;
-            if (row_count_sum >= row_count_per_segment) {
+            ids.push_back(segment_info.id_);
+            row_count_sum += segment_info.row_count_;
+            if (row_count_sum >= row_per_segment) {
                 if (ids.size() >= 2) {
                     groups.push_back(ids);
                 }
