@@ -27,7 +27,7 @@
 #include "cache/GpuCacheMgr.h"
 #include "config/ServerConfig.h"
 #include "codecs/Codec.h"
-#include "db/DBImpl.h"
+#include "db/DBFactory.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
@@ -38,6 +38,7 @@
 #include "db/meta/backend/MockEngine.h"
 #include "db/meta/backend/MySqlEngine.h"
 #include "db/meta/backend/SqliteEngine.h"
+#include "db/wal/WalProxy.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
 #include "utils/CommonUtil.h"
@@ -80,7 +81,7 @@ BaseTest::InitLog() {
 }
 
 void
-BaseTest::SnapshotStart(bool mock_store, milvus::engine::DBOptions options) {
+BaseTest::SnapshotStart(bool mock_store, DBOptions options) {
     auto store = Store::Build(options.meta_.backend_uri_, options.meta_.path_,
             milvus::codec::Codec::instance().GetSuffixSet());
 
@@ -135,7 +136,7 @@ BaseTest::TearDown() {
 void
 SnapshotTest::SetUp() {
     BaseTest::SetUp();
-    milvus::engine::DBOptions options;
+    DBOptions options;
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
@@ -149,14 +150,15 @@ SnapshotTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-milvus::engine::DBOptions
+DBOptions
 DBTest::GetOptions() {
     milvus::cache::CpuCacheMgr::GetInstance().SetCapacity(256 * milvus::engine::MB);
 
-    auto options = milvus::engine::DBOptions();
+    auto options = DBOptions();
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
+    options.auto_flush_interval_ = 1;
     return options;
 }
 
@@ -173,7 +175,8 @@ DBTest::SetUp() {
     auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
     dummy_context_->SetTraceContext(trace_context);
 
-    db_ = std::make_shared<milvus::engine::DBImpl>(GetOptions());
+    db_ = milvus::engine::DBFactory::BuildDB(GetOptions());
+    db_->Start();
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
     res_mgr->Clear();
@@ -181,9 +184,9 @@ DBTest::SetUp() {
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
 
     auto default_conn = milvus::scheduler::Connection("IO", 500.0);
-    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
     res_mgr->Connect("disk", "cpu", default_conn);
 #ifdef MILVUS_GPU_VERSION
+    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("0", "GPU", 0));
     res_mgr->Connect("cpu", "0", PCIE);
 #endif
@@ -195,6 +198,7 @@ DBTest::SetUp() {
 
 void
 DBTest::TearDown() {
+    db_->Stop();
     db_ = nullptr; // db must be stopped before JobMgr and Snapshot
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
@@ -215,18 +219,20 @@ DBTest::TearDown() {
 void
 SegmentTest::SetUp() {
     BaseTest::SetUp();
-    milvus::engine::DBOptions options;
+    DBOptions options;
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(false, options);
 
-    db_ = std::make_shared<milvus::engine::DBImpl>(options);
+    db_ = milvus::engine::DBFactory::BuildDB(options);
+    db_->Start();
 }
 
 void
 SegmentTest::TearDown() {
     BaseTest::SnapshotStop();
+    db_->Stop();
     db_ = nullptr;
     BaseTest::TearDown();
 }
@@ -250,12 +256,13 @@ MetaTest::TearDown() {
 void
 SchedulerTest::SetUp() {
     BaseTest::SetUp();
-    milvus::engine::DBOptions options;
+    DBOptions options;
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(true, options);
-    db_ = std::make_shared<milvus::engine::DBImpl>(options);
+    db_ = milvus::engine::DBFactory::BuildDB(options);
+    db_->Start();
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
     res_mgr->Clear();
@@ -263,9 +270,9 @@ SchedulerTest::SetUp() {
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0));
 
     auto default_conn = milvus::scheduler::Connection("IO", 500.0);
-    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
     res_mgr->Connect("disk", "cpu", default_conn);
 #ifdef MILVUS_GPU_VERSION
+    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("0", "GPU", 0));
     res_mgr->Connect("cpu", "0", PCIE);
 #endif
@@ -277,6 +284,7 @@ SchedulerTest::SetUp() {
 
 void
 SchedulerTest::TearDown() {
+    db_->Stop();
     db_ = nullptr; // db must be stopped before JobMgr and Snapshot
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
@@ -289,6 +297,7 @@ SchedulerTest::TearDown() {
     BaseTest::TearDown();
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 EventTest::SetUp() {
     auto uri = "mock://:@:/";
@@ -298,6 +307,31 @@ EventTest::SetUp() {
 
 void
 EventTest::TearDown() {
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+DBOptions
+WalTest::GetOptions() {
+    DBOptions options;
+    options.wal_path_ = "/tmp/milvus_wal";
+    options.wal_enable_ = true;
+    return options;
+}
+
+void
+WalTest::SetUp() {
+    auto options = GetOptions();
+    std::experimental::filesystem::create_directory(options.wal_path_);
+    milvus::engine::DBPtr db = std::make_shared<milvus::engine::DBProxy>(nullptr, GetOptions());
+    db_ = std::make_shared<milvus::engine::WalProxy>(db, options);
+    db_->Start();
+}
+
+void
+WalTest::TearDown() {
+    db_->Stop();
+    db_ = nullptr;
+    std::experimental::filesystem::remove_all(GetOptions().wal_path_);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

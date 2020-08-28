@@ -1,4 +1,4 @@
 #!/bin/bash
 
-./cmake_build/src/milvus_server -c ./conf/server_config.yaml &
+./cmake_build/src/milvus_server -c ./conf/milvus.yaml &
 

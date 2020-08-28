@@ -2,7 +2,7 @@
 @Library('mpl') _
 
 String cron_timezone = "TZ=Asia/Shanghai"
-String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
+String cron_string = BRANCH_NAME == "master" ? "50 3 * * * " : ""
 
 pipeline {
     agent none
@@ -28,7 +28,7 @@ pipeline {
         LOWER_BUILD_TYPE = params.BUILD_TYPE.toLowerCase()
         SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
         PIPELINE_NAME = "milvus-ci"
-        HELM_BRANCH = "0.10.1"
+        HELM_BRANCH = "0.11.0"
     }
     stages {
         stage ('Milvus Build and Unittest') {
@@ -66,7 +66,6 @@ pipeline {
                             container("milvus-${BINARY_VERSION}-build-env") {
                                 MPLModule('Milvus Build')
                                 MPLModule('Unittest')
-                                MPLModule('Coverage')
                                 MPLModule('Package Build')
                             }
                         }

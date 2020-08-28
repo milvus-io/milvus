@@ -39,10 +39,10 @@ class MemManagerImpl : public MemManager {
     ~MemManagerImpl() = default;
 
     Status
-    InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) override;
+    InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id) override;
 
     Status
-    DeleteEntities(int64_t collection_id, const std::vector<id_t>& entity_ids, uint64_t lsn) override;
+    DeleteEntities(int64_t collection_id, const std::vector<idx_t>& entity_ids, idx_t op_id) override;
 
     Status
     Flush(int64_t collection_id) override;
@@ -73,16 +73,13 @@ class MemManagerImpl : public MemManager {
     ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk);
 
     Status
-    InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const VectorSourcePtr& source, uint64_t lsn);
+    InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id);
 
     Status
     ToImmutable();
 
     Status
     ToImmutable(int64_t collection_id);
-
-    uint64_t
-    GetMaxLSN(const MemList& collections);
 
     Status
     InternalFlush(std::set<int64_t>& collection_ids);
@@ -94,7 +91,7 @@ class MemManagerImpl : public MemManager {
     DBOptions options_;
     std::mutex mutex_;
     std::mutex serialization_mtx_;
-};  // NewMemManager
+};
 
 }  // namespace engine
 }  // namespace milvus

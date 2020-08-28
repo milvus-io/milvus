@@ -34,7 +34,7 @@ macro( build_libunwind )
     ExternalProject_Add(
         libunwind_ep
             PREFIX          ${MILVUS_BINARY_DIR}/3rdparty_download/libunwind-subbuild
-            DOWNLOAD_DIR    ${MILVUS_BINARY_DIR}/3rdparty_download/download
+            DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH}
             INSTALL_DIR     ${CMAKE_CURRENT_BINARY_DIR}/libunwind
             URL             ${LIBUNWIND_SOURCE_URL}
             URL_MD5         a04f69d66d8e16f8bf3ab72a69112cd6
@@ -42,13 +42,14 @@ macro( build_libunwind )
                                     "--prefix=<INSTALL_DIR>"
                                     "--quiet"
                                     "--disable-tests"
-                                    "cc=${CCACHE_FOUND} {CMAKE_C_COMPILER}"
-                                    "cxx=${CCACHE_FOUND} {CMAKE_CXX_COMPILER}"
+                                    "cc=${EP_C_COMPILER}"
+                                    "cxx=${EP_CXX_COMPILER}"
             BUILD_COMMAND       ${MAKE}    ${MAKE_BUILD_ARGS}
             INSTALL_COMMAND     ${MAKE}    install
             ${EP_LOG_OPTIONS} )
 
     ExternalProject_Get_Property( libunwind_ep INSTALL_DIR )
+    file(MAKE_DIRECTORY ${INSTALL_DIR}/include)
     add_library( libunwind SHARED IMPORTED )
     set_target_properties(
         libunwind   PROPERTIES
@@ -77,8 +78,8 @@ macro( build_gperftools )
             CONFIGURE_COMMAND   <SOURCE_DIR>/configure
                                     "--prefix=<INSTALL_DIR>"
                                     "--quiet"
-                                    "cc=${CCACHE_FOUND} {CMAKE_C_COMPILER}"
-                                    "cxx=${CCACHE_FOUND} {CMAKE_CXX_COMPILER}"
+                                    "cc=${EP_C_COMPILER}"
+                                    "cxx=${EP_CXX_COMPILER}"
             BUILD_COMMAND       ${MAKE}     ${MAKE_BUILD_ARGS}
             INSTALL_COMMAND     ${MAKE}     install
             ${EP_LOG_OPTIONS} )
@@ -86,6 +87,7 @@ macro( build_gperftools )
 
 
     ExternalProject_Get_Property( gperftools_ep INSTALL_DIR )
+    file(MAKE_DIRECTORY ${INSTALL_DIR}/include)
     # libprofiler.a
     add_library( gperftools STATIC IMPORTED )
     set_target_properties( gperftools

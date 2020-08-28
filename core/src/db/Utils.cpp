@@ -25,8 +25,11 @@
 #include "db/Types.h"
 
 #ifdef MILVUS_GPU_VERSION
+
 #include "cache/GpuCacheMgr.h"
+
 #endif
+
 #include "config/ServerConfig.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -99,8 +102,8 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
     std::string host_regex = "(.*)";
     std::string port_regex = "(.*)";
     std::string db_name_regex = "(.*)";
-    std::string uri_regex_str = dialect_regex + "\\:\\/\\/" + username_tegex + "\\:" + password_regex + "\\@" +
-                                host_regex + "\\:" + port_regex + "\\/" + db_name_regex;
+    std::string uri_regex_str = dialect_regex + R"(\:\/\/)" + username_tegex + R"(\:)" + password_regex + R"(\@)" +
+                                host_regex + R"(\:)" + port_regex + R"(\/)" + db_name_regex;
 
     std::regex uri_regex(uri_regex_str);
     std::smatch pieces_match;
@@ -141,8 +144,8 @@ GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids) {
     }
 
     if (!pair->second->data_.empty()) {
-        ids.resize(pair->second->data_.size() / sizeof(engine::id_t));
-        memcpy((void*)(ids.data()), pair->second->data_.data(), pair->second->data_.size());
+        ids.resize(pair->second->data_.size() / sizeof(engine::idx_t));
+        memcpy(ids.data(), pair->second->data_.data(), pair->second->data_.size());
     }
 }
 
@@ -167,6 +170,17 @@ GetSizeOfChunk(const engine::DataChunkPtr& chunk) {
     }
 
     return total_size;
+}
+
+bool
+RequireRawFile(const std::string& index_type) {
+    return index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_type == knowhere::IndexEnum::INDEX_NSG ||
+           index_type == knowhere::IndexEnum::INDEX_HNSW;
+}
+
+bool
+RequireCompressFile(const std::string& index_type) {
+    return index_type == knowhere::IndexEnum::INDEX_RHNSWSQ || index_type == knowhere::IndexEnum::INDEX_RHNSWPQ;
 }
 
 }  // namespace utils

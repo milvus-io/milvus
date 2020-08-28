@@ -77,7 +77,7 @@ class Operations : public std::enable_shared_from_this<Operations> {
         context_.lsn = lsn;
     }
 
-    virtual Status
+    Status
     CheckStale(const CheckStaleFunc& checker = nullptr) const;
     virtual Status
     DoCheckStale(ScopedSnapshotT& latest_snapshot) const;
@@ -122,7 +122,8 @@ class Operations : public std::enable_shared_from_this<Operations> {
 
     virtual Status
     operator()(StorePtr store);
-    virtual Status
+
+    Status
     Push(bool sync = true);
 
     virtual Status

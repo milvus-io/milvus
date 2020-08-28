@@ -11,39 +11,20 @@
 
 #pragma once
 
-#include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
-#include "db/IDGenerator.h"
-#include "db/insert/MemManager.h"
-#include "segment/Segment.h"
-#include "segment/SegmentWriter.h"
+#include "db/merge/MergeStrategy.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-// TODO(zhiru): this class needs to be refactored once attributes are added
-
-class VectorSource {
+class MergeLayerStrategy : public MergeStrategy {
  public:
-    explicit VectorSource(const DataChunkPtr& chunk);
-
     Status
-    Add(const segment::SegmentWriterPtr& segment_writer_ptr, const int64_t& num_attrs_to_add, int64_t& num_attrs_added);
-
-    bool
-    AllAdded();
-
- private:
-    DataChunkPtr chunk_;
-
-    int64_t current_num_added_ = 0;
-};  // SSVectorSource
-
-using VectorSourcePtr = std::shared_ptr<VectorSource>;
+    RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t row_per_segment, SegmentGroups& groups) override;
+};  // MergeSimpleStrategy
 
 }  // namespace engine
 }  // namespace milvus

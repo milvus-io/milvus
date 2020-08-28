@@ -21,6 +21,7 @@ extern const char* F_COLLECTON_ID;
 extern const char* F_SCHEMA_ID;
 extern const char* F_NUM;
 extern const char* F_FTYPE;
+extern const char* F_FETYPE;
 extern const char* F_FIELD_ID;
 extern const char* F_FIELD_ELEMENT_ID;
 extern const char* F_PARTITION_ID;

@@ -29,8 +29,7 @@
 #include "Connection.h"
 #include "Node.h"
 
-namespace milvus {
-namespace scheduler {
+namespace milvus::scheduler {
 
 // TODO(wxyu): Storage, Route, Executor
 enum class ResourceType {
@@ -197,5 +196,4 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
 using ResourcePtr = std::shared_ptr<Resource>;
 using ResourceWPtr = std::weak_ptr<Resource>;
 
-}  // namespace scheduler
-}  // namespace milvus
+}  // namespace milvus::scheduler

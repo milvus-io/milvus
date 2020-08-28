@@ -28,8 +28,8 @@ using BlockingReqQueue = BlockingQueue<BaseReqPtr>;
 
 class ReqQueue : public BlockingReqQueue {
  public:
-    ReqQueue();
-    virtual ~ReqQueue();
+    ReqQueue() = default;
+    virtual ~ReqQueue() = default;
 
     BaseReqPtr
     TakeReq();

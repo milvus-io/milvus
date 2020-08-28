@@ -68,9 +68,9 @@ IVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
-    int64_t nlist = config[IndexParams::nlist].get<int64_t>();
+    auto nlist = config[IndexParams::nlist].get<int64_t>();
     index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFFlat(coarse_quantizer, dim, nlist, metric_type));
-    index_->train(rows, (float*)p_data);
+    index_->train(rows, reinterpret_cast<const float*>(p_data));
 }
 
 void
@@ -81,7 +81,7 @@ IVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 
     std::lock_guard<std::mutex> lk(mutex_);
     GET_TENSOR_DATA_ID(dataset_ptr)
-    index_->add_with_ids(rows, (float*)p_data, p_ids);
+    index_->add_with_ids(rows, reinterpret_cast<const float*>(p_data), p_ids);
 }
 
 void
@@ -92,7 +92,7 @@ IVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 
     std::lock_guard<std::mutex> lk(mutex_);
     GET_TENSOR_DATA(dataset_ptr)
-    index_->add(rows, (float*)p_data);
+    index_->add(rows, reinterpret_cast<const float*>(p_data));
 }
 
 DatasetPtr
@@ -106,15 +106,15 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     try {
         fiu_do_on("IVF.Search.throw_std_exception", throw std::exception());
         fiu_do_on("IVF.Search.throw_faiss_exception", throw faiss::FaissException(""));
-        int64_t k = config[meta::TOPK].get<int64_t>();
+        auto k = config[meta::TOPK].get<int64_t>();
         auto elems = rows * k;
 
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
-        auto p_id = (int64_t*)malloc(p_id_size);
-        auto p_dist = (float*)malloc(p_dist_size);
+        auto p_id = static_cast<int64_t*>(malloc(p_id_size));
+        auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
-        QueryImpl(rows, (float*)p_data, k, p_dist, p_id, config);
+        QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {
@@ -294,8 +294,8 @@ IVF::GenGraph(const float* data, const int64_t k, GraphType& graph, const Config
         auto& res = res_vec[i];
         res.resize(K * b_size);
 
-        auto xq = data + batch_size * dim * i;
-        QueryImpl(b_size, (float*)xq, K, res_dis.data(), res.data(), config);
+        const float* xq = data + batch_size * dim * i;
+        QueryImpl(b_size, xq, K, res_dis.data(), res.data(), config);
 
         for (int j = 0; j < b_size; ++j) {
             auto& node = graph[batch_size * i + j];
@@ -327,7 +327,7 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
     } else {
         ivf_index->parallel_mode = 0;
     }
-    ivf_index->search(n, (float*)data, k, distances, labels, bitset_);
+    ivf_index->search(n, data, k, distances, labels, bitset_);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
     LOG_KNOWHERE_DEBUG_ << "IVF search cost: " << search_cost

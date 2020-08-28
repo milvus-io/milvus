@@ -1,6 +1,6 @@
 milvus/
-conf/server_config.yaml
-conf/server_config.yaml.ori
+conf/milvus.yaml
+conf/milvus.yaml.ori
 conf/log_config.conf
 src/config.h
 src/version.h
