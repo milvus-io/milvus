@@ -57,6 +57,7 @@ class EventExecutor {
 
     Status
     Submit(const EventPtr& evt, bool flush = false) {
+        std::cout << "[GC] Submit " << evt->Name() << std::endl;
         if (evt == nullptr) {
             return Status(SS_INVALID_ARGUMENT_ERROR, "Invalid Resource");
         }
@@ -118,6 +119,7 @@ class EventExecutor {
                 }
 
                 /* std::cout << std::this_thread::get_id() << " Dequeue Event " << std::endl; */
+                std::cout << "\n\t[GCThread] GC " << event_front->Name() << std::endl;
                 status = event_front->Process(store_);
                 if (!status.ok()) {
                     LOG_ENGINE_ERROR_ << "EventExecutor Handle Event Error: " << status.ToString();

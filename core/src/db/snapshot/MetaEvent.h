@@ -26,6 +26,10 @@ namespace snapshot {
 class MetaEvent {
  public:
     virtual Status Process(StorePtr) = 0;
+
+    virtual
+    std::string
+    Name() = 0;
 };
 
 class GCEvent : virtual public MetaEvent {

@@ -275,7 +275,7 @@ TEST_F(DBTest, CollectionTest) {
     };
     std::string c1 = "c1";
     auto status = CreateCollection(db_, c1, next_lsn());
-    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(status.ok()) << status.ToString();
 
     ScopedSnapshotT ss;
     status = Snapshots::GetInstance().GetSnapshot(ss, c1);
