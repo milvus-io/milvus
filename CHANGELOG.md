@@ -43,6 +43,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2689 Construct Knowhere Index Without Data
 -   \#2940 Add option to build.sh for cuda arch
 -   \#3132 Refine the implementation of hnsw in faiss and add support for hnsw-flat, hnsw-pq and hnsw-sq8
+-   \#3463 Restrict the content of partition_tag
 
 ## Improvement
 -   \#2543 Remove secondary_path related code

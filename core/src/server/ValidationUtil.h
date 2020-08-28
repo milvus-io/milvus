@@ -55,5 +55,8 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags);
 
 extern Status
 ValidateInsertDataSize(const engine::DataChunkPtr& data);
+
+extern Status
+ValidateCompactThreshold(double threshold);
 }  // namespace server
 }  // namespace milvus
