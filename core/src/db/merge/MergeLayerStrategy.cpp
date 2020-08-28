@@ -53,16 +53,16 @@ MergeLayerStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, i
 
         // distribute segments to layers according to segment row count
         SegmentInfoList temp_list = kv.second;
-        for (SegmentInfoList::iterator iter = temp_list.begin(); iter != temp_list.end();) {
+        for (auto iter = temp_list.begin(); iter != temp_list.end();) {
             SegmentInfo& segment_info = *iter;
             if (segment_info.row_count_ <= 0 || segment_info.row_count_ >= row_per_segment) {
                 iter = temp_list.erase(iter);
                 continue;  // empty segment or full segment
             }
 
-            for (auto layer_iter = layers.begin(); layer_iter != layers.end(); ++layer_iter) {
-                if (segment_info.row_count_ < layer_iter->first) {
-                    layer_iter->second.push_back(segment_info);
+            for (auto& layer_iter : layers) {
+                if (segment_info.row_count_ < layer_iter.first) {
+                    layer_iter.second.push_back(segment_info);
                     break;
                 }
             }
@@ -80,7 +80,7 @@ MergeLayerStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, i
             }
 
             if (segments.size() == 1) {
-                if (now - segments[0].create_on_ > (int64_t)(FORCE_MERGE_THREASHOLD * 1000)) {
+                if (now - segments[0].create_on_ > static_cast<int64_t>(FORCE_MERGE_THREASHOLD * 1000)) {
                     force_list.swap(segments);
                 }
             }
