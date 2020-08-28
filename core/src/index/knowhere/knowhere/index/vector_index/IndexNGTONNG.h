@@ -12,7 +12,7 @@ class IndexNGTONNG : public IndexNGT {
     }
 
     void
-    Train(const DatasetPtr& dataset_ptr, const Config& config) override;
+    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override;
 };
 
 }  // namespace knowhere

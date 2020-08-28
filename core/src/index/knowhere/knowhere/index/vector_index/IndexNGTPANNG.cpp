@@ -6,7 +6,7 @@ namespace milvus {
 namespace knowhere {
 
 void
-IndexNGTPANNG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA_DIM(dataset_ptr);
 
     NGT::Property prop;

@@ -25,15 +25,22 @@ class IndexNGT : public VecIndex {
     Load(const BinarySet& index_binary) override;
 
     void
-    Train(const DatasetPtr& dataset_ptr, const Config& config) override;
+    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    Add(const DatasetPtr& dataset_ptr, const Config& config) override {
-        KNOWHERE_THROW_MSG("NGT not support add item with ID, please invoke AddWithoutIds interface.");
+    Train(const DatasetPtr& dataset_ptr, const Config& config) override {
+        KNOWHERE_THROW_MSG("NGT not support add item dynamically, please invoke BuildAll interface.");
     }
 
     void
-    AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) override;
+    Add(const DatasetPtr& dataset_ptr, const Config& config) override {
+        KNOWHERE_THROW_MSG("NGT not support add item dynamically, please invoke BuildAll interface.");
+    }
+
+    void
+    AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) override {
+        KNOWHERE_THROW_MSG("Incremental index is not supported");
+    }
 
     DatasetPtr
     Query(const DatasetPtr& dataset_ptr, const Config& config) override;
@@ -44,6 +51,7 @@ class IndexNGT : public VecIndex {
     int64_t
     Dim() override;
 
+ protected:
     std::shared_ptr<NGT::Index> index_ = nullptr;
 };
 

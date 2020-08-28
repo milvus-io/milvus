@@ -93,9 +93,14 @@ IndexNGT::Load(const BinarySet& index_binary) {
 }
 
 void
+IndexNGT::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
+    KNOWHERE_THROW_MSG("IndexNGT has no implementation of BuildAll, please use IndexNGT(PANNG/ONNG) instead!");
+}
+
+#if 0
+void
 IndexNGT::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     KNOWHERE_THROW_MSG("IndexNGT has no implementation of Train, please use IndexNGT(PANNG/ONNG) instead!");
-#if 0
     GET_TENSOR_DATA_DIM(dataset_ptr);
 
     NGT::Property prop;
@@ -114,7 +119,6 @@ IndexNGT::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
     index_ =
         std::shared_ptr<NGT::Index>(NGT::Index::createGraphAndTree(reinterpret_cast<const float*>(p_data), prop, rows));
-#endif
 }
 
 void
@@ -126,6 +130,7 @@ IndexNGT::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 
     index_->append(reinterpret_cast<const float*>(p_data), rows);
 }
+#endif
 
 DatasetPtr
 IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) {
@@ -142,6 +147,8 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 
     NGT::Command::SearchParameter sp;
     sp.size = k;
+
+    faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
@@ -166,7 +173,7 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         sc.setEdgeSize(sp.edgeSize);
 
         try {
-            index_->search(sc);
+            index_->search(sc, blacklist);
         } catch (NGT::Exception& err) {
             throw err;
         }
