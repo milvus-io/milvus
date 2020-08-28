@@ -285,12 +285,8 @@ class TestHasBase:
         '''
         tag_name = get_tag_name
         connect.create_partition(collection, tag)
-        if isinstance(tag_name, str):
+        with pytest.raises(Exception) as e:
             res = connect.has_partition(collection, tag_name)
-            assert not res
-        else:
-            with pytest.raises(Exception) as e:
-                res = connect.has_partition(collection, tag_name)
 
 
 class TestDropBase:
