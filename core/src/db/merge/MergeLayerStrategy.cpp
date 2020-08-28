@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/merge/MergeLayerStrategy.h"
+#include "db/Utils.h"
 #include "utils/Log.h"
 
 #include <map>
@@ -19,7 +20,9 @@ namespace milvus {
 namespace engine {
 
 namespace {
-using LayerGroups = std::map<int64_t, SegmentsRowList>;
+const int64_t FORCE_MERGE_THREASHOLD = 30;  // force merge files older this time(in second)
+
+using LayerGroups = std::map<int64_t, SegmentInfoList>;
 
 void
 ConstructLayers(LayerGroups& groups, int64_t row_count_per_segment) {
@@ -28,7 +31,7 @@ ConstructLayers(LayerGroups& groups, int64_t row_count_per_segment) {
     while (true) {
         int64_t key = 1UL << power;
         power += 2;
-        groups.insert(std::pair(key, SegmentsRowList()));
+        groups.insert(std::pair(key, SegmentInfoList()));
         if (key >= row_count_per_segment || key >= MAX_SEGMENT_ROW_COUNT) {
             break;
         }
@@ -37,28 +40,29 @@ ConstructLayers(LayerGroups& groups, int64_t row_count_per_segment) {
 }  // namespace
 
 Status
-MergeLayerStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t rwo_per_segment,
+MergeLayerStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t row_per_segment,
                                     SegmentGroups& groups) {
+    auto now = utils::GetMicroSecTimeStamp();
     for (auto& kv : part2segment) {
         if (kv.second.size() <= 1) {
             continue;  // no segment or only one segment, no need to merge
         }
 
         LayerGroups layers;
-        ConstructLayers(layers, rwo_per_segment);
+        ConstructLayers(layers, row_per_segment);
 
         // distribute segments to layers according to segment row count
-        SegmentsRowList temp_list = kv.second;
-        for (SegmentsRowList::iterator iter = temp_list.begin(); iter != temp_list.end();) {
-            auto segment_row = iter->second;
-            if (segment_row <= 0 || segment_row >= rwo_per_segment) {
+        SegmentInfoList temp_list = kv.second;
+        for (SegmentInfoList::iterator iter = temp_list.begin(); iter != temp_list.end();) {
+            SegmentInfo& segment_info = *iter;
+            if (segment_info.row_count_ <= 0 || segment_info.row_count_ >= row_per_segment) {
                 iter = temp_list.erase(iter);
                 continue;  // empty segment or full segment
             }
 
             for (auto layer_iter = layers.begin(); layer_iter != layers.end(); ++layer_iter) {
-                if (segment_row < layer_iter->first) {
-                    layer_iter->second.push_back(std::make_pair(iter->first, iter->second));
+                if (segment_info.row_count_ < layer_iter->first) {
+                    layer_iter->second.push_back(segment_info);
                     break;
                 }
             }
@@ -66,15 +70,31 @@ MergeLayerStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, i
             iter = temp_list.erase(iter);
         }
 
+        // if some segment's create time is 30 seconds ago, and it still un-merged, force merge with upper layer
+        SegmentInfoList force_list;
+        for (auto& pair : layers) {
+            SegmentInfoList& segments = pair.second;
+            if (!force_list.empty()) {
+                segments.insert(segments.begin(), force_list.begin(), force_list.end());
+                force_list.clear();
+            }
+
+            if (segments.size() == 1) {
+                if (now - segments[0].create_on_ > (int64_t)(FORCE_MERGE_THREASHOLD * 1000)) {
+                    force_list.swap(segments);
+                }
+            }
+        }
+
         // merge for each layer
         for (auto& pair : layers) {
             snapshot::IDS_TYPE ids;
             int64_t row_count_sum = 0;
-            SegmentsRowList& segments = pair.second;
+            SegmentInfoList& segments = pair.second;
             for (auto& segment : segments) {
-                ids.push_back(segment.first);
-                row_count_sum += segment.second;
-                if (row_count_sum >= rwo_per_segment) {
+                ids.push_back(segment.id_);
+                row_count_sum += segment.row_count_;
+                if (row_count_sum >= row_per_segment) {
                     if (ids.size() >= 2) {
                         groups.push_back(ids);
                     }

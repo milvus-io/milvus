@@ -16,7 +16,7 @@ namespace milvus {
 namespace engine {
 
 Status
-MergeSimpleStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t rwo_per_segment,
+MergeSimpleStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t row_per_segment,
                                      SegmentGroups& groups) {
     for (auto& kv : part2segment) {
         if (kv.second.size() <= 1) {
@@ -25,15 +25,14 @@ MergeSimpleStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, 
 
         snapshot::IDS_TYPE ids;
         int64_t row_count_sum = 0;
-        for (auto& segment_info : kv.second) {
-            auto segment_row = segment_info.second;
-            if (segment_row <= 0 || segment_row >= rwo_per_segment) {
+        for (const SegmentInfo& segment_info : kv.second) {
+            if (segment_info.row_count_ <= 0 || segment_info.row_count_ >= row_per_segment) {
                 continue;  // empty segment or full segment
             }
 
-            ids.push_back(segment_info.first);
-            row_count_sum += segment_row;
-            if (row_count_sum >= rwo_per_segment) {
+            ids.push_back(segment_info.id_);
+            row_count_sum += segment_info.row_count_;
+            if (row_count_sum >= row_per_segment) {
                 if (ids.size() >= 2) {
                     groups.push_back(ids);
                 }

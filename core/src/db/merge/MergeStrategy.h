@@ -25,14 +25,24 @@
 namespace milvus {
 namespace engine {
 
-using SegmentsRowList = std::vector<std::pair<snapshot::ID_TYPE, int64_t>>;
-using Partition2SegmentsMap = std::unordered_map<snapshot::ID_TYPE, SegmentsRowList>;
+struct SegmentInfo {
+    SegmentInfo(snapshot::ID_TYPE id, int64_t row_count, snapshot::TS_TYPE create_on)
+        : id_(id), row_count_(row_count), create_on_(create_on) {
+    }
+
+    snapshot::ID_TYPE id_ = 0;
+    int64_t row_count_ = 0;
+    snapshot::TS_TYPE create_on_ = 0;
+};
+
+using SegmentInfoList = std::vector<SegmentInfo>;
+using Partition2SegmentsMap = std::unordered_map<snapshot::ID_TYPE, SegmentInfoList>;
 using SegmentGroups = std::vector<snapshot::IDS_TYPE>;
 
 class MergeStrategy {
  public:
     virtual Status
-    RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t rwo_per_segment, SegmentGroups& groups) = 0;
+    RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t row_per_segment, SegmentGroups& groups) = 0;
 };  // MergeStrategy
 
 using MergeStrategyPtr = std::shared_ptr<MergeStrategy>;

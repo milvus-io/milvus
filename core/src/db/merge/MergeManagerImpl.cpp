@@ -69,8 +69,8 @@ MergeManagerImpl::MergeSegments(int64_t collection_id, MergeStrategyType type) {
                 continue;  // maybe stale
             }
 
-            auto segment_row = segment_commit->GetRowCount();
-            part2seg[kv.second->GetPartitionId()].push_back(std::make_pair(segment_id, segment_row));
+            SegmentInfo info(segment_id, segment_commit->GetRowCount(), segment_commit->GetCreatedTime());
+            part2seg[kv.second->GetPartitionId()].emplace_back(info);
         }
 
         if (part2seg.empty()) {

@@ -580,28 +580,35 @@ TEST_F(DBTest, InsertTest) {
 
 TEST(MergeTest, MergeStrategyTest) {
     milvus::engine::Partition2SegmentsMap part2segments;
-    milvus::engine::SegmentsRowList segmet_list_1 = {
-        {1, 100},
-        {2, 2500},
-        {3, 300},
-        {4, 5},
-        {5, 60000},
-        {6, 100000},
-        {7, 60},
-        {8, 800},
-        {9, 6600},
-        {10, 110000},
+    milvus::engine::SegmentInfoList segmet_list_1 = {
+        milvus::engine::SegmentInfo(1, 100, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(2, 2500, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(3, 300, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(4, 5, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(5, 60000, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(6, 99999, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(7, 60, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(8, 800, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(9, 6600, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(10, 110000, milvus::engine::utils::GetMicroSecTimeStamp()),
     };
-    milvus::engine::SegmentsRowList segmet_list_2 = {
-        {11, 9000},
-        {12, 1500},
-        {13, 20},
-        {14, 1},
-        {15, 70000},
-        {16, 15000},
+    milvus::engine::SegmentInfoList segmet_list_2 = {
+        milvus::engine::SegmentInfo(11, 9000, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(12, 1500, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(13, 20, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(14, 1, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(15, 100001, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(16, 15000, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(17, 0, milvus::engine::utils::GetMicroSecTimeStamp()),
+    };
+    milvus::engine::SegmentInfoList segmet_list_3 = {
+        milvus::engine::SegmentInfo(21, 19000, milvus::engine::utils::GetMicroSecTimeStamp()),
+        milvus::engine::SegmentInfo(22, 40500, milvus::engine::utils::GetMicroSecTimeStamp() - 2000000),
+        milvus::engine::SegmentInfo(23, 1000, milvus::engine::utils::GetMicroSecTimeStamp() - 1000000),
     };
     part2segments.insert(std::make_pair(1, segmet_list_1));
     part2segments.insert(std::make_pair(2, segmet_list_2));
+    part2segments.insert(std::make_pair(3, segmet_list_3));
 
     int64_t row_per_segment = 100000;
     {
@@ -609,7 +616,13 @@ TEST(MergeTest, MergeStrategyTest) {
         milvus::engine::MergeSimpleStrategy strategy;
         auto status = strategy.RegroupSegments(part2segments, row_per_segment, groups);
         ASSERT_TRUE(status.ok());
-        ASSERT_FALSE(groups.empty());
+        ASSERT_EQ(groups.size(), 4);
+        std::set<size_t> compare = {3, 3, 5, 6};
+        std::set<size_t> result;
+        for (auto& group : groups) {
+            result.insert(group.size());
+        }
+        ASSERT_EQ(compare, result);
     }
 
     {
@@ -617,7 +630,13 @@ TEST(MergeTest, MergeStrategyTest) {
         milvus::engine::MergeLayerStrategy strategy;
         auto status = strategy.RegroupSegments(part2segments, row_per_segment, groups);
         ASSERT_TRUE(status.ok());
-        ASSERT_FALSE(groups.empty());
+        ASSERT_EQ(groups.size(), 4);
+        std::set<size_t> compare = {2, 3, 3, 6};
+        std::set<size_t> result;
+        for (auto& group : groups) {
+            result.insert(group.size());
+        }
+        ASSERT_EQ(compare, result);
     }
 }
 

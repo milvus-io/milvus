@@ -23,7 +23,7 @@ namespace engine {
 class MergeLayerStrategy : public MergeStrategy {
  public:
     Status
-    RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t rwo_per_segment, SegmentGroups& groups) override;
+    RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t row_per_segment, SegmentGroups& groups) override;
 };  // MergeSimpleStrategy
 
 }  // namespace engine
