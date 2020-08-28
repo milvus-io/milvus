@@ -228,7 +228,7 @@ MemSegment::ApplyDeleteToMem() {
             if (uid_data->data_.size() / sizeof(idx_t) != chunk->count_) {
                 continue;  // invalid uid data?
             }
-            idx_t* uid = (idx_t*)(uid_data->data_.data());
+            auto uid = reinterpret_cast<idx_t*>(uid_data->data_.data());
 
             // calculte delete offsets
             std::vector<offset_t> offsets;
