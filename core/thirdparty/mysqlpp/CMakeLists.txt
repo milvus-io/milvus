@@ -59,5 +59,5 @@ endmacro()
 build_mysqlpp()
 install( FILES  ${INSTALL_DIR}/lib/libmysqlpp.so
                 ${INSTALL_DIR}/lib/libmysqlpp.so.3
-                ${INSTALL_DIR}/lib/libmysqlpp.so.3.2.4
+                ${INSTALL_DIR}/lib/libmysqlpp.so.3.2.5
         DESTINATION lib )
