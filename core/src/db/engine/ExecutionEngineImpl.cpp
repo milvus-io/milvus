@@ -728,8 +728,8 @@ ExecutionEngineImpl::CreateSnapshotIndexFile(AddSegmentFileOperation& operation,
 
     // create snapshot compress file
     std::string index_name = index_element->GetName();
-    if (index_name == knowhere::IndexEnum::INDEX_RHNSWSQ) {
-        auto compress_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+    if (utils::RequireCompressFile(index_info.index_type_)) {
+        auto compress_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_COMPRESS);
         if (compress_visitor == nullptr) {
             return Status(DB_ERROR,
                           "Could not build index: compress element not exist");  // something wrong in CreateIndex
@@ -804,18 +804,24 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
 
     std::vector<idx_t> uids;
     faiss::ConcurrentBitsetPtr blacklist;
+    knowhere::DatasetPtr dataset;
     if (from_index) {
-        auto dataset =
+        dataset =
             knowhere::GenDatasetWithIds(row_count, dimension, from_index->GetRawVectors(), from_index->GetRawIds());
-        new_index->BuildAll(dataset, conf);
         uids = from_index->GetUids();
         blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {
-        auto dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
-                                                   bin_from_index->GetRawIds());
-        new_index->BuildAll(dataset, conf);
+        dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
+                                              bin_from_index->GetRawIds());
         uids = bin_from_index->GetUids();
         blacklist = bin_from_index->GetBlacklist();
+    }
+
+    try {
+        new_index->BuildAll(dataset, conf);
+    } catch (std::exception& ex) {
+        std::string msg = "Knowhere failed to build index: " + std::string(ex.what());
+        return Status(DB_ERROR, msg);
     }
 
 #ifdef MILVUS_GPU_VERSION

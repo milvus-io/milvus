@@ -563,7 +563,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         String response;
         auto status_dto = handler.EntityOp(collection_name, query_params, body_str, response);
-        //        status_dto = handler.GetEntity(collection_name, query_params, response);
         switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:
                 return createResponse(Status::CODE_200, response);

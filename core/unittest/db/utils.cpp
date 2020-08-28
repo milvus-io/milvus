@@ -158,6 +158,7 @@ DBTest::GetOptions() {
     options.meta_.path_ = "/tmp/milvus_ss";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
+    options.auto_flush_interval_ = 1;
     return options;
 }
 
@@ -312,16 +313,17 @@ EventTest::TearDown() {
 DBOptions
 WalTest::GetOptions() {
     DBOptions options;
-    options.meta_.path_ = "/tmp/milvus_wal";
-    options.meta_.backend_uri_ = "mock://:@:/";
+    options.wal_path_ = "/tmp/milvus_wal";
     options.wal_enable_ = true;
     return options;
 }
 
 void
 WalTest::SetUp() {
+    auto options = GetOptions();
+    std::experimental::filesystem::create_directory(options.wal_path_);
     milvus::engine::DBPtr db = std::make_shared<milvus::engine::DBProxy>(nullptr, GetOptions());
-    db_ = std::make_shared<milvus::engine::WalProxy>(db, GetOptions());
+    db_ = std::make_shared<milvus::engine::WalProxy>(db, options);
     db_->Start();
 }
 
@@ -329,7 +331,7 @@ void
 WalTest::TearDown() {
     db_->Stop();
     db_ = nullptr;
-    std::experimental::filesystem::remove_all(GetOptions().meta_.path_);
+    std::experimental::filesystem::remove_all(GetOptions().wal_path_);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

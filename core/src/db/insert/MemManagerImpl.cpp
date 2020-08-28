@@ -14,7 +14,6 @@
 #include <fiu/fiu-local.h>
 #include <thread>
 
-#include "VectorSource.h"
 #include "db/Constants.h"
 #include "db/snapshot/Snapshots.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -42,9 +41,8 @@ MemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, cons
         return status;
     }
 
-    VectorSourcePtr source = std::make_shared<VectorSource>(chunk, op_id);
     std::unique_lock<std::mutex> lock(mutex_);
-    return InsertEntitiesNoLock(collection_id, partition_id, source);
+    return InsertEntitiesNoLock(collection_id, partition_id, chunk, op_id);
 }
 
 Status
@@ -140,11 +138,11 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
 }
 
 Status
-MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id,
-                                     const milvus::engine::VectorSourcePtr& source) {
+MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk,
+                                     idx_t op_id) {
     MemCollectionPtr mem = GetMemByCollection(collection_id);
 
-    auto status = mem->Add(partition_id, source);
+    auto status = mem->Add(partition_id, chunk, op_id);
     return status;
 }
 
@@ -153,7 +151,7 @@ MemManagerImpl::DeleteEntities(int64_t collection_id, const std::vector<idx_t>& 
     std::unique_lock<std::mutex> lock(mutex_);
     MemCollectionPtr mem = GetMemByCollection(collection_id);
 
-    auto status = mem->Delete(entity_ids);
+    auto status = mem->Delete(entity_ids, op_id);
     if (!status.ok()) {
         return status;
     }
@@ -186,13 +184,15 @@ MemManagerImpl::InternalFlush(std::set<int64_t>& collection_ids) {
 
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     for (auto& mem : temp_immutable_list) {
-        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetCollectionId();
+        int64_t collection_id = mem->GetCollectionId();
+        LOG_ENGINE_DEBUG_ << "Flushing collection: " << collection_id;
         auto status = mem->Serialize();
         if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetCollectionId() << " failed";
+            LOG_ENGINE_ERROR_ << "Flush collection " << collection_id << " failed";
             return status;
         }
-        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetCollectionId();
+        LOG_ENGINE_DEBUG_ << "Flushed collection: " << collection_id;
+        collection_ids.insert(collection_id);
     }
 
     return Status::OK();

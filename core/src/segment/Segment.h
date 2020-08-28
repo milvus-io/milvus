@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "db/Types.h"
+#include "db/snapshot/Resources.h"
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
 
@@ -34,6 +35,12 @@ extern const char* COLLECTIONS_FOLDER;
 class Segment {
  public:
     Status
+    SetFields(int64_t collection_id);
+
+    Status
+    AddField(const snapshot::FieldPtr& field);
+
+    Status
     AddField(const std::string& field_name, DataType field_type, int64_t field_width = 0);
 
     Status
@@ -41,6 +48,15 @@ class Segment {
 
     Status
     AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
+
+    // reserve chunk data capacity to specify count
+    // this method should only be used on an empty segment
+    Status
+    Reserve(const std::vector<std::string>& field_names, int64_t count);
+
+    // copy part of chunk data into this segment and append to tail
+    Status
+    AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
 
     Status
     DeleteEntity(std::vector<offset_t>& offsets);

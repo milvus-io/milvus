@@ -61,10 +61,10 @@ SetSnapshotIndex(const std::string& collection_name, const std::string& field_na
         json[engine::PARAM_INDEX_EXTRA_PARAMS] = index_info.extra_params_;
         index_element->SetParams(json);
 
-        if (index_info.index_name_ == knowhere::IndexEnum::INDEX_RHNSWSQ) {
+        if (utils::RequireCompressFile(index_info.index_type_)) {
             auto compress_element =
                 std::make_shared<snapshot::FieldElement>(ss->GetCollectionId(), field->GetID(), ELEMENT_INDEX_COMPRESS,
-                                                         milvus::engine::FieldElementType::FET_COMPRESS_SQ8);
+                                                         milvus::engine::FieldElementType::FET_COMPRESS);
             ss_context.new_field_elements.push_back(compress_element);
         }
     }
@@ -135,7 +135,7 @@ DeleteSnapshotIndex(const std::string& collection_name, const std::string& field
         std::vector<snapshot::FieldElementPtr> elements = ss->GetFieldElementsByField(name);
         for (auto& element : elements) {
             if (element->GetFEtype() == engine::FieldElementType::FET_INDEX ||
-                element->GetFEtype() == engine::FieldElementType::FET_COMPRESS_SQ8) {
+                element->GetFEtype() == engine::FieldElementType::FET_COMPRESS) {
                 snapshot::OperationContext context;
                 context.stale_field_elements.push_back(element);
                 auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
@@ -210,7 +210,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
             const engine::snapshot::FieldPtr& field = iter.second->GetField();
 
             auto& elements = iter.second->GetElementVistors();
-            for (auto pair : elements) {
+            for (const auto& pair : elements) {
                 if (pair.second == nullptr || pair.second->GetElement() == nullptr) {
                     continue;
                 }

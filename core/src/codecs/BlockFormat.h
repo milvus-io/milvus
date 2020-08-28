@@ -24,6 +24,7 @@
 #include "db/Types.h"
 #include "knowhere/common/BinarySet.h"
 #include "storage/FSHandler.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace codec {
@@ -41,18 +42,18 @@ class BlockFormat {
  public:
     BlockFormat() = default;
 
-    void
+    Status
     Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::BinaryDataPtr& raw);
 
-    void
+    Status
     Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset, int64_t num_bytes,
          engine::BinaryDataPtr& raw);
 
-    void
+    Status
     Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
          engine::BinaryDataPtr& raw);
 
-    void
+    Status
     Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const engine::BinaryDataPtr& raw);
 
     // No copy and move
