@@ -139,7 +139,7 @@ type SearchMsg struct {
 	CollectionName string
 	PartitionTag   string
 	VectorParam    *VectorParam
-	Timestamp      int64
+	Timestamp      uint64
 	ClientId       int64
 	MsgType        OpType
 }

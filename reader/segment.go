@@ -6,7 +6,7 @@ import (
 	"suvlim/pulsar/schema"
 )
 
-const SEGMENT_LIFETIME = 20000
+const SegmentLifetime = 20000
 
 type Segment struct {
 	SegmentPtr *C.SegmentBase
@@ -76,7 +76,7 @@ func SegmentDelete(segment *Segment, collectionName string, entityIds *[]int64, 
 	return ResultEntityIds{}
 }
 
-func SegmentSearch(segment *Segment, collectionName string, queryString string, timestamps *[]int64, vectorRecord *[]schema.VectorRecord) ResultEntityIds {
+func SegmentSearch(segment *Segment, collectionName string, queryString string, timestamps *[]uint64, vectorRecord *[]schema.VectorRecord) ResultEntityIds {
 	// TODO: wrap cgo
 	return ResultEntityIds{}
 }
