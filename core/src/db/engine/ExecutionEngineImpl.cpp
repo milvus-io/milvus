@@ -797,7 +797,7 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
         knowhere::IVFPQConfAdapter::GetValidM(dimension, m, mode);
     }
 #endif
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(new_index->index_type());
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_info.index_type_);
     if (!adapter->CheckTrain(conf, mode)) {
         throw Exception(DB_ERROR, "Illegal index params");
     }

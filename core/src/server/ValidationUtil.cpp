@@ -458,5 +458,15 @@ ValidateInsertDataSize(const engine::DataChunkPtr& data) {
     return Status::OK();
 }
 
+Status
+ValidateCompactThreshold(double threshold) {
+    if (threshold > 1.0 || threshold < 0.0) {
+        std::string msg = "Invalid compact threshold: " + std::to_string(threshold) + ". Should be in range [0.0, 1.0]";
+        return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
+    }
+
+    return Status::OK();
+}
+
 }  // namespace server
 }  // namespace milvus

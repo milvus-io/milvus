@@ -22,6 +22,7 @@
 
 #include "knowhere/common/BinarySet.h"
 #include "storage/FSHandler.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace codec {
@@ -33,10 +34,10 @@ class VectorCompressFormat {
     static std::string
     FilePostfix();
 
-    void
+    Status
     Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinaryPtr& compress);
 
-    void
+    Status
     Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const knowhere::BinaryPtr& compress);
 
     // No copy and move

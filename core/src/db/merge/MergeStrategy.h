@@ -11,28 +11,38 @@
 
 #pragma once
 
-#include <map>
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "db/Types.h"
 #include "db/snapshot/ResourceTypes.h"
-#include "db/snapshot/Snapshot.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-using Partition2SegmentsMap = std::map<snapshot::ID_TYPE, snapshot::IDS_TYPE>;
+struct SegmentInfo {
+    SegmentInfo(snapshot::ID_TYPE id, int64_t row_count, snapshot::TS_TYPE create_on)
+        : id_(id), row_count_(row_count), create_on_(create_on) {
+    }
+
+    snapshot::ID_TYPE id_ = 0;
+    int64_t row_count_ = 0;
+    snapshot::TS_TYPE create_on_ = 0;
+};
+
+using SegmentInfoList = std::vector<SegmentInfo>;
+using Partition2SegmentsMap = std::unordered_map<snapshot::ID_TYPE, SegmentInfoList>;
 using SegmentGroups = std::vector<snapshot::IDS_TYPE>;
 
 class MergeStrategy {
  public:
     virtual Status
-    RegroupSegments(const snapshot::ScopedSnapshotT& ss, const Partition2SegmentsMap& part2segment,
-                    SegmentGroups& groups) = 0;
+    RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t row_per_segment, SegmentGroups& groups) = 0;
 };  // MergeStrategy
 
 using MergeStrategyPtr = std::shared_ptr<MergeStrategy>;

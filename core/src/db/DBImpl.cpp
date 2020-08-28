@@ -41,6 +41,8 @@
 
 #include <fiu/fiu-local.h>
 #include <src/scheduler/job/BuildIndexJob.h>
+#include <algorithm>
+#include <functional>
 #include <limits>
 #include <unordered_set>
 #include <utility>
@@ -694,7 +696,11 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
     STATUS_CHECK(segment_reader->LoadDeletedDocs(deleted_docs_ptr));
     if (deleted_docs_ptr) {
         const std::vector<offset_t>& delete_ids = deleted_docs_ptr->GetDeletedDocs();
-        for (auto offset : delete_ids) {
+        std::vector<offset_t> temp_ids;
+        temp_ids.reserve(delete_ids.size());
+        std::copy(delete_ids.begin(), delete_ids.end(), std::back_inserter(temp_ids));
+        std::sort(temp_ids.begin(), temp_ids.end(), std::greater<offset_t>());
+        for (auto offset : temp_ids) {
             entity_ids.erase(entity_ids.begin() + offset, entity_ids.begin() + offset + 1);
         }
     }
@@ -1075,7 +1081,8 @@ DBImpl::BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all) 
     for (auto& collection_id : collection_ids) {
         const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-        auto status = merge_mgr_ptr_->MergeFiles(collection_id);
+        MergeStrategyType type = force_merge_all ? MergeStrategyType::SIMPLE : MergeStrategyType::LAYERED;
+        auto status = merge_mgr_ptr_->MergeSegments(collection_id, type);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to get merge files for collection id: " << collection_id
                               << " reason:" << status.message();

@@ -26,6 +26,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "db/Utils.h"
 #include "storage/ExtraFileInfo.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -41,7 +42,7 @@ DeletedDocsFormat::FilePostfix() {
     return str;
 }
 
-void
+Status
 DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                         segment::DeletedDocsPtr& deleted_docs) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
@@ -49,7 +50,7 @@ DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& 
     CHECK_MAGIC_VALID(fs_ptr, full_file_path);
     CHECK_SUM_VALID(fs_ptr, full_file_path);
     if (!fs_ptr->reader_ptr_->Open(full_file_path)) {
-        THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open deleted docs file: " + full_file_path);
+        return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open deleted docs file: " + full_file_path);
     }
 
     fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
@@ -64,9 +65,11 @@ DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& 
     fs_ptr->reader_ptr_->Close();
 
     deleted_docs = std::make_shared<segment::DeletedDocs>(deleted_docs_list);
+
+    return Status::OK();
 }
 
-void
+Status
 DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                          const segment::DeletedDocsPtr& deleted_docs) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
@@ -84,7 +87,7 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     std::vector<engine::offset_t> delete_ids;
     if (exists) {
         if (!fs_ptr->reader_ptr_->Open(temp_path)) {
-            THROW_ERROR(SERVER_CANNOT_OPEN_FILE, "Fail to open tmp deleted docs file: " + temp_path);
+            return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open tmp deleted docs file: " + temp_path);
         }
         fs_ptr->reader_ptr_->Read(&old_num_bytes, sizeof(size_t));
         delete_ids.resize(old_num_bytes / sizeof(engine::offset_t));
@@ -105,26 +108,42 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     WRITE_HEADER(fs_ptr, temp_path, maps);
 
     if (!fs_ptr->writer_ptr_->InOpen(temp_path)) {
-        THROW_ERROR(SERVER_CANNOT_CREATE_FILE, "Fail to write file: " + temp_path);
+        return Status(SERVER_CANNOT_CREATE_FILE, "Fail to write file: " + temp_path);
     }
 
-    fs_ptr->writer_ptr_->Seekp(MAGIC_SIZE + HEADER_SIZE);
-    fs_ptr->writer_ptr_->Write(&new_num_bytes, sizeof(size_t));
-    fs_ptr->writer_ptr_->Write(delete_ids.data(), new_num_bytes);
-    fs_ptr->writer_ptr_->Close();
-    WRITE_SUM(fs_ptr, temp_path);
+    try {
+        fs_ptr->writer_ptr_->Seekp(MAGIC_SIZE + HEADER_SIZE);
+        fs_ptr->writer_ptr_->Write(&new_num_bytes, sizeof(size_t));
+        fs_ptr->writer_ptr_->Write(delete_ids.data(), new_num_bytes);
+        fs_ptr->writer_ptr_->Close();
+        WRITE_SUM(fs_ptr, temp_path);
+    } catch (std::exception& ex) {
+        std::string err_msg = "Failed to write delete doc: " + std::string(ex.what());
+        LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
+        return Status(SERVER_WRITE_ERROR, err_msg);
+    }
 
     // Move temp file to delete file
-    std::experimental::filesystem::rename(temp_path, full_file_path);
+    try {
+        std::experimental::filesystem::rename(temp_path, full_file_path);
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to rename file [" + temp_path + "] to [" + full_file_path + "]";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_UNEXPECTED_ERROR, msg);
+    }
+
+    return Status::OK();
 }
 
-void
+Status
 DeletedDocsFormat::ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, size_t& size) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
     CHECK_MAGIC_VALID(fs_ptr, full_file_path);
     CHECK_SUM_VALID(fs_ptr, full_file_path);
     if (!fs_ptr->writer_ptr_->Open(full_file_path)) {
-        THROW_ERROR(SERVER_CANNOT_CREATE_FILE, "Fail to open deleted docs file: " + full_file_path);
+        return Status(SERVER_CANNOT_CREATE_FILE, "Fail to open deleted docs file: " + full_file_path);
     }
 
     fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
@@ -133,6 +152,8 @@ DeletedDocsFormat::ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::stri
 
     size = num_bytes / sizeof(engine::offset_t);
     fs_ptr->reader_ptr_->Close();
+
+    return Status::OK();
 }
 
 }  // namespace codec
