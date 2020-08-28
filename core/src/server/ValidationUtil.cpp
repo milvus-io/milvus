@@ -251,7 +251,13 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
         }
 
         // special check for 'm' parameter
-        std::vector<int64_t> resset;
+        int64_t m_value = index_params[knowhere::IndexParams::m];
+        if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(dimension, m_value)) {
+            std::string msg = "Invalid m, dimension can't not be divided by m ";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+        /*std::vector<int64_t> resset;
         milvus::knowhere::IVFPQConfAdapter::GetValidMList(dimension, resset);
         int64_t m_value = index_params[knowhere::IndexParams::m];
         if (resset.empty()) {
@@ -273,7 +279,7 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
+        }*/
     } else if (index_type == knowhere::IndexEnum::INDEX_NSG) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::search_length, 10, 300);
         if (!status.ok()) {
@@ -310,9 +316,13 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
             }
 
             // special check for 'PQM' parameter
-            std::vector<int64_t> resset;
-            milvus::knowhere::IVFPQConfAdapter::GetValidMList(dimension, resset);
             int64_t pqm_value = index_params[knowhere::IndexParams::PQM];
+            if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(dimension, pqm_value)) {
+                std::string msg = "Invalid m, dimension can't not be divided by m ";
+                LOG_SERVER_ERROR_ << msg;
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }
+            /*int64_t pqm_value = index_params[knowhere::IndexParams::PQM];
             if (resset.empty()) {
                 std::string msg = "Invalid collection dimension, unable to get reasonable values for 'PQM'";
                 LOG_SERVER_ERROR_ << msg;
@@ -332,7 +342,7 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_ARGUMENT, msg);
-            }
+            }*/
         }
     } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
