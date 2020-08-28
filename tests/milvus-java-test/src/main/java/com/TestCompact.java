@@ -84,4 +84,18 @@ public class TestCompact {
         Assert.assertEquals(segmentsBefore.get("data_size"), segmentsAfter.get("data_size"));
     }
 
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testCompactInvalidThreshold(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        client.flush(collectionName);
+        Response deleteRes = client.deleteEntityByID(collectionName, res.getEntityIds());
+        assert (deleteRes.ok());
+        client.flush(collectionName);
+        CompactParam compactParam = new CompactParam.Builder(collectionName).withThreshold(-1.0).build();
+        Response resCompact = client.compact(compactParam);
+        Assert.assertFalse(resCompact.ok());
+    }
+
 }
