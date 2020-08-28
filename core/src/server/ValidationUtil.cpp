@@ -443,11 +443,12 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
         }
 
         // Partition tag first character should be underscore or character.
-        //        char first_char = tag[0];
-        //        if (first_char != '_' && std::isalpha(first_char) == 0) {
-        //            std::string msg = invalid_msg + "The first character of a partition tag must be an underscore or
-        //            letter."; LOG_SERVER_ERROR_ << msg; return Status(SERVER_INVALID_PARTITION_TAG, msg);
-        //        }
+        char first_char = tag[0];
+        if (first_char != '_' && std::isalnum(first_char) == 0) {
+            std::string msg = invalid_msg + "The first character of a partition tag must be an underscore or letter.";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_PARTITION_TAG, msg);
+        }
 
         int64_t tag_size = tag.size();
         for (int64_t i = 1; i < tag_size; ++i) {
