@@ -13,11 +13,11 @@
 #include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 
+#include <src/cache/CpuCacheMgr.h>
 #include <algorithm>
+#include <experimental/filesystem>
 #include <set>
 #include <string>
-#include <experimental/filesystem>
-#include <src/cache/CpuCacheMgr.h>
 
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
@@ -250,9 +250,7 @@ BuildEntities2(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& d
 
 TEST_F(DBTest, CollectionTest) {
     LSN_TYPE lsn = 0;
-    auto next_lsn = [&]() -> decltype(lsn) {
-        return ++lsn;
-    };
+    auto next_lsn = [&]() -> decltype(lsn) { return ++lsn; };
     std::string c1 = "c1";
     auto status = CreateCollection(db_, c1, next_lsn());
     ASSERT_TRUE(status.ok());
@@ -306,9 +304,7 @@ TEST_F(DBTest, CollectionTest) {
 
 TEST_F(DBTest, PartitionTest) {
     LSN_TYPE lsn = 0;
-    auto next_lsn = [&]() -> decltype(lsn) {
-        return ++lsn;
-    };
+    auto next_lsn = [&]() -> decltype(lsn) { return ++lsn; };
     std::string c1 = "c1";
     auto status = CreateCollection(db_, c1, next_lsn());
     ASSERT_TRUE(status.ok());
@@ -345,9 +341,7 @@ TEST_F(DBTest, PartitionTest) {
 
 TEST_F(DBTest, VisitorTest) {
     LSN_TYPE lsn = 0;
-    auto next_lsn = [&]() -> decltype(lsn) {
-        return ++lsn;
-    };
+    auto next_lsn = [&]() -> decltype(lsn) { return ++lsn; };
 
     std::string c1 = "c1";
     auto status = CreateCollection(db_, c1, next_lsn());
@@ -451,9 +445,7 @@ TEST_F(DBTest, VisitorTest) {
 
 TEST_F(DBTest, QueryTest) {
     LSN_TYPE lsn = 0;
-    auto next_lsn = [&]() -> decltype(lsn) {
-        return ++lsn;
-    };
+    auto next_lsn = [&]() -> decltype(lsn) { return ++lsn; };
 
     std::string c1 = "c1";
     auto status = CreateCollection3(db_, c1, next_lsn());
@@ -575,7 +567,7 @@ TEST_F(DBTest, MergeTest) {
         status = db_->Insert(collection_name, "", data_chunk);
         ASSERT_TRUE(status.ok());
 
-        data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
+        data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID);  // clear auto-generated id
 
         status = db_->Flush();
         ASSERT_TRUE(status.ok());
@@ -643,8 +635,8 @@ TEST_F(DBTest, MergeTest) {
 }
 
 TEST_F(DBTest, GetEntityTest) {
-    auto insert_entities = [&](const std::string& collection, const std::string& partition,
-                               uint64_t count, uint64_t batch_index, milvus::engine::IDNumbers& ids,
+    auto insert_entities = [&](const std::string& collection, const std::string& partition, uint64_t count,
+                               uint64_t batch_index, milvus::engine::IDNumbers& ids,
                                milvus::engine::DataChunkPtr& data_chunk) -> Status {
         BuildEntities(count, batch_index, data_chunk);
         STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
@@ -838,8 +830,8 @@ TEST_F(DBTest, CompactTest) {
     };
 
     // compact the collection, when threshold = 0.001, the compact do nothing
-    validate_compact(0.001); // compact skip
-    validate_compact(0.5); // do compact
+    validate_compact(0.001);  // compact skip
+    validate_compact(0.5);    // do compact
 }
 
 TEST_F(DBTest, IndexTest) {
@@ -937,7 +929,7 @@ TEST_F(DBTest, StatsTest) {
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
-    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
+    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID);  // clear auto-generated id
 
     status = db_->Insert(collection_name, partition_name, data_chunk);
     ASSERT_TRUE(status.ok());
@@ -1031,7 +1023,7 @@ TEST_F(DBTest, FetchTest) {
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
-    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
+    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID);  // clear auto-generated id
 
     status = db_->Insert(collection_name, partition_name, data_chunk);
     ASSERT_TRUE(status.ok());
@@ -1125,8 +1117,8 @@ TEST_F(DBTest, DeleteEntitiesTest) {
     // flush empty segment
     db_->Flush(collection_name);
 
-    auto insert_entities = [&](const std::string& collection, const std::string& partition,
-                               uint64_t count, uint64_t batch_index, milvus::engine::IDNumbers& ids) -> Status {
+    auto insert_entities = [&](const std::string& collection, const std::string& partition, uint64_t count,
+                               uint64_t batch_index, milvus::engine::IDNumbers& ids) -> Status {
         milvus::engine::DataChunkPtr data_chunk;
         BuildEntities(count, batch_index, data_chunk);
         STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
@@ -1199,8 +1191,8 @@ TEST_F(DBTest, DeleteEntitiesTest) {
 
 TEST_F(DBTest, DeleteStaleTest) {
     const int del_id_pair = 3;
-    auto insert_entities = [&](const std::string& collection, const std::string& partition,
-                               uint64_t count, uint64_t batch_index, milvus::engine::IDNumbers& ids) -> Status {
+    auto insert_entities = [&](const std::string& collection, const std::string& partition, uint64_t count,
+                               uint64_t batch_index, milvus::engine::IDNumbers& ids) -> Status {
         milvus::engine::DataChunkPtr data_chunk;
         BuildEntities(count, batch_index, data_chunk);
         STATUS_CHECK(db_->Insert(collection, partition, data_chunk));
@@ -1297,7 +1289,7 @@ TEST_F(DBTest, LoadTest) {
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
 
-    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID); // clear auto-generated id
+    data_chunk->fixed_fields_.erase(milvus::engine::FIELD_UID);  // clear auto-generated id
 
     status = db_->Insert(collection_name, partition_name, data_chunk);
     ASSERT_TRUE(status.ok());
