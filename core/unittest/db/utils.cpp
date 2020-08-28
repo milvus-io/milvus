@@ -155,7 +155,7 @@ DBTest::GetOptions() {
     milvus::cache::CpuCacheMgr::GetInstance().SetCapacity(256 * milvus::engine::MB);
 
     auto options = DBOptions();
-    options.meta_.path_ = "/tmp/milvus_ss";
+    options.meta_.path_ = "/tmp/milvus_ss/db";
     options.meta_.backend_uri_ = "sqlite://:@:/";
 //    options.meta_.backend_uri_ = "mysql://root:12345678@127.0.0.1:3309/milvus";
     options.wal_enable_ = false;
@@ -168,7 +168,7 @@ DBTest::SetUp() {
     BaseTest::SetUp();
     auto options = GetOptions();
     std::experimental::filesystem::create_directories(options.meta_.path_);
-    std::experimental::filesystem::create_directories(options.meta_.path_ + "/db");
+//    std::experimental::filesystem::create_directories(options.meta_.path_ + "/db");
     BaseTest::SnapshotStart(false, options);
 
     dummy_context_ = std::make_shared<milvus::server::Context>("dummy_request_id");

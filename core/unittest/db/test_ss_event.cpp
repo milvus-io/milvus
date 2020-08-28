@@ -156,6 +156,29 @@ TEST_F(EventTest, TestInActiveResGcEvent) {
     ASSERT_TRUE(collection_commits.empty());
 }
 
+TEST_F(EventTest, GcTest) {
+    std::string collection_name = "";
+
+    CollectionPtr collection;
+    auto cc = Collection(collection_name);
+    cc.Activate();
+    auto status = store_->CreateResource(std::move(cc), collection);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    CollectionPtr collection2;
+    status = store_->GetResource<Collection>(collection->GetID(), collection2);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    auto event = std::make_shared<ResourceGCEvent<Collection>>(collection);
+    ASSERT_TRUE(EventExecutor::GetInstance().Submit(event, true).ok());
+
+    sleep(1);
+
+    CollectionPtr rcollection;
+    status = store_->GetResource<Collection>(collection->GetID(),rcollection);
+    ASSERT_FALSE(status.ok());
+}
+
 TEST_F(EventTest, GcBlockingTest) {
     size_t max_count = 1000;
 

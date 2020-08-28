@@ -719,6 +719,7 @@ MergeOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentF
 
 Status
 MergeOperation::DoExecute(StorePtr store) {
+    std::cout << "\nMergeOperation::DoExecute" << std::endl;
     auto row_cnt = 0;
     for (auto& stale_seg : context_.stale_segments) {
         row_cnt += GetStartedSS()->GetSegmentCommitBySegmentId(stale_seg->GetID())->GetRowCount();
