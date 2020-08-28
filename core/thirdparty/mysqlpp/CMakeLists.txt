@@ -26,7 +26,7 @@ macro( build_mysqlpp )
             DOWNLOAD_DIR        ${THIRDPARTY_DOWNLOAD_PATH}
             INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}
             URL                 ${MYSQLPP_SOURCE_URL}
-            URL_MD5             "cda38b5ecc0117de91f7c42292dd1e79"
+            URL_MD5             "707a37cfcb93246570449bddd637210a"
             CONFIGURE_COMMAND   <SOURCE_DIR>/configure
                                     "--prefix=<INSTALL_DIR>"
                                     "--enable-thread-check"
