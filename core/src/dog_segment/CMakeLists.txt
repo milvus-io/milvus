@@ -1,6 +1,9 @@
 set(DOG_SEGMENT_FILES
         SegmentNaive.cpp
         Collection.cpp
+        Partition.cpp
+        collection_c.cpp
+        partition_c.cpp
         segment_c.cpp
         )
 # Third Party dablooms file
