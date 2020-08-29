@@ -26,6 +26,7 @@
 #include "config/ConfigMgr.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/Snapshots.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
@@ -158,11 +159,11 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "\n"
     "general:\n"
     "  timezone: UTC+8\n"
-    "  meta_uri: sqlite://:@:/\n"
+    "  meta_uri: mock://:@:/\n"
     "\n"
     "network:\n"
     "  bind.address: 0.0.0.0\n"
-    "  bind.port: 19530\n"
+    "  bind.port: 19540\n"
     "  http.enable: true\n"
     "  http.port: 29999\n"
     "\n"
@@ -326,7 +327,18 @@ class WebControllerTest : public ::testing::Test {
         fs.close();
 
         milvus::ConfigMgr::GetInstance().Init();
-        milvus::ConfigMgr::GetInstance().Load(config_path);
+//        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "mock://:@:/");
+//        milvus::ConfigMgr::GetInstance().Set("storage.path", CONTROLLER_TEST_CONFIG_DIR);
+//        milvus::ConfigMgr::GetInstance().Set("network.http.enable", "true");
+//        milvus::ConfigMgr::GetInstance().Set("network.http.port", "20121");
+
+        auto& config = milvus::ConfigMgr::GetInstance();
+
+//        milvus::ConfigMgr::GetInstance().Init();
+        config.Load(config_path);
+//        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "mock://:@:/");
+
+        milvus::engine::snapshot::Snapshots::GetInstance().StartService();
 
         auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
         res_mgr->Clear();
@@ -361,7 +373,6 @@ class WebControllerTest : public ::testing::Test {
         fs.flush();
         fs.close();
 
-        //        milvus::ConfigMgr::GetInstance().Init();
         milvus::ConfigMgr::GetInstance().Load(config_path);
 
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
@@ -384,6 +395,8 @@ class WebControllerTest : public ::testing::Test {
         milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Clear();
+
+        milvus::engine::snapshot::Snapshots::GetInstance().StopService();
 
         boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
     }
