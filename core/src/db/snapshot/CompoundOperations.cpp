@@ -416,7 +416,7 @@ DropAllIndexOperation::PreCheck() {
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
 
-    for (auto stale_fe : context_.stale_field_elements) {
+    for (const auto& stale_fe : context_.stale_field_elements) {
         if (!GetStartedSS()->GetResource<FieldElement>(stale_fe->GetID())) {
             std::stringstream emsg;
             emsg << GetRepr() << ".  Specified field element " << stale_fe->GetName();

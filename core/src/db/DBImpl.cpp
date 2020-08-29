@@ -699,7 +699,7 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
         std::vector<offset_t> temp_ids;
         temp_ids.reserve(delete_ids.size());
         std::copy(delete_ids.begin(), delete_ids.end(), std::back_inserter(temp_ids));
-        std::sort(temp_ids.begin(), temp_ids.end(), std::greater<offset_t>());
+        std::sort(temp_ids.begin(), temp_ids.end(), std::greater<>());
         for (auto offset : temp_ids) {
             entity_ids.erase(entity_ids.begin() + offset, entity_ids.begin() + offset + 1);
         }
@@ -979,7 +979,7 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
 
     std::unique_lock<std::mutex> lock(build_index_mutex_);
 
-    for (auto collection_name : collection_names) {
+    for (const auto& collection_name : collection_names) {
         snapshot::ScopedSnapshotT latest_ss;
         auto status = snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
         if (!status.ok()) {
