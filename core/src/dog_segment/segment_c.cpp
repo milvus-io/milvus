@@ -1,10 +1,11 @@
 #include "SegmentBase.h"
-#include "cwrap.h"
+#include "segment_c.h"
 
 CSegmentBase
-SegmentBaseInit() {
+SegmentBaseInit(unsigned long segment_id) {
   std::cout << "Hello milvus" << std::endl;
   auto seg = milvus::dog_segment::CreateSegment();
+  seg->set_segment_id(segment_id);
   return (void*)seg;
 }
 

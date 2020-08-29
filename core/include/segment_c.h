@@ -10,7 +10,7 @@ extern "C" {
 
 typedef void* CSegmentBase;
 
-CSegmentBase SegmentBaseInit();
+CSegmentBase SegmentBaseInit(unsigned long segment_id);
 
 //int32_t Insert(CSegmentBase c_segment, signed long int size, const unsigned long* primary_keys, const unsigned long int* timestamps, DogDataChunk values);
 
