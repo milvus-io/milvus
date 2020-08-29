@@ -30,4 +30,11 @@ if( ${UNIX} )
 		target_link_libraries(ngt gomp rt)
 	endif(${APPLE})
 
+	install(TARGETS
+		ngt
+		ngtstatic
+		RUNTIME DESTINATION bin
+		LIBRARY DESTINATION lib
+		ARCHIVE DESTINATION lib)
+
 endif()
