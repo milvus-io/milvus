@@ -73,7 +73,7 @@ class OperationExecutor {
             Enqueue(nullptr);
             thread_ptr_->join();
             thread_ptr_ = nullptr;
-            std::cout << "OperationExecutor Stopped" << std::endl;
+            LOG_ENGINE_INFO_ << "OperationExecutor Stopped";
         }
     }
 

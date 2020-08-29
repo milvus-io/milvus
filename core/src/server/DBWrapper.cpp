@@ -19,6 +19,7 @@
 #include <faiss/utils/distances.h>
 
 #include "config/ServerConfig.h"
+#include "db/Constants.h"
 #include "db/DBFactory.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "utils/CommonUtil.h"
@@ -38,7 +39,7 @@ DBWrapper::StartService() {
     opt.meta_.backend_uri_ = config.general.meta_uri();
 
     std::string path = config.storage.path();
-    opt.meta_.path_ = path + "/db";
+    opt.meta_.path_ = path + engine::DB_FOLDER;
 
     opt.auto_flush_interval_ = config.storage.auto_flush_interval();
     opt.metric_enable_ = config.metric.enable();
@@ -77,14 +78,6 @@ DBWrapper::StartService() {
     // init faiss global variable
     int64_t use_blas_threshold = config.engine.use_blas_threshold();
     faiss::distance_compute_blas_threshold = use_blas_threshold;
-
-    // create db root folder
-    s = CommonUtil::CreateDirectory(opt.meta_.path_);
-    if (!s.ok()) {
-        std::cerr << "Error: Failed to create database primary path: " << path
-                  << ". Possible reason: db_config.primary_path is wrong in milvus.yaml or not available." << std::endl;
-        kill(0, SIGUSR1);
-    }
 
     try {
         db_ = engine::DBFactory::BuildDB(opt);

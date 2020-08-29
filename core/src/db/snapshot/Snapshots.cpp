@@ -10,13 +10,16 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Snapshots.h"
+
+#include "config/ServerConfig.h"
+#include "db/Constants.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
+#include "db/snapshot/OperationExecutor.h"
+#include "utils/CommonUtil.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 /* Status */
 /* Snapshots::DropAll() { */
@@ -128,7 +131,7 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
 Status
 Snapshots::Init(StorePtr store) {
     auto event = std::make_shared<InActiveResourcesGCEvent>();
-    EventExecutor::GetInstance().Submit(event);
+    EventExecutor::GetInstance().Submit(event, true);
     STATUS_CHECK(event->WaitToFinish());
     auto op = std::make_shared<GetCollectionIDsOperation>();
     STATUS_CHECK((*op)(store));
@@ -209,10 +212,34 @@ void
 Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
     /* to_release_.push_back(ss_ptr); */
     ss_ptr->UnRef();
-    std::cout << "Snapshot " << ss_ptr->GetID() << " ref_count = " << ss_ptr->ref_count() << " To be removed"
-              << std::endl;
+    LOG_ENGINE_DEBUG_ << "Snapshot " << ss_ptr->GetID() << " ref_count = " << ss_ptr->ref_count() << " To be removed";
 }
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+Status
+Snapshots::StartService() {
+    auto meta_path = config.storage.path() + DB_FOLDER;
+
+    // create db root path
+    auto s = CommonUtil::CreateDirectory(meta_path);
+    if (!s.ok()) {
+        std::cerr << "Error: Failed to create database primary path: " << meta_path
+                  << ". Possible reason: db_config.primary_path is wrong in milvus.yaml or not available." << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    auto store = snapshot::Store::Build(config.general.meta_uri(), meta_path, codec::Codec::instance().GetSuffixSet());
+    snapshot::OperationExecutor::Init(store);
+    snapshot::OperationExecutor::GetInstance().Start();
+    snapshot::EventExecutor::Init(store);
+    snapshot::EventExecutor::GetInstance().Start();
+    return snapshot::Snapshots::GetInstance().Init(store);
+}
+
+Status
+Snapshots::StopService() {
+    snapshot::EventExecutor::GetInstance().Stop();
+    snapshot::OperationExecutor::GetInstance().Stop();
+    return Status::OK();
+}
+
+}  // namespace milvus::engine::snapshot
