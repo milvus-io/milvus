@@ -744,7 +744,7 @@ WebRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, que
                 return Status{SERVER_INVALID_DSL_PARAMETER, msg};
             }
         }
-    } catch (std::exception &ex) {
+    } catch (std::exception& ex) {
         return Status(SERVER_INVALID_DSL_PARAMETER, ex.what());
     }
 
