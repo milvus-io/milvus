@@ -260,7 +260,8 @@ int split_clusters (size_t d, size_t k, size_t n,
 
 }
 };
-KmeansType kmeans_type = KmeansType::KMEANS;
+
+ClusteringType clustering_type = ClusteringType::K_MEANS;
 
 void Clustering::kmeans_algorithm(std::vector<int>& centroids_index, int64_t random_seed,
                                   size_t n_input_centroids, size_t d, size_t k,
@@ -328,18 +329,17 @@ void Clustering::kmeans_plus_plus_algorithm(std::vector<int>& centroids_index, i
 
         //calculate P(x)
         #pragma omp parallel for
-        for (size_t point_it = 0; point_it < thread_max_num; point_it++) {
-            size_t left = point_it == 0 ? 0 : task[point_it - 1];
-            size_t right = task[point_it];
-            // cout <<"Thread = "<< omp_get_thread_num() <<" left = "<<left<<" right = "<<right << endl;
+        for (size_t task_i = 0; task_i < thread_max_num; task_i++) {
+            size_t left = (task_i == 0) ? 0 : task[task_i - 1];
+            size_t right = task[task_i];
             pre_sum[left] = dx_distance[left];
             for (size_t j = left + 1; j < right; j++) {
                 pre_sum[j] = pre_sum[j - 1] + dx_distance[j];
             }
         }
         float sum = 0.0;
-        for (size_t point_it = 0; point_it < thread_max_num; point_it++) {
-            sum += pre_sum[task[point_it] - 1];
+        for (size_t task_i = 0; task_i < thread_max_num; task_i++) {
+            sum += pre_sum[task[task_i] - 1];
         }
 
         // the random num is [0,sum]
@@ -493,12 +493,14 @@ void Clustering::train_encoded (idx_t nx, const uint8_t *x_in,
             int64_t random_seed = seed + 1 + redo * 15486557L;
             std::vector<int> centroids_index(nx);
 
-            if (KmeansType::KMEANS == kmeans_type) {
+            if (ClusteringType::K_MEANS == clustering_type) {
                 //Use classic kmeans algorithm
                 kmeans_algorithm(centroids_index, random_seed, n_input_centroids, d, k, nx, x_in);
-            } else if (KmeansType::KMEANS_PLUSPLUS == kmeans_type) {
+            } else if (ClusteringType::K_MEANS_PLUS_PLUS == clustering_type) {
                 //Use kmeans++ algorithm
                 kmeans_plus_plus_algorithm(centroids_index, random_seed, n_input_centroids, d, k, nx, x_in);
+            } else {
+                FAISS_THROW_FMT ("Clustering Type is knonws: %d", (int)clustering_type);
             }
 
             centroids.resize(d * k);
