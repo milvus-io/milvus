@@ -23,7 +23,7 @@ class FinishedTask : public Task {
     Create(const TaskPtr& task);
 
  public:
-    FinishedTask(const TaskPtr& task);
+    explicit FinishedTask(const TaskPtr& task);
 
     Status
     OnLoad(LoadType type, uint8_t device_id) override;
