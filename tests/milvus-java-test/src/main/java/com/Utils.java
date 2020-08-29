@@ -147,6 +147,75 @@ public class Utils {
         return indexParams;
     }
 
+    public static CollectionMapping genDefaultCollectionMapping(String collectionName, int dimension,
+                                                                int segmentRowCount, boolean isBinary) {
+        Map<String, Object> vectorFieldMap;
+        if (isBinary) {
+            vectorFieldMap = new FieldBuilder("binary_vector", DataType.VECTOR_BINARY)
+                                .param("dim", dimension)
+                                .build();
+        } else {
+            vectorFieldMap = new FieldBuilder("float_vector", DataType.VECTOR_FLOAT)
+                                .param("dim", dimension)
+                                .build();
+        }
+
+        return new CollectionMapping.Builder(collectionName)
+            .field(new FieldBuilder("int64", DataType.INT64).build())
+            .field(new FieldBuilder("float", DataType.FLOAT).build())
+            .field(vectorFieldMap)
+            .withParamsInJson(new JsonBuilder()
+                    .param("segment_row_count", segmentRowCount)
+                    .build())
+            .build();
+    }
+
+    public static InsertParam genDefaultInsertParam(String collectionName, int dimension, int vectorCount,
+                                                    List<List<Float>> vectors) {
+        List<Long> intValues = new ArrayList<>(vectorCount);
+        List<Float> floatValues = new ArrayList<>(vectorCount);
+        for (int i = 0; i < vectorCount; ++i) {
+            intValues.add((long) i);
+            floatValues.add((float) i);
+        }
+
+        return new InsertParam.Builder(collectionName)
+            .field(new FieldBuilder("int64", DataType.INT64)
+                    .values(intValues)
+                    .build())
+            .field(new FieldBuilder("float", DataType.FLOAT)
+                    .values(floatValues)
+                    .build())
+            .field(new FieldBuilder("float_vector", DataType.VECTOR_FLOAT)
+                    .values(vectors)
+                    .param("dim", dimension)
+                    .build())
+            .build();
+    }
+
+    public static InsertParam genDefaultBinaryInsertParam(String collectionName, int dimension, int vectorCount,
+                                                          List<ByteBuffer> vectorsBinary) {
+        List<Long> intValues = new ArrayList<>(vectorCount);
+        List<Float> floatValues = new ArrayList<>(vectorCount);
+        for (int i = 0; i < vectorCount; ++i) {
+            intValues.add((long) i);
+            floatValues.add((float) i);
+        }
+
+        return new InsertParam.Builder(collectionName)
+            .field(new FieldBuilder("int64", DataType.INT64)
+                    .values(intValues)
+                    .build())
+            .field(new FieldBuilder("float", DataType.FLOAT)
+                    .values(floatValues)
+                    .build())
+            .field(new FieldBuilder("binary_vector", DataType.VECTOR_BINARY)
+                    .values(vectorsBinary)
+                    .param("dim", dimension)
+                    .build())
+            .build();
+    }
+
     public static String setSearchParam(String metricType, List<List<Float>> queryVectors, int topk, int nprobe) {
         JSONObject searchParam = new JSONObject();
         JSONObject fieldParam = new JSONObject();
