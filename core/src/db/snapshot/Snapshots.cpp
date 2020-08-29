@@ -17,6 +17,7 @@
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
 #include "db/snapshot/OperationExecutor.h"
+#include "utils/CommonUtil.h"
 
 namespace milvus::engine::snapshot {
 
@@ -217,6 +218,15 @@ Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
 Status
 Snapshots::StartService() {
     auto meta_path = config.storage.path() + DB_FOLDER;
+
+    // create db root path
+    auto s = CommonUtil::CreateDirectory(meta_path);
+    if (!s.ok()) {
+        std::cerr << "Error: Failed to create database primary path: " << meta_path
+                  << ". Possible reason: db_config.primary_path is wrong in milvus.yaml or not available." << std::endl;
+        kill(0, SIGUSR1);
+    }
+
     auto store = snapshot::Store::Build(config.general.meta_uri(), meta_path, codec::Codec::instance().GetSuffixSet());
     snapshot::OperationExecutor::Init(store);
     snapshot::OperationExecutor::GetInstance().Start();

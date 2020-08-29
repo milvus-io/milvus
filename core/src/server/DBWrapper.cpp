@@ -79,14 +79,6 @@ DBWrapper::StartService() {
     int64_t use_blas_threshold = config.engine.use_blas_threshold();
     faiss::distance_compute_blas_threshold = use_blas_threshold;
 
-    // create db root folder
-    s = CommonUtil::CreateDirectory(opt.meta_.path_);
-    if (!s.ok()) {
-        std::cerr << "Error: Failed to create database primary path: " << path
-                  << ". Possible reason: db_config.primary_path is wrong in milvus.yaml or not available." << std::endl;
-        kill(0, SIGUSR1);
-    }
-
     try {
         db_ = engine::DBFactory::BuildDB(opt);
         db_->Start();
