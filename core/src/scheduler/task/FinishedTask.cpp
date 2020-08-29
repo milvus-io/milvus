@@ -14,11 +14,14 @@
 namespace milvus::scheduler {
 
 std::shared_ptr<FinishedTask>
-FinishedTask::Create() {
-    return std::make_shared<FinishedTask>();
+FinishedTask::Create(const TaskPtr& task) {
+    return std::make_shared<FinishedTask>(task);
 }
 
-FinishedTask::FinishedTask() : Task(TaskType::SearchTask, nullptr) {
+FinishedTask::FinishedTask(const TaskPtr& task) : Task(TaskType::SearchTask, nullptr) {
+    Task::task_path_ = task->task_path_;
+    Task::type_ = task->type_;
+    Task::label_ = task->label_;
 }
 
 Status
