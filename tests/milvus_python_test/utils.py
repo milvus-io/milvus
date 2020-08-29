@@ -535,12 +535,8 @@ def gen_invalid_strs():
         # "",
         # None,
         "12 s",
-        "BB。A",
-        "c|c",
         " siede ",
         "(mn)",
-        "pip+",
-        "=c",
         "中文",
         "a".join("a" for i in range(256))
     ]
@@ -617,12 +613,7 @@ def gen_invalid_vectors():
         " ",
         "",
         "String",
-        "12-s",
-        "BB。A",
         " siede ",
-        "(mn)",
-        "pip+",
-        "=c",
         "中文",
         "a".join("a" for i in range(256))
     ]
