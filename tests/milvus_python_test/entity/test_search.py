@@ -1325,7 +1325,6 @@ class TestSearchDSL(object):
         range = update_range_expr({"range": {}}, [range_first, range_second])
         expr = {"must": [gen_default_vector_expr(default_query), range]}
         query = update_query_expr(default_query, expr=expr)
-        res = connect.search(collection, query)
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 

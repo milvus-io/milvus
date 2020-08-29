@@ -60,9 +60,9 @@ MergeLayerStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, i
                 continue;  // empty segment or full segment
             }
 
-            for (auto & layer : layers) {
-                if (segment_info.row_count_ < layer.first) {
-                    layer.second.push_back(segment_info);
+            for (auto& layer_iter : layers) {
+                if (segment_info.row_count_ < layer_iter.first) {
+                    layer_iter.second.push_back(segment_info);
                     break;
                 }
             }

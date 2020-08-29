@@ -1,4 +1,4 @@
-timeout(time: 120, unit: 'MINUTES') {
+timeout(time: 150, unit: 'MINUTES') {
     sh "mkdir -p ${env.DEV_TEST_ARTIFACTS}"
 
     dir ('milvus-helm') {
