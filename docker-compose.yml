@@ -1,17 +1,11 @@
 version: '3.5'
 
-volumes:
-  amd64-ubuntu-18.04-cache:
-  amd64-centos-7-cache:
-  amd64-ubuntu-18.04-cuda-cache:
-  amd64-centos-7-cuda-cache:
-
 x-ccache: &ccache
   CCACHE_COMPILERCHECK: content
   CCACHE_COMPRESS: 1
   CCACHE_COMPRESSLEVEL: 5
   CCACHE_MAXSIZE: 2G
-  CCACHE_DIR: /build/ccache
+  CCACHE_DIR: /ccache
 
 services:
   ubuntu-core:
@@ -26,7 +20,7 @@ services:
       <<: *ccache
     volumes: &ubuntu-volumes
       - .:/milvus:delegated
-      - ${ARCH}-ubuntu-${UBUNTU}-cache:/build:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu-${UBUNTU}-cache:/ccache:delegated
     networks:
       - milvus
     command: &ubuntu-command
@@ -45,7 +39,7 @@ services:
       <<: *ccache
     volumes: &centos-volumes
       - .:/milvus:delegated
-      - ${ARCH}-centos-${CENTOS}-cache:/build:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-centos-${CENTOS}-cache:/ccache:delegated
     networks:
       - milvus
     command: &centos-command
@@ -64,7 +58,7 @@ services:
       <<: *ccache
     volumes: &ubuntu-cuda-volumes
       - .:/milvus:delegated
-      - ${ARCH}-ubuntu-${UBUNTU}-cuda-cache:/build:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu-${UBUNTU}-cuda-cache:/ccache:delegated
     networks:
       - milvus
     command: &ubuntu-cuda-command
@@ -82,7 +76,7 @@ services:
       <<: *ccache
     volumes: &centos-cuda-volumes
       - .:/milvus:delegated
-      - ${ARCH}-centos-${CENTOS}-cuda-cache:/build:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-centos-${CENTOS}-cuda-cache:/ccache:delegated
     networks:
       - milvus
     command: &centos-cuda-command
@@ -98,7 +92,6 @@ services:
     shm_size: 2G
     volumes:
       - .:/milvus:delegated
-      - ${ARCH}-centos-${CENTOS}-cache:/build:delegated
     networks:
       - milvus
     command:
@@ -114,7 +107,6 @@ services:
     shm_size: 2G
     volumes:
       - .:/milvus:delegated
-      - ${ARCH}-centos-${CENTOS}-cuda-cache:/build:delegated
     networks:
       - milvus
     command:
