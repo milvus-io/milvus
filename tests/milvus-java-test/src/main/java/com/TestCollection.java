@@ -49,7 +49,7 @@ public class TestCollection {
 
     // case-02
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void testCreateCollectionDisconnect(MilvusClient client, String collectionName){
+    public void testCreateCollectionDisconnect(MilvusClient client, String collectionName) {
         CollectionMapping collectionSchema = new CollectionMapping.Builder(collectionName)
                 .withFields(Utils.genDefaultFields(dimension,false))
                 .withParamsInJson(String.format("{\"segment_row_count\": %s}",segmentRowCount))
@@ -60,7 +60,7 @@ public class TestCollection {
 
     // case-03
     @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
-    public void testCreateCollectionRepeatably(MilvusClient client, String collectionName){
+    public void testCreateCollectionRepeatably(MilvusClient client, String collectionName) {
         CollectionMapping collectionSchema = new CollectionMapping.Builder(collectionName)
                 .withFields(Utils.genDefaultFields(dimension,false))
                 .withParamsInJson(String.format("{\"segment_row_count\": %s}",segmentRowCount))
@@ -73,7 +73,7 @@ public class TestCollection {
 
     // case-04
     @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
-    public void testCreateCollectionWrongParams(MilvusClient client, String collectionName){
+    public void testCreateCollectionWrongParams(MilvusClient client, String collectionName) {
         Integer dim = 0;
         CollectionMapping collectionSchema = new CollectionMapping.Builder(collectionName)
                 .withFields(Utils.genDefaultFields(dim,false))
@@ -86,7 +86,7 @@ public class TestCollection {
 
     // case-05
     @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
-    public void testShowCollections(MilvusClient client, String collectionName){
+    public void testShowCollections(MilvusClient client, String collectionName) {
         Integer collectionNum = 10;
         ListCollectionsResponse res = null;
         for (int i = 0; i < collectionNum; ++i) {
