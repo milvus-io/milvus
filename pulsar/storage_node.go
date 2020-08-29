@@ -2,7 +2,7 @@ package pulsar
 
 import (
 	"fmt"
-	"suvlim/pulsar/schema"
+	"github.com/czs007/suvlim/pulsar/schema"
 	"sync"
 	"time"
 )
@@ -11,13 +11,12 @@ type WriteNode struct {
 	mc MessageClient
 }
 
-func (wn *WriteNode)doWriteNode(wg sync.WaitGroup) {
+func (wn *WriteNode) doWriteNode(wg sync.WaitGroup) {
 	wg.Add(2)
 	go wn.insert_write(wn.mc.InsertMsg, wg)
 	go wn.delete_write(wn.mc.DeleteMsg, wg)
 	wg.Wait()
 }
-
 
 func (wn *WriteNode) PrepareBatchMsg() {
 	wn.mc.PrepareBatchMsg(JobType(1))
@@ -40,16 +39,12 @@ func main() {
 	}
 }
 
-func (wn *WriteNode) insert_write(data []*schema.InsertMsg, wg sync.WaitGroup) schema.Status{
+func (wn *WriteNode) insert_write(data []*schema.InsertMsg, wg sync.WaitGroup) schema.Status {
 	wg.Done()
 	return schema.Status{schema.ErrorCode_SUCCESS, ""}
 }
 
-func (wn *WriteNode) delete_write(data []*schema.DeleteMsg, wg sync.WaitGroup) schema.Status{
+func (wn *WriteNode) delete_write(data []*schema.DeleteMsg, wg sync.WaitGroup) schema.Status {
 	wg.Done()
 	return schema.Status{schema.ErrorCode_SUCCESS, ""}
 }
-
-
-
-

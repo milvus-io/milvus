@@ -1,10 +1,9 @@
 package main
 
 import (
-	"context"
+	"container/list"
 	"fmt"
 	"github.com/czs007/suvlim/pulsar/schema"
-	"github.com/czs007/suvlim/writer"
 )
 
 func GetInsertMsg(entityId int64) *schema.InsertMsg {
@@ -25,40 +24,46 @@ func GetDeleteMsg(entityId int64) *schema.DeleteMsg {
 	}
 }
 
+//type example struct {
+//	id int
+//}
+//
+//type data struct {
+//	buffer *list.List
+//}
+
+//func GetExample(num int) []*example {
+//	var examples []*example
+//	i := 0
+//	for i = 0; i < num; i++ {
+//		examples = append(examples, &example{id: i})
+//	}
+//	return examples
+//}
+//
+//func GetValue(data *list.List, value []int) []int {
+//	for e := data.Front(); e != nil; e = e.Next() {
+//		value = append(value, e.Value.(*example).id)
+//	}
+//	return value
+//}
+
 func main() {
-	ctx := context.Background()
-	writer, err := writer.NewWriteNode(ctx,
-		"collection_tag01_seg01",
-		100,
-		"collection_tag01_seg02",
-		200,
-		0)
-	if err != nil {
-		fmt.Println("Can't create write node")
+	//ctx := context.Background()
+	deleteBuffer := list.New()
+	//insertBuffer := list.New()
+	deleteBuffer.PushBack(1)
+	deleteBuffer.PushBack(2)
+	var data []*list.Element
+	for e := deleteBuffer.Front(); e != nil; e = e.Next() {
+		if e.Value.(int) == 1 {
+			data = append(data, e)
+		}
 	}
-	var data1 []*schema.InsertMsg
-	var i int64
-	for i = 0; i < 100; i++ {
-		data1 = append(data1, GetInsertMsg(i))
-	}
-	writer.InsertBatchData(ctx, data1, 99)
-	var data2 []*schema.InsertMsg
-	for i = 100; i < 200; i++ {
-		data2 = append(data2, GetInsertMsg(i))
-	}
-	writer.InsertBatchData(ctx, data2, 199)
-	var deleteData []*schema.DeleteMsg
-	for i = 0; i < 99; i++ {
-		deleteData = append(deleteData, GetDeleteMsg(i))
-	}
-	for i = 100; i < 110; i++ {
-		deleteData = append(deleteData, GetDeleteMsg(i))
-	}
-	writer.DeleteBatchData(ctx, deleteData, 110)
-	kvMap := (*writer.KvStore).GetData(ctx)
-
-	for k, v := range kvMap {
-		fmt.Println(k + ":" + string(v))
-	}
-
+	fmt.Println(data[0].Value.(int))
+	//writeNode := writer.NewWriteNode(
+	//	ctx,
+	//	"",
+	//	)
+	//a := make(map[string]in)
 }

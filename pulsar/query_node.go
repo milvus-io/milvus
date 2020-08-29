@@ -15,7 +15,11 @@ func (qn *QueryNode)doQueryNode(wg sync.WaitGroup) {
 	wg.Add(3)
 	go qn.insert_query(qn.mc.InsertMsg, wg)
 	go qn.delete_query(qn.mc.DeleteMsg, wg)
+<<<<<<< HEAD
+	go qn.search_query(qn.mc.searchMsg, wg)
+=======
 	go qn.search_query(qn.mc.SearchMsg, wg)
+>>>>>>> 1ab497232c9c1179499c456a250dd6e73a3259b2
 	wg.Wait()
 }
 
