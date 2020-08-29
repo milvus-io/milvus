@@ -1,21 +1,52 @@
 #pragma once
 
-#include "dog_segment/Partition.h"
 #include "SegmentDefs.h"
+#include "SegmentBase.h"
+
+//////////////////////////////////////////////////////////////////
 
 namespace milvus::dog_segment {
 
+class Partition {
+public:
+    explicit Partition(std::string& partition_name): partition_name_(partition_name) {}
+
+    const std::vector<SegmentBasePtr> &segments() const {
+      return segments_;
+    }
+
+private:
+    std::string partition_name_;
+    std::vector<SegmentBasePtr> segments_;
+};
+
+using PartitionPtr = std::shared_ptr<Partition>;
+
+//////////////////////////////////////////////////////////////////
+
 class Collection {
 public:
-    explicit Collection(std::string &collection_name, std::string &schema);
+    explicit Collection(std::string &collection_name, std::string &schema)
+        : collection_name_(collection_name), schema_json_(schema) {}
 
     // TODO: set index
-    void set_index();
+    void set_index() {}
 
-    // TODO: config to schema
-    void parse();
+    void parse() {
+      // TODO: config to schema
+    }
 
-    void AddNewPartition();
+public:
+
+//    std::vector<int64_t> Insert() {
+//       for (auto partition: partitions_) {
+//         for (auto segment: partition.segments()) {
+//           if (segment.Status == Status.open) {
+//             segment.Insert()
+//           }
+//         }
+//       }
+//    }
 
 private:
     // TODO: add Index ptr
