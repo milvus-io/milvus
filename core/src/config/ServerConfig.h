@@ -63,6 +63,16 @@ const configEnum SimdMap{
     {"avx512", SimdType::AVX512},
 };
 
+enum ClusteringType {
+    K_MEANS = 1,
+    K_MEANS_PLUS_PLUS,
+};
+
+const configEnum ClusteringMap{
+    {"k-means", ClusteringType::K_MEANS},
+    {"k-means++", ClusteringType::K_MEANS_PLUS_PLUS},
+};
+
 struct ServerConfig {
     using String = ConfigValue<std::string>;
     using Bool = ConfigValue<bool>;
@@ -116,6 +126,7 @@ struct ServerConfig {
         Integer search_combine_nq{0};
         Integer use_blas_threshold{0};
         Integer omp_thread_num{0};
+        Integer clustering_type{0};
         Integer simd_type{0};
     } engine;
 
