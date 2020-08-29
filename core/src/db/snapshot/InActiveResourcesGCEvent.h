@@ -35,14 +35,8 @@ class InActiveResourcesGCEvent : public GCEvent, public Operations {
 
     ~InActiveResourcesGCEvent() = default;
 
-    std::string
-    Name() override {
-        return "InActive";
-    }
-
     Status
     Process(StorePtr store) override {
-        std::cout << "InActiveEvent Process" << std::endl;
         return store->Apply(*this);
     }
 

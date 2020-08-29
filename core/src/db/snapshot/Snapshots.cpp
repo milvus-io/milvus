@@ -10,9 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Snapshots.h"
+
+#include "config/ServerConfig.h"
+#include "db/Constants.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
+#include "db/snapshot/OperationExecutor.h"
 
 namespace milvus::engine::snapshot {
 
@@ -208,6 +212,24 @@ Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
     /* to_release_.push_back(ss_ptr); */
     ss_ptr->UnRef();
     LOG_ENGINE_DEBUG_ << "Snapshot " << ss_ptr->GetID() << " ref_count = " << ss_ptr->ref_count() << " To be removed";
+}
+
+Status
+Snapshots::StartService() {
+    auto meta_path = config.storage.path() + DB_FOLDER;
+    auto store = snapshot::Store::Build(config.general.meta_uri(), meta_path, codec::Codec::instance().GetSuffixSet());
+    snapshot::OperationExecutor::Init(store);
+    snapshot::OperationExecutor::GetInstance().Start();
+    snapshot::EventExecutor::Init(store);
+    snapshot::EventExecutor::GetInstance().Start();
+    return snapshot::Snapshots::GetInstance().Init(store);
+}
+
+Status
+Snapshots::StopService() {
+    snapshot::EventExecutor::GetInstance().Stop();
+    snapshot::OperationExecutor::GetInstance().Stop();
+    return Status::OK();
 }
 
 }  // namespace milvus::engine::snapshot

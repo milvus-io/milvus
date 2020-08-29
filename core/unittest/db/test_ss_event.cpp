@@ -9,8 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <chrono>
-
 #include <gtest/gtest.h>
 
 #include "db/snapshot/InActiveResourcesGCEvent.h"
@@ -106,9 +104,9 @@ TEST_F(EventTest, TestInActiveResGcEvent) {
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     // TODO(yhz): Check if disk file has been deleted
+
     auto event = std::make_shared<InActiveResourcesGCEvent>();
-    EventExecutor::GetInstance().Submit(event, true);
-    status = event->WaitToFinish();
+    status = event->Process(store_);
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     std::vector<FieldElementPtr> field_elements;
@@ -157,7 +155,7 @@ TEST_F(EventTest, TestInActiveResGcEvent) {
 }
 
 TEST_F(EventTest, GcTest) {
-    std::string collection_name = "";
+    std::string collection_name = "event_test_gc_test";
 
     CollectionPtr collection;
     auto cc = Collection(collection_name);
@@ -170,9 +168,8 @@ TEST_F(EventTest, GcTest) {
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     auto event = std::make_shared<ResourceGCEvent<Collection>>(collection);
-    ASSERT_TRUE(EventExecutor::GetInstance().Submit(event, true).ok());
-
-    sleep(1);
+    status = event->Process(store_);
+    ASSERT_TRUE(status.ok()) << status.ToString();
 
     CollectionPtr rcollection;
     status = store_->GetResource<Collection>(collection->GetID(),rcollection);

@@ -57,7 +57,6 @@ class EventExecutor {
 
     Status
     Submit(const EventPtr& evt, bool flush = false) {
-        std::cout << "[GC] Submit " << evt->Name() << std::endl;
         if (evt == nullptr) {
             return Status(SS_INVALID_ARGUMENT_ERROR, "Invalid Resource");
         }
@@ -67,6 +66,10 @@ class EventExecutor {
 
     void
     Start() {
+        if (running_.exchange(true)) {
+            return;
+        }
+
         if (gc_thread_ptr_ == nullptr) {
             gc_thread_ptr_ = std::make_shared<std::thread>(&EventExecutor::GCThread, this);
         }
@@ -78,7 +81,7 @@ class EventExecutor {
 
     void
     Stop() {
-        if (!initialized_.exchange(false)) {
+        if (!running_.exchange(false)) {
             //             executor has been stopped, just return
             return;
         }
@@ -119,14 +122,13 @@ class EventExecutor {
                 }
 
                 /* std::cout << std::this_thread::get_id() << " Dequeue Event " << std::endl; */
-                std::cout << "\n\t[GCThread] GC " << event_front->Name() << std::endl;
                 status = event_front->Process(store_);
                 if (!status.ok()) {
                     LOG_ENGINE_ERROR_ << "EventExecutor Handle Event Error: " << status.ToString();
                 }
             }
 
-            if (!initialized_.load() && cache_queues_.Empty()) {
+            if ((!initialized_.load() || !running_.load()) && cache_queues_.Empty()) {
                 break;
             }
         }
@@ -150,7 +152,7 @@ class EventExecutor {
                 cache_queues_.Put(queue);
             }
 
-            if (!initialized_.load()) {
+            if (!running_.load() || !initialized_.load()) {
                 cache_queues_.Put(nullptr);
                 break;
             }
@@ -159,7 +161,7 @@ class EventExecutor {
 
     void
     Enqueue(const EventPtr& evt, bool flush = false) {
-        if (!initialized_.load()) {
+        if (!initialized_.load() || !running_.load()) {
             LOG_ENGINE_WARNING_ << "GcEvent exiting ...";
             return;
         }
@@ -177,7 +179,7 @@ class EventExecutor {
             }
         }
 
-        if (!initialized_.load() || need_notify) {
+        if (!initialized_.load() || !running_.load() || need_notify) {
             timing_.Notify();
         }
         if (evt != nullptr) {
@@ -194,6 +196,7 @@ class EventExecutor {
     std::shared_ptr<EventQueue> queue_;
     BlockingQueue<std::shared_ptr<EventQueue>> cache_queues_;
     std::atomic_bool initialized_ = false;
+    std::atomic_bool running_ = false;
     StorePtr store_;
 };
 

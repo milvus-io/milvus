@@ -34,26 +34,15 @@ class ResourceGCEvent : public GCEvent {
 
     ~ResourceGCEvent() = default;
 
-    std::string
-    Name() override {
-        return std::string("GCEvent<") + ResourceT::Name + ">: " + std::to_string(res_->GetID());
-    }
-
     Status
     Process(StorePtr store) override {
         /* mark resource as 'deleted' in meta */
-        std::cout << "[GC] Remove " << Name() << std::endl;
         auto sd_op = std::make_shared<SoftDeleteOperation<ResourceT>>(res_->GetID());
-        auto stat = (*sd_op)(store);
-        if (!stat.ok()) {
-            std::cout << "[GC] Remove " << Name() << " fail: " << stat.ToString() << std::endl;
-            return stat;
-        }
+        STATUS_CHECK((*sd_op)(store));
 
         /* TODO: physically clean resource */
         auto res_prefix = store->GetRootPath();
         std::string res_path = GetResPath<ResourceT>(res_prefix, res_);
-        std::cout << "[GC] Remove path " << res_path << std::endl;
         auto do_remove = [&](bool do_throw) -> Status {
             try {
                 if (res_path.empty()) {
@@ -67,11 +56,8 @@ class ResourceGCEvent : public GCEvent {
                 } else {
                     RemoveWithSuffix<ResourceT>(res_, res_path, store->GetSuffixSet());
                 }
-                std::cout << "[GC] Remove path " << res_path << std::endl;
             } catch (const std::experimental::filesystem::filesystem_error& er) {
                 LOG_SERVER_ERROR_ << "[GC] Error when removing path " << res_path << ": " << er.what();
-                std::cout << "[GC] Error when removing path " << res_path << ": " << er.what() << std::endl;
-
                 if (do_throw) {
                     throw;
                 }

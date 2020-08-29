@@ -273,12 +273,12 @@ class Snapshot : public ReferenceProxy {
     DumpResource(const std::string& tag = "") const {
         auto& resources = GetResources<ResourceT>();
         LOG_ENGINE_DEBUG_ << typeid(*this).name() << " Dump " << GetID() << " " << ResourceT::Name << " Start [" << tag
-                  << "]:" << resources.size();
+                          << "]:" << resources.size();
         for (auto& kv : resources) {
             LOG_ENGINE_DEBUG_ << "\t" << kv.second->ToString();
         }
         LOG_ENGINE_DEBUG_ << typeid(*this).name() << " Dump " << GetID() << " " << ResourceT::Name << "  End [" << tag
-                  << "]:" << resources.size();
+                          << "]:" << resources.size();
     }
 
     template <typename T>
