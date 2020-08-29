@@ -18,6 +18,7 @@
 #include <unordered_map>
 
 #include "config/ServerConfig.h"
+#include "db/snapshot/Snapshots.h"
 #include "index/archive/KnowhereResource.h"
 #include "log/LogMgr.h"
 #include "metrics/Metrics.h"
@@ -250,6 +251,8 @@ Server::StartService() {
         goto FAIL;
     }
 
+    engine::snapshot::Snapshots::GetInstance().StartService();
+
     scheduler::StartSchedulerService();
 
     stat = DBWrapper::GetInstance().StartService();
@@ -280,6 +283,7 @@ Server::StopService() {
     grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
     scheduler::StopSchedulerService();
+    engine::snapshot::Snapshots::GetInstance().StopService();
     engine::KnowhereResource::Finalize();
 }
 

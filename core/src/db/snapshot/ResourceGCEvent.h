@@ -48,16 +48,16 @@ class ResourceGCEvent : public GCEvent {
                 if (res_path.empty()) {
                     /* std::cout << "[GC] No remove action for " << res_->ToString() << std::endl; */
                 } else if (std::experimental::filesystem::is_directory(res_path)) {
-                    std::cout << "[GC] Remove DIR " << res_->ToString() << " " << res_path << std::endl;
+                    LOG_ENGINE_DEBUG_ << "[GC] Remove DIR " << res_->ToString() << " " << res_path;
                     auto ok = std::experimental::filesystem::remove_all(res_path);
                 } else if (std::experimental::filesystem::is_regular_file(res_path)) {
-                    std::cout << "[GC] Remove FILE " << res_->ToString() << " " << res_path << std::endl;
+                    LOG_ENGINE_DEBUG_ << "[GC] Remove FILE " << res_->ToString() << " " << res_path;
                     auto ok = std::experimental::filesystem::remove(res_path);
                 } else {
                     RemoveWithSuffix<ResourceT>(res_, res_path, store->GetSuffixSet());
                 }
             } catch (const std::experimental::filesystem::filesystem_error& er) {
-                std::cout << "[GC] " << er.what() << std::endl;
+                LOG_SERVER_ERROR_ << "[GC] Error when removing path " << res_path << ": " << er.what();
                 if (do_throw) {
                     throw;
                 }
@@ -73,7 +73,7 @@ class ResourceGCEvent : public GCEvent {
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            std::cout << "[GC] Retry remove: " << res_path << std::endl;
+            LOG_ENGINE_DEBUG_ << "[GC] Retry remove: " << res_path;
         }
 
         auto hard_delete_meta = [](ID_TYPE id, StorePtr store) -> Status {
@@ -82,7 +82,7 @@ class ResourceGCEvent : public GCEvent {
         };
 
         if (!status.ok()) {
-            std::cout << "[GC] Stale Resource: " << res_path << " need to be cleanup later" << std::endl;
+            LOG_ENGINE_ERROR_ << "[GC] Stale Resource: " << res_path << " need to be cleanup later";
             return status;
         }
 
