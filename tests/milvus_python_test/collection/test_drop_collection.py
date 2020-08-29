@@ -3,6 +3,7 @@ import pytest
 import logging
 import itertools
 from time import sleep
+import threading
 from multiprocessing import Process
 from utils import *
 
@@ -47,6 +48,33 @@ class TestDropCollection:
         collection_name = gen_unique_str(uniq_id)
         with pytest.raises(Exception) as e:
             connect.drop_collection(collection_name)
+
+    @pytest.mark.level(2)
+    def test_create_drop_collection_multithread(self, connect):
+        '''
+        target: test create and drop collection with multithread
+        method: create and drop collection using multithread, 
+        expected: collections are created, and dropped
+        '''
+        threads_num = 8 
+        threads = []
+        collection_names = []
+
+        def create():
+            collection_name = gen_unique_str(collection_id)
+            collection_names.append(collection_name)
+            connect.create_collection(collection_name, default_fields)
+            connect.drop_collection(collection_name)
+        for i in range(threads_num):
+            t = threading.Thread(target=create, args=())
+            threads.append(t)
+            t.start()
+            time.sleep(0.2)
+        for t in threads:
+            t.join()
+        
+        for item in collection_names:
+            assert not connect.has_collection(item)
 
 
 class TestDropCollectionInvalid(object):

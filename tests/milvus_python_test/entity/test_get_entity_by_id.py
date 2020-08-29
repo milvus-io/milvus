@@ -48,8 +48,6 @@ class TestGetBase:
         scope="function",
         params=[
             1,
-            10,
-            100,
             500
         ],
     )
