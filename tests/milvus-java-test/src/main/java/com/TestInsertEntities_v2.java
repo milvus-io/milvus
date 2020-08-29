@@ -11,9 +11,7 @@ import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
@@ -21,11 +19,8 @@ public class TestInsertEntities_v2 {
     int dimension = Constants.dimension;
     String tag = "tag";
     int nb = Constants.nb;
-    int n_list = Constants.n_list;
     List<List<Float>> vectors = Constants.vectors;
     List<ByteBuffer> vectorsBinary = Constants.vectorsBinary;
-    String indexType = Constants.indexType;
-    String metricType = Constants.defaultMetricType;
 
     // case-01
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
