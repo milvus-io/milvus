@@ -16,17 +16,17 @@
 namespace faiss {
 
 /**
- * The algorithm of Kmeans Type
+ * The algorithm of clustering
  */
-enum KmeansType
+enum ClusteringType
 {
-    KMEANS,
-    KMEANS_PLUSPLUS,
-    KMEANS_TWO,
+    K_MEANS,
+    K_MEANS_PLUS_PLUS,
+    K_MEANS_TWO,
 };
 
-//The default algorithm use the KMEANS_PLUSPLUS
-extern KmeansType kmeans_type;
+//The default algorithm use the K_MEANS
+extern ClusteringType clustering_type;
 
 
 /** Class for the clustering parameters. Can be passed to the

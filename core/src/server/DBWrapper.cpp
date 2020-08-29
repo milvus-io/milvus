@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include <faiss/Clustering.h>
 #include <faiss/utils/distances.h>
 
 #include "config/ServerConfig.h"
@@ -77,6 +78,17 @@ DBWrapper::StartService() {
     // init faiss global variable
     int64_t use_blas_threshold = config.engine.use_blas_threshold();
     faiss::distance_compute_blas_threshold = use_blas_threshold;
+
+    int64_t clustering_type = config.engine.clustering_type();
+    switch (clustering_type) {
+        case ClusteringType::K_MEANS:
+        default:
+            faiss::clustering_type = faiss::ClusteringType::K_MEANS;
+            break;
+        case ClusteringType::K_MEANS_PLUS_PLUS:
+            faiss::clustering_type = faiss::ClusteringType::K_MEANS_PLUS_PLUS;
+            break;
+    }
 
     // create db root folder
     s = CommonUtil::CreateDirectory(opt.meta_.path_);
