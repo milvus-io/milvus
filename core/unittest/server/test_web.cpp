@@ -295,10 +295,13 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("GET", "/collections/{collection_name}/entities", getEntityByID,
              PATH(String, collection_name, "collection_name"), QUERY(String, ids))
 
+    API_CALL("GET", "/collections/{collection_name}/entities", search,
+             PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
+
     API_CALL("POST", "/collections/{collection_name}/entities", insert,
              PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
 
-    API_CALL("PUT", "/collections/{collection_name}/entities", entityOp,
+    API_CALL("DELETE", "/collections/{collection_name}/entities", deleteOp,
              PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
 
     API_CALL("GET", "/system/{msg}", cmd, PATH(String, cmd_str, "msg"), QUERY(String, action), QUERY(String, target))
@@ -813,7 +816,7 @@ TEST_F(WebControllerTest, SEARCH) {
         }
     })";
 
-    response = client_ptr->entityOp(collection_name.c_str(), query_str.c_str(), connection_ptr);
+    response = client_ptr->search(collection_name.c_str(), query_str.c_str(), connection_ptr);
     //    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDtoT>(object_mapper.get());
     //    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, error_dto->code);
     auto result_json = nlohmann::json::parse(response->readBodyToString()->std_str());
@@ -862,36 +865,46 @@ TEST_F(WebControllerTest, INDEX) {
             break;
         }
     }
-    //
-    //    //    index_json["index_type"] = milvus::server::web::IndexMap.at(milvus::engine::FAISS_IDMAP);
-    //
-    //    // missing index `params`
-    //    response = client_ptr->createIndex(collection_name.c_str(), index_json.dump().c_str(), connection_ptr);
-    //    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-    //
-    //    index_json["params"] = nlohmann::json::parse("{\"nlist\": 10}");
-    //    response = client_ptr->createIndex(collection_name.c_str(), index_json.dump().c_str(), connection_ptr);
-    //    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-    //
-    //    // drop index
-    //    response = client_ptr->dropIndex(collection_name.c_str(), connection_ptr);
-    //    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
-    //
-    //    // create index without existing collection
-    //    response = client_ptr->createIndex((collection_name + "fgafafafafafUUUUUUa124254").c_str(),
-    //                                       index_json.dump().c_str(), connection_ptr);
-    //    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
-    //
-    //    // invalid index type
-    //    index_json["index_type"] = "J46";
-    //    response = client_ptr->createIndex(collection_name.c_str(), index_json.dump().c_str(), connection_ptr);
-    //    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
-    //    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDtoT>(object_mapper.get());
-    //    ASSERT_EQ((int64_t)milvus::server::web::StatusCode::ILLEGAL_INDEX_TYPE, result_dto->code);
-    //
-    //    // drop index
-    //    response = client_ptr->dropIndex(collection_name.c_str(), connection_ptr);
-    //    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, DELETE_BY_ID) {
+    auto collection_name = "test_delete_by_id_collection_test" + RandomName();
+    nlohmann::json mapping_json;
+    CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
+
+    nlohmann::json insert_json;
+    GenEntities(NB, DIM, insert_json);
+    auto response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
+
+    auto insert_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(insert_result_json.contains("ids"));
+    auto ids_json = insert_result_json["ids"];
+    ASSERT_TRUE(ids_json.is_array());
+
+    auto status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
+    ASSERT_TRUE(status.ok());
+
+    std::vector<std::string> ids;
+    for (auto& id : ids_json) {
+        ids.emplace_back(id.get<std::string>());
+    }
+
+    std::string offset = "0";
+    std::string page_size = "10";
+    response = client_ptr->getEntity(collection_name.c_str(), offset.c_str(), page_size.c_str(), "", connection_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    auto delete_ids = std::vector<std::string>(ids.begin(), ids.begin() + 10);
+
+    nlohmann::json delete_json;
+    delete_json["ids"] = delete_ids;
+
+    response = client_ptr->deleteOp(collection_name.c_str(), delete_json.dump().c_str(), connection_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
+    ASSERT_TRUE(status.ok());
 
     // insert data and create index
     //    auto status = InsertData(client_ptr, connection_ptr, collection_name, 64, 200);
