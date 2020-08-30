@@ -26,7 +26,6 @@
 #include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
@@ -61,27 +60,7 @@ SegmentWriter::Initialize() {
     const engine::SegmentVisitor::IdMapT& field_map = segment_visitor_->GetFieldVisitors();
     for (auto& iter : field_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
-        std::string name = field->GetName();
-        engine::DataType ftype = static_cast<engine::DataType>(field->GetFtype());
-        if (engine::IsVectorField(field)) {
-            json params = field->GetParams();
-            if (params.find(knowhere::meta::DIM) == params.end()) {
-                std::string msg = "Vector field params must contain: dimension";
-                LOG_SERVER_ERROR_ << msg;
-                return Status(DB_ERROR, msg);
-            }
-
-            int64_t field_width = 0;
-            int64_t dimension = params[knowhere::meta::DIM];
-            if (ftype == engine::DataType::VECTOR_BINARY) {
-                field_width += (dimension / 8);
-            } else {
-                field_width += (dimension * sizeof(float));
-            }
-            segment_ptr_->AddField(name, ftype, field_width);
-        } else {
-            segment_ptr_->AddField(name, ftype);
-        }
+        STATUS_CHECK(segment_ptr_->AddField(field));
     }
 
     return Status::OK();
@@ -113,16 +92,9 @@ SegmentWriter::Serialize() {
 
 Status
 SegmentWriter::WriteField(const std::string& file_path, const engine::BinaryDataPtr& raw) {
-    try {
-        auto& ss_codec = codec::Codec::instance();
-        ss_codec.GetBlockFormat()->Write(fs_ptr_, file_path, raw);
-    } catch (std::exception& e) {
-        std::string err_msg = "Failed to write field: " + std::string(e.what());
-        LOG_ENGINE_ERROR_ << err_msg;
+    auto& ss_codec = codec::Codec::instance();
+    STATUS_CHECK(ss_codec.GetBlockFormat()->Write(fs_ptr_, file_path, raw));
 
-        engine::utils::SendExitSignal();
-        return Status(SERVER_WRITE_ERROR, err_msg);
-    }
     return Status::OK();
 }
 
@@ -158,49 +130,41 @@ SegmentWriter::WriteFields() {
 
 Status
 SegmentWriter::WriteBloomFilter() {
-    try {
-        TimeRecorder recorder("SegmentWriter::WriteBloomFilter");
+    TimeRecorder recorder("SegmentWriter::WriteBloomFilter");
 
-        engine::BinaryDataPtr uid_data;
-        auto status = segment_ptr_->GetFixedFieldData(engine::FIELD_UID, uid_data);
-        if (!status.ok()) {
-            return status;
+    engine::BinaryDataPtr uid_data;
+    auto status = segment_ptr_->GetFixedFieldData(engine::FIELD_UID, uid_data);
+    if (!status.ok()) {
+        return status;
+    }
+
+    auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+    auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
+    auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
+    if (uid_blf_visitor && uid_blf_visitor->GetFile()) {
+        auto segment_file = uid_blf_visitor->GetFile();
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
+
+        auto& ss_codec = codec::Codec::instance();
+        segment::IdBloomFilterPtr bloom_filter_ptr;
+        STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr));
+
+        auto uids = reinterpret_cast<int64_t*>(uid_data->data_.data());
+        int64_t row_count = segment_ptr_->GetRowCount();
+        for (int64_t i = 0; i < row_count; i++) {
+            bloom_filter_ptr->Add(uids[i]);
         }
+        segment_ptr_->SetBloomFilter(bloom_filter_ptr);
 
-        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
-        auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
-        auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
-        if (uid_blf_visitor && uid_blf_visitor->GetFile()) {
-            auto segment_file = uid_blf_visitor->GetFile();
-            std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
+        recorder.RecordSection("Initialize bloom filter");
 
-            auto& ss_codec = codec::Codec::instance();
-            segment::IdBloomFilterPtr bloom_filter_ptr;
-            ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
+        STATUS_CHECK(WriteBloomFilter(file_path, segment_ptr_->GetBloomFilter()));
 
-            int64_t* uids = (int64_t*)(uid_data->data_.data());
-            int64_t row_count = segment_ptr_->GetRowCount();
-            for (int64_t i = 0; i < row_count; i++) {
-                bloom_filter_ptr->Add(uids[i]);
-            }
-            segment_ptr_->SetBloomFilter(bloom_filter_ptr);
-
-            recorder.RecordSection("Initialize bloom filter");
-
-            STATUS_CHECK(WriteBloomFilter(file_path, segment_ptr_->GetBloomFilter()));
-
-            auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::IdBloomFilterFormat::FilePostfix());
-            segment_file->SetSize(file_size);
-        } else {
-            return Status(DB_ERROR, "Bloom filter element missed in snapshot");
-        }
-    } catch (std::exception& e) {
-        std::string err_msg = "Failed to write vectors: " + std::string(e.what());
-        LOG_ENGINE_ERROR_ << err_msg;
-
-        engine::utils::SendExitSignal();
-        return Status(SERVER_WRITE_ERROR, err_msg);
+        auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::IdBloomFilterFormat::FilePostfix());
+        segment_file->SetSize(file_size);
+    } else {
+        return Status(DB_ERROR, "Bloom filter element missed in snapshot");
     }
 
     return Status::OK();
@@ -209,11 +173,7 @@ SegmentWriter::WriteBloomFilter() {
 Status
 SegmentWriter::CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr) {
     auto& ss_codec = codec::Codec::instance();
-    try {
-        ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr);
-    } catch (std::exception& er) {
-        return Status(DB_ERROR, "Create a new bloom filter fail: " + std::string(er.what()));
-    }
+    STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr));
 
     return Status::OK();
 }
@@ -224,18 +184,10 @@ SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilte
         return Status(DB_ERROR, "WriteBloomFilter: null pointer");
     }
 
-    try {
-        TimeRecorderAuto recorder("SegmentWriter::WriteBloomFilter: " + file_path);
+    TimeRecorderAuto recorder("SegmentWriter::WriteBloomFilter: " + file_path);
 
-        auto& ss_codec = codec::Codec::instance();
-        ss_codec.GetIdBloomFilterFormat()->Write(fs_ptr_, file_path, id_bloom_filter_ptr);
-    } catch (std::exception& e) {
-        std::string err_msg = "Failed to write bloom filter: " + std::string(e.what());
-        LOG_ENGINE_ERROR_ << err_msg;
-
-        engine::utils::SendExitSignal();
-        return Status(SERVER_WRITE_ERROR, err_msg);
-    }
+    auto& ss_codec = codec::Codec::instance();
+    STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Write(fs_ptr_, file_path, id_bloom_filter_ptr));
 
     return Status::OK();
 }
@@ -267,18 +219,11 @@ SegmentWriter::WriteDeletedDocs(const std::string& file_path, const DeletedDocsP
         return Status::OK();
     }
 
-    try {
-        TimeRecorderAuto recorder("SegmentWriter::WriteDeletedDocs: " + file_path);
+    TimeRecorderAuto recorder("SegmentWriter::WriteDeletedDocs: " + file_path);
 
-        auto& ss_codec = codec::Codec::instance();
-        ss_codec.GetDeletedDocsFormat()->Write(fs_ptr_, file_path, deleted_docs);
-    } catch (std::exception& e) {
-        std::string err_msg = "Failed to write deleted docs: " + std::string(e.what());
-        LOG_ENGINE_ERROR_ << err_msg;
+    auto& ss_codec = codec::Codec::instance();
+    STATUS_CHECK(ss_codec.GetDeletedDocsFormat()->Write(fs_ptr_, file_path, deleted_docs));
 
-        engine::utils::SendExitSignal();
-        return Status(SERVER_WRITE_ERROR, err_msg);
-    }
     return Status::OK();
 }
 
@@ -289,7 +234,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     }
 
     // check conflict
-    int64_t src_id, target_id;
+    int64_t src_id = 0, target_id = 0;
     auto status = GetSegmentID(target_id);
     if (!status.ok()) {
         return status;
@@ -359,7 +304,7 @@ SegmentWriter::RowCount() {
 }
 
 Status
-SegmentWriter::LoadUids(std::vector<engine::id_t>& uids) {
+SegmentWriter::LoadUids(std::vector<engine::idx_t>& uids) {
     engine::BinaryDataPtr raw;
     auto status = segment_ptr_->GetFixedFieldData(engine::FIELD_UID, raw);
     if (!status.ok()) {
@@ -371,14 +316,14 @@ SegmentWriter::LoadUids(std::vector<engine::id_t>& uids) {
         return Status(DB_ERROR, "Invalid id field");
     }
 
-    if (raw->data_.size() % sizeof(engine::id_t) != 0) {
+    if (raw->data_.size() % sizeof(engine::idx_t) != 0) {
         std::string err_msg = "Failed to load uids: illegal file size";
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
 
     uids.clear();
-    uids.resize(raw->data_.size() / sizeof(engine::id_t));
+    uids.resize(raw->data_.size() / sizeof(engine::idx_t));
     memcpy(uids.data(), raw->data_.data(), raw->data_.size());
 
     return Status::OK();
@@ -413,7 +358,7 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
                 auto segment_file = element_visitor->GetFile();
                 std::string file_path =
                     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
-                ss_codec.GetVectorIndexFormat()->WriteIndex(fs_ptr_, file_path, index);
+                STATUS_CHECK(ss_codec.GetVectorIndexFormat()->WriteIndex(fs_ptr_, file_path, index));
 
                 auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::VectorIndexFormat::FilePostfix());
                 segment_file->SetSize(file_size);
@@ -422,12 +367,12 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
 
         // serialize compress file
         {
-            auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS_SQ8);
+            auto element_visitor = field->GetElementVisitor(engine::FieldElementType::FET_COMPRESS);
             if (element_visitor && element_visitor->GetFile()) {
                 auto segment_file = element_visitor->GetFile();
                 std::string file_path =
                     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
-                ss_codec.GetVectorIndexFormat()->WriteCompress(fs_ptr_, file_path, index);
+                STATUS_CHECK(ss_codec.GetVectorIndexFormat()->WriteCompress(fs_ptr_, file_path, index));
 
                 auto file_size =
                     milvus::CommonUtil::GetFileSize(file_path + codec::VectorCompressFormat::FilePostfix());
@@ -475,7 +420,7 @@ SegmentWriter::WriteStructuredIndex(const std::string& field_name) {
             auto segment_file = element_visitor->GetFile();
             std::string file_path =
                 engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
-            ss_codec.GetStructuredIndexFormat()->Write(fs_ptr_, file_path, field_type, index);
+            STATUS_CHECK(ss_codec.GetStructuredIndexFormat()->Write(fs_ptr_, file_path, field_type, index));
 
             auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::StructuredIndexFormat::FilePostfix());
             segment_file->SetSize(file_size);

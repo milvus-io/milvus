@@ -294,7 +294,7 @@ message Command {
  * @index_name: a name for index provided by user, unique within this field
  * @extra_params: index parameters in json format
  *    for vector field:
- *        extra_params["index_type"] = one of the values: IDMAP, IVFLAT, IVFSQ8, NSGMIX, IVFSQ8H,
+ *        extra_params["index_type"] = one of the values: FLAT, IVF_LAT, IVF_SQ8, NSGMIX, IVFSQ8H,
  *                                                        PQ, HNSW, HNSW_SQ8NM, ANNOY
  *        extra_params["metric_type"] = one of the values: L2, IP, HAMMING, JACCARD, TANIMOTO
  *                                                         SUBSTRUCTURE, SUPERSTRUCTURE

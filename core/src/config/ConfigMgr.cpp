@@ -12,6 +12,7 @@
 #include <yaml-cpp/yaml.h>
 #include <cstring>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <unordered_map>
 
 #include "config/ConfigMgr.h"
@@ -99,9 +100,6 @@ ConfigMgr::ConfigMgr() {
         {"storage.auto_flush_interval",
          CreateIntegerConfig("storage.auto_flush_interval", true, 0, std::numeric_limits<int64_t>::max(),
                              &config.storage.auto_flush_interval.value, 1, nullptr, nullptr)},
-        {"storage.file_cleanup_timeout",
-         CreateIntegerConfig("storage.file_cleanup_timeout", false, 0, 3600, &config.storage.file_cleanup_timeout.value,
-                             10, nullptr, nullptr)},
 
         /* wal */
         {"wal.enable", CreateBoolConfig("wal.enable", false, &config.wal.enable.value, true, nullptr, nullptr)},
@@ -167,6 +165,9 @@ ConfigMgr::ConfigMgr() {
 
         /* invisible */
         /* engine */
+        {"engine.build_index_threshold",
+         CreateIntegerConfig("engine.build_index_threshold", true, 0, std::numeric_limits<int64_t>::max(),
+                             &config.engine.build_index_threshold.value, 4096, nullptr, nullptr)},
         {"engine.search_combine_nq",
          CreateIntegerConfig("engine.search_combine_nq", true, 0, std::numeric_limits<int64_t>::max(),
                              &config.engine.search_combine_nq.value, 64, nullptr, nullptr)},
@@ -176,16 +177,14 @@ ConfigMgr::ConfigMgr() {
         {"engine.omp_thread_num",
          CreateIntegerConfig("engine.omp_thread_num", true, 0, std::numeric_limits<int64_t>::max(),
                              &config.engine.omp_thread_num.value, 0, nullptr, nullptr)},
+        {"engine.clustering_type",
+         CreateEnumConfig("engine.clustering_type", false, &ClusteringMap, &config.engine.clustering_type.value,
+                          ClusteringType::K_MEANS, nullptr, nullptr)},
         {"engine.simd_type", CreateEnumConfig("engine.simd_type", false, &SimdMap, &config.engine.simd_type.value,
                                               SimdType::AUTO, nullptr, nullptr)},
 
-        /* db */
-        {"db.archive_disk_threshold",
-         CreateFloatingConfig("db.archive_disk_threshold", false, 0.0, 1.0, &config.db.archive_disk_threshold.value,
-                              0.0, nullptr, nullptr)},
-        {"db.archive_days_threshold",
-         CreateIntegerConfig("db.archive_days_threshold", false, 0, std::numeric_limits<int64_t>::max(),
-                             &config.db.archive_days_threshold.value, 0, nullptr, nullptr)},
+        {"system.lock.enable",
+         CreateBoolConfig("system.lock.enable", false, &config.system.lock.enable.value, true, nullptr, nullptr)},
     };
 }
 
@@ -227,7 +226,7 @@ ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
             throw ConfigStatus(SetReturn::IMMUTABLE, "Config " + name + " is not modifiable");
         }
     } catch (ConfigStatus& cs) {
-        throw cs;
+        throw;
     } catch (...) {
         throw "Config " + name + " not found.";
     }
@@ -254,6 +253,16 @@ ConfigMgr::Dump() const {
     return ss.str();
 }
 
+std::string
+ConfigMgr::JsonDump() const {
+    nlohmann::json j;
+    for (auto& kv : config_list_) {
+        auto& config = kv.second;
+        j[config->name_] = config->Get();
+    }
+    return j.dump();
+}
+
 void
 ConfigMgr::Attach(const std::string& name, ConfigObserver* observer) {
     std::lock_guard<std::mutex> lock(observer_mutex_);
@@ -263,8 +272,9 @@ ConfigMgr::Attach(const std::string& name, ConfigObserver* observer) {
 void
 ConfigMgr::Detach(const std::string& name, ConfigObserver* observer) {
     std::lock_guard<std::mutex> lock(observer_mutex_);
-    if (observers_.find(name) == observers_.end())
+    if (observers_.find(name) == observers_.end()) {
         return;
+    }
     auto& ob_list = observers_[name];
     ob_list.remove(observer);
 }
@@ -272,8 +282,9 @@ ConfigMgr::Detach(const std::string& name, ConfigObserver* observer) {
 void
 ConfigMgr::Notify(const std::string& name) {
     std::lock_guard<std::mutex> lock(observer_mutex_);
-    if (observers_.find(name) == observers_.end())
+    if (observers_.find(name) == observers_.end()) {
         return;
+    }
     auto& ob_list = observers_[name];
     for (auto& ob : ob_list) {
         ob->ConfigUpdate(name);

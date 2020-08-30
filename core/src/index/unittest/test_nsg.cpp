@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 #include <memory>
 
@@ -79,7 +79,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     fiu_init(0);
     // untrained index
     {
-        ASSERT_ANY_THROW(index_->Serialize());
+        ASSERT_ANY_THROW(index_->Serialize(search_conf));
         ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf));
         ASSERT_ANY_THROW(index_->Add(base_dataset, search_conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, search_conf));
@@ -89,7 +89,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     index_->BuildAll(base_dataset, train_conf);
 
     // Serialize and Load before Query
-    milvus::knowhere::BinarySet bs = index_->Serialize();
+    milvus::knowhere::BinarySet bs = index_->Serialize(search_conf);
 
     int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
     int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
@@ -110,7 +110,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     new_index_1->BuildAll(base_dataset, train_conf);
 
     // Serialize and Load before Query
-    bs = new_index_1->Serialize();
+    bs = new_index_1->Serialize(search_conf);
 
     dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
     rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
@@ -151,7 +151,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
     index_->Train(base_dataset, train_conf);
 
     // Serialize and Load before Query
-    milvus::knowhere::BinarySet bs = index_->Serialize();
+    milvus::knowhere::BinarySet bs = index_->Serialize(search_conf);
 
     int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
     int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
@@ -180,7 +180,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
     index_->SetBlacklist(bitset);
 
     // Serialize and Load before Query
-    bs = index_->Serialize();
+    bs = index_->Serialize(search_conf);
 
     dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
     rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);

@@ -32,7 +32,7 @@ class MergeManagerImpl : public MergeManager {
     explicit MergeManagerImpl(const DBOptions& options);
 
     Status
-    MergeFiles(const std::string& collection_name, MergeStrategyType type) override;
+    MergeSegments(int64_t collection_id, MergeStrategyType type) override;
 
  private:
     Status

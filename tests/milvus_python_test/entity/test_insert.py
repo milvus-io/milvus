@@ -194,7 +194,6 @@ class TestInsertBase:
         res_count = connect.count_entities(id_collection)
         assert res_count == nb
 
-    # TODO
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_ids_fields(self, connect, get_filter_field, get_vector_field):
         '''
@@ -221,8 +220,9 @@ class TestInsertBase:
         assert res_count == nb
 
     # TODO: assert exception && enable
+    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def _test_insert_twice_ids_no_ids(self, connect, id_collection):
+    def test_insert_twice_ids_no_ids(self, connect, id_collection):
         '''
         target: check the result of insert, with params ids and no ids
         method: test insert vectors twice, use customize ids first, and then use no ids
@@ -234,8 +234,9 @@ class TestInsertBase:
             res_ids_new = connect.insert(id_collection, entities)
 
     # TODO: assert exception && enable
+    @pytest.mark.level(2)
     @pytest.mark.timeout(ADD_TIMEOUT)
-    def _test_insert_twice_not_ids_ids(self, connect, id_collection):
+    def test_insert_twice_not_ids_ids(self, connect, id_collection):
         '''
         target: check the result of insert, with params ids and no ids
         method: test insert vectors twice, use not ids first, and then use customize ids
@@ -268,7 +269,6 @@ class TestInsertBase:
         with pytest.raises(Exception) as e:
             res_ids = connect.insert(collection, entity, ids)
 
-    # TODO
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_ids_fields(self, connect, get_filter_field, get_vector_field):
         '''
@@ -394,25 +394,25 @@ class TestInsertBase:
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
-    # TODO: Python sdk needs to do check
-    def _test_insert_with_field_type_not_match(self, connect, collection):
+    @pytest.mark.level(2)
+    def test_insert_with_field_type_not_match(self, connect, collection):
         '''
         target: test insert entities, with the entity field type updated
         method: update entity field type
         expected: error raised
         '''
-        tmp_entity = update_field_type(copy.deepcopy(entity), DataType.INT64, DataType.FLOAT)
+        tmp_entity = update_field_type(copy.deepcopy(entity), "int64", DataType.FLOAT)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
-    # TODO: Python sdk needs to do check
-    def _test_insert_with_field_value_not_match(self, connect, collection):
+    @pytest.mark.level(2)
+    def test_insert_with_field_value_not_match(self, connect, collection):
         '''
         target: test insert entities, with the entity field value updated
         method: update entity field value
         expected: error raised
         '''
-        tmp_entity = update_field_value(copy.deepcopy(entity), 'int64', 's')
+        tmp_entity = update_field_value(copy.deepcopy(entity), DataType.FLOAT, 's')
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -519,7 +519,7 @@ class TestInsertBase:
         assert res_count == thread_num * nb
 
 
-class TestAddAsync:
+class TestInsertAsync:
     @pytest.fixture(scope="function", autouse=True)
     def skip_http_check(self, args):
         if args["handler"] == "HTTP":
@@ -539,9 +539,9 @@ class TestAddAsync:
         logging.getLogger().info("In callback check status")
         assert not result
 
-    def check_status_not_ok(self, status, result):
+    def check_result(self, result):
         logging.getLogger().info("In callback check status")
-        assert not status.OK()
+        assert result
 
     def test_insert_async(self, connect, collection, insert_count):
         '''
@@ -578,14 +578,15 @@ class TestAddAsync:
         future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_status)
         future.done()
 
-    def _test_insert_async_long(self, connect, collection):
+    @pytest.mark.level(2)
+    def test_insert_async_long(self, connect, collection):
         '''
         target: test insert vectors with different length of vectors
         method: set different vectors as insert method params
         expected: length of ids is equal to the length of vectors
         '''
         nb = 50000
-        future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_status)
+        future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_result)
         result = future.result()
         assert len(result) == nb
         connect.flush([collection])
@@ -593,14 +594,14 @@ class TestAddAsync:
         logging.getLogger().info(count)
         assert count == nb
 
-    # TODO:
-    def _test_insert_async_callback_timeout(self, connect, collection):
+    @pytest.mark.level(2)
+    def test_insert_async_callback_timeout(self, connect, collection):
         '''
         target: test insert vectors with different length of vectors
         method: set different vectors as insert method params
         expected: length of ids is equal to the length of vectors
         '''
-        nb = 500000
+        nb = 100000
         future = connect.insert(collection, gen_entities(nb), _async=True, _callback=self.check_status, timeout=1)
         with pytest.raises(Exception) as e:
             result = future.result()
@@ -922,28 +923,6 @@ class TestInsertInvalidBinary(object):
     )
     def get_field_vectors_value(self, request):
         yield request.param
-
-    @pytest.mark.level(2)
-    def test_insert_ids_invalid(self, connect, binary_id_collection, get_entity_id):
-        '''
-        target: test insert, with using customize ids, which are not int64
-        method: create collection and insert entities in it
-        expected: raise an exception
-        '''
-        entity_id = get_entity_id
-        ids = [entity_id for _ in range(nb)]
-        with pytest.raises(Exception):
-            connect.insert(binary_id_collection, binary_entities, ids)
-
-    @pytest.mark.level(2)
-    def test_insert_with_invalid_tag_name(self, connect, binary_collection, get_tag_name):
-        tag_name = get_tag_name
-        connect.create_partition(binary_collection, tag)
-        if tag_name is not None:
-            with pytest.raises(Exception):
-                connect.insert(binary_collection, binary_entity, partition_tag=tag_name)
-        else:
-            connect.insert(binary_collection, binary_entity, partition_tag=tag_name)
 
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_name(self, connect, binary_collection, get_field_name):

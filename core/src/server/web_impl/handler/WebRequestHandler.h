@@ -85,7 +85,11 @@ class WebRequestHandler {
     IsBinaryCollection(const std::string& collection_name, bool& bin);
 
     Status
-    CopyRecordsFromJson(const nlohmann::json& json, engine::VectorsData& vectors, bool bin);
+    CopyRecordsFromJson(const nlohmann::json& json, std::vector<uint8_t>& vectors_data, bool bin);
+
+    Status
+    CopyData2Json(const engine::DataChunkPtr& data_chunk, const engine::snapshot::FieldElementMappings& field_mappings,
+                  const std::vector<int64_t>& id_array, nlohmann::json& json_res);
 
  protected:
     Status
@@ -97,6 +101,10 @@ class WebRequestHandler {
     Status
     GetSegmentVectors(const std::string& collection_name, int64_t segment_id, int64_t page_size, int64_t offset,
                       nlohmann::json& json_out);
+
+    Status
+    GetPageEntities(const std::string& collection_name, const std::string& partition_tag, const int64_t page_size,
+                    const int64_t offset, nlohmann::json& json_out);
 
     Status
     GetSegmentIds(const std::string& collection_name, int64_t segment_id, int64_t page_size, int64_t offset,
@@ -124,19 +132,18 @@ class WebRequestHandler {
     SetConfig(const nlohmann::json& json, std::string& result_str);
 
     Status
-    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& boolean_query);
+    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& boolean_query, std::string& field_name,
+                         query::QueryPtr& query_ptr);
 
     Status
-    ProcessBoolQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query);
+    ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
+                            query::QueryPtr& query_ptr);
 
     Status
     Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
 
     Status
     DeleteByIDs(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);
-
-    Status
-    GetVectorsByIDs(const std::string& collection_name, const std::vector<int64_t>& ids, nlohmann::json& json_out);
 
     Status
     GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
@@ -149,61 +156,59 @@ class WebRequestHandler {
     }
 
  public:
-    StatusDto::ObjectWrapper
-    GetDevices(DevicesDto::ObjectWrapper& devices);
+    StatusDtoT
+    GetDevices(DevicesDtoT& devices);
 
-    StatusDto::ObjectWrapper
-    GetAdvancedConfig(AdvancedConfigDto::ObjectWrapper& config);
+    StatusDtoT
+    GetAdvancedConfig(AdvancedConfigDtoT& config);
 
-    StatusDto::ObjectWrapper
-    SetAdvancedConfig(const AdvancedConfigDto::ObjectWrapper& config);
+    StatusDtoT
+    SetAdvancedConfig(const AdvancedConfigDtoT& config);
 
 #ifdef MILVUS_GPU_VERSION
-    StatusDto::ObjectWrapper
-    GetGpuConfig(GPUConfigDto::ObjectWrapper& gpu_config_dto);
+    StatusDtoT
+    GetGpuConfig(GPUConfigDtoT& gpu_config_dto);
 
-    StatusDto::ObjectWrapper
-    SetGpuConfig(const GPUConfigDto::ObjectWrapper& gpu_config_dto);
+    StatusDtoT
+    SetGpuConfig(const GPUConfigDtoT& gpu_config_dto);
 #endif
 
-    StatusDto::ObjectWrapper
-    CreateCollection(const CollectionRequestDto::ObjectWrapper& table_schema);
-    StatusDto::ObjectWrapper
+    StatusDtoT
+    CreateCollection(const milvus::server::web::OString& body);
+
+    StatusDtoT
     ShowCollections(const OQueryParams& query_params, OString& result);
 
-    StatusDto::ObjectWrapper
-    CreateHybridCollection(const OString& body);
-
-    StatusDto::ObjectWrapper
+    StatusDtoT
     GetCollection(const OString& collection_name, const OQueryParams& query_params, OString& result);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     DropCollection(const OString& collection_name);
 
-    StatusDto::ObjectWrapper
-    CreateIndex(const OString& collection_name, const OString& body);
+    StatusDtoT
+    CreateIndex(const OString& collection_name, const OString& field_name, const OString& body);
 
-    StatusDto::ObjectWrapper
-    DropIndex(const OString& collection_name);
+    StatusDtoT
+    DropIndex(const OString& collection_name, const OString& field_name);
 
-    StatusDto::ObjectWrapper
-    CreatePartition(const OString& collection_name, const PartitionRequestDto::ObjectWrapper& param);
+    StatusDtoT
+    CreatePartition(const OString& collection_name, const PartitionRequestDtoT& param);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
-                   PartitionListDto::ObjectWrapper& partition_list_dto);
+                   PartitionListDtoT& partition_list_dto);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     DropPartition(const OString& collection_name, const OString& body);
 
     /***********
      *
      * Segment
      */
-    StatusDto::ObjectWrapper
+    StatusDtoT
     ShowSegments(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     GetSegmentInfo(const OString& collection_name, const OString& segment_name, const OString& info,
                    const OQueryParams& query_params, OString& result);
 
@@ -211,26 +216,26 @@ class WebRequestHandler {
      *
      * Vector
      */
-    StatusDto::ObjectWrapper
-    InsertEntity(const OString& collection_name, const OString& body, VectorIdsDto::ObjectWrapper& ids_dto);
+    StatusDtoT
+    InsertEntity(const OString& collection_name, const OString& body, EntityIdsDtoT& ids_dto);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     GetEntity(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
-    StatusDto::ObjectWrapper
-    VectorsOp(const OString& collection_name, const OString& payload, OString& response);
+    StatusDtoT
+    EntityOp(const OString& collection_name, const OString& payload, OString& response);
 
     /**
      *
      * System
      */
-    StatusDto::ObjectWrapper
+    StatusDtoT
     SystemInfo(const OString& cmd, const OQueryParams& query_params, OString& response_str);
 
-    StatusDto::ObjectWrapper
+    StatusDtoT
     SystemOp(const OString& op, const OString& body_str, OString& response_str);
 
  public:

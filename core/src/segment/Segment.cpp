@@ -16,6 +16,9 @@
 // under the License.
 
 #include "segment/Segment.h"
+#include "db/SnapshotUtils.h"
+#include "db/snapshot/Snapshots.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/Log.h"
 
 #include <algorithm>
@@ -26,6 +29,51 @@ namespace milvus {
 namespace engine {
 
 const char* COLLECTIONS_FOLDER = "/collections";
+
+Status
+Segment::SetFields(int64_t collection_id) {
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id));
+
+    auto& fields = ss->GetResources<snapshot::Field>();
+    for (auto& kv : fields) {
+        const snapshot::FieldPtr& field = kv.second.Get();
+        STATUS_CHECK(AddField(field));
+    }
+
+    return Status::OK();
+}
+
+Status
+Segment::AddField(const snapshot::FieldPtr& field) {
+    if (field == nullptr) {
+        return Status(DB_ERROR, "Field is null pointer");
+    }
+
+    std::string name = field->GetName();
+    auto ftype = static_cast<DataType>(field->GetFtype());
+    if (IsVectorField(field)) {
+        json params = field->GetParams();
+        if (params.find(knowhere::meta::DIM) == params.end()) {
+            std::string msg = "Vector field params must contain: dimension";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(DB_ERROR, msg);
+        }
+
+        int64_t field_width = 0;
+        int64_t dimension = params[knowhere::meta::DIM];
+        if (ftype == DataType::VECTOR_BINARY) {
+            field_width += (dimension / 8);
+        } else {
+            field_width += (dimension * sizeof(float));
+        }
+        AddField(name, ftype, field_width);
+    } else {
+        AddField(name, ftype);
+    }
+
+    return Status::OK();
+}
 
 Status
 Segment::AddField(const std::string& field_name, DataType field_type, int64_t field_width) {
@@ -67,6 +115,8 @@ Segment::AddField(const std::string& field_name, DataType field_type, int64_t fi
             real_field_width = field_width;
             break;
         }
+        default:
+            break;
     }
 
     field_types_.insert(std::make_pair(field_name, field_type));
@@ -108,9 +158,62 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
     }
 
     // consume
+    AppendChunk(chunk_ptr, from, to);
+
+    return Status::OK();
+}
+
+Status
+Segment::Reserve(const std::vector<std::string>& field_names, int64_t count) {
+    if (count <= 0) {
+        return Status(DB_ERROR, "Invalid input fot segment resize");
+    }
+
+    if (field_names.empty()) {
+        for (auto& width_iter : fixed_fields_width_) {
+            int64_t resize_bytes = count * width_iter.second;
+
+            auto& data = fixed_fields_[width_iter.first];
+            if (data == nullptr) {
+                data = std::make_shared<BinaryData>();
+            }
+            data->data_.resize(resize_bytes);
+        }
+    } else {
+        for (const auto& name : field_names) {
+            auto iter_width = fixed_fields_width_.find(name);
+            if (iter_width == fixed_fields_width_.end()) {
+                return Status(DB_ERROR, "Invalid input fot segment resize");
+            }
+
+            int64_t resize_bytes = count * iter_width->second;
+
+            auto& data = fixed_fields_[name];
+            if (data == nullptr) {
+                data = std::make_shared<BinaryData>();
+            }
+            data->data_.resize(resize_bytes);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
+Segment::AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
+    if (chunk_ptr == nullptr || from < 0 || to < 0 || from > to) {
+        return Status(DB_ERROR, "Invalid input fot segment append");
+    }
+
     int64_t add_count = to - from;
+    if (add_count == 0) {
+        add_count = 1;  // n ~ n also means append the No.n
+    }
     for (auto& width_iter : fixed_fields_width_) {
         auto input = chunk_ptr->fixed_fields_.find(width_iter.first);
+        if (input == chunk_ptr->fixed_fields_.end()) {
+            continue;
+        }
         auto& data = fixed_fields_[width_iter.first];
         if (data == nullptr) {
             fixed_fields_[width_iter.first] = input->second;
@@ -121,7 +224,9 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
         int64_t add_bytes = add_count * width_iter.second;
         int64_t previous_bytes = row_count_ * width_iter.second;
         int64_t target_bytes = previous_bytes + add_bytes;
-        data->data_.resize(target_bytes);
+        if (data->data_.size() < target_bytes) {
+            data->data_.resize(target_bytes);
+        }
         if (input == chunk_ptr->fixed_fields_.end()) {
             // this field is not provided, complicate by 0
             memset(data->data_.data() + origin_bytes, 0, target_bytes - origin_bytes);
@@ -147,7 +252,7 @@ Segment::DeleteEntity(std::vector<offset_t>& offsets) {
         return Status::OK();
     }
     // sort offset in descendant
-    std::sort(offsets.begin(), offsets.end(), std::greater<offset_t>());
+    std::sort(offsets.begin(), offsets.end(), std::greater<>());
 
     // delete entity data from max offset to min offset
     for (auto& pair : fixed_fields_) {
@@ -221,7 +326,7 @@ Segment::SetFixedFieldData(const std::string& field_name, BinaryDataPtr& data) {
     }
 
     fixed_fields_[field_name] = data;
-    if (row_count_ == 0) {
+    if (row_count_ == 0 && width != 0) {
         row_count_ = data->Size() / width;
     }
     return Status::OK();

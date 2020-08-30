@@ -13,27 +13,25 @@
 
 #include "server/web_impl/dto/Dto.h"
 
-namespace milvus {
-namespace server {
-namespace web {
+namespace milvus::server::web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class DeviceInfoDto : public OObject {
-    DTO_INIT(DeviceInfoDto, Object);
+class DeviceInfoDto : public ODTO {
+    DTO_INIT(DeviceInfoDto, DTO);
 
     DTO_FIELD(Int64, memory);
 };
 
-class DevicesDto : public OObject {
-    DTO_INIT(DevicesDto, Object);
+class DevicesDto : public ODTO {
+    DTO_INIT(DevicesDto, DTO);
 
-    DTO_FIELD(DeviceInfoDto::ObjectWrapper, cpu);
-    DTO_FIELD(Fields<DeviceInfoDto::ObjectWrapper>::ObjectWrapper, gpus);
+    DTO_FIELD(Object<DeviceInfoDto>, cpu);
+    DTO_FIELD(Fields<Object<DeviceInfoDto>>, gpus);
 };
 
 #include OATPP_CODEGEN_END(DTO)
 
-} // namespace web
-} // namespace server
-} // namespace milvus
+using DevicesDtoT = oatpp::Object<DevicesDto>;
+
+} // namespace milvus::server::web

@@ -94,6 +94,7 @@ set(depend_libs
         gomp
         gfortran
         pthread
+        fiu
         ngt
         )
 

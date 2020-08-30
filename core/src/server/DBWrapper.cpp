@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include <faiss/Clustering.h>
 #include <faiss/utils/distances.h>
 
 #include "config/ServerConfig.h"
@@ -41,9 +42,7 @@ DBWrapper::StartService() {
     opt.meta_.path_ = path + "/db";
 
     opt.auto_flush_interval_ = config.storage.auto_flush_interval();
-    opt.file_cleanup_timeout_ = config.storage.file_cleanup_timeout();
     opt.metric_enable_ = config.metric.enable();
-    opt.insert_cache_immediately_ = config.cache.cache_insert_data();
     opt.insert_buffer_size_ = config.cache.insert_buffer_size();
 
     if (not config.cluster.enable()) {
@@ -58,16 +57,8 @@ DBWrapper::StartService() {
     }
 
     opt.wal_enable_ = config.wal.enable();
-
-    // disable wal for ci devtest
-    opt.wal_enable_ = false;
-
     if (opt.wal_enable_) {
-        opt.recovery_error_ignore_ = config.wal.recovery_error_ignore();
-        int64_t wal_buffer_size = config.wal.buffer_size();
-        wal_buffer_size /= (1024 * 1024);
-        opt.buffer_size_ = wal_buffer_size;
-        opt.mxlog_path_ = config.wal.path();
+        opt.wal_path_ = config.wal.path();
     }
 
     // engine config
@@ -88,26 +79,22 @@ DBWrapper::StartService() {
     int64_t use_blas_threshold = config.engine.use_blas_threshold();
     faiss::distance_compute_blas_threshold = use_blas_threshold;
 
-    // set archive config
-    engine::ArchiveConf::CriteriaT criterial;
-    int64_t disk = config.db.archive_disk_threshold();
-    int64_t days = config.db.archive_days_threshold();
-
-    if (disk > 0) {
-        criterial[engine::ARCHIVE_CONF_DISK] = disk;
+    int64_t clustering_type = config.engine.clustering_type();
+    switch (clustering_type) {
+        case ClusteringType::K_MEANS:
+        default:
+            faiss::clustering_type = faiss::ClusteringType::K_MEANS;
+            break;
+        case ClusteringType::K_MEANS_PLUS_PLUS:
+            faiss::clustering_type = faiss::ClusteringType::K_MEANS_PLUS_PLUS;
+            break;
     }
-
-    if (days > 0) {
-        criterial[engine::ARCHIVE_CONF_DAYS] = days;
-    }
-    opt.meta_.archive_conf_.SetCriterias(criterial);
 
     // create db root folder
     s = CommonUtil::CreateDirectory(opt.meta_.path_);
     if (!s.ok()) {
         std::cerr << "Error: Failed to create database primary path: " << path
-                  << ". Possible reason: db_config.primary_path is wrong in server_config.yaml or not available."
-                  << std::endl;
+                  << ". Possible reason: db_config.primary_path is wrong in milvus.yaml or not available." << std::endl;
         kill(0, SIGUSR1);
     }
 
@@ -121,20 +108,14 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
-    //    // preload collection
-    //    std::string preload_collections;
-    //    s = config.GetCacheConfigPreloadCollection(preload_collections);
-    //    if (!s.ok()) {
-    //        std::cerr << s.ToString() << std::endl;
-    //        return s;
-    //    }
-    //
-    //    s = PreloadCollections(preload_collections);
-    //    if (!s.ok()) {
-    //        std::cerr << "ERROR! Failed to preload tables: " << preload_collections << std::endl;
-    //        std::cerr << s.ToString() << std::endl;
-    //        kill(0, SIGUSR1);
-    //    }
+    // preload collection
+    std::string preload_collections = config.cache.preload_collection();
+    s = PreloadCollections(preload_collections);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to preload collections: " << preload_collections << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
 
     return Status::OK();
 }
@@ -150,38 +131,39 @@ DBWrapper::StopService() {
     return Status::OK();
 }
 
-// Status
-// DBWrapper::PreloadCollections(const std::string& preload_collections) {
-//    if (preload_collections.empty()) {
-//        // do nothing
-//    } else if (preload_collections == "*") {
-//        // load all tables
-//        // SS TODO: Replace name with id
-//        std::vector<std::string> names;
-//        auto status = db_->AllCollections(names);
-//        if (!status.ok()) {
-//            return status;
-//        }
-//
-//        for (auto& name : names) {
-//            auto status = db_->PreloadCollection(nullptr, name);
-//            if (!status.ok()) {
-//                return status;
-//            }
-//        }
-//    } else {
-//        std::vector<std::string> collection_names;
-//        StringHelpFunctions::SplitStringByDelimeter(preload_collections, ",", collection_names);
-//        for (auto& name : collection_names) {
-//            auto status = db_->PreloadCollection(nullptr, name);
-//            if (!status.ok()) {
-//                return status;
-//            }
-//        }
-//    }
-//
-//    return Status::OK();
-//}
+Status
+DBWrapper::PreloadCollections(const std::string& preload_collections) {
+    if (preload_collections.empty()) {
+        // do nothing
+    } else if (preload_collections == "*") {
+        // load all collections
+        std::vector<std::string> names;
+        auto status = db_->ListCollections(names);
+        if (!status.ok()) {
+            return status;
+        }
+
+        for (auto& name : names) {
+            std::vector<std::string> field_names;  // input empty field names will load all fileds
+            auto status = db_->LoadCollection(nullptr, name, field_names);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+    } else {
+        std::vector<std::string> collection_names;
+        StringHelpFunctions::SplitStringByDelimeter(preload_collections, ",", collection_names);
+        for (auto& name : collection_names) {
+            std::vector<std::string> field_names;  // input empty field names will load all fileds
+            auto status = db_->LoadCollection(nullptr, name, field_names);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+    }
+
+    return Status::OK();
+}
 
 }  // namespace server
 }  // namespace milvus

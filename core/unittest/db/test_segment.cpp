@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 
 #include <string>
@@ -29,7 +29,7 @@ using SegmentVisitor = milvus::engine::SegmentVisitor;
 
 namespace {
 milvus::Status
-CreateCollection(std::shared_ptr<DBImpl> db, const std::string& collection_name, const LSN_TYPE& lsn) {
+CreateCollection(std::shared_ptr<DB> db, const std::string& collection_name, const LSN_TYPE& lsn) {
     CreateCollectionContext context;
     context.lsn = lsn;
     auto collection_schema = std::make_shared<Collection>(collection_name);
@@ -94,7 +94,7 @@ TEST_F(SegmentTest, SegmentTest) {
         break;
     }
 
-    std::vector<milvus::engine::id_t> raw_uids = {123};
+    std::vector<milvus::engine::idx_t> raw_uids = {123};
     std::vector<uint8_t> raw_vectors = {1, 2, 3, 4};
 
     {

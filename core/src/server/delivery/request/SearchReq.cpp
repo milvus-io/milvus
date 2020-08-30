@@ -17,7 +17,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -75,10 +75,16 @@ SearchReq::OnExecute() {
         std::unordered_map<std::string, engine::DataType> field_types;
         for (auto& schema : fields_schema) {
             auto field = schema.first;
-            field_types.insert(std::make_pair(field->GetName(), (engine::DataType)field->GetFtype()));
-            if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
-                field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
+            field_types.insert(std::make_pair(field->GetName(), field->GetFtype()));
+            if (field->GetFtype() == engine::DataType::VECTOR_FLOAT ||
+                field->GetFtype() == engine::DataType::VECTOR_BINARY) {
                 dimension = field->GetParams()[engine::PARAM_DIMENSION];
+                // validate search metric type and DataType match
+                bool is_binary = (field->GetFtype() == engine::DataType::VECTOR_FLOAT) ? false : true;
+                if (query_ptr_->metric_types.find(field->GetName()) != query_ptr_->metric_types.end()) {
+                    auto metric_type = query_ptr_->metric_types.at(field->GetName());
+                    STATUS_CHECK(ValidateSearchMetricType(metric_type, is_binary));
+                }
             }
         }
 

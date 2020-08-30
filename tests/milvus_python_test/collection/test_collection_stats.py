@@ -134,9 +134,8 @@ class TestStatsBase:
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats["row_count"] == nb - 2
+        assert stats["partitions"][0]["row_count"] == nb -2
         assert stats["partitions"][0]["segments"][0]["data_size"] > 0
-        # TODO
-        # assert stats["partitions"][0]["segments"][0]["index_type"] == "FLAT"
 
     def test_get_collection_stats_after_compact_parts(self, connect, collection):
         '''
@@ -228,10 +227,11 @@ class TestStatsBase:
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
-        logging.getLogger().info(stats)
-        assert stats["partitions"][0]["segments"][0]["row_count"] == nb
-        # TODO
-        # assert stats["partitions"][0]["segments"][0]["index_name"] == get_simple_index["index_type"]
+        assert stats["row_count"] == nb
+        for file in stats["partitions"][0]["segments"][0]["files"]:
+            if file["field"] == field_name and file["name"] != "_raw":
+                assert file["data_size"] > 0
+                assert file["index_type"] == get_simple_index["index_type"]
 
     def test_get_collection_stats_after_index_created_ip(self, connect, collection, get_simple_index):
         '''
@@ -245,10 +245,11 @@ class TestStatsBase:
         get_simple_index.update({"metric_type": "IP"})
         connect.create_index(collection, field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
-        logging.getLogger().info(stats)
-        assert stats["partitions"][0]["segments"][0]["row_count"] == nb
-        # TODO
-        # assert stats["partitions"][0]["segments"][0]["index_name"] == get_simple_index["index_type"]
+        assert stats["row_count"] == nb
+        for file in stats["partitions"][0]["segments"][0]["files"]:
+            if file["field"] == field_name and file["name"] != "_raw":
+                assert file["data_size"] > 0
+                assert file["index_type"] == get_simple_index["index_type"]
 
     def test_get_collection_stats_after_index_created_jac(self, connect, binary_collection, get_jaccard_index):
         '''
@@ -260,10 +261,11 @@ class TestStatsBase:
         connect.flush([binary_collection])
         connect.create_index(binary_collection, "binary_vector", get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
-        logging.getLogger().info(stats)
-        assert stats["partitions"][0]["segments"][0]["row_count"] == nb
-        # TODO
-        # assert stats["partitions"][0]["segments"][0]["index_name"] == get_jaccard_index["index_type"]
+        assert stats["row_count"] == nb
+        for file in stats["partitions"][0]["segments"][0]["files"]:
+            if file["field"] == field_name and file["name"] != "_raw":
+                assert file["data_size"] > 0
+                assert file["index_type"] == get_simple_index["index_type"]
 
     def test_get_collection_stats_after_create_different_index(self, connect, collection):
         '''
@@ -276,10 +278,11 @@ class TestStatsBase:
         for index_type in ["IVF_FLAT", "IVF_SQ8"]:
             connect.create_index(collection, field_name, {"index_type": index_type, "params":{"nlist": 1024}, "metric_type": "L2"})
             stats = connect.get_collection_stats(collection)
-            logging.getLogger().info(stats)
-            # TODO
-            # assert stats["partitions"][0]["segments"][0]["index_name"] == index_type
-            assert stats["partitions"][0]["segments"][0]["row_count"] == nb
+            assert stats["row_count"] == nb
+            for file in stats["partitions"][0]["segments"][0]["files"]:
+                if file["field"] == field_name and file["name"] != "_raw":
+                    assert file["data_size"] > 0
+                    assert file["index_type"] == index_type
 
     def test_collection_count_multi_collections(self, connect):
         '''
@@ -301,6 +304,7 @@ class TestStatsBase:
             assert stats["partitions"][0]["segments"][0]["row_count"] == nb
             connect.drop_collection(collection_list[i])
 
+    @pytest.mark.level(2)
     def test_collection_count_multi_collections_indexed(self, connect):
         '''
         target: test collection rows_count is correct or not with multiple collections of L2
@@ -322,10 +326,12 @@ class TestStatsBase:
                 connect.create_index(collection_name, field_name, {"index_type": "IVF_FLAT","params":{ "nlist": 1024}, "metric_type": "L2"})
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
-            assert stats["partitions"][0]["segments"][0]["row_count"] == nb
-            # TODO
-            # if i % 2:
-            #     assert stats["partitions"][0]["segments"][0]["index_name"] == "IVF_SQ8"
-            # else:
-            #     assert stats["partitions"][0]["segments"][0]["index_name"] == "IVF_FLAT"
+            if i % 2:
+                for file in stats["partitions"][0]["segments"][0]["files"]:
+                    if file["field"] == field_name and file["name"] != "_raw":
+                        assert file["index_type"] == "IVF_SQ8"
+            else:
+                for file in stats["partitions"][0]["segments"][0]["files"]:
+                    if file["field"] == field_name and file["name"] != "_raw":
+                        assert file["index_type"] == "IVF_FLAT"
             connect.drop_collection(collection_list[i])

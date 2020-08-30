@@ -19,8 +19,9 @@ namespace knowhere {
 
 ConfAdapterPtr
 AdapterMgr::GetAdapter(const IndexType type) {
-    if (!init_)
+    if (!init_) {
         RegisterAdapter();
+    }
 
     try {
         return collection_.at(type)();

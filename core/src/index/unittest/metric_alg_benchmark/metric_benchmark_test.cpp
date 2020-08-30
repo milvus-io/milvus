@@ -397,9 +397,9 @@ TEST(METRICTEST, BENCHMARK) {
     GenerateData(DIM, NQ, xq.data());
 
     std::vector<float> distance_faiss(NB * NQ);
-    std::vector<float> distance_nsg(NB * NQ);
+    // std::vector<float> distance_nsg(NB * NQ);
     std::vector<float> distance_annoy(NB * NQ);
-    std::vector<float> distance_hnsw(NB * NQ);
+    // std::vector<float> distance_hnsw(NB * NQ);
 
     std::cout << "==========" << std::endl;
     TestMetricAlg(func_map, "FAISS::L2", LOOP, distance_faiss.data(), NB, xb.data(), NQ, xq.data(), DIM);

@@ -13,7 +13,7 @@
 #include "config/ServerConfig.h"
 #include "utils/Log.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <sstream>
 #include <utility>
 

@@ -7,9 +7,11 @@ import threading
 from multiprocessing import Process
 from utils import *
 
+nb = 1000
 collection_id = "info"
 default_fields = gen_default_fields() 
 segment_row_count = 5000
+field_name = "float_vector"
 
 
 class TestInfoBase:
@@ -35,13 +37,23 @@ class TestInfoBase:
     def get_segment_row_count(self, request):
         yield request.param
 
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_simple_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if str(connect._cmd("mode")) == "CPU":
+            if request.param["index_type"] in index_cpu_not_support():
+                pytest.skip("sq8h not support in CPU mode")
+        return request.param
+
     """
     ******************************************************************
       The following cases are used to test `get_collection_info` function, no data in collection
     ******************************************************************
     """
   
-    # TODO
     def test_info_collection_fields(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, check info returned
@@ -57,13 +69,16 @@ class TestInfoBase:
         }
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
-        # assert field_name
-        # assert field_type
-        # assert vector field params
-        # assert metric type
-        # assert dimension
+        assert res['auto_id'] == True
+        assert res['segment_row_count'] == segment_row_count
+        assert len(res["fields"]) == 2
+        for field in res["fields"]:
+            if field["type"] == filter_field:
+                assert field["name"] == filter_field["name"]
+            elif field["type"] == vector_field:
+                assert field["name"] == vector_field["name"]
+                assert field["params"] == vector_field["params"]
 
-    # TODO
     def test_create_collection_segment_row_count(self, connect, get_segment_row_count):
         '''
         target: test create normal collection with different fields
@@ -74,8 +89,18 @@ class TestInfoBase:
         fields = copy.deepcopy(default_fields)
         fields["segment_row_count"] = get_segment_row_count
         connect.create_collection(collection_name, fields)
-        # assert segment size
+        # assert segment row count
+        res = connect.get_collection_info(collection_name)
+        assert res['segment_row_count'] == get_segment_row_count
 
+    def test_get_collection_info_after_index_created(self, connect, collection, get_simple_index):
+        connect.create_index(collection, field_name, get_simple_index)
+        res = connect.get_collection_info(collection)
+        for field in res["fields"]:
+            if field["field"] == field_name:
+                index = field["indexes"][0]
+                assert index["index_type"] == get_simple_index["index_type"]
+                assert index["metric_type"] == get_simple_index["metric_type"]
 
     @pytest.mark.level(2)
     def test_get_collection_info_without_connection(self, collection, dis_connect):
@@ -98,6 +123,7 @@ class TestInfoBase:
         with pytest.raises(Exception) as e:
             res = connect.get_collection_info(connect, collection_name)
 
+    @pytest.mark.level(2)
     def test_get_collection_info_multithread(self, connect):
         '''
         target: test create collection with multithread
@@ -127,7 +153,6 @@ class TestInfoBase:
     ******************************************************************
     """
 
-    # TODO
     def test_info_collection_fields_after_insert(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, check info returned
@@ -142,15 +167,20 @@ class TestInfoBase:
                 "segment_row_count": segment_row_count
         }
         connect.create_collection(collection_name, fields)
-        # insert
+        entities = gen_entities_by_fields(fields["fields"], nb, vector_field["params"]["dim"])
+        res_ids = connect.insert(collection_name, entities)
+        connect.flush([collection_name])
         res = connect.get_collection_info(collection_name)
-        # assert field_name
-        # assert field_type
-        # assert vector field params
-        # assert metric type
-        # assert dimension
+        assert res['auto_id'] == True
+        assert res['segment_row_count'] == segment_row_count
+        assert len(res["fields"]) == 2
+        for field in res["fields"]:
+            if field["type"] == filter_field:
+                assert field["name"] == filter_field["name"]
+            elif field["type"] == vector_field:
+                assert field["name"] == vector_field["name"]
+                assert field["params"] == vector_field["params"]
 
-    # TODO
     def test_create_collection_segment_row_count_after_insert(self, connect, get_segment_row_count):
         '''
         target: test create normal collection with different fields
@@ -161,8 +191,12 @@ class TestInfoBase:
         fields = copy.deepcopy(default_fields)
         fields["segment_row_count"] = get_segment_row_count
         connect.create_collection(collection_name, fields)
-        # insert
-        # assert segment size
+        entities = gen_entities_by_fields(fields["fields"], nb, fields["fields"][-1]["params"]["dim"])
+        res_ids = connect.insert(collection_name, entities)
+        connect.flush([collection_name])
+        res = connect.get_collection_info(collection_name)
+        assert res['auto_id'] == True
+        assert res['segment_row_count'] == get_segment_row_count
 
 
 class TestInfoInvalid(object):

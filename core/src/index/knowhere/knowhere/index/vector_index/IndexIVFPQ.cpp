@@ -24,6 +24,7 @@
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #ifdef MILVUS_GPU_VERSION
+#include "knowhere/index/vector_index/ConfAdapter.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFPQ.h"
 #endif
@@ -41,12 +42,18 @@ IVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), config[IndexParams::m].get<int64_t>(),
         config[IndexParams::nbits].get<int64_t>(), metric_type));
 
-    index_->train(rows, (float*)p_data);
+    index_->train(rows, reinterpret_cast<const float*>(p_data));
 }
 
 VecIndexPtr
 IVFPQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 #ifdef MILVUS_GPU_VERSION
+    auto ivfpq_index = dynamic_cast<faiss::IndexIVFPQ*>(index_.get());
+    int64_t dim = ivfpq_index->d;
+    int64_t m = ivfpq_index->pq.M;
+    if (!IVFPQConfAdapter::GetValidGPUM(dim, m)) {
+        return nullptr;
+    }
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
         auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get());

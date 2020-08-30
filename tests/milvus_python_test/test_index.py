@@ -156,18 +156,19 @@ class TestIndexBase:
         target: test create index interface when collection name not existed
         method: create collection and add entities in it, create index
             , make sure the collection name not in index
-        expected: return code not equals to 0, create index failed
+        expected: create index failed
         '''
         collection_name = gen_unique_str(collection_id)
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
 
+    @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_no_vectors_insert(self, connect, collection, get_simple_index):
+    def test_create_index_insert_flush(self, connect, collection, get_simple_index):
         '''
-        target: test create index interface when there is no vectors in collection, and does not affect the subsequent process
-        method: create collection and add no vectors in it, and then create index, add entities in it
-        expected: return code equals to 0
+        target: test create index
+        method: create collection and create index, add entities in it
+        expected: create index ok, and count correct
         '''
         connect.create_index(collection, field_name, get_simple_index)
         ids = connect.insert(collection, entities)
@@ -514,6 +515,14 @@ class TestIndexBinary:
 
     @pytest.fixture(
         scope="function",
+        params=gen_binary_index()
+    )
+    def get_l2_index(self, request, connect):
+        request.param["metric_type"] = "L2"
+        return request.param
+
+    @pytest.fixture(
+        scope="function",
         params=[
             1,
             10,
@@ -550,23 +559,37 @@ class TestIndexBinary:
         ids = connect.insert(binary_collection, binary_entities, partition_tag=tag)
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
 
-    # TODO:
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    def _test_create_index_search_with_query_vectors(self, connect, binary_collection, get_jaccard_index, get_nq):
+    def test_create_index_search_with_query_vectors(self, connect, binary_collection, get_jaccard_index, get_nq):
         '''
         target: test create index interface, search with more query vectors
         method: create collection and add entities in it, create index
         expected: return search success
         '''
         nq = get_nq
-        pdb.set_trace()
         ids = connect.insert(binary_collection, binary_entities)
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        query, vecs = gen_query_vectors(binary_field_name, binary_entities, top_k, nq)
-        search_param = get_search_param(binary_collection["index_type"])
+        query, vecs = gen_query_vectors(binary_field_name, binary_entities, top_k, nq, metric_type="JACCARD")
+        search_param = get_search_param(get_jaccard_index["index_type"], metric_type="JACCARD")
+        logging.getLogger().info(search_param)
         res = connect.search(binary_collection, query, search_params=search_param)
-        logging.getLogger().info(res)
         assert len(res) == nq
+
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index_invalid_metric_type_binary(self, connect, binary_collection, get_l2_index):
+        '''
+        target: test create index interface with invalid metric type
+        method: add entitys into binary connection, flash, create index with L2 metric type.
+        expected: return create_index failure
+        '''
+        # insert 6000 vectors
+        ids = connect.insert(binary_collection, binary_entities)
+        connect.flush([binary_collection])
+        if get_l2_index["index_type"] == "BIN_FLAT":
+            res = connect.create_index(binary_collection, binary_field_name, get_l2_index)
+        else:
+            with pytest.raises(Exception) as e:
+                res = connect.create_index(binary_collection, binary_field_name, get_l2_index)
 
     """
     ******************************************************************
@@ -580,15 +603,18 @@ class TestIndexBinary:
         method: create collection and add entities in it, create index, call describe index
         expected: return code 0, and index instructure
         '''
-        if get_jaccard_index["index_type"] == "BIN_FLAT":
-            pytest.skip("GetCollectionStats skip BIN_FLAT")
         ids = connect.insert(binary_collection, binary_entities)
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
-        logging.getLogger().info(stats)
-        # TODO
-        # assert stats['partitions'][0]['segments'][0]['index_name'] == get_jaccard_index['index_type']
+        assert stats["row_count"] == nb
+        for partition in stats["partitions"]:
+            segments = partition["segments"]
+            if segments:
+                for segment in segments:
+                    for file in segment["files"]:
+                        if "index_type" in file:
+                            assert file["index_type"] == get_jaccard_index["index_type"]
 
     def test_get_index_info_partition(self, connect, binary_collection, get_jaccard_index):
         '''
@@ -596,16 +622,21 @@ class TestIndexBinary:
         method: create collection, create partition and add entities in it, create index, call describe index
         expected: return code 0, and index instructure
         '''
-        if get_jaccard_index["index_type"] == "BIN_FLAT":
-            pytest.skip("GetCollectionStats skip BIN_FLAT")
         connect.create_partition(binary_collection, tag)
         ids = connect.insert(binary_collection, binary_entities, partition_tag=tag)
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
         logging.getLogger().info(stats)
-        # TODO
-        # assert stats['partitions'][1]['segments'][0]['index_name'] == get_jaccard_index['index_type']
+        assert stats["row_count"] == nb
+        assert len(stats["partitions"]) == 2
+        for partition in stats["partitions"]:
+            segments = partition["segments"]
+            if segments:
+                for segment in segments:
+                    for file in segment["files"]:
+                        if "index_type" in file:
+                            assert file["index_type"] == get_jaccard_index["index_type"]
 
     """
     ******************************************************************
@@ -638,65 +669,18 @@ class TestIndexBinary:
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
-        logging.getLogger().info(stats)
         connect.drop_index(binary_collection, binary_field_name)
         stats = connect.get_collection_stats(binary_collection)
-        logging.getLogger().info(stats)
-        # TODO
-        # assert stats["partitions"][1]["segments"][0]["index_name"] == default_index_type
-
-
-class TestIndexMultiCollections(object):
-
-    @pytest.mark.level(2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
-    def _test_create_index_multithread_multicollection(self, connect, args):
-        '''
-        target: test create index interface with multiprocess
-        method: create collection and add entities in it, create index
-        expected: return search success
-        '''
-        threads_num = 8
-        loop_num = 8
-        threads = []
-        collection = []
-        j = 0
-        while j < (threads_num * loop_num):
-            collection_name = gen_unique_str("test_create_index_multiprocessing")
-            collection.append(collection_name)
-            param = {'collection_name': collection_name,
-                     'dimension': dim,
-                     'index_type': IndexType.FLAT,
-                     'store_raw_vector': False}
-            connect.create_collection(param)
-            j = j + 1
-
-        def create_index():
-            i = 0
-            while i < loop_num:
-                # assert connect.has_collection(collection[ids*process_num+i])
-                ids = connect.insert(collection[ids * threads_num + i], vectors)
-                connect.create_index(collection[ids * threads_num + i], IndexType.IVFLAT, {"nlist": NLIST, "metric_type": "L2"})
-                assert status.OK()
-                query_vec = [vectors[0]]
-                top_k = 1
-                search_param = {"nprobe": nprobe}
-                status, result = connect.search(collection[ids * threads_num + i], top_k, query_vec,
-                                                params=search_param)
-                assert len(result) == 1
-                assert len(result[0]) == top_k
-                assert result[0][0].distance == 0.0
-                i = i + 1
-
-        for i in range(threads_num):
-            m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-            ids = i
-            t = threading.Thread(target=create_index, args=(m, ids))
-            threads.append(t)
-            t.start()
-            time.sleep(0.2)
-        for t in threads:
-            t.join()
+        assert stats["row_count"] == nb
+        for partition in stats["partitions"]:
+            segments = partition["segments"]
+            if segments:
+                for segment in segments:
+                    for file in segment["files"]:
+                        if "index_type" not in file:
+                            continue
+                        if file["index_type"] == get_jaccard_index["index_type"]:
+                            assert False
 
 
 class TestIndexInvalid(object):

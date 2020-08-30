@@ -12,7 +12,7 @@
 #include "server/delivery/ReqScheduler.h"
 #include "utils/Log.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <unistd.h>
 #include <utility>
 
@@ -64,8 +64,9 @@ ReqScheduler::Stop() {
     }
 
     for (auto& iter : execute_threads_) {
-        if (iter == nullptr)
+        if (iter == nullptr) {
             continue;
+        }
         iter->join();
     }
     req_groups_.clear();

@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <string>
 
 #include "knowhere/common/Exception.h"
@@ -114,9 +114,9 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     idmap->AddWithoutIds(dataset_ptr, config);
     impl::Graph knng;
     const float* raw_data = idmap->GetRawVectors();
-    const int64_t device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
     const int64_t k = config[IndexParams::knng].get<int64_t>();
 #ifdef MILVUS_GPU_VERSION
+    const int64_t device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
     if (device_id == -1) {
         auto preprocess_index = std::make_shared<IVF>();
         preprocess_index->Train(dataset_ptr, config);

@@ -14,7 +14,6 @@ __pycache__
 # vscode generated files
 .vscode
 
-build
 cmake-build-debug
 cmake-build-release
 cmake_build

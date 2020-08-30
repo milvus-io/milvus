@@ -1,7 +1,8 @@
 #!/usr/bin/env groovy
+@Library('mpl') _
 
 String cron_timezone = "TZ=Asia/Shanghai"
-String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
+String cron_string = BRANCH_NAME == "master" ? "50 3 * * * " : ""
 
 pipeline {
     agent none
@@ -27,7 +28,7 @@ pipeline {
         LOWER_BUILD_TYPE = params.BUILD_TYPE.toLowerCase()
         SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
         PIPELINE_NAME = "milvus-ci"
-        HELM_BRANCH = "0.10.1"
+        HELM_BRANCH = "0.11.0"
     }
     stages {
         stage ('Milvus Build and Unittest') {
@@ -63,12 +64,9 @@ pipeline {
                     stage('Build and Unittest') {
                         steps {
                             container("milvus-${BINARY_VERSION}-build-env") {
-                                script {
-                                    load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
-                                    load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
-                                    load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
-                                    load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
-                                }
+                                MPLModule('Milvus Build')
+                                MPLModule('Unittest')
+                                MPLModule('Package Build')
                             }
                         }
                     }
@@ -111,9 +109,7 @@ pipeline {
                     stage('Publish') {
                         steps {
                             container('publish-images') {
-                                script {
-                                    load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
-                                }
+                                MPLModule('Publish')
                             }
                         }
                     }
@@ -157,12 +153,8 @@ pipeline {
                     stage('Test') {
                         steps {
                             container('milvus-test-env') {
-                                script {
-                                    load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
-                                    if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                        load "${env.WORKSPACE}/ci/jenkins/step/shardsDevTest.groovy"
-                                    }
-                                }
+                                MPLModule('Single Node DevTest')
+                                MPLModule('Mishards DevTest')
                             }
                         }
                     }
@@ -170,13 +162,9 @@ pipeline {
                 post {
                     cleanup {
                         container('milvus-test-env') {
-                            script {
-                                archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
-                                load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDevTest.groovy"
-                                if (isTimeTriggeredBuild() || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
-                                    load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDevTest.groovy"
-                                }
-                            }
+                            archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
+                            MPLModule('Cleanup Single Node DevTest')
+                            MPLModule('Cleanup Mishards DevTest')
                         }
                     }
                 }

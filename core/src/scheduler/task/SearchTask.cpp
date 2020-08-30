@@ -11,7 +11,7 @@
 
 #include "scheduler/task/SearchTask.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include <algorithm>
 #include <memory>

@@ -72,7 +72,6 @@ ClientTest::Connect() {
     conn = milvus::Connection::Create();
     milvus::Status stat = conn->Connect(param);
     if (!stat.ok()) {
-        std::string msg = "Connect function call status: " + stat.message();
         std::cout << "Connect function call status: " << stat.message() << std::endl;
     }
     return conn;

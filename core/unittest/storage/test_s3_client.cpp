@@ -13,7 +13,7 @@
 #include <gtest/gtest.h>
 #include <fstream>
 #include <memory>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <fiu-control.h>
 
 #include "config/Config.h"
@@ -32,7 +32,7 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
     const std::string filename_dummy = "/tmp/test_file_dummy";
     const std::string filename_out = "/tmp/test_file_out";
     const std::string objname = "/tmp/test_obj";
-    const std::string objname_dummy = "/tmp/test_obj_dummy";
+    // const std::string objname_dummy = "/tmp/test_obj_dummy";
     const std::string content = "abcdefghijklmnopqrstuvwxyz";
 
     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();

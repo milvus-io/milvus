@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <string>
 
 #include "knowhere/common/Exception.h"
@@ -86,8 +86,8 @@ NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto elems = rows * topK;
         size_t p_id_size = sizeof(int64_t) * elems;
         size_t p_dist_size = sizeof(float) * elems;
-        auto p_id = (int64_t*)malloc(p_id_size);
-        auto p_dist = (float*)malloc(p_dist_size);
+        auto p_id = static_cast<int64_t*>(malloc(p_id_size));
+        auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
         faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 
@@ -97,7 +97,8 @@ NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         {
             std::lock_guard<std::mutex> lk(mutex_);
             // index_->ori_data_ = (float*) data_.get();
-            index_->Search((float*)p_data, (float*)data_.get(), rows, dim, topK, p_dist, p_id, s_params, blacklist);
+            index_->Search(reinterpret_cast<const float*>(p_data), reinterpret_cast<float*>(data_.get()), rows, dim,
+                           topK, p_dist, p_id, s_params, blacklist);
         }
 
         auto ret_ds = std::make_shared<Dataset>();
@@ -116,9 +117,9 @@ NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     idmap->AddWithoutIds(dataset_ptr, config);
     impl::Graph knng;
     const float* raw_data = idmap->GetRawVectors();
-    const int64_t k = config[IndexParams::knng].get<int64_t>();
+    auto k = config[IndexParams::knng].get<int64_t>();
 #ifdef MILVUS_GPU_VERSION
-    const int64_t device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
+    const auto device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
     if (device_id == -1) {
         auto preprocess_index = std::make_shared<IVF>();
         preprocess_index->Train(dataset_ptr, config);
@@ -154,7 +155,8 @@ NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     }
     index_ = std::make_shared<impl::NsgIndex>(dim, rows, metric_type_nsg);
     index_->SetKnnGraph(knng);
-    index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);
+    index_->Build_with_ids(rows, reinterpret_cast<float*>(const_cast<void*>(p_data)),
+                           reinterpret_cast<const int64_t*>(p_ids), b_params);
 }
 
 int64_t

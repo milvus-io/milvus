@@ -48,6 +48,7 @@ extern const char* VALUE_INDEX_INDEX_TYPE_DEFAULT;
 extern const int64_t VALUE_INDEX_NLIST_DEFAULT;
 extern const int64_t VALUE_CONFIG_CPU_CACHE_CAPACITY_DEFAULT;
 extern const bool VALUE_CONFIG_CACHE_INSERT_DATA_DEFAULT;
+extern const char* NAME_ID;
 
 /////////////////////////////////////////////////////
 

@@ -9,7 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <iostream>  // TODO(linxj): using Log instead
+#include <iostream>
+#include <utility>
 
 #include "knowhere/common/Log.h"
 #include "knowhere/common/Timer.h"
@@ -17,11 +18,8 @@
 namespace milvus {
 namespace knowhere {
 
-TimeRecorder::TimeRecorder(const std::string& header, int64_t log_level) : header_(header), log_level_(log_level) {
+TimeRecorder::TimeRecorder(std::string hdr, int64_t log_level) : header_(std::move(hdr)), log_level_(log_level) {
     start_ = last_ = stdclock::now();
-}
-
-TimeRecorder::~TimeRecorder() {
 }
 
 std::string
@@ -35,30 +33,21 @@ TimeRecorder::GetTimeSpanStr(double span) {
 void
 TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
     std::string str_log;
-    if (!header_.empty())
+    if (!header_.empty()) {
         str_log += header_ + ": ";
+    }
     str_log += msg;
     str_log += " (";
     str_log += TimeRecorder::GetTimeSpanStr(span);
     str_log += ")";
 
     switch (log_level_) {
-        case 0: {
+        case 0:
             std::cout << str_log << std::endl;
             break;
-        }
-        case 1: {
+        default:
             LOG_KNOWHERE_DEBUG_ << str_log;
             break;
-        }
-            // case 2: {
-            //     LOG_KNOWHERE_TRACE_ << str_log;
-            //     break;
-            // }
-            // case 3: {
-            //     LOG_KNOWHERE_WARNING_ << str_log;
-            //     break;
-            // }
     }
 }
 

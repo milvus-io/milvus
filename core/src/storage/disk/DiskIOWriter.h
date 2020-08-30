@@ -34,16 +34,25 @@ class DiskIOWriter : public IOWriter {
     operator=(DiskIOWriter&&) = delete;
 
     bool
-    open(const std::string& name) override;
+    Open(const std::string& name) override;
+
+    bool
+    InOpen(const std::string& name) override;
 
     void
-    write(void* ptr, int64_t size) override;
+    Write(const void* ptr, int64_t size) override;
+
+    void
+    Seekp(int64_t pos) override;
+
+    void
+    Seekp(int64_t pos, std::ios_base::seekdir seekdir) override;
 
     int64_t
-    length() override;
+    Length() override;
 
     void
-    close() override;
+    Close() override;
 
  public:
     std::string name_;

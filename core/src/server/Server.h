@@ -15,8 +15,7 @@
 #include "config/ConfigMgr.h"
 #include "utils/Status.h"
 
-namespace milvus {
-namespace server {
+namespace milvus::server {
 
 class Server {
  public:
@@ -39,14 +38,14 @@ class Server {
     Daemonize();
 
     Status
-    LoadConfig();
-
-    Status
     StartService();
     void
     StopService();
 
  private:
+    static std::string
+    RunningMode(bool cluster_enable, ClusterRole cluster_role);
+
     static void
     LogConfigInFile(const std::string& path);
 
@@ -61,5 +60,4 @@ class Server {
     // ConfigMgrPtr config_mgr_;
 };  // Server
 
-}  // namespace server
-}  // namespace milvus
+}  // namespace milvus::server

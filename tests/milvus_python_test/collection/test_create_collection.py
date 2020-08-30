@@ -13,7 +13,7 @@ from utils import *
 nb = 1
 dim = 128
 collection_id = "create_collection"
-default_segment_row_count = 100000
+default_segment_row_count = 512 * 1024
 drop_collection_interval_time = 3
 segment_row_count = 5000
 default_fields = gen_default_fields() 
@@ -65,7 +65,6 @@ class TestCreateCollection:
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
 
-    # TODO
     def test_create_collection_fields_create_index(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields
@@ -297,20 +296,6 @@ class TestCreateCollectionInvalid(object):
         res = connect.get_collection_info(collection_name)
         logging.getLogger().info(res)
         assert res["segment_row_count"] == default_segment_row_count
-
-    # def _test_create_collection_no_metric_type(self, connect):
-    #     '''
-    #     target: test create collection with no metric_type params
-    #     method: create collection with corrent params
-    #     expected: use default L2
-    #     '''
-    #     collection_name = gen_unique_str(collection_id)
-    #     fields = copy.deepcopy(default_fields)
-    #     fields["fields"][-1]["params"].pop("metric_type")
-    #     connect.create_collection(collection_name, fields)
-    #     res = connect.get_collection_info(collection_name)
-    #     logging.getLogger().info(res)
-    #     assert res["metric_type"] == "L2"
 
     # TODO: assert exception
     def test_create_collection_limit_fields(self, connect):

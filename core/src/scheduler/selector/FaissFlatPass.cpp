@@ -18,7 +18,7 @@
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 namespace milvus {
 namespace scheduler {
 
@@ -47,15 +47,14 @@ FaissFlatPass::Run(const TaskPtr& task) {
 
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: gpu disable, specify cpu to search!", "search", 0);
+        LOG_SERVER_DEBUG_ << LogOut("FaissFlatPass: gpu disable, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_task->nq() < (int64_t)threshold_) {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: nq < gpu_search_threshold, specify cpu to search!",
-                                    "search", 0);
+    } else if (search_task->nq() < threshold_) {
+        LOG_SERVER_DEBUG_ << LogOut("FaissFlatPass: nq < gpu_search_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: nq >= gpu_search_threshold, specify gpu %d to search!",
-                                    "search", 0, search_gpus_[idx_]);
+        LOG_SERVER_DEBUG_ << LogOut("FaissFlatPass: nq >= gpu_search_threshold, specify gpu %d to search!",
+                                    search_gpus_[idx_]);
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[idx_]);
         idx_ = (idx_ + 1) % search_gpus_.size();
     }

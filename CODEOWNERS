@@ -3,7 +3,8 @@
 *                        @JinHai-CN
 /sdk                     @scsven
 /shards                  @XuPeng-SH
+/ci/                     @jeffoverflow @cydrain
 /core/                   @scsven
 /core/src/db/meta        @yhmo
-/core/src/index/knowhere @cydrain
 /core/src/index/         @shengjun1985
+/tests/                  @cydrain

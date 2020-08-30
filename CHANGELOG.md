@@ -29,6 +29,9 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2869 Create index failed with binary vectors
 -   \#2893 Insert binary data failed
 -   \#2957 There is no exisitence check of annoy search parameter
+-   \#3406 No debug and info log generated after server started
+-   \#3407 Server get stuck if create index after entities inserted with no manual flush
+-   \#3446 ListIDInSegment get wrong result when delete more than one ids
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
@@ -43,6 +46,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2543 Remove secondary_path related code
 -   \#2544 Optimize unittest build
 -   \#2561 Clean util dependencies with other modules
+-   \#2568 Upgrade thirdparty oatpp to v1.1.0
 -   \#2612 Move all APIs in utils into namespace milvus 
 -   \#2675 Print out system memory size when report invalid cpu cache size 
 -   \#2686 Remove dependency on sqlite_orm
@@ -50,16 +54,18 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2858 Unify index name in db
 -   \#2884 Using BlockingQueue in JobMgr
 -   \#3220 Enable -Werror to improve code quality
+-   \#3449 Upgrade master version to v0.11.0
 
 ## Task
 
-# Milvus 0.10.2 (TBD)
+# Milvus 0.10.2 (2020-08-15)
 
 ## Bug
 -   \#2890 Fix the index size caculation in cache
 -   \#2952 Fix the result merging of IVF_PQ IP
 -   \#2975 Fix config UT failed
 -   \#3012 If the cache is too small, queries using multiple GPUs will cause to crash
+-   \#3133 Reverse query result in mishards if metric type is IP
 
 ## Feature
 

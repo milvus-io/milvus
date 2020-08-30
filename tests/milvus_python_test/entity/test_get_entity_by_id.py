@@ -261,6 +261,7 @@ class TestGetBase:
         for i in range(get_pos, get_pos*2):
             assert_equal_vector(res[i].get(default_float_vec_field_name), new_entities[-1]["values"][i-get_pos])
 
+    @pytest.mark.level(2)
     def test_get_entities_indexed_tag(self, connect, collection, get_simple_index, get_pos):
         '''
         target: test.get_entity_by_id
@@ -281,7 +282,6 @@ class TestGetBase:
       The following cases are used to test `get_entity_by_id` function, with fields params
     ******************************************************************
     """
-    # TODO: 
     def test_get_entity_field(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id, get one
@@ -294,8 +294,11 @@ class TestGetBase:
         fields = ["int64"]
         res = connect.get_entity_by_id(collection, get_ids, fields = fields)
         # assert fields
+        res = res.dict()
+        assert res[0]["field"] == fields[0]
+        assert res[0]["values"] == [entities[0]["values"][get_pos]]
+        assert res[0]["type"] == DataType.INT64
 
-    # TODO: 
     def test_get_entity_fields(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id, get one
@@ -308,6 +311,15 @@ class TestGetBase:
         fields = ["int64", "float", default_float_vec_field_name]
         res = connect.get_entity_by_id(collection, get_ids, fields = fields)
         # assert fields
+        res = res.dict()
+        assert len(res) == len(fields)
+        for field in res:
+            if field["field"] == fields[0]:
+                assert field["values"] == [entities[0]["values"][get_pos]]
+            elif field["field"] == fields[1]:
+                assert field["values"] == [entities[1]["values"][get_pos]]
+            else:
+                assert_equal_vector(field["values"][0], entities[-1]["values"][get_pos])
 
     # TODO: assert exception
     def test_get_entity_field_not_match(self, connect, collection, get_pos):
@@ -427,6 +439,7 @@ class TestGetBase:
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
 
+    @pytest.mark.level(2)
     def test_get_entities_indexed_single(self, connect, collection, get_simple_index, get_pos):
         '''
         target: test.get_entity_by_id

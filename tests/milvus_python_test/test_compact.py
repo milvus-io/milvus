@@ -168,8 +168,7 @@ class TestCompactBase:
         logging.getLogger().info(size_after)
         assert(size_before >= size_after)
     
-    # TODO
-    @pytest.mark.skip("not implement")
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_insert_delete_all_and_compact(self, connect, collection):
         '''
@@ -323,17 +322,17 @@ class TestCompactBase:
         method: create 50 collections, add entities into them and compact in turn
         expected: status ok
         '''
-        nq = 100
-        num_collections = 50
-        entities = gen_entities(nq)
+        nb = 100
+        num_collections = 20
+        entities = gen_entities(nb)
         collection_list = []
         for i in range(num_collections):
             collection_name = gen_unique_str("test_compact_multi_collection_%d" % i)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
-        time.sleep(6)
         for i in range(num_collections):
             ids = connect.insert(collection_list[i], entities)
+            connect.delete_entity_by_id(collection_list[i], ids[:nb//2])
             status = connect.compact(collection_list[i])
             assert status.OK()
 
@@ -419,33 +418,6 @@ class TestCompactBase:
         assert res[1]._distances[0] < epsilon
         assert res[2]._distances[0] < epsilon
 
-    # TODO: enable
-    def _test_compact_server_crashed_recovery(self, connect, collection):
-        '''
-        target: test compact when server crashed unexpectedly and restarted
-        method: add entities, delete and compact collection; server stopped and restarted during compact
-        expected: status ok, request recovered
-        '''
-        entities = gen_vectors(nb * 100, dim)
-        status, ids = connect.insert(collection, entities)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        delete_ids = ids[0:1000]
-        status = connect.delete_entity_by_id(collection, delete_ids)
-        assert status.OK()
-        status = connect.flush([collection])
-        assert status.OK()
-        # start to compact, kill and restart server
-        logging.getLogger().info("compact starting...")
-        status = connect.compact(collection)
-        # pdb.set_trace()
-        assert status.OK()
-        # get collection info after compact
-        status, info = connect.get_collection_stats(collection)
-        assert status.OK()
-        assert info["partitions"][0].count == nb * 100 - 1000
-
 
 class TestCompactBinary:
     """
@@ -521,8 +493,6 @@ class TestCompactBinary:
         logging.getLogger().info(size_after)
         assert(size_before >= size_after)
     
-    # TODO
-    @pytest.mark.skip("not implement")
     @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_insert_delete_all_and_compact(self, connect, binary_collection):
@@ -693,7 +663,6 @@ class TestCompactBinary:
         res = connect.search(binary_collection, query)
         assert abs(res[0]._distances[0]-distance) <= epsilon
 
-    # TODO:
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_search_after_compact_ip(self, connect, collection):
         '''

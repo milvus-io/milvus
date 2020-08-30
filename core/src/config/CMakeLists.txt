@@ -20,21 +20,44 @@ set( CONFIG_SRCS    ConfigMgr.h
                     ServerConfig.cpp
                     )
 
-add_library( config ${CONFIG_SRCS} )
-add_dependencies( config yaml-cpp )
+set( CONFIG_LIBS    yaml-cpp
+                    fiu
+                    )
 
+create_library(
+        TARGET      config
+        SRCS        ${CONFIG_SRCS}
+        LIBS        ${CONFIG_LIBS}
+)
 
 if ( BUILD_UNIT_TEST )
-    add_executable( ConfigTypeTest )
-    target_sources( ConfigTypeTest PRIVATE ConfigTypeTest1
-                                           ConfigTypeTest2 )
-    target_link_libraries( ConfigTypeTest
-                PRIVATE    config
-                           gtest
-                           gtest_main
-                           gmock
-                           gmock_main
-                           yaml-cpp )
+    create_library(
+            TARGET      config-fiu
+            SRCS        ${CONFIG_SRCS}
+            LIBS        ${CONFIG_LIBS}
+            DEFS        FIU_ENABLE
+    )
+    target_compile_definitions(config-fiu PRIVATE FIU_ENABLE)
+
+    set(GTEST_LIBS gtest gtest_main gmock gmock_main)
+
+    create_executable(
+            TARGET      ServerConfigTest
+            SRCS        ServerConfigTest
+            LIBS        config-fiu ${GTEST_LIBS}
+            DEFS        FIU_ENABLE
+    )
+
+    create_executable(
+            TARGET      ConfigTypeTest
+            SRCS        ConfigTypeTest1 ConfigTypeTest2
+            LIBS        config-fiu ${GTEST_LIBS}
+            DEFS        FIU_ENABLE
+    )
+
+    add_test ( NAME     ServerConfigTest
+               COMMAND  $<TARGET_FILE:ServerConfigTest>
+             )
 
     add_test ( NAME     ConfigTypeTest
                COMMAND  $<TARGET_FILE:ConfigTypeTest>
