@@ -132,7 +132,6 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         NGT::Object* object = index_->allocateObject(single_query, Dim());
         NGT::SearchContainer sc(*object);
 
-        size_t step = sp.step == 0 ? UINT_MAX : sp.step;
         double epsilon = sp.beginOfEpsilon;
 
         NGT::ObjectDistances res;
@@ -158,12 +157,12 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 
         int64_t res_num = res.size();
         for (int64_t idx = 0; idx < res_num; ++idx) {
-            *(local_id + idx) = res[idx].id;
+            *(local_id + idx) = res[idx].id - 1;
             *(local_dist + idx) = res[idx].distance;
         }
-        while (res_num < k) {
-            *(local_id + res_num) = 0;
-            *(local_dist + res_num) = -1;
+        while (res_num < static_cast<int64_t>(k)) {
+            *(local_id + res_num) = -1;
+            *(local_dist + res_num) = 1.0 / 0.0;
         }
         index_->deleteObject(object);
     }

@@ -48,7 +48,7 @@ INSTANTIATE_TEST_CASE_P(NGTPANNGParameters, NGTPANNGTest, Values("NGTPANNG"));
 TEST_P(NGTPANNGTest, ngtpanng_basic) {
     assert(!xb.empty());
 
-    // null faiss index
+    // null index
     {
         ASSERT_ANY_THROW(index_->Train(base_dataset, conf));
         ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
@@ -59,18 +59,18 @@ TEST_P(NGTPANNGTest, ngtpanng_basic) {
         ASSERT_ANY_THROW(index_->Dim());
     }
 
-    index_->BuildAll(base_dataset, conf);  // Train + Add
+    index_->BuildAll(base_dataset, conf);
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
 
-    auto result = index_->Query(query_dataset, conf);
-    AssertAnns(result, nq, k);
+	auto result = index_->Query(query_dataset, conf);
+	AssertAnns(result, nq, k);
 }
 
 TEST_P(NGTPANNGTest, ngtpanng_delete) {
     assert(!xb.empty());
 
-    index_->BuildAll(base_dataset, conf);  // Train + Add
+    index_->BuildAll(base_dataset, conf);
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
 
@@ -84,7 +84,7 @@ TEST_P(NGTPANNGTest, ngtpanng_delete) {
 
     index_->SetBlacklist(bitset);
     auto result2 = index_->Query(query_dataset, conf);
-    AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
+	AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
 }
 
 TEST_P(NGTPANNGTest, ngtpanng_serialize) {
@@ -140,7 +140,7 @@ TEST_P(NGTPANNGTest, ngtpanng_serialize) {
         index_->Load(binaryset);
         ASSERT_EQ(index_->Count(), nb);
         ASSERT_EQ(index_->Dim(), dim);
-        auto result = index_->Query(query_dataset, conf);
-        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+		auto result = index_->Query(query_dataset, conf);
+		AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     }
 }

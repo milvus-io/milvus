@@ -15,7 +15,7 @@
 #include <sstream>
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexNGTPANNG.h"
+#include "knowhere/index/vector_index/IndexNGTONNG.h"
 
 #include "unittest/utils.h"
 
@@ -23,7 +23,7 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-class NGTONNNGTest : public DataGen, public TestWithParam<std::string> {
+class NGTONNGTest : public DataGen, public TestWithParam<std::string> {
  protected:
     void
     SetUp() override {

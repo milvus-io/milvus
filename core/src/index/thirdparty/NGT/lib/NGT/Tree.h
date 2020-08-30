@@ -16,9 +16,10 @@
 
 #pragma once
 
-#include	"NGT/defines.h"
-#include	"NGT/Common.h"
-#include	"NGT/Node.h"
+#include "NGT/Common.h"
+#include "NGT/Node.h"
+#include "NGT/defines.h"
+#include "faiss/utils/ConcurrentBitset.h"
 
 #include <sstream>
 #include	<string>
@@ -259,6 +260,27 @@ namespace NGT {
 
     Node::Objects * getObjects(LeafNode	&n, Container	&iobj);
 
+    // for milvus
+    void
+    getObjectIDsFromLeaf(Node::ID nid, ObjectDistances& rl, faiss::ConcurrentBitsetPtr& bitset) {
+        LeafNode& ln = *(LeafNode*)getNode(nid);
+        rl.clear();
+        ObjectDistance r;
+        for (size_t i = 0; i < ln.getObjectSize(); i++) {
+#if defined(NGT_SHARED_MEMORY_ALLOCATOR)
+        r.id = ln.getObjectIDs(leafNodes.allocator)[i].id;
+        r.distance = ln.getObjectIDs(leafNodes.allocator)[i].distance;
+#else
+        r.id = ln.getObjectIDs()[i].id;
+        r.distance = ln.getObjectIDs()[i].distance;
+#endif
+        if (bitset != nullptr && bitset->test(r.id - 1)) {
+            continue;
+        }
+        rl.push_back(r);
+      }
+      return;
+    }
     void getObjectIDsFromLeaf(Node::ID		nid,      ObjectDistances	&rl) {
       LeafNode &ln = *(LeafNode*)getNode(nid);
       rl.clear();

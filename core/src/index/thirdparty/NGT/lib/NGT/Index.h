@@ -2129,12 +2129,70 @@ public:
     }
 
     // for milvus
+    void
+    getSeedsFromTree(NGT::SearchContainer& sc, ObjectDistances& seeds, faiss::ConcurrentBitsetPtr& bitset) {
+        DVPTree::SearchContainer tso(sc.object);
+        tso.mode = DVPTree::SearchContainer::SearchLeaf;
+        tso.radius = 0.0;
+        tso.size = 1;
+        tso.distanceComputationCount = 0;
+        tso.visitCount = 0;
+        try
+        {
+            DVPTree::search(tso);
+        }
+        catch (Exception & err)
+        {
+            std::stringstream msg;
+            msg << "GraphAndTreeIndex::getSeeds: Cannot search for tree.:" << err.what();
+            NGTThrowException(msg);
+        }
+
+        try
+        {
+            DVPTree::getObjectIDsFromLeaf(tso.nodeID, seeds, bitset);
+        }
+        catch (Exception & err)
+        {
+            std::stringstream msg;
+            msg << "GraphAndTreeIndex::getSeeds: Cannot get a leaf.:" << err.what();
+            NGTThrowException(msg);
+        }
+        sc.distanceComputationCount += tso.distanceComputationCount;
+        sc.visitCount += tso.visitCount;
+        if (sc.useAllNodesInLeaf || NeighborhoodGraph::property.seedType == NeighborhoodGraph::SeedTypeAllLeafNodes)
+        {
+            return;
+        }
+        // if seedSize is zero, the result size of the query is used as seedSize.
+        size_t seedSize = NeighborhoodGraph::property.seedSize == 0 ? sc.size : NeighborhoodGraph::property.seedSize;
+        seedSize = seedSize > sc.size ? sc.size : seedSize;
+        if (seeds.size() > seedSize)
+        {
+            srand(tso.nodeID.getID());
+            // to accelerate thinning data.
+            for (size_t i = seeds.size(); i > seedSize; i--)
+            {
+                double random = ((double)rand() + 1.0) / ((double)RAND_MAX + 2.0);
+                size_t idx = floor(i * random);
+                seeds[idx] = seeds[i - 1];
+            }
+            seeds.resize(seedSize);
+        }
+        else if (seeds.size() < seedSize)
+        {
+            // A lack of the seeds is compansated by random seeds.
+            //getRandomSeeds(seeds, seedSize);
+        }
+    }
+
+    // for milvus
     void search(NGT::SearchContainer & sc, faiss::ConcurrentBitsetPtr & bitset)
     {
         sc.distanceComputationCount = 0;
         sc.visitCount = 0;
         ObjectDistances seeds;
-        getSeedsFromTree(sc, seeds);
+        getSeedsFromTree(sc, seeds, bitset);
         GraphIndex::search(sc, seeds, bitset);
     }
 

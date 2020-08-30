@@ -278,8 +278,6 @@ namespace NGT {
                 throw(err);
             }
         }
-
-        optimizeSearchParameters(index_);
     }
 
     void optimizeSearchParameters(NGT::Index & outIndex)

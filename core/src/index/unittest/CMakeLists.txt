@@ -1,11 +1,13 @@
 include_directories(${INDEX_SOURCE_DIR}/thirdparty)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
+include_directories(${INDEX_SOURCE_DIR}/thirdparty/NGT/lib)
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR})
 
 set(depend_libs
         gtest gmock gtest_main gmock_main
         faiss fiu
+		ngt
         )
 if (FAISS_WITH_MKL)
     set(depend_libs ${depend_libs}
