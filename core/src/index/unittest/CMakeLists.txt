@@ -2,10 +2,12 @@ include_directories(${INDEX_SOURCE_DIR}/thirdparty)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR})
+include_directories(${INDEX_SOURCE_DIR}/thirdparty/NGT/lib)
 
 set(depend_libs
         gtest gmock gtest_main gmock_main
         faiss fiu
+        ngt
         )
 if (FAISS_WITH_MKL)
     set(depend_libs ${depend_libs}
@@ -198,7 +200,30 @@ endif ()
 target_link_libraries(test_annoy ${depend_libs} ${unittest_libs} ${basic_libs})
 install(TARGETS test_annoy DESTINATION unittest)
 
+#<NGTPANNG-TEST>
+set(ngtpanng_srcs
+	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGTPANNG.cpp
+	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGT.cpp
+		)
+if (NOT TARGET test_ngtpanng)
+	add_executable(test_ngtpanng test_ngtpanng.cpp ${ngtpanng_srcs} ${util_srcs})
+endif ()
+target_link_libraries(test_ngtpanng ${depend_libs} ${unittest_libs} ${basic_libs})
+install(TARGETS test_ngtpanng DESTINATION unittest)
 
+################################################################################
+#<NGTPANNG-TEST>
+set(ngtonng_srcs
+	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGTONNG.cpp
+	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGT.cpp
+		)
+if (NOT TARGET test_ngtonng)
+	add_executable(test_ngtonng test_ngtonng.cpp ${ngtonng_srcs} ${util_srcs})
+endif ()
+target_link_libraries(test_ngtonng ${depend_libs} ${unittest_libs} ${basic_libs})
+install(TARGETS test_ngtonng DESTINATION unittest)
+
+################################################################################
 #add_subdirectory(faiss_ori)
 #add_subdirectory(faiss_benchmark)
 #add_subdirectory(metric_alg_benchmark)
