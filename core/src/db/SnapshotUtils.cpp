@@ -215,9 +215,8 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
                     continue;
                 }
 
-                milvus::json json_file;
-                auto element = pair.second->GetElement();
                 if (pair.second->GetFile()) {
+                    milvus::json json_file;
                     json_file[JSON_DATA_SIZE] = pair.second->GetFile()->GetSize();
                     json_file[JSON_PATH] =
                         engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", pair.second->GetFile());
@@ -225,14 +224,15 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
 
                     // if the element is index, print index name/type
                     // else print element name
+                    auto element = pair.second->GetElement();
                     if (element->GetFEtype() == engine::FieldElementType::FET_INDEX) {
                         json_file[JSON_NAME] = element->GetName();
                         json_file[JSON_INDEX_TYPE] = element->GetTypeName();
                     } else {
                         json_file[JSON_NAME] = element->GetName();
                     }
+                    json_files.push_back(json_file);
                 }
-                json_files.push_back(json_file);
             }
         }
 
