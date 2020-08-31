@@ -217,7 +217,7 @@ Resource::executor_function() {
                 ResMgrInst::GetInstance()->GetResource("disk")->WakeupLoader();
             }
 
-            task_item->task = FinishedTask::Create();
+            task_item->task = FinishedTask::Create(task_item->task);
 
             if (subscriber_) {
                 auto event = std::make_shared<FinishTaskEvent>(shared_from_this(), task_item);
