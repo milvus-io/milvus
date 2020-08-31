@@ -263,5 +263,37 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
     return Status::OK();
 }
 
+Status
+GetSegmentRowCount(const std::string& collection_name, int64_t& segment_row_count) {
+    segment_row_count = DEFAULT_SEGMENT_ROW_COUNT;
+    snapshot::ScopedSnapshotT latest_ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
+
+    // get row count per segment
+    auto collection = latest_ss->GetCollection();
+    const json params = collection->GetParams();
+    if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
+        segment_row_count = params[PARAM_SEGMENT_ROW_COUNT];
+    }
+
+    return Status::OK();
+}
+
+Status
+GetSegmentRowCount(int64_t collection_id, int64_t& segment_row_count) {
+    segment_row_count = DEFAULT_SEGMENT_ROW_COUNT;
+    snapshot::ScopedSnapshotT latest_ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_id));
+
+    // get row count per segment
+    auto collection = latest_ss->GetCollection();
+    const json params = collection->GetParams();
+    if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
+        segment_row_count = params[PARAM_SEGMENT_ROW_COUNT];
+    }
+
+    return Status::OK();
+}
+
 }  // namespace engine
 }  // namespace milvus

@@ -11,8 +11,8 @@
 
 #include "db/wal/WalProxy.h"
 #include "config/ServerConfig.h"
+#include "db/SnapshotUtils.h"
 #include "db/Utils.h"
-#include "db/snapshot/Snapshots.h"
 #include "db/wal/WalManager.h"
 #include "db/wal/WalOperation.h"
 #include "utils/Exception.h"
@@ -65,16 +65,7 @@ WalProxy::Insert(const std::string& collection_name, const std::string& partitio
                  idx_t op_id) {
     // get segment row count of this collection
     int64_t row_count_per_segment = DEFAULT_SEGMENT_ROW_COUNT;
-    snapshot::ScopedSnapshotT latest_ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
-    if (status.ok()) {
-        // get row count per segment
-        auto collection = latest_ss->GetCollection();
-        const json params = collection->GetParams();
-        if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
-            row_count_per_segment = params[PARAM_SEGMENT_ROW_COUNT];
-        }
-    }
+    GetSegmentRowCount(collection_name, row_count_per_segment);
 
     // split chunk accordding to segment row count
     std::vector<DataChunkPtr> chunks;
@@ -91,7 +82,7 @@ WalProxy::Insert(const std::string& collection_name, const std::string& partitio
         InsertEntityOperationPtr op = std::make_shared<InsertEntityOperation>();
         op->collection_name_ = collection_name;
         op->partition_name = partition_name;
-        op->data_chunk_ = data_chunk;
+        op->data_chunk_ = chunk;
         STATUS_CHECK(WalManager::GetInstance().RecordOperation(op, db_));
     }
 
