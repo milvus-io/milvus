@@ -26,6 +26,7 @@
 #include "config/ConfigMgr.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/Snapshots.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
@@ -158,11 +159,11 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "\n"
     "general:\n"
     "  timezone: UTC+8\n"
-    "  meta_uri: sqlite://:@:/\n"
+    "  meta_uri: mock://:@:/\n"
     "\n"
     "network:\n"
     "  bind.address: 0.0.0.0\n"
-    "  bind.port: 19530\n"
+    "  bind.port: 19540\n"
     "  http.enable: true\n"
     "  http.port: 29999\n"
     "\n"
@@ -294,10 +295,13 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("GET", "/collections/{collection_name}/entities", getEntityByID,
              PATH(String, collection_name, "collection_name"), QUERY(String, ids))
 
+    API_CALL("GET", "/collections/{collection_name}/entities", search,
+             PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
+
     API_CALL("POST", "/collections/{collection_name}/entities", insert,
              PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
 
-    API_CALL("PUT", "/collections/{collection_name}/entities", entityOp,
+    API_CALL("DELETE", "/collections/{collection_name}/entities", deleteOp,
              PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
 
     API_CALL("GET", "/system/{msg}", cmd, PATH(String, cmd_str, "msg"), QUERY(String, action), QUERY(String, target))
@@ -323,7 +327,18 @@ class WebControllerTest : public ::testing::Test {
         fs.close();
 
         milvus::ConfigMgr::GetInstance().Init();
-        milvus::ConfigMgr::GetInstance().Load(config_path);
+//        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "mock://:@:/");
+//        milvus::ConfigMgr::GetInstance().Set("storage.path", CONTROLLER_TEST_CONFIG_DIR);
+//        milvus::ConfigMgr::GetInstance().Set("network.http.enable", "true");
+//        milvus::ConfigMgr::GetInstance().Set("network.http.port", "20121");
+
+        auto& config = milvus::ConfigMgr::GetInstance();
+
+//        milvus::ConfigMgr::GetInstance().Init();
+        config.Load(config_path);
+//        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "mock://:@:/");
+
+        milvus::engine::snapshot::Snapshots::GetInstance().StartService();
 
         auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
         res_mgr->Clear();
@@ -358,7 +373,6 @@ class WebControllerTest : public ::testing::Test {
         fs.flush();
         fs.close();
 
-        //        milvus::ConfigMgr::GetInstance().Init();
         milvus::ConfigMgr::GetInstance().Load(config_path);
 
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
@@ -381,6 +395,8 @@ class WebControllerTest : public ::testing::Test {
         milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Stop();
         milvus::scheduler::ResMgrInst::GetInstance()->Clear();
+
+        milvus::engine::snapshot::Snapshots::GetInstance().StopService();
 
         boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
     }
@@ -800,7 +816,7 @@ TEST_F(WebControllerTest, SEARCH) {
         }
     })";
 
-    response = client_ptr->entityOp(collection_name.c_str(), query_str.c_str(), connection_ptr);
+    response = client_ptr->search(collection_name.c_str(), query_str.c_str(), connection_ptr);
     //    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDtoT>(object_mapper.get());
     //    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, error_dto->code);
     auto result_json = nlohmann::json::parse(response->readBodyToString()->std_str());
@@ -882,9 +898,9 @@ TEST_F(WebControllerTest, DELETE_BY_ID) {
     auto delete_ids = std::vector<std::string>(ids.begin(), ids.begin() + 10);
 
     nlohmann::json delete_json;
-    delete_json["delete"]["ids"] = delete_ids;
+    delete_json["ids"] = delete_ids;
 
-    response = client_ptr->entityOp(collection_name.c_str(), delete_json.dump().c_str(), connection_ptr);
+    response = client_ptr->deleteOp(collection_name.c_str(), delete_json.dump().c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
 
     status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));

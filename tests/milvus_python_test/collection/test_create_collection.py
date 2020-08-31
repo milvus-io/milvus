@@ -135,7 +135,7 @@ class TestCreateCollection:
         '''
         target: test create collection, without connection
         method: create collection with correct params, with a disconnected instance
-        expected: create raise exception
+        expected: error raised
         '''
         collection_name = gen_unique_str(collection_id)
         with pytest.raises(Exception) as e:
@@ -145,12 +145,22 @@ class TestCreateCollection:
         '''
         target: test create collection but the collection name have already existed
         method: create collection with the same collection_name
-        expected: create status return not ok
+        expected: error raised
         '''
         collection_name = gen_unique_str(collection_id)
         connect.create_collection(collection_name, default_fields)
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, default_fields)
+
+    def test_create_after_drop_collection(self, connect, collection):
+        '''
+        target: create with the same collection name after collection dropped 
+        method: delete, then create
+        expected: create success
+        '''
+        connect.drop_collection(collection)
+        time.sleep(2)
+        connect.create_collection(collection, default_fields)
 
     @pytest.mark.level(2)
     def test_create_collection_multithread(self, connect):
@@ -175,9 +185,9 @@ class TestCreateCollection:
         for t in threads:
             t.join()
         
-        res = connect.list_collections()
         for item in collection_names:
-            assert item in res
+            assert item in connect.list_collections()
+            connect.drop_collection(item)
 
 
 class TestCreateCollectionInvalid(object):
@@ -226,14 +236,6 @@ class TestCreateCollectionInvalid(object):
         fields["segment_row_count"] = get_segment_row_count
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
-
-    # @pytest.mark.level(2)
-    # def test_create_collection_with_invalid_metric_type(self, connect, get_metric_type):
-    #     collection_name = gen_unique_str()
-    #     fields = copy.deepcopy(default_fields)
-    #     fields["fields"][-1]["params"]["metric_type"] = get_metric_type
-    #     with pytest.raises(Exception) as e:
-    #         connect.create_collection(collection_name, fields)
 
     @pytest.mark.level(2)
     def test_create_collection_with_invalid_dimension(self, connect, get_dim):

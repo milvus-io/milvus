@@ -892,33 +892,35 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
     return Status::OK();
 }
 
-Status
-WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohmann::json& json,
-                               std::string& result_str) {
+StatusDtoT
+WebRequestHandler::DeleteByIDs(const OString& collection_name, const OString& payload, OString& response) {
+    auto json = nlohmann::json::parse(payload->std_str());
     std::vector<int64_t> entity_ids;
     if (!json.contains("ids")) {
-        return Status(BODY_FIELD_LOSS, R"(Field "delete" must contains "ids")");
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, R"(Field "delete" must contains "ids")");
     }
     auto ids = json["ids"];
     if (!ids.is_array()) {
-        return Status(BODY_FIELD_LOSS, R"("ids" must be an array)");
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, R"("ids" must be an array)");
     }
 
     for (auto& id : ids) {
         auto id_str = id.get<std::string>();
         if (!ValidateStringIsNumber(id_str).ok()) {
-            return Status(ILLEGAL_BODY, R"(Members in "ids" must be integer string)");
+            RETURN_STATUS_DTO(ILLEGAL_BODY, R"(Members in "ids" must be integer string)")
         }
         entity_ids.emplace_back(std::stol(id_str));
     }
 
-    auto status = req_handler_.DeleteEntityByID(context_ptr_, collection_name, entity_ids);
+    auto status = req_handler_.DeleteEntityByID(context_ptr_, collection_name->std_str(), entity_ids);
 
     nlohmann::json result_json;
     AddStatusToJson(result_json, status.code(), status.message());
-    result_str = result_json.dump();
+    std::string result_str = result_json.dump();
 
-    return status;
+    response = status.ok() ? result_str.c_str() : "NULL";
+
+    ASSIGN_RETURN_STATUS_DTO(status);
 }
 
 Status
@@ -1746,7 +1748,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-StatusDtoT
+Status
 WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name,
                              const milvus::server::web::OQueryParams& query_params,
                              milvus::server::web::OString& response) {
@@ -1763,12 +1765,12 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
             status = GetPageEntities(collection_name->std_str(), partition_tag, page_size, offset, json_out);
             AddStatusToJson(json_out, status.code(), status.message());
             response = json_out.dump().c_str();
-            ASSIGN_RETURN_STATUS_DTO(status);
+            return status;
         }
 
         auto query_ids = query_params.get("ids");
         if (query_ids == nullptr || query_ids.get() == nullptr) {
-            RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param ids is required.");
+            return Status(QUERY_PARAM_LOSS, "Query param ids is required.");
         }
 
         std::vector<std::string> ids;
@@ -1791,7 +1793,7 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         status = GetEntityByIDs(collection_name->std_str(), entity_ids, field_names, entity_result_json);
         if (!status.ok()) {
             response = "NULL";
-            ASSIGN_RETURN_STATUS_DTO(status)
+            return status;
         }
 
         nlohmann::json json;
@@ -1803,29 +1805,29 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         }
         response = json.dump().c_str();
     } catch (std::exception& e) {
-        RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, e.what());
+        return Status(SERVER_UNEXPECTED_ERROR, e.what());
     }
 
-    ASSIGN_RETURN_STATUS_DTO(status);
+    return status;
 }
 
 StatusDtoT
-WebRequestHandler::EntityOp(const OString& collection_name, const OString& payload, OString& response) {
+WebRequestHandler::EntityOp(const OString& collection_name, const OQueryParams& query_params, const OString& payload,
+                            OString& response) {
     auto status = Status::OK();
     std::string result_str;
 
     try {
-        nlohmann::json payload_json = nlohmann::json::parse(payload->std_str());
-
-        if (payload_json.empty()) {
-            status = Status(ILLEGAL_BODY, "Http payload is null");
-        }
-        if (payload_json.contains("delete")) {
-            status = DeleteByIDs(collection_name->std_str(), payload_json["delete"], result_str);
-        } else if (payload_json.contains("query")) {
-            status = Search(collection_name->c_str(), payload_json, result_str);
+        if (query_params.get("offset") || query_params.get("page_size") || query_params.get("ids")) {
+            status = GetEntity(collection_name, query_params, response);
+            ASSIGN_RETURN_STATUS_DTO(status);
         } else {
-            status = Status(ILLEGAL_BODY, "Unknown body");
+            nlohmann::json payload_json = nlohmann::json::parse(payload->std_str());
+            if (payload_json.contains("query")) {
+                status = Search(collection_name->c_str(), payload_json, result_str);
+            } else {
+                status = Status(ILLEGAL_BODY, "Unknown body");
+            }
         }
     } catch (nlohmann::detail::parse_error& e) {
         std::string emsg = "json error: code=" + std::to_string(e.id) + ", reason=" + e.what();

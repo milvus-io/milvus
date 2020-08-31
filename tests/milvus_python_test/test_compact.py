@@ -296,7 +296,6 @@ class TestCompactBase:
         # get collection info before compact
         info = connect.get_collection_stats(collection)
         size_before = info["partitions"][0]["segments"][0]["data_size"]
-        logging.getLogger().info(info["partitions"])
         delete_ids = ids[:1500]
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
@@ -305,7 +304,6 @@ class TestCompactBase:
         assert status.OK()
         # get collection info after compact
         info = connect.get_collection_stats(collection)
-        logging.getLogger().info(info["partitions"])
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before >= size_after)
 

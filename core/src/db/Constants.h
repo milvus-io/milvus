@@ -32,5 +32,7 @@ constexpr int64_t MAX_WAL_FILE_SIZE = 256 * MB;             // max file size of 
 
 constexpr int64_t BUILD_INEDX_RETRY_TIMES = 3;  // retry times if build index failed
 
+constexpr const char* DB_FOLDER = "/db";
+
 }  // namespace engine
 }  // namespace milvus
