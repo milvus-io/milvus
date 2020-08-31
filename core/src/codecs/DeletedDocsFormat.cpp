@@ -86,9 +86,12 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     size_t old_num_bytes;
     std::vector<engine::offset_t> delete_ids;
     if (exists) {
+        CHECK_MAGIC_VALID(fs_ptr, full_file_path);
+        CHECK_SUM_VALID(fs_ptr, full_file_path);
         if (!fs_ptr->reader_ptr_->Open(temp_path)) {
             return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open tmp deleted docs file: " + temp_path);
         }
+        fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
         fs_ptr->reader_ptr_->Read(&old_num_bytes, sizeof(size_t));
         delete_ids.resize(old_num_bytes / sizeof(engine::offset_t));
         fs_ptr->reader_ptr_->Read(delete_ids.data(), old_num_bytes);
