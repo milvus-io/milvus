@@ -13,6 +13,7 @@
 
 #include <ctime>
 #include <string>
+#include <vector>
 
 #include "db/Types.h"
 #include "utils/Status.h"
@@ -57,6 +58,9 @@ GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids);
 
 int64_t
 GetSizeOfChunk(const engine::DataChunkPtr& chunk);
+
+Status
+SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<DataChunkPtr>& chunks);
 
 bool
 RequireRawFile(const std::string& index_type);

@@ -19,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <regex>
+#include <utility>
 #include <vector>
 
 #include "cache/CpuCacheMgr.h"
@@ -170,6 +171,82 @@ GetSizeOfChunk(const engine::DataChunkPtr& chunk) {
     }
 
     return total_size;
+}
+
+Status
+SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<DataChunkPtr>& chunks) {
+    if (chunk == nullptr || segment_row_count <= 0) {
+        return Status::OK();
+    }
+
+    // no need to split chunk
+    if (chunk->count_ <= segment_row_count) {
+        chunks.push_back(chunk);
+        return Status::OK();
+    }
+
+    int64_t chunk_count = chunk->count_;
+
+    // split chunk accordding to segment row count
+    // firstly validate each field size
+    FIELD_WIDTH_MAP fields_width;
+    for (auto& pair : chunk->fixed_fields_) {
+        if (pair.second == nullptr) {
+            continue;
+        }
+
+        if (pair.second->data_.size() % chunk_count != 0) {
+            return Status(DB_ERROR, "Invalid chunk fixed field size");
+        }
+
+        fields_width.insert(std::make_pair(pair.first, pair.second->data_.size() / chunk_count));
+    }
+
+    for (auto& pair : chunk->variable_fields_) {
+        if (pair.second == nullptr) {
+            continue;
+        }
+
+        if (pair.second->offset_.size() != chunk_count) {
+            return Status(DB_ERROR, "Invalid chunk variable field size");
+        }
+    }
+
+    // secondly, copy new chunk
+    int64_t copied_count = 0;
+    while (copied_count < chunk_count) {
+        int64_t count_to_copy = segment_row_count;
+        if (chunk_count - copied_count < segment_row_count) {
+            count_to_copy = chunk_count - copied_count;
+        }
+        DataChunkPtr new_chunk = std::make_shared<DataChunk>();
+        for (auto& pair : chunk->fixed_fields_) {
+            if (pair.second == nullptr) {
+                continue;
+            }
+
+            int64_t field_width = fields_width[pair.first];
+            BinaryDataPtr data = std::make_shared<BinaryData>();
+            int64_t data_length = field_width * count_to_copy;
+            int64_t offset = field_width * copied_count;
+            data->data_.resize(data_length);
+            memcpy(data->data_.data(), pair.second->data_.data() + offset, data_length);
+            new_chunk->fixed_fields_.insert(std::make_pair(pair.first, data));
+        }
+
+        // TODO: copy variable data
+        for (auto& pair : chunk->variable_fields_) {
+            if (pair.second == nullptr) {
+                continue;
+            }
+        }
+
+        new_chunk->count_ = count_to_copy;
+        copied_count += count_to_copy;
+        chunks.emplace_back(new_chunk);
+    }
+
+    return Status::OK();
 }
 
 bool

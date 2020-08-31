@@ -11,6 +11,8 @@
 
 #include "db/wal/WalProxy.h"
 #include "config/ServerConfig.h"
+#include "db/Utils.h"
+#include "db/snapshot/Snapshots.h"
 #include "db/wal/WalManager.h"
 #include "db/wal/WalOperation.h"
 #include "utils/Exception.h"
@@ -61,13 +63,54 @@ WalProxy::DropCollection(const std::string& collection_name) {
 Status
 WalProxy::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
                  idx_t op_id) {
-    // write operation into disk
-    InsertEntityOperationPtr op = std::make_shared<InsertEntityOperation>();
-    op->collection_name_ = collection_name;
-    op->partition_name = partition_name;
-    op->data_chunk_ = data_chunk;
+    // get segment row count of this collection
+    int64_t row_count_per_segment = DEFAULT_SEGMENT_ROW_COUNT;
+    snapshot::ScopedSnapshotT latest_ss;
+    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
+    if (status.ok()) {
+        // get row count per segment
+        auto collection = latest_ss->GetCollection();
+        const json params = collection->GetParams();
+        if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
+            row_count_per_segment = params[PARAM_SEGMENT_ROW_COUNT];
+        }
+    }
 
-    return WalManager::GetInstance().RecordOperation(op, db_);
+    // split chunk accordding to segment row count
+    std::vector<DataChunkPtr> chunks;
+    utils::SplitChunk(data_chunk, row_count_per_segment, chunks);
+    if (chunks.size() > 0 && data_chunk != chunks[0]) {
+        // data has been copied to new chunk, do this to free memory
+        data_chunk->fixed_fields_.clear();
+        data_chunk->variable_fields_.clear();
+        data_chunk->count_ = 0;
+    }
+
+    // write operation into wal file, and insert to memory
+    for (auto& chunk : chunks) {
+        InsertEntityOperationPtr op = std::make_shared<InsertEntityOperation>();
+        op->collection_name_ = collection_name;
+        op->partition_name = partition_name;
+        op->data_chunk_ = data_chunk;
+        STATUS_CHECK(WalManager::GetInstance().RecordOperation(op, db_));
+    }
+
+    // return id field
+    if (chunks.size() > 0 && data_chunk != chunks[0]) {
+        int64_t row_count = 0;
+        BinaryDataPtr id_data = std::make_shared<BinaryData>();
+        for (auto& chunk : chunks) {
+            auto iter = chunk->fixed_fields_.find(engine::FIELD_UID);
+            if (iter != chunk->fixed_fields_.end()) {
+                id_data->data_.insert(id_data->data_.end(), iter->second->data_.begin(), iter->second->data_.end());
+                row_count += chunk->count_;
+            }
+        }
+        data_chunk->count_ = row_count;
+        data_chunk->fixed_fields_[engine::FIELD_UID] = id_data;
+    }
+
+    return Status::OK();
 }
 
 Status
