@@ -24,17 +24,17 @@ namespace {
 
 const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 
-constexpr int64_t COLLECTION_DIMENSION = 512;
+constexpr int64_t COLLECTION_DIMENSION = 64;
 constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ENTITY_COUNT = 10000;
+constexpr int64_t BATCH_ENTITY_COUNT = 6000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
-constexpr int64_t NPROBE = 16;
+constexpr int64_t NPROBE = 2050;
 constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
-constexpr int64_t ADD_ENTITY_LOOP = 10;
+constexpr int64_t ADD_ENTITY_LOOP = 1;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
-constexpr int32_t NLIST = 1024;
+constexpr int32_t NLIST = 3000;
 const char* PARTITION_TAG = "part";
 const char* DIMENSION = "dim";
 const char* METRICTYPE = "metric_type";
@@ -205,7 +205,7 @@ void
 ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int64_t nprobe,
                            const std::string metric_type) {
     nlohmann::json dsl_json, vector_param_json;
-    milvus_sdk::Utils::GenDSLJson(dsl_json, vector_param_json, metric_type);
+    milvus_sdk::Utils::GenDSLJson(dsl_json, vector_param_json, metric_type, nprobe);
 
     std::vector<int64_t> record_ids;
     std::vector<milvus::VectorData> temp_entity_array;
@@ -341,8 +341,9 @@ ClientTest::Test() {
     //
     BuildVectors(NQ, COLLECTION_DIMENSION);
     //    GetEntityByID(collection_name, search_id_array_);
+    LoadCollection(collection_name);
     SearchEntities(collection_name, TOP_K, NPROBE, "L2");
-    SearchEntities(collection_name, TOP_K, NPROBE, "IP");
+    //SearchEntities(collection_name, TOP_K, NPROBE, "IP");
     //    GetCollectionStats(collection_name);
     //
     //    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};

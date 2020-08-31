@@ -335,7 +335,7 @@ Utils::GenLeafQuery() {
 }
 
 void
-Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type) {
+Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type, const int64_t nprobe) {
     uint64_t row_num = 10000;
     std::vector<int64_t> term_value;
     term_value.resize(row_num);
@@ -365,7 +365,7 @@ Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, c
     int64_t topk = 10;
     query_vector_json["topk"] = topk;
     query_vector_json["metric_type"] = metric_type;
-    vector_extra_params["nprobe"] = 64;
+    vector_extra_params["nprobe"] = nprobe;
     query_vector_json["params"] = vector_extra_params;
     vector_param_json[placeholder]["field_vec"] = query_vector_json;
 }

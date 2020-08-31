@@ -220,7 +220,29 @@ SearchTask::MergeTopkToResultSet(const engine::ResultIds& src_ids, const engine:
 
 int64_t
 SearchTask::nq() {
+    if (!query_ptr_) {
+        auto vector_query = query_ptr_->vectors.begin();
+        if (vector_query != query_ptr_->vectors.end()) {
+            if (vector_query->second) {
+                return vector_query->second->nq;
+            }
+        }
+    }
     return 0;
+}
+
+milvus::json
+SearchTask::ExtraParam() {
+    milvus::json param;
+    if (!query_ptr_) {
+        auto vector_query = query_ptr_->vectors.begin();
+        if (vector_query != query_ptr_->vectors.end()) {
+            if (vector_query->second) {
+                return vector_query->second->extra_params;
+            }
+        }
+    }
+    return param;
 }
 
 }  // namespace scheduler

@@ -52,6 +52,9 @@ class SearchTask : public Task {
     int64_t
     nq();
 
+    milvus::json
+    ExtraParam();
+
  private:
     void
     CreateExecEngine();

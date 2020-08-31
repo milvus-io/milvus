@@ -17,6 +17,8 @@
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "faiss/gpu/utils/DeviceUtils.h"
 
 namespace milvus {
 namespace scheduler {
@@ -51,7 +53,11 @@ FaissIVFFlatPass::Run(const TaskPtr& task) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFFlatPass: gpu disable, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_task->nq() < threshold_) {
-        LOG_SERVER_DEBUG_ << LogOut("FaissIVFFlatPass: nq < gpu_search_threshold, specify cpu to search!");
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFFlatPass: nq  < gpu_search_threshold, specify cpu to search! new _");
+        printf("nq%ld threshold %ld\n",search_task->nq(), threshold_);
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else if (search_task->ExtraParam()[knowhere::IndexParams::nprobe].get<int64_t>() > faiss::gpu::getMaxKSelection()) {
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFFlatPass: nprobe > gpu_max_nprobe_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFFlatPass: nq >= gpu_search_threshold, specify gpu %d to search!",
