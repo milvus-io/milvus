@@ -50,7 +50,7 @@ LoadCollectionReq::OnExecute() {
 
         // TODO(yukun): if PreloadCollection interface needs to add field names as params
         std::vector<std::string> field_names;
-        for (auto field_it : fields_schema) {
+        for (const auto& field_it : fields_schema) {
             field_names.emplace_back(field_it.first->GetName());
         }
 

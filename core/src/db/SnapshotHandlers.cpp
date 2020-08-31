@@ -105,7 +105,7 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
 
     std::vector<idx_t> ids_in_this_segment;
     std::vector<int64_t> offsets;
-    for (IDNumbers::iterator it = ids_left_.begin(); it != ids_left_.end();) {
+    for (auto it = ids_left_.begin(); it != ids_left_.end();) {
         idx_t id = *it;
         // fast check using bloom filter
         if (!id_bloom_filter_ptr->Check(id)) {

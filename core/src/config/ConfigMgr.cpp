@@ -166,7 +166,7 @@ ConfigMgr::ConfigMgr() {
         /* invisible */
         /* engine */
         {"engine.build_index_threshold",
-         CreateIntegerConfig("engine.build_index_threshold", false, 0, std::numeric_limits<int64_t>::max(),
+         CreateIntegerConfig("engine.build_index_threshold", true, 0, std::numeric_limits<int64_t>::max(),
                              &config.engine.build_index_threshold.value, 4096, nullptr, nullptr)},
         {"engine.search_combine_nq",
          CreateIntegerConfig("engine.search_combine_nq", true, 0, std::numeric_limits<int64_t>::max(),
@@ -177,6 +177,9 @@ ConfigMgr::ConfigMgr() {
         {"engine.omp_thread_num",
          CreateIntegerConfig("engine.omp_thread_num", true, 0, std::numeric_limits<int64_t>::max(),
                              &config.engine.omp_thread_num.value, 0, nullptr, nullptr)},
+        {"engine.clustering_type",
+         CreateEnumConfig("engine.clustering_type", false, &ClusteringMap, &config.engine.clustering_type.value,
+                          ClusteringType::K_MEANS, nullptr, nullptr)},
         {"engine.simd_type", CreateEnumConfig("engine.simd_type", false, &SimdMap, &config.engine.simd_type.value,
                                               SimdType::AUTO, nullptr, nullptr)},
 

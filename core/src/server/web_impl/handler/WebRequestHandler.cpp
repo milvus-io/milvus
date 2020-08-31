@@ -90,7 +90,7 @@ CopyStructuredData(const nlohmann::json& json, std::vector<uint8_t>& raw) {
     values.resize(size);
     raw.resize(size * sizeof(T));
     size_t offset = 0;
-    for (auto data : json) {
+    for (const auto& data : json) {
         values[offset] = data.get<T>();
         ++offset;
     }
@@ -1770,6 +1770,8 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         std::vector<std::string> ids;
         StringHelpFunctions::SplitStringByDelimeter(query_ids->c_str(), ",", ids);
         std::vector<int64_t> entity_ids;
+
+        entity_ids.reserve(ids.size());
         for (auto& id : ids) {
             entity_ids.push_back(std::stol(id));
         }
