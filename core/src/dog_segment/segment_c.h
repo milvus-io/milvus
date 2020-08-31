@@ -2,17 +2,13 @@
 extern "C" {
 #endif
 
-//struct DogDataChunk {
-//    void* raw_data;      // schema
-//    int sizeof_per_row;  // alignment
-//    signed long int count;
-//};
+#include "partition_c.h"
 
 typedef void* CSegmentBase;
 
-CSegmentBase SegmentBaseInit(unsigned long segment_id);
+CSegmentBase NewSegment(CPartition partition, unsigned long segment_id);
 
-//int32_t Insert(CSegmentBase c_segment, signed long int size, const unsigned long* primary_keys, const unsigned long int* timestamps, DogDataChunk values);
+void DeleteSegment(CSegmentBase segment);
 
 int Insert(CSegmentBase c_segment,
                 signed long int size,

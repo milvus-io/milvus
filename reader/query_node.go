@@ -48,7 +48,38 @@ func NewQueryNode(timeSync uint64) *QueryNode {
 	}
 }
 
-func (node *QueryNode)doQueryNode(wg *sync.WaitGroup) {
+// TODO: Schema
+type CollectionSchema string
+
+func (node *QueryNode) NewCollection(collectionName string, schema CollectionSchema) (*Collection, error) {
+	cName := C.CString(collectionName)
+	cSchema := C.CString(schema)
+	collection, status := C.NewCollection(cName, cSchema)
+
+	if status != 0 {
+		return nil, errors.New("create collection failed")
+	}
+
+	var newCollection = &Collection{CollectionPtr: collection, CollectionName: collectionName}
+	node.Collections = append(node.Collections, newCollection)
+
+	return newCollection, nil
+}
+
+func (node *QueryNode) DeleteCollection(collection *Collection) error {
+	status := C.DeleteCollection(collection.CollectionPtr)
+
+	if status != 0 {
+		return errors.New("delete collection failed")
+	}
+
+	// TODO: remove from node.Collections
+	return nil
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+func (node *QueryNode) doQueryNode (wg *sync.WaitGroup) {
 	wg.Add(3)
 	go node.Insert(node.messageClient.InsertMsg, wg)
 	go node.Delete(node.messageClient.DeleteMsg, wg)
@@ -65,12 +96,6 @@ func (node *QueryNode) StartMessageClient() {
 	node.messageClient.InitClient("pulsar://localhost:6650", topics)
 
 	go node.messageClient.ReceiveMessage()
-}
-
-func (node *QueryNode) AddNewCollection(collectionName string, schema CollectionSchema) error {
-	var collection, err = NewCollection(collectionName, schema)
-	node.Collections = append(node.Collections, collection)
-	return err
 }
 
 func (node *QueryNode) GetSegmentByEntityId(entityId int64) *Segment {
@@ -115,13 +140,11 @@ func (node *QueryNode) GetTimeSync() uint64 {
 
 func (node *QueryNode) InitQueryNodeCollection() {
 	// TODO: remove hard code, add collection creation request
-	var collection, _ = NewCollection("collection1", "fakeSchema")
-	node.Collections = append(node.Collections, collection)
-	var partition, _ = collection.NewPartition("partition1")
-	collection.Partitions = append(collection.Partitions, partition)
+	// TODO: error handle
+	var newCollection, _ = node.NewCollection("collection1", "fakeSchema")
+	var newPartition, _ = newCollection.NewPartition("partition1")
 	// TODO: add segment id
-	var segment, _ = partition.NewSegment(0)
-	partition.Segments = append(partition.Segments, segment)
+	var _, _ = newPartition.NewSegment(0)
 }
 
 func (node *QueryNode) SegmentsManagement() {

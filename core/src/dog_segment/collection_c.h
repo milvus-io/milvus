@@ -4,7 +4,7 @@ extern "C" {
 
 typedef void* CCollection;
 
-CCollection NewCollection(const char* collection_name);
+CCollection NewCollection(const char* collection_name, const char* schema_conf);
 
 void DeleteCollection(CCollection collection);
 

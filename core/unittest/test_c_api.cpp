@@ -2,13 +2,14 @@
 #include <string>
 #include <random>
 #include <gtest/gtest.h>
+#include <dog_segment/SegmentBase.h>
 
 #include "dog_segment/segment_c.h"
 #include "dog_segment/collection_c.h"
 
 TEST(SegmentTest, InsertTest) {
-  auto segment_id = 0;
-  auto s = SegmentBaseInit(segment_id);
+  auto fake_schema = std::make_shared<milvus::dog_segment::Schema>();
+  auto s = milvus::dog_segment::CreateSegment(fake_schema).release();
 
   std::vector<char> raw_data;
   std::vector<uint64_t> timestamps;

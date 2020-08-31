@@ -128,11 +128,8 @@ class SegmentNaive : public SegmentBase {
     }
 
  public:
-    friend std::unique_ptr<SegmentBase>
-    CreateSegment(SchemaPtr schema);
-
-    friend SegmentBase*
-    CreateSegment();
+    friend SegmentBasePtr
+    CreateSegment(SchemaPtr& schema);
 
  private:
     SchemaPtr schema_;
@@ -147,22 +144,17 @@ class SegmentNaive : public SegmentBase {
     tbb::concurrent_unordered_multimap<int, Timestamp> delete_logs_;
 };
 
-std::unique_ptr<SegmentBase>
-CreateSegment(SchemaPtr schema) {
-    auto segment = std::make_unique<SegmentNaive>();
-    segment->schema_ = schema;
-    segment->entity_vecs_.resize(schema->size());
-    return segment;
-}
+SegmentBasePtr
+CreateSegment(SchemaPtr& schema) {
+    // TODO: remove hard code
+    auto schema_tmp = std::make_shared<Schema>();
+    schema_tmp->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema_tmp->AddField("age", DataType::INT32);
 
-SegmentBase* CreateSegment() {
-  auto segment = new SegmentNaive();
-  auto schema = std::make_shared<Schema>();
-  schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
-  schema->AddField("age", DataType::INT32);
-  segment->schema_ = schema;
-  segment->entity_vecs_.resize(schema->size());
-  return segment;
+    auto segment = std::make_unique<SegmentNaive>();
+    segment->schema_ = schema_tmp;
+    segment->entity_vecs_.resize(schema_tmp->size());
+    return segment;
 }
 
 Status

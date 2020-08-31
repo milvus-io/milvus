@@ -11,7 +11,6 @@ package reader
 */
 import "C"
 import (
-	"errors"
 	"suvlim/pulsar/schema"
 )
 
@@ -21,27 +20,6 @@ type Segment struct {
 	SegmentPtr *C.SegmentBase
 	SegmentId	int32
 	SegmentCloseTime uint64
-}
-
-func (p *Partition) NewSegment(segmentId uint64) (*Segment, error) {
-	// TODO: add segment id
-	segmentPtr, status := C.SegmentBaseInit(p.PartitionPtr)
-
-	if status != 0 {
-		return nil, errors.New("create segment failed")
-	}
-
-	return &Segment{SegmentPtr: segmentPtr}, nil
-}
-
-func (p *Partition) DeleteSegment() error {
-	status := C.DeleteSegment(p.PartitionPtr)
-
-	if status != 0 {
-		return errors.New("delete segment failed")
-	}
-
-	return nil
 }
 
 func (s *Segment) GetRowCount() int64 {

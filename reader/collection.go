@@ -11,28 +11,28 @@ type Collection struct {
 	Partitions []*Partition
 }
 
-// TODO: Schema
-type CollectionSchema string
-
-func NewCollection(collectionName string, schema CollectionSchema) (*Collection, error) {
-	cName := C.CString(collectionName)
-	cSchema := C.CString(schema)
-	collection, status := C.NewCollection(cName, cSchema)
+func (c *Collection) NewPartition(partitionName string) (*Partition, error) {
+	cName := C.CString(partitionName)
+	partitionPtr, status := C.NewPartition(c.CollectionPtr, cName)
 
 	if status != 0 {
-		return nil, errors.New("create collection failed")
+		return nil, errors.New("create partition failed")
 	}
 
-	return &Collection{CollectionPtr: collection, CollectionName: collectionName}, nil
+	var newPartition = &Partition{PartitionPtr: partitionPtr, PartitionName: partitionName}
+	c.Partitions = append(c.Partitions, newPartition)
+	return newPartition, nil
 }
 
-func DeleteCollection(collection *Collection) error {
-	status := C.DeleteCollection(collection.CollectionPtr)
+func (c *Collection) DeletePartition(partitionName string) error {
+	cName := C.CString(partitionName)
+	status := C.DeletePartition(c.CollectionPtr, cName)
 
 	if status != 0 {
-		return errors.New("delete collection failed")
+		return errors.New("create partition failed")
 	}
 
+	// TODO: remove from c.Partitions
 	return nil
 }
 

@@ -102,12 +102,9 @@ class SegmentBase {
     uint64_t segment_id_;
 };
 
-using SegmentBasePtr = std::shared_ptr<SegmentBase>;
+using SegmentBasePtr = std::unique_ptr<SegmentBase>;
 
-std::unique_ptr<SegmentBase> CreateSegment(SchemaPtr ptr);
-
-// TODO: Delete this after schema parse function done
-SegmentBase* CreateSegment();
+SegmentBasePtr CreateSegment(SchemaPtr& ptr);
 
 }  // namespace engine
 }  // namespace milvus

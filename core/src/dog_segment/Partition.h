@@ -6,21 +6,18 @@ namespace milvus::dog_segment {
 
 class Partition {
 public:
-    explicit Partition(std::string& partition_name);
+    explicit Partition(std::string& partition_name, SchemaPtr& schema);
 
-    const std::vector<SegmentBasePtr> &segments() const {
-      return segments_;
+public:
+    SchemaPtr& get_schema() {
+      return schema_;
     }
-
-    void AddNewSegment(uint64_t segment_id);
 
 private:
     std::string partition_name_;
-    std::vector<SegmentBasePtr> segments_;
+    SchemaPtr schema_;
 };
 
-using PartitionPtr = std::shared_ptr<Partition>;
-
-Partition* CreatePartiton();
+using PartitionPtr = std::unique_ptr<Partition>;
 
 }

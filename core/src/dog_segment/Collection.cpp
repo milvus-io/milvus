@@ -11,7 +11,4 @@ Collection::set_index() {}
 void
 Collection::parse() {}
 
-void
-Collection::AddNewPartition() {}
-
 }
