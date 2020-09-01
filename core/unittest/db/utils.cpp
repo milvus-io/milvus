@@ -313,6 +313,7 @@ EventTest::TearDown() {
 DBOptions
 WalTest::GetOptions() {
     DBOptions options;
+    options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_path_ = "/tmp/milvus_wal";
     options.wal_enable_ = true;
     return options;
@@ -320,18 +321,22 @@ WalTest::GetOptions() {
 
 void
 WalTest::SetUp() {
+    BaseTest::SetUp();
     auto options = GetOptions();
     std::experimental::filesystem::create_directory(options.wal_path_);
     milvus::engine::DBPtr db = std::make_shared<milvus::engine::DBProxy>(nullptr, GetOptions());
     db_ = std::make_shared<milvus::engine::WalProxy>(db, options);
     db_->Start();
+    BaseTest::SnapshotStart(true, options);
 }
 
 void
 WalTest::TearDown() {
+    BaseTest::SnapshotStop();
     db_->Stop();
     db_ = nullptr;
     std::experimental::filesystem::remove_all(GetOptions().wal_path_);
+    BaseTest::TearDown();
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

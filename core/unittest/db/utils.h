@@ -411,7 +411,7 @@ class EventTest : public BaseTest {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-class WalTest : public ::testing::Test {
+class WalTest : public BaseTest {
  protected:
     std::shared_ptr<DB> db_;
 

@@ -257,69 +257,43 @@ WalManager::Init() {
 
 Status
 WalManager::RecordInsertOperation(const InsertEntityOperationPtr& operation, const DBPtr& db) {
-    std::vector<DataChunkPtr> chunks;
-    SplitChunk(operation->data_chunk_, chunks);
+    idx_t op_id = id_gen_.GetNextIDNumber();
 
-    IDNumbers op_ids;
-    auto status = id_gen_.GetNextIDNumbers(chunks.size(), op_ids);
-    if (!status.ok()) {
-        return status;
-    }
+    DataChunkPtr& chunk = operation->data_chunk_;
+    int64_t chunk_size = utils::GetSizeOfChunk(chunk);
 
-    for (size_t i = 0; i < chunks.size(); ++i) {
-        idx_t op_id = op_ids[i];
-        DataChunkPtr& chunk = chunks[i];
-        int64_t chunk_size = utils::GetSizeOfChunk(chunk);
-
-        try {
-            // open wal file
-            std::string path = ConstructFilePath(operation->collection_name_, std::to_string(op_id));
-            if (!path.empty()) {
-                std::lock_guard<std::mutex> lock(file_map_mutex_);
-                WalFilePtr file = file_map_[operation->collection_name_];
-                if (file == nullptr) {
-                    file = std::make_shared<WalFile>();
-                    file_map_[operation->collection_name_] = file;
-                    file->OpenFile(path, WalFile::APPEND_WRITE);
-                } else if (!file->IsOpened() || file->ExceedMaxSize(chunk_size)) {
-                    file->OpenFile(path, WalFile::APPEND_WRITE);
-                }
-
-                // write to wal file
-                status = WalOperationCodec::WriteInsertOperation(file, operation->partition_name, chunk, op_id);
-                if (!status.ok()) {
-                    return status;
-                }
+    try {
+        // open wal file
+        std::string path = ConstructFilePath(operation->collection_name_, std::to_string(op_id));
+        if (!path.empty()) {
+            std::lock_guard<std::mutex> lock(file_map_mutex_);
+            WalFilePtr file = file_map_[operation->collection_name_];
+            if (file == nullptr) {
+                file = std::make_shared<WalFile>();
+                file_map_[operation->collection_name_] = file;
+                file->OpenFile(path, WalFile::APPEND_WRITE);
+            } else if (!file->IsOpened() || file->ExceedMaxSize(chunk_size)) {
+                file->OpenFile(path, WalFile::APPEND_WRITE);
             }
-        } catch (std::exception& ex) {
-            std::string msg = "Failed to record insert operation, reason: " + std::string(ex.what());
-            return Status(DB_ERROR, msg);
-        }
 
-        // insert action to db
-        if (db) {
-            status = db->Insert(operation->collection_name_, operation->partition_name, operation->data_chunk_, op_id);
+            // write to wal file
+            auto status = WalOperationCodec::WriteInsertOperation(file, operation->partition_name, chunk, op_id);
             if (!status.ok()) {
                 return status;
             }
         }
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to record insert operation, reason: " + std::string(ex.what());
+        return Status(DB_ERROR, msg);
     }
 
-    return Status::OK();
-}
-
-Status
-WalManager::SplitChunk(const DataChunkPtr& chunk, std::vector<DataChunkPtr>& chunks) {
-    //    int64_t chunk_size = utils::GetSizeOfChunk(chunk);
-    //    if (chunk_size > insert_buffer_size_) {
-    //        int64_t batch = chunk_size / insert_buffer_size_;
-    //        int64_t batch_count = chunk->count_ / batch;
-    //        for (int64_t i = 0; i <= batch; ++i) {
-    //        }
-    //    } else {
-    //        chunks.push_back(chunk);
-    //    }
-    chunks.push_back(chunk);
+    // insert action to db
+    if (db) {
+        auto status = db->Insert(operation->collection_name_, operation->partition_name, operation->data_chunk_, op_id);
+        if (!status.ok()) {
+            return status;
+        }
+    }
 
     return Status::OK();
 }

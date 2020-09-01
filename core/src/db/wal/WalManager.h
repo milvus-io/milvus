@@ -67,9 +67,6 @@ class WalManager {
     Status
     RecordDeleteOperation(const DeleteEntityOperationPtr& operation, const DBPtr& db);
 
-    Status
-    SplitChunk(const DataChunkPtr& chunk, std::vector<DataChunkPtr>& chunks);
-
     std::string
     ConstructFilePath(const std::string& collection_name, const std::string& file_name);
 
