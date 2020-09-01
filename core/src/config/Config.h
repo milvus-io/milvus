@@ -374,6 +374,10 @@ class Config {
     GetMetricConfigAddress(std::string& value);
     Status
     GetMetricConfigPort(std::string& value);
+    Status
+    GetMetricConfigClusterLabel(std::string& value);
+    Status
+    GetMetricConfigInstanceLabel(std::string& value);
 
     /* cache config */
     Status

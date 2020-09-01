@@ -32,23 +32,26 @@ PrometheusMetrics::Init() {
         }
 
         // Following should be read from config file.
-        std::string server_port, push_port, push_address;
+        std::string server_port, push_port, push_address, cluster_label, instance_label;
         STATUS_CHECK(config.GetNetworkConfigBindPort(server_port));
         STATUS_CHECK(config.GetMetricConfigPort(push_port));
         STATUS_CHECK(config.GetMetricConfigAddress(push_address));
+        STATUS_CHECK(config.GetMetricConfigClusterLabel(cluster_label));
+        STATUS_CHECK(config.GetMetricConfigInstanceLabel(instance_label));
 
         const std::string uri = std::string("/metrics");
         // const std::size_t num_threads = 2;
 
-        std::string hostportstr;
-        char hostname[1024];
-        if (gethostname(hostname, sizeof(hostname)) == 0) {
-            hostportstr = std::string(hostname) + ":" + server_port;
-        } else {
-            hostportstr = "pushgateway";
+        if (instance_label.empty()) {
+            char hostname[1024];
+            if (gethostname(hostname, sizeof(hostname)) == 0) {
+                instance_label = std::string(hostname) + ":" + server_port;
+            } else {
+                instance_label = "pushgateway";
+            }
         }
 
-        auto labels = prometheus::Gateway::GetInstanceLabel(hostportstr);
+        auto labels = prometheus::Gateway::Labels{{"cluster", cluster_label}, {"instance", instance_label}};
 
         // Init pushgateway
         gateway_ = std::make_shared<prometheus::Gateway>(push_address, push_port, "milvus_metrics", labels);

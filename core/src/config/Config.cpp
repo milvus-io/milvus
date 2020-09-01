@@ -106,6 +106,10 @@ const char* CONFIG_METRIC_ADDRESS = "address";
 const char* CONFIG_METRIC_ADDRESS_DEFAULT = "127.0.0.1";
 const char* CONFIG_METRIC_PORT = "port";
 const char* CONFIG_METRIC_PORT_DEFAULT = "9091";
+const char* CONFIG_METRIC_CLUSTER_LABEL = "cluster_label";
+const char* CONFIG_METRIC_CLUSTER_LABEL_DEFAULT = "milvus_cluster";
+const char* CONFIG_METRIC_INSTANCE_LABEL = "instance_label";
+const char* CONFIG_METRIC_INSTANCE_LABEL_DEFAULT = "";
 
 /* engine config */
 const char* CONFIG_ENGINE = "engine_config";
@@ -344,6 +348,12 @@ Config::ValidateConfig() {
 
     std::string metric_port;
     STATUS_CHECK(GetMetricConfigPort(metric_port));
+
+    std::string metric_cluster_label;
+    STATUS_CHECK(GetMetricConfigClusterLabel(metric_cluster_label));
+
+    std::string metric_instance_label;
+    STATUS_CHECK(GetMetricConfigInstanceLabel(metric_instance_label));
 
     /* cache config */
     int64_t cache_cpu_cache_capacity;
@@ -2223,6 +2233,18 @@ Status
 Config::GetMetricConfigPort(std::string& value) {
     value = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_PORT, CONFIG_METRIC_PORT_DEFAULT);
     return CheckMetricConfigPort(value);
+}
+
+Status
+Config::GetMetricConfigClusterLabel(std::string& value) {
+    value = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_CLUSTER_LABEL, CONFIG_METRIC_CLUSTER_LABEL_DEFAULT);
+    return Status::OK();
+}
+
+Status
+Config::GetMetricConfigInstanceLabel(std::string& value) {
+    value = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_INSTANCE_LABEL, CONFIG_METRIC_INSTANCE_LABEL_DEFAULT);
+    return Status::OK();
 }
 
 /* cache config */
