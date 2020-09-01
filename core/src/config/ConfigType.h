@@ -216,44 +216,45 @@ class SizeConfig : public BaseConfig {
 
 /* create config without {is_valid, update} function */
 
-#define CreateBoolConfig(name, config_addr, default) CreateBoolConfig_(name, config_addr, (default), nullptr, nullptr)
+#define CreateBoolConfig(name, config_addr, default) \
+    CreateBoolConfig_(name, true, config_addr, (default), nullptr, nullptr)
 
 #define CreateStringConfig(name, config_addr, default) \
-    CreateStringConfig_(name, config_addr, (default), nullptr, nullptr)
+    CreateStringConfig_(name, true, config_addr, (default), nullptr, nullptr)
 
 #define CreateEnumConfig(name, enumd, config_addr, default) \
-    CreateEnumConfig_(name, enumd, config_addr, (default), nullptr, nullptr)
+    CreateEnumConfig_(name, true, enumd, config_addr, (default), nullptr, nullptr)
 
 #define CreateIntegerConfig(name, lower_bound, upper_bound, config_addr, default) \
-    CreateIntegerConfig_(name, lower_bound, upper_bound, config_addr, (default), nullptr, nullptr)
+    CreateIntegerConfig_(name, true, lower_bound, upper_bound, config_addr, (default), nullptr, nullptr)
 
 #define CreateFloatingConfig(name, lower_bound, upper_bound, config_addr, default) \
-    CreateFloatingConfig_(name, lower_bound, upper_bound, config_addr, (default), nullptr, nullptr)
+    CreateFloatingConfig_(name, true, lower_bound, upper_bound, config_addr, (default), nullptr, nullptr)
 
 #define CreateSizeConfig(name, lower_bound, upper_bound, config_addr, default) \
-    CreateSizeConfig_(name, lower_bound, upper_bound, config_addr, (default), nullptr, nullptr)
+    CreateSizeConfig_(name, true, lower_bound, upper_bound, config_addr, (default), nullptr, nullptr)
 
 /* create config with {is_valid, update} function */
 
-#define CreateBoolConfig_(name, config_addr, default, is_valid, update) \
-    std::make_shared<BoolConfig>(name, nullptr, true, config_addr, (default), is_valid, update)
+#define CreateBoolConfig_(name, modifiable, config_addr, default, is_valid, update) \
+    std::make_shared<BoolConfig>(name, nullptr, modifiable, config_addr, (default), is_valid, update)
 
-#define CreateStringConfig_(name, config_addr, default, is_valid, update) \
-    std::make_shared<StringConfig>(name, nullptr, true, config_addr, (default), is_valid, update)
+#define CreateStringConfig_(name, modifiable, config_addr, default, is_valid, update) \
+    std::make_shared<StringConfig>(name, nullptr, modifiable, config_addr, (default), is_valid, update)
 
-#define CreateEnumConfig_(name, enumd, config_addr, default, is_valid, update) \
-    std::make_shared<EnumConfig>(name, nullptr, true, enumd, config_addr, (default), is_valid, update)
+#define CreateEnumConfig_(name, modifiable, enumd, config_addr, default, is_valid, update) \
+    std::make_shared<EnumConfig>(name, nullptr, modifiable, enumd, config_addr, (default), is_valid, update)
 
-#define CreateIntegerConfig_(name, lower_bound, upper_bound, config_addr, default, is_valid, update)                 \
-    std::make_shared<IntegerConfig>(name, nullptr, true, lower_bound, upper_bound, config_addr, (default), is_valid, \
-                                    update)
+#define CreateIntegerConfig_(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid, update) \
+    std::make_shared<IntegerConfig>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), \
+                                    is_valid, update)
 
-#define CreateFloatingConfig_(name, lower_bound, upper_bound, config_addr, default, is_valid, update)                 \
-    std::make_shared<FloatingConfig>(name, nullptr, true, lower_bound, upper_bound, config_addr, (default), is_valid, \
-                                     update)
+#define CreateFloatingConfig_(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid, update) \
+    std::make_shared<FloatingConfig>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), \
+                                     is_valid, update)
 
-#define CreateSizeConfig_(name, lower_bound, upper_bound, config_addr, default, is_valid, update)                 \
-    std::make_shared<SizeConfig>(name, nullptr, true, lower_bound, upper_bound, config_addr, (default), is_valid, \
-                                 update)
+#define CreateSizeConfig_(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid, update) \
+    std::make_shared<SizeConfig>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), \
+                                 is_valid, update)
 
 }  // namespace milvus

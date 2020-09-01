@@ -42,8 +42,8 @@ InitConfig() {
          CreateEnumConfig("cluster.role", &ClusterRoleMap, &config.cluster.role.value, ClusterRole::RW)},
 
         /* general */
-        {"general.timezone",
-         CreateStringConfig_("general.timezone", &config.general.timezone.value, "UTC+8", is_timezone_valid, nullptr)},
+        {"general.timezone", CreateStringConfig_("general.timezone", _MODIFIABLE, &config.general.timezone.value,
+                                                 "UTC+8", is_timezone_valid, nullptr)},
         {"general.meta_uri", CreateStringConfig("general.meta_uri", &config.general.meta_uri.value, "sqlite://:@:/")},
 
         /* network */
