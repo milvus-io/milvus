@@ -36,7 +36,7 @@ class TestCacheConfig:
         '''
         relpy = connect.set_config("cache", "cache_size", '4GB')
         config_value = connect.get_config("cache", "cache_size")
-        assert config_value == '4294967296'
+        assert config_value == '4GB'
         #relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
         #config_value = connect.get_config("cache", "insert_buffer_size")
         #assert config_value == '1073741824'
@@ -188,7 +188,7 @@ class TestCacheConfig:
         self.reset_configs(connect)
         relpy = connect.set_config("cache", "cache_size", '2147483648')
         config_value = connect.get_config("cache", "cache_size")
-        assert config_value == '2147483648'
+        assert config_value == '2GB'
 
     @pytest.mark.level(2)
     def test_set_cache_size_valid_multiple_times(self, connect, collection):
@@ -228,8 +228,7 @@ class TestCacheConfig:
         expected: status ok, set successfully
         '''
         self.reset_configs(connect)
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
+        relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
 
     @pytest.mark.level(2)
     def test_set_insert_buffer_size_valid_multiple_times(self, connect, collection):
@@ -845,8 +844,7 @@ class TestNetworkConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("network", "bind.address", '0.0.0.0')
+        relpy = connect.set_config("network", "bind.address", '0.0.0.0')
 
     def test_set_port_valid(self, connect, collection):
         '''
@@ -855,8 +853,7 @@ class TestNetworkConfig:
         expected: status ok, set successfully
         '''
         for valid_port in [1025, 65534, 12345, "19530"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("network", "http.port", valid_port)
+            relpy = connect.set_config("network", "http.port", valid_port)
 
     def test_set_port_invalid(self, connect, collection):
         '''
@@ -864,7 +861,7 @@ class TestNetworkConfig:
         method: call set_config with port number out of range(1024, 65535)
         expected: status not ok
         '''
-        for invalid_port in [1024, 65535, "0", "True", "19530 ", "100000"]:
+        for invalid_port in [1024, 65535, "0", "True", "100000"]:
             logging.getLogger().info(invalid_port)
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("network", "http.port", invalid_port)
@@ -876,8 +873,7 @@ class TestNetworkConfig:
         expected: status ok, set successfully
         '''
         for valid_http_port in [1025, 65534, "12345", 19121]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("network", "http.port", valid_http_port)
+            relpy = connect.set_config("network", "http.port", valid_http_port)
 
     def test_set_http_port_invalid(self, connect, collection):
         '''
@@ -885,7 +881,7 @@ class TestNetworkConfig:
         method: call set_config with http.port number out of range(1024, 65535)
         expected: status not ok
         '''
-        for invalid_http_port in [1024, 65535, "0", "True", "19530 ", "1000000"]:
+        for invalid_http_port in [1024, 65535, "0", "True", "1000000"]:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("network", "http.port", invalid_http_port)
 
@@ -956,7 +952,7 @@ class TestGeneralConfig:
         method: call set_config with invalid timezone
         expected: status not ok
         '''
-        for invalid_timezone in ["utc++8", "UTC++8", "GMT+8"]:
+        for invalid_timezone in ["utc++8", "UTC++8"]:
             logging.getLogger().info(invalid_timezone)
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("general", "timezone", invalid_timezone)
@@ -978,8 +974,7 @@ class TestGeneralConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("general", "meta_uri", 'sqlite://:@:/')
+        relpy = connect.set_config("general", "meta_uri", 'sqlite://:@:/')
 
 
 class TestStorageConfig:
@@ -1058,8 +1053,7 @@ class TestStorageConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("storage", "path", '/var/lib/milvus')
+        relpy = connect.set_config("storage", "path", '/var/lib/milvus')
 
     def test_set_auto_flush_interval_valid(self, connect, collection):
         '''
@@ -1182,9 +1176,8 @@ class TestMetricConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        for valid_enable in ["Off", "false", 0, "yes", "On", "true", "1", "NO"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("metric", "enable", valid_enable)
+        for valid_enable in ["false", "true"]:
+            relpy = connect.set_config("metric", "enable", valid_enable)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_address_valid(self, connect, collection):
@@ -1193,8 +1186,7 @@ class TestMetricConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("metric", "address", '127.0.0.1')
+        relpy = connect.set_config("metric", "address", '127.0.0.1')
 
     def test_set_port_valid(self, connect, collection):
         '''
@@ -1203,8 +1195,7 @@ class TestMetricConfig:
         expected: status ok, set successfully
         '''
         for valid_port in [1025, 65534, "19530", "9091"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("metric", "port", valid_port)
+            relpy = connect.set_config("metric", "port", valid_port)
 
     def test_set_port_invalid(self, connect, collection):
         '''
@@ -1212,7 +1203,7 @@ class TestMetricConfig:
         method: call set_config with port number out of range(1024, 65535), or same as http.port number
         expected: status not ok
         '''
-        for invalid_port in [1024, 65535, "0", "True", "19530 ", "100000"]:
+        for invalid_port in [1024, 65535, "0", "True", "100000"]:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("metric", "port", invalid_port)
 
@@ -1337,9 +1328,8 @@ class TestWALConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        for valid_enable in ["Off", "false", 0, "no", "On", "true", "1", "YES"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("wal", "enable", valid_enable)
+        for valid_enable in ["false", "true"]:
+            relpy = connect.set_config("wal", "enable", valid_enable)
 
     def test_set_recovery_error_ignore_valid(self, connect, collection):
         '''
@@ -1347,9 +1337,8 @@ class TestWALConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        for valid_recovery_error_ignore in ["Off", "false", "0", "no", "On", "true", "1", "YES"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("wal", "recovery_error_ignore", valid_recovery_error_ignore)
+        for valid_recovery_error_ignore in ["false", "true"]:
+            relpy = connect.set_config("wal", "recovery_error_ignore", valid_recovery_error_ignore)
 
     def test_set_buffer_size_valid_A(self, connect, collection):
         '''
@@ -1358,8 +1347,7 @@ class TestWALConfig:
         expected: status ok, set successfully
         '''
         for valid_buffer_size in ["64MB", "128MB", "4096MB", "1000MB", "256MB"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("wal", "buffer_size", valid_buffer_size)
+            relpy = connect.set_config("wal", "buffer_size", valid_buffer_size)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_wal_path_valid(self, connect, collection, args):
@@ -1368,6 +1356,5 @@ class TestWALConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("wal", "path", "/var/lib/milvus/wal")
+        relpy = connect.set_config("wal", "path", "/var/lib/milvus/wal")
 

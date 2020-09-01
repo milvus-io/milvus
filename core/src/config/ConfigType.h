@@ -214,22 +214,46 @@ class SizeConfig : public BaseConfig {
     Get() override;
 };
 
-#define CreateBoolConfig(name, config_addr, default) \
-    std::make_shared<BoolConfig>(name, nullptr, true, config_addr, (default))
+/* create config without {is_valid, update} function */
+
+#define CreateBoolConfig(name, config_addr, default) CreateBoolConfig_(name, config_addr, (default), nullptr, nullptr)
 
 #define CreateStringConfig(name, config_addr, default) \
-    std::make_shared<StringConfig>(name, nullptr, true, config_addr, (default))
+    CreateStringConfig_(name, config_addr, (default), nullptr, nullptr)
 
 #define CreateEnumConfig(name, enumd, config_addr, default) \
-    std::make_shared<EnumConfig>(name, nullptr, true, enumd, config_addr, (default))
+    CreateEnumConfig_(name, enumd, config_addr, (default), nullptr, nullptr)
 
 #define CreateIntegerConfig(name, lower_bound, upper_bound, config_addr, default) \
-    std::make_shared<IntegerConfig>(name, nullptr, true, lower_bound, upper_bound, config_addr, (default))
+    CreateIntegerConfig_(name, lower_bound, upper_bound, config_addr, (default), nullptr, nullptr)
 
 #define CreateFloatingConfig(name, lower_bound, upper_bound, config_addr, default) \
-    std::make_shared<FloatingConfig>(name, nullptr, true, lower_bound, upper_bound, config_addr, (default))
+    CreateFloatingConfig_(name, lower_bound, upper_bound, config_addr, (default), nullptr, nullptr)
 
 #define CreateSizeConfig(name, lower_bound, upper_bound, config_addr, default) \
-    std::make_shared<SizeConfig>(name, nullptr, true, lower_bound, upper_bound, config_addr, (default))
+    CreateSizeConfig_(name, lower_bound, upper_bound, config_addr, (default), nullptr, nullptr)
+
+/* create config with {is_valid, update} function */
+
+#define CreateBoolConfig_(name, config_addr, default, is_valid, update) \
+    std::make_shared<BoolConfig>(name, nullptr, true, config_addr, (default), is_valid, update)
+
+#define CreateStringConfig_(name, config_addr, default, is_valid, update) \
+    std::make_shared<StringConfig>(name, nullptr, true, config_addr, (default), is_valid, update)
+
+#define CreateEnumConfig_(name, enumd, config_addr, default, is_valid, update) \
+    std::make_shared<EnumConfig>(name, nullptr, true, enumd, config_addr, (default), is_valid, update)
+
+#define CreateIntegerConfig_(name, lower_bound, upper_bound, config_addr, default, is_valid, update)                 \
+    std::make_shared<IntegerConfig>(name, nullptr, true, lower_bound, upper_bound, config_addr, (default), is_valid, \
+                                    update)
+
+#define CreateFloatingConfig_(name, lower_bound, upper_bound, config_addr, default, is_valid, update)                 \
+    std::make_shared<FloatingConfig>(name, nullptr, true, lower_bound, upper_bound, config_addr, (default), is_valid, \
+                                     update)
+
+#define CreateSizeConfig_(name, lower_bound, upper_bound, config_addr, default, is_valid, update)                 \
+    std::make_shared<SizeConfig>(name, nullptr, true, lower_bound, upper_bound, config_addr, (default), is_valid, \
+                                 update)
 
 }  // namespace milvus

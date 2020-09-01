@@ -19,6 +19,17 @@ const int64_t GB = (1024ll * 1024 * 1024);
 
 namespace milvus {
 
+bool
+is_timezone_valid(const std::string& val, std::string& err) {
+    auto plus_count = std::count(val.begin(), val.end(), '+');
+    auto sub_count = std::count(val.begin(), val.end(), '+');
+    if (plus_count > 1 or sub_count > 1) {
+        err = "Invalid timezone: " + val;
+        return false;
+    }
+    return true;
+}
+
 std::unordered_map<std::string, BaseConfigPtr>
 InitConfig() {
     return std::unordered_map<std::string, BaseConfigPtr>{
@@ -31,17 +42,18 @@ InitConfig() {
          CreateEnumConfig("cluster.role", &ClusterRoleMap, &config.cluster.role.value, ClusterRole::RW)},
 
         /* general */
-        {"general.timezone", CreateStringConfig("general.timezone", &config.general.timezone.value, "UTC+8")},
+        {"general.timezone",
+         CreateStringConfig_("general.timezone", &config.general.timezone.value, "UTC+8", is_timezone_valid, nullptr)},
         {"general.meta_uri", CreateStringConfig("general.meta_uri", &config.general.meta_uri.value, "sqlite://:@:/")},
 
         /* network */
         {"network.bind.address",
          CreateStringConfig("network.bind.address", &config.network.bind.address.value, "0.0.0.0")},
         {"network.bind.port",
-         CreateIntegerConfig("network.bind.port", 0, 65535, &config.network.bind.port.value, 19530)},
+         CreateIntegerConfig("network.bind.port", 1025, 65534, &config.network.bind.port.value, 19530)},
         {"network.http.enable", CreateBoolConfig("network.http.enable", &config.network.http.enable.value, true)},
         {"network.http.port",
-         CreateIntegerConfig("network.http.port", 0, 65535, &config.network.http.port.value, 19121)},
+         CreateIntegerConfig("network.http.port", 1025, 65534, &config.network.http.port.value, 19121)},
 
         /* storage */
         {"storage.path", CreateStringConfig("storage.path", &config.storage.path.value, "/var/lib/milvus")},
@@ -95,7 +107,7 @@ InitConfig() {
         /* metric */
         {"metric.enable", CreateBoolConfig("metric.enable", &config.metric.enable.value, false)},
         {"metric.address", CreateStringConfig("metric.address", &config.metric.address.value, "127.0.0.1")},
-        {"metric.port", CreateIntegerConfig("metric.port", 1024, 65535, &config.metric.port.value, 9091)},
+        {"metric.port", CreateIntegerConfig("metric.port", 1025, 65534, &config.metric.port.value, 9091)},
 
         /* tracing */
         {"tracing.json_config_path",

@@ -49,6 +49,10 @@ if ( BUILD_UNIT_TEST )
             DEFS        FIU_ENABLE
     )
 
+    add_test ( NAME     ConfigMgrTest
+            COMMAND  $<TARGET_FILE:ConfigMgrTest>
+            )
+
     create_executable(
             TARGET      ServerConfigTest
             SRCS        ServerConfigTest
@@ -56,20 +60,16 @@ if ( BUILD_UNIT_TEST )
             DEFS        FIU_ENABLE
     )
 
+    add_test ( NAME     ServerConfigTest
+            COMMAND  $<TARGET_FILE:ServerConfigTest>
+            )
+
     create_executable(
             TARGET      ConfigTypeTest
             SRCS        ConfigTypeTest1 ConfigTypeTest2
             LIBS        config-fiu ${GTEST_LIBS}
             DEFS        FIU_ENABLE
     )
-
-    add_test ( NAME     ConfigMgrTest
-            COMMAND  $<TARGET_FILE:ConfigMgrTest>
-            )
-
-    add_test ( NAME     ServerConfigTest
-               COMMAND  $<TARGET_FILE:ServerConfigTest>
-             )
 
     add_test ( NAME     ConfigTypeTest
                COMMAND  $<TARGET_FILE:ConfigTypeTest>
