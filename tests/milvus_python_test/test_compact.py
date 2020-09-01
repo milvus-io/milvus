@@ -206,14 +206,14 @@ class TestCompactBase:
         # get collection info before compact
         info = connect.get_collection_stats(collection)
         logging.getLogger().info(info["partitions"])
-        size_before = info["partitions"][0]["segments"][0]["data_size"]
+        size_before = info["partitions"][0]["data_size"]
         logging.getLogger().info(size_before)
         status = connect.compact(collection, 0.1)
         assert status.OK()
         # get collection info after compact
         info = connect.get_collection_stats(collection)
         logging.getLogger().info(info["partitions"])
-        size_after = info["partitions"][0]["segments"][0]["data_size"]
+        size_after = info["partitions"][0]["data_size"]
         logging.getLogger().info(size_after)
         assert(size_before >= size_after)
 
