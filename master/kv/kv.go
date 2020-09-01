@@ -15,7 +15,7 @@ package kv
 
 // Base is an abstract interface for load/save pd cluster data.
 type Base interface {
-	Load(key string) (string, error)	
+	Load(key string) (string, error)
 	Save(key, value string) error
 	Remove(key string) error
 }
