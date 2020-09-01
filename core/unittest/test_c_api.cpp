@@ -2,14 +2,47 @@
 #include <string>
 #include <random>
 #include <gtest/gtest.h>
-#include <dog_segment/SegmentBase.h>
 
-#include "dog_segment/segment_c.h"
 #include "dog_segment/collection_c.h"
+#include "dog_segment/segment_c.h"
 
-TEST(SegmentTest, InsertTest) {
-  auto fake_schema = std::make_shared<milvus::dog_segment::Schema>();
-  auto s = milvus::dog_segment::CreateSegment(fake_schema).release();
+TEST(CApiTest, CollectionTest) {
+  auto collection_name = "collection0";
+  auto schema_tmp_conf = "null_schema";
+  auto collection = NewCollection(collection_name, schema_tmp_conf);
+  DeleteCollection(collection);
+}
+
+TEST(CApiTest, PartitonTest) {
+  auto collection_name = "collection0";
+  auto schema_tmp_conf = "null_schema";
+  auto collection = NewCollection(collection_name, schema_tmp_conf);
+  auto partition_name = "partition0";
+  auto partition = NewPartition(collection, partition_name);
+  DeleteCollection(collection);
+  DeletePartition(partition);
+}
+
+TEST(CApiTest, SegmentTest) {
+  auto collection_name = "collection0";
+  auto schema_tmp_conf = "null_schema";
+  auto collection = NewCollection(collection_name, schema_tmp_conf);
+  auto partition_name = "partition0";
+  auto partition = NewPartition(collection, partition_name);
+  auto segment = NewSegment(partition, 0);
+  DeleteCollection(collection);
+  DeletePartition(partition);
+  DeleteSegment(segment);
+}
+
+
+TEST(CApiTest, InsertTest) {
+  auto collection_name = "collection0";
+  auto schema_tmp_conf = "null_schema";
+  auto collection = NewCollection(collection_name, schema_tmp_conf);
+  auto partition_name = "partition0";
+  auto partition = NewPartition(collection, partition_name);
+  auto segment = NewSegment(partition, 0);
 
   std::vector<char> raw_data;
   std::vector<uint64_t> timestamps;
@@ -31,7 +64,11 @@ TEST(SegmentTest, InsertTest) {
 
   auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-  auto res = Insert(s, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+  auto res = Insert(segment, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
 
-  std::cout << res << std::endl;
+  assert(res == 0);
+
+  DeleteCollection(collection);
+  DeletePartition(partition);
+  DeleteSegment(segment);
 }

@@ -2,7 +2,7 @@ package reader
 
 import (
 	"fmt"
-	"suvlim/pulsar/schema"
+	"github.com/czs007/suvlim/pulsar/schema"
 )
 
 type ResultEntityIds []int64

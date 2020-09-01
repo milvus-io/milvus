@@ -10,12 +10,16 @@ NewSegment(CPartition partition, unsigned long segment_id) {
 
   segment->set_segment_id(segment_id);
 
+  // TODO: delete print
+  std::cout << "create segment " << segment_id << std::endl;
   return (void*)segment.release();
 }
 
 void DeleteSegment(CSegmentBase segment) {
   auto s = (milvus::dog_segment::SegmentBase*)segment;
 
+  // TODO: delete print
+  std::cout << "delete segment " << s->get_segment_id() << std::endl;
   delete s;
 }
 

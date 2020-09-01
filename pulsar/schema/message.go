@@ -101,14 +101,14 @@ const (
 
 type PulsarMessage struct {
 	CollectionName string
-	Fields []*FieldValue
-	EntityId int64
-	PartitionTag string
-	VectorParam *VectorParam
-	Segments []*SegmentRecord
-	Timestamp int64
-	ClientId int64
-	MsgType OpType
+	Fields         []*FieldValue
+	EntityId       int64
+	PartitionTag   string
+	VectorParam    *VectorParam
+	Segments       []*SegmentRecord
+	Timestamp      int64
+	ClientId       int64
+	MsgType        OpType
 }
 
 type Message interface {
@@ -122,6 +122,7 @@ type InsertMsg struct {
 	Fields         []*FieldValue
 	EntityId       int64
 	PartitionTag   string
+	SegmentId      uint64
 	Timestamp      uint64
 	ClientId       int64
 	MsgType        OpType
@@ -189,5 +190,5 @@ func (kms *Key2SegMsg) GetType() OpType {
 }
 
 type SyncEofMsg struct {
-	MsgType  OpType
+	MsgType OpType
 }

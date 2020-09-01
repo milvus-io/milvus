@@ -89,7 +89,7 @@ class SegmentBase {
     void set_time_end(Timestamp time_end) {
         this->time_end_ = time_end;
     }
-    uint64_t get_segment_id(uint64_t segment_id) {
+    uint64_t get_segment_id() {
         return segment_id_;
     }
     uint64_t set_segment_id(uint64_t segment_id) {
