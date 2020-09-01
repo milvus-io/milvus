@@ -40,7 +40,7 @@ public class TestCollectionInfo_v2 {
         InsertParam insertParam = Utils.genDefaultInsertParam(collectionName, dimension, nb, vectors);
         InsertResponse resInsert = client.insert(insertParam);
         client.flush(collectionName);
-        Index index = Utils.genDefaultIndex(collectionName, indexType, metricType, n_list);
+        Index index = Utils.genDefaultIndex(collectionName, Constants.floatFieldName, indexType, metricType, n_list);
         Response createIndexResponse = client.createIndex(index);
         assert(createIndexResponse.ok());
         List<Long> idsBefore = resInsert.getEntityIds();
