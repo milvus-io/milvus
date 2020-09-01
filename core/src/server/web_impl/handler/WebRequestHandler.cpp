@@ -286,6 +286,12 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
         field_json["extra_params"] = field.second.field_params_;
         json_out["fields"].push_back(field_json);
     }
+    if (schema.extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
+        json_out[engine::PARAM_SEGMENT_ROW_COUNT] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT];
+    }
+    if (schema.extra_params_.contains(engine::PARAM_UID_AUTOGEN)) {
+        json_out[engine::PARAM_UID_AUTOGEN] = schema.extra_params_[engine::PARAM_UID_AUTOGEN];
+    }
     return Status::OK();
 }
 

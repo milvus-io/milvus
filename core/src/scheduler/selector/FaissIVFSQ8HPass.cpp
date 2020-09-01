@@ -44,6 +44,9 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
     }
 
     auto search_task = std::static_pointer_cast<SearchTask>(task);
+    if (seach_task->IndexType() != knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H) {
+        return false;
+    }
 
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
