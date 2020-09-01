@@ -52,5 +52,11 @@ IsVectorField(engine::DataType type);
 Status
 GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info);
 
+Status
+GetSegmentRowCount(const std::string& collection_name, int64_t& segment_row_count);
+
+Status
+GetSegmentRowCount(int64_t collection_id, int64_t& segment_row_count);
+
 }  // namespace engine
 }  // namespace milvus
