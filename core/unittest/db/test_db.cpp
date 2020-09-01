@@ -1181,58 +1181,6 @@ TEST_F(DBTest, FetchTest1) {
     }
     ASSERT_EQ(fetch_vectors, result_vectors);
 
-<<<<<<< HEAD
-    //    std::string collection_name = "STATS_TEST";
-    //    auto status = CreateCollection2(db_, collection_name, 0);
-    //    ASSERT_TRUE(status.ok());
-    //
-    //    std::string partition_name1 = "p1";
-    //    status = db_->CreatePartition(collection_name, partition_name1);
-    //    ASSERT_TRUE(status.ok());
-    //
-    //    milvus::engine::IDNumbers ids_1;
-    //    std::vector<float> fetch_vectors;
-    //    {
-    //        // insert 100 entities into partition 'p1'
-    //        const uint64_t entity_count = 100;
-    //        milvus::engine::DataChunkPtr data_chunk;
-    //        BuildEntities(entity_count, 0, data_chunk);
-    //
-    //        float* p = (float*)(data_chunk->fixed_fields_[VECTOR_FIELD_NAME]->data_.data());
-    //        for (int64_t i = 0; i < COLLECTION_DIM; ++i) {
-    //            fetch_vectors.push_back(p[i]);
-    //        }
-    //
-    //        status = db_->Insert(collection_name, partition_name1, data_chunk);
-    //        ASSERT_TRUE(status.ok());
-    //
-    //        milvus::engine::utils::GetIDFromChunk(data_chunk, ids_1);
-    //        ASSERT_EQ(ids_1.size(), entity_count);
-    //    }
-    //
-    //    status = db_->Flush();
-    //    ASSERT_TRUE(status.ok());
-    //
-    //    // fetch no.1 entity from partition 'p1'
-    //    // fetch no.2 entity from partition 'p2'
-    //    std::vector<std::string> field_names = {milvus::engine::FIELD_UID, VECTOR_FIELD_NAME};
-    //    std::vector<bool> valid_row;
-    //    milvus::engine::DataChunkPtr fetch_chunk;
-    //    milvus::engine::IDNumbers fetch_ids = {ids_1[0]};
-    //    status = db_->GetEntityByID(collection_name, fetch_ids, field_names, valid_row, fetch_chunk);
-    //    ASSERT_TRUE(status.ok());
-    //    ASSERT_EQ(fetch_chunk->count_, fetch_ids.size());
-    //    ASSERT_EQ(fetch_chunk->fixed_fields_[VECTOR_FIELD_NAME]->data_.size(),
-    //              fetch_ids.size() * COLLECTION_DIM * sizeof(float));
-    //
-    //    // compare result
-    //    std::vector<float> result_vectors;
-    //    float* p = (float*)(fetch_chunk->fixed_fields_[VECTOR_FIELD_NAME]->data_.data());
-    //    for (int64_t i = 0; i < COLLECTION_DIM; i++) {
-    //        result_vectors.push_back(p[i]);
-    //    }
-    //    ASSERT_EQ(fetch_vectors, result_vectors);
-=======
 //    std::string collection_name = "STATS_TEST";
 //    auto status = CreateCollection2(db_, collection_name);
 //    ASSERT_TRUE(status.ok());
@@ -1283,7 +1231,6 @@ TEST_F(DBTest, FetchTest1) {
 //        result_vectors.push_back(p[i]);
 //    }
 //    ASSERT_EQ(fetch_vectors, result_vectors);
->>>>>>> a87596fb7... split insert data accordding to segment row count (#3529)
 }
 
 TEST_F(DBTest, FetchTest2) {
