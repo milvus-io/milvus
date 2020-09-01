@@ -39,13 +39,11 @@ CheckMagic(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path) {
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
 
-    char* ch = static_cast<char*>(malloc(MAGIC_SIZE));
-    fs_ptr->reader_ptr_->Read(ch, MAGIC_SIZE);
-    bool result = !strcmp(ch, MAGIC);
-
+    std::string magic;
+    fs_ptr->reader_ptr_->Read(magic.data(), MAGIC_SIZE);
     fs_ptr->reader_ptr_->Close();
-    free(ch);
-    return result;
+
+    return magic.compare(MAGIC);
 }
 
 void
@@ -55,7 +53,7 @@ WriteMagic(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path) {
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
-    fs_ptr->writer_ptr_->Write(const_cast<char*>(MAGIC), MAGIC_SIZE);
+    fs_ptr->writer_ptr_->Write(MAGIC, MAGIC_SIZE);
     fs_ptr->writer_ptr_->Close();
 }
 
@@ -67,24 +65,24 @@ ReadHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string& file_pa
         throw Exception(SERVER_WRITE_ERROR, err_msg);
     }
     fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE);
-    char* ch = static_cast<char*>(malloc(HEADER_SIZE));
-    fs_ptr->reader_ptr_->Read(ch, HEADER_SIZE);
-
-    std::string data(ch);
+    std::string header;
+    header.resize(HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(header.data(), HEADER_SIZE);
 
     auto result = std::unordered_map<std::string, std::string>();
 
     std::regex semicolon(";");
-    std::vector<std::string> maps(std::sregex_token_iterator(data.begin(), data.end(), semicolon, -1),
+    std::vector<std::string> maps(std::sregex_token_iterator(header.begin(), header.end(), semicolon, -1),
                                   std::sregex_token_iterator());
     std::regex equal("=");
     for (auto& item : maps) {
         std::vector<std::string> pair(std::sregex_token_iterator(item.begin(), item.end(), equal, -1),
                                       std::sregex_token_iterator());
-        result.insert(std::make_pair(pair[0], pair[1]));
+        if (pair.size() == 2) {
+            result.insert(std::make_pair(pair[0], pair[1]));
+        }
     }
     fs_ptr->reader_ptr_->Close();
-    free(ch);
     return result;
 }
 
@@ -106,11 +104,11 @@ CalculateSum(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, 
     if (written) {
         size -= SUM_SIZE;
     }
-    char* ch = static_cast<char*>(malloc(size));
-    fs_ptr->reader_ptr_->Read(ch, size);
-    std::uint32_t result = crc32c::Crc32c(ch, size);
+    std::string data;
+    data.resize(size);
+    fs_ptr->reader_ptr_->Read(data.data(), size);
+    std::uint32_t result = crc32c::Crc32c(data.data(), size);
     fs_ptr->reader_ptr_->Close();
-    free(ch);
     return result;
 }
 
@@ -179,6 +177,7 @@ WriteHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     if (kv.size() > HEADER_SIZE) {
         throw "Exceeded the limit of header data size";
     }
+    kv.resize(HEADER_SIZE, ' ');
 
     fs_ptr->writer_ptr_->Write(kv.data(), HEADER_SIZE);
     fs_ptr->writer_ptr_->Close();
