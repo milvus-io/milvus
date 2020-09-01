@@ -171,11 +171,11 @@ class TestStatsBase:
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
-        compact_before = stats["partitions"][0]["data_size"]
+        compact_before = stats["partitions"][0]["row_count"]
         connect.compact(collection)
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
-        compact_after = stats["partitions"][0]["data_size"]
+        compact_after = stats["partitions"][0]["row_count"]
         # pdb.set_trace()
         assert compact_before == compact_after
 

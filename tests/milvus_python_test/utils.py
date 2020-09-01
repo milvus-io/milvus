@@ -468,8 +468,7 @@ def add_vector_field(nb, dimension=dimension):
 
 def gen_segment_row_counts():
     sizes = [
-        1,
-        2,
+        128,
         1024,
         4096
     ]
