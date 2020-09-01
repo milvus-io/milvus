@@ -38,6 +38,7 @@
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
+#include "server/ValidationUtil.h"
 
 #include <fiu/fiu-local.h>
 #include <src/scheduler/job/BuildIndexJob.h>
@@ -300,6 +301,7 @@ DBImpl::HasPartition(const std::string& collection_name, const std::string& part
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(server::ValidatePartitionTags({partition_tag}));
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     auto partition_tags = std::move(ss->GetPartitionNames());
@@ -330,7 +332,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
                     const std::string& field_name, const CollectionIndex& index) {
     CHECK_INITIALIZED;
 
-    LOG_ENGINE_DEBUG_ << "Create index for collection: " << collection_name << " field: " << field_name;
+    LOG_ENGINE_ERROR_ << "Create index for collection: " << collection_name << " field: " << field_name;
 
     // step 1: wait merge file thread finished to avoid duplicate data bug
     auto status = Flush();
