@@ -10,12 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/transcript/TranscriptProxy.h"
-#include "db/transcript/ScriptCodec.h"
+#include "db/transcript/ScriptRecorder.h"
 #include "db/transcript/ScriptReplay.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 
-#include <boost/filesystem.hpp>
+#include <experimental/filesystem>
 
 namespace milvus {
 namespace engine {
@@ -40,8 +40,7 @@ TranscriptProxy::Start() {
         ScriptReplay replay;
         return replay.Replay(db_, options_.replay_script_path_);
     } else {
-        ScriptCodec& codec = ScriptCodec::GetInstance();
-        boost::filesystem::path db_path(options_.meta_.path_);
+        std::experimental::filesystem::path db_path(options_.meta_.path_);
         auto transcript_path = db_path.parent_path();
         transcript_path /= "transcript";
         std::string path = transcript_path.c_str();
@@ -51,7 +50,8 @@ TranscriptProxy::Start() {
             kill(0, SIGUSR1);
         }
 
-        codec.SetScriptPath(path);
+        ScriptRecorder& recorder = ScriptRecorder::GetInstance();
+        recorder.SetScriptPath(path);
     }
 
     return Status::OK();

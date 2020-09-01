@@ -9,12 +9,32 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/transcript/ScriptCodec.h"
+#pragma once
+
+#include "db/transcript/ScriptFile.h"
+
+#include <string>
 
 namespace milvus {
 namespace engine {
 
+class ScriptRecorder {
+ public:
+    static ScriptRecorder&
+    GetInstance();
 
+    void
+    SetScriptPath(const std::string& path);
+
+ private:
+    ScriptFilePtr GetFile();
+
+ private:
+    ScriptRecorder() = default;
+
+    std::string script_path_;
+    ScriptFilePtr file_;
+};
 
 }  // namespace engine
 }  // namespace milvus

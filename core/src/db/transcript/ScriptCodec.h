@@ -18,18 +18,7 @@ namespace engine {
 
 class ScriptCodec {
  public:
-    ScriptCodec() = default;
 
-    static ScriptCodec&
-    GetInstance();
-
-    void
-    SetScriptPath(const std::string& path) {
-        script_path_ = path;
-    }
-
- private:
-    std::string script_path_;
 };
 
 }  // namespace engine
