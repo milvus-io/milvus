@@ -45,7 +45,7 @@ FaissIVFFlatPass::Run(const TaskPtr& task) {
     }
 
     auto search_task = std::static_pointer_cast<SearchTask>(task);
-    if (seach_task->IndexType() != knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+    if (search_task->IndexType() != knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
         return false;
     }
 
