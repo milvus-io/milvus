@@ -55,6 +55,9 @@ class SearchTask : public Task {
     milvus::json
     ExtraParam();
 
+    std::string
+    IndexType();
+
  private:
     void
     CreateExecEngine();
@@ -66,6 +69,7 @@ class SearchTask : public Task {
     const engine::DBOptions& options_;
     query::QueryPtr query_ptr_;
     engine::snapshot::ID_TYPE segment_id_;
+    std::string index_type_;
 
     engine::ExecutionEnginePtr execution_engine_;
 

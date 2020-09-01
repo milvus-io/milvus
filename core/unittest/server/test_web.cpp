@@ -836,6 +836,8 @@ TEST_F(WebControllerTest, INDEX) {
     auto result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
     ASSERT_EQ(NB, result_dto->ids->size());
 
+    FlushCollection(client_ptr, connection_ptr, collection_name.c_str());
+
     // test index with imcomplete param
     std::string field_name = "field_vec";
     std::string index_str = R"({
