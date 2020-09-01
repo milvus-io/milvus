@@ -1,30 +1,13 @@
-package pulsar
+package client_go
 
 import (
 	"context"
 	"github.com/apache/pulsar/pulsar-client-go/pulsar"
 	"log"
-	"github.com/czs007/suvlim/pulsar/schema"
-	"sync"
+	"suvlim/pulsar/client-go/schema"
 )
 
 var (
-	wg sync.WaitGroup
-	//wgJob sync.WaitGroup
-	//wgQuery sync.WaitGroup
-	//wgWrite sync.WaitGroup
-
-	OriginMsgSchema = "{\"type\":\"record\",\"name\":\"suvlim\",\"namespace\":\"pulsar\",\"fields\":[" +
-		"{\"name\":\"CollectionName\",\"type\":\"string\"}," +
-		"{\"name\":\"Fields\",\"type\":\"[]*FieldValue\"}" +
-		"{\"name\":\"EntityId\",\"type\":\"int64\"}" +
-		"{\"name\":\"PartitionTag\",\"type\":\"string\"}" +
-		"{\"name\":\"VectorParam\",\"type\":\"*VectorParam\"}" +
-		"{\"name\":\"Segments\",\"type\":\"[]string\"}" +
-		"{\"name\":\"Timestamp\",\"type\":\"int64\"}" +
-		"{\"name\":\"ClientId\",\"type\":\"int64\"}" +
-		"{\"name\":\"MsgType\",\"type\":\"OpType\"}" +
-		"]}"
 	SyncEofSchema = "{\"type\":\"record\",\"name\":\"suvlim\",\"namespace\":\"pulsar\",\"fields\":[" +
 		"{\"name\":\"MsgType\",\"type\":\"OpType\"}," +
 		"]}"
@@ -122,17 +105,29 @@ func (mc *MessageClient) CreateClient(url string) pulsar.Client {
 	return client
 }
 
-func (mc *MessageClient) InitClient(url string,topics []string) {
+func (mc *MessageClient) InitClient(url string, topics []string, consumerMsgSchema string) {
 	//create client
 	mc.client = mc.CreateClient(url)
 
 	//create producer
+	for topicIndex := range topics {
+		if topics[topicIndex] == "insert" {
+			mc.syncInsertProducer = mc.CreatProducer(SyncEofSchema, "insert")
+		}
+		if topics[topicIndex] == "delete" {
+			mc.syncDeleteProducer = mc.CreatProducer(SyncEofSchema, "delete")
+		}
+		if topics[topicIndex] == "key2seg" {
+			mc.syncInsertProducer = mc.CreatProducer(SyncEofSchema, "key2seg")
+		}
+
+	}
 	mc.syncInsertProducer = mc.CreatProducer(SyncEofSchema, "insert")
 	mc.syncDeleteProducer = mc.CreatProducer(SyncEofSchema, "delete")
 	mc.key2segProducer = mc.CreatProducer(SyncEofSchema, "key2seg")
 
 	//create consumer
-	mc.consumer = mc.CreateConsumer(OriginMsgSchema, topics)
+	mc.consumer = mc.CreateConsumer(consumerMsgSchema, topics)
 
 	// init channel
 	mc.insertChan = make(chan *schema.InsertMsg, 1000)
@@ -148,6 +143,36 @@ const (
 	OpInWriteNode JobType = 1
 )
 
+func (mc *MessageClient) PrepareMsg(opType schema.OpType, msgLen int) {
+	switch opType {
+	case schema.Insert:
+		for i := 0; i < msgLen; i++ {
+			msg := <- mc.insertChan
+			mc.InsertMsg[i] = msg
+		}
+	case schema.Delete:
+		for i := 0; i < msgLen; i++ {
+			msg := <- mc.deleteChan
+			mc.DeleteMsg[i] = msg
+		}
+	case schema.Search:
+		for i := 0; i < msgLen; i++ {
+			msg := <-mc.searchChan
+			mc.SearchMsg[i] = msg
+		}
+	case schema.TimeSync:
+		for i := 0; i < msgLen; i++ {
+			msg := <- mc.timeSyncChan
+			mc.timeMsg[i] = msg
+		}
+	case schema.Key2Seg:
+		for i := 0; i < msgLen; i++ {
+			msg := <-mc.key2SegChan
+			mc.key2segMsg[i] = msg
+		}
+	}
+}
+
 func (mc *MessageClient) PrepareBatchMsg(jobType JobType) {
 	// assume the channel not full
 	mc.InsertMsg = make([]*schema.InsertMsg, 1000)
@@ -156,6 +181,8 @@ func (mc *MessageClient) PrepareBatchMsg(jobType JobType) {
 	mc.timeMsg = make([]*schema.TimeSyncMsg, 1000)
 	mc.key2segMsg = make([]*schema.Key2SegMsg, 1000)
 
+	// ensure all messages before time in timeSyncTopic have been push into channel
+
 	// get the length of every channel
 	insertLen := len(mc.insertChan)
 	deleteLen := len(mc.deleteChan)
@@ -163,29 +190,12 @@ func (mc *MessageClient) PrepareBatchMsg(jobType JobType) {
 	timeLen := len(mc.timeSyncChan)
 	key2segLen := len(mc.key2SegChan)
 
-
 	// get message from channel to slice
-	for i := 0; i < insertLen; i++ {
-		msg := <- mc.insertChan
-		mc.InsertMsg[i] = msg
-	}
-	for i := 0; i < deleteLen; i++ {
-		msg := <- mc.deleteChan
-		mc.DeleteMsg[i] = msg
-	}
-	for i := 0; i < timeLen; i++ {
-		msg := <- mc.timeSyncChan
-		mc.timeMsg[i] = msg
-	}
+	mc.PrepareMsg(schema.Insert, insertLen)
+	mc.PrepareMsg(schema.Delete, deleteLen)
+	mc.PrepareMsg(schema.TimeSync, timeLen)
 	if jobType == OpInQueryNode {
-		for i := 0; i < key2segLen; i++ {
-			msg := <-mc.key2SegChan
-			mc.key2segMsg[i] = msg
-		}
-
-		for i := 0; i < searchLen; i++ {
-			msg := <-mc.searchChan
-			mc.SearchMsg[i] = msg
-		}
+		mc.PrepareMsg(schema.Key2Seg, key2segLen)
+		mc.PrepareMsg(schema.Search, searchLen)
 	}
 }

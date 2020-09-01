@@ -178,7 +178,6 @@ func (c *client) tsLoop() {
 				default:
 				}
 				log.Error("[pd] create tso stream error")
-				c.ScheduleCheckLeader()
 				cancel()
 				c.revokeTSORequest(errors.WithStack(err))
 				select {
@@ -225,7 +224,6 @@ func (c *client) tsLoop() {
 			default:
 			}
 			log.Error("[pd] getTS error")
-			c.ScheduleCheckLeader()
 			cancel()
 			stream, cancel = nil, nil
 		}

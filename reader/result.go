@@ -2,7 +2,7 @@ package reader
 
 import (
 	"fmt"
-	"github.com/czs007/suvlim/pulsar/schema"
+	schema2 "suvlim/pulsar/client-go/schema"
 )
 
 type ResultEntityIds []int64
@@ -12,17 +12,17 @@ func getResultTopicByClientId(clientId int64) string {
 	return "result-topic/partition-" + string(clientId)
 }
 
-func publishResult(ids *ResultEntityIds, clientId int64) schema.Status {
+func publishResult(ids *ResultEntityIds, clientId int64) schema2.Status {
 	// TODO: Pulsar publish
 	var resultTopic = getResultTopicByClientId(clientId)
 	fmt.Println(resultTopic)
-	return schema.Status{Error_code: schema.ErrorCode_SUCCESS}
+	return schema2.Status{Error_code: schema2.ErrorCode_SUCCESS}
 }
 
-func publicStatistic(statisticTopic string) schema.Status {
+func publicStatistic(statisticTopic string) schema2.Status {
 	// TODO: get statistic info
 	// getStatisticInfo()
 	// var info = getStatisticInfo()
 	// TODO: Pulsar publish
-	return schema.Status{Error_code: schema.ErrorCode_SUCCESS}
+	return schema2.Status{Error_code: schema2.ErrorCode_SUCCESS}
 }
