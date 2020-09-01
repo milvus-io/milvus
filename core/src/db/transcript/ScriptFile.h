@@ -14,9 +14,8 @@
 #include "db/Types.h"
 #include "utils/Status.h"
 
-#include <map>
+#include <iostream>
 #include <memory>
-#include <mutex>
 #include <string>
 
 namespace milvus {
@@ -27,105 +26,26 @@ class ScriptFile {
     ScriptFile() = default;
     virtual ~ScriptFile();
 
-    bool
-    IsOpened() const {
-        return file_ != nullptr;
-    }
-
-    enum OpenMode {
-        NA = 0,
-        READ = 1,
-        APPEND_WRITE = 2,
-    };
     Status
-    OpenFile(const std::string& path, OpenMode mode);
+    OpenWrite(const std::string& path);
+
+    Status
+    OpenRead(const std::string& path);
 
     Status
     CloseFile();
 
+    Status
+    WriteLine(const std::string& str);
+
+    Status
+    ReadLine(std::string& str);
+
     bool
     ExceedMaxSize(int64_t append_size);
 
-    template <typename T>
-    inline int64_t
-    Write(T* value) {
-        if (file_ == nullptr || value == nullptr) {
-            return 0;
-        }
-
-        int64_t bytes = fwrite(value, 1, sizeof(T), file_);
-        file_size_ += bytes;
-        return bytes;
-    }
-
-    inline int64_t
-    Write(const void* data, int64_t length) {
-        if (file_ == nullptr || data == nullptr || length <= 0) {
-            return 0;
-        }
-
-        int64_t bytes = fwrite(data, 1, length, file_);
-        file_size_ += bytes;
-        return bytes;
-    }
-
-    template <typename T>
-    inline int64_t
-    Read(T* value) {
-        if (file_ == nullptr) {
-            return 0;
-        }
-
-        int64_t bytes = fread(value, 1, sizeof(T), file_);
-        return bytes;
-    }
-
-    inline int64_t
-    Read(void* data, int64_t length) {
-        if (file_ == nullptr || length <= 0) {
-            return 0;
-        }
-
-        int64_t bytes = fread(data, 1, length, file_);
-        return bytes;
-    }
-
-    inline int64_t
-    ReadStr(std::string& str, int64_t length) {
-        if (file_ == nullptr || length <= 0) {
-            return 0;
-        }
-
-        char* buf = new char[length + 1];
-        int64_t bytes = fread(buf, 1, length, file_);
-        buf[length] = '\0';
-        str = buf;
-        return bytes;
-    }
-
-    inline void
-    Flush() {
-        if (file_ && mode_ != OpenMode::READ) {
-            fflush(file_);
-        }
-    }
-
-    int64_t
-    Size() const {
-        return file_size_;
-    }
-
-    void inline SeekForward(int64_t offset) {
-        if (file_ == nullptr || mode_ != OpenMode::READ) {
-            return;
-        }
-
-        fseek(file_, offset, SEEK_CUR);
-    }
-
  private:
-    FILE* file_ = nullptr;
-    OpenMode mode_ = OpenMode::NA;
+
     int64_t file_size_ = 0;
 };
 

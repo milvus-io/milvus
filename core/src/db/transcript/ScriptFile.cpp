@@ -17,48 +17,40 @@
 namespace milvus {
 namespace engine {
 
+
 ScriptFile::~ScriptFile() {
     CloseFile();
 }
 
 Status
-ScriptFile::OpenFile(const std::string& path, OpenMode mode) {
+ScriptFile::OpenWrite(const std::string& path) {
     CloseFile();
 
-    try {
-        std::string str_mode;
-        switch (mode) {
-            case OpenMode::READ:
-                str_mode = "r";
-                break;
-            case OpenMode::APPEND_WRITE:
-                str_mode = "aw";
-                break;
-            default:
-                return Status(DB_ERROR, "Unsupported file mode");
-        }
-        file_ = fopen(path.c_str(), str_mode.c_str());
-        if (file_ == nullptr) {
-            std::string msg = "Failed to create wal file: " + path;
-            return Status(DB_ERROR, msg);
-        }
-        mode_ = mode;
-    } catch (std::exception& ex) {
-        std::string msg = "Failed to create wal file, reason: " + std::string(ex.what());
-        return Status(DB_ERROR, msg);
-    }
+    return Status::OK();
+}
+
+Status
+ScriptFile::OpenRead(const std::string& path) {
+    CloseFile();
+
 
     return Status::OK();
 }
 
 Status
 ScriptFile::CloseFile() {
-    if (file_ != nullptr) {
-        fclose(file_);
-        file_ = nullptr;
-        file_size_ = 0;
-    }
 
+
+    return Status::OK();
+}
+
+Status
+ScriptFile::WriteLine(const std::string& str) {
+    return Status::OK();
+}
+
+Status
+ScriptFile::ReadLine(std::string& str) {
     return Status::OK();
 }
 
