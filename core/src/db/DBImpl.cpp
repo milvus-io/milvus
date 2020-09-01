@@ -532,7 +532,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     int64_t partition_id = partition->GetID();
 
     std::vector<DataChunkPtr> chunks;
-    utils::SplitChunk(consume_chunk, segment_row_count, chunks);
+    STATUS_CHECK(utils::SplitChunk(consume_chunk, segment_row_count, chunks));
 
     for (auto& chunk : chunks) {
         auto status = mem_mgr_->InsertEntities(collection_id, partition_id, chunk, op_id);
