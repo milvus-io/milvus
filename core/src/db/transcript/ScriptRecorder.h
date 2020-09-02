@@ -19,33 +19,6 @@
 namespace milvus {
 namespace engine {
 
-enum ScriptActionType {
-    NA = 0,
-    CreateCollection = 1,
-    DropCollection,
-    HasCollection,
-    ListCollections,
-    GetCollectionInfo,
-    GetCollectionStats,
-    CountEntities,
-    CreatePartition,
-    DropPartition,
-    HasPartition,
-    ListPartitions,
-    CreateIndex,
-    DropIndex,
-    DescribeIndex,
-    Insert,
-    GetEntityByID,
-    DeleteEntityByID,
-    ListIDInSegment,
-    Query,
-    LoadCollection,
-    FlushCollection,
-    FlushAll,
-    Compact,
-};
-
 class ScriptRecorder {
  public:
     static ScriptRecorder&
@@ -131,6 +104,9 @@ class ScriptRecorder {
 
  private:
     ScriptFilePtr GetFile();
+
+    Status
+    WriteJson(milvus::json& json_obj);
 
  private:
     ScriptRecorder() = default;

@@ -39,20 +39,21 @@ TranscriptProxy::Start() {
     if (!options_.replay_script_path_.empty()) {
         ScriptReplay replay;
         return replay.Replay(db_, options_.replay_script_path_);
-    } else {
-        std::experimental::filesystem::path db_path(options_.meta_.path_);
-        auto transcript_path = db_path.parent_path();
-        transcript_path /= "transcript";
-        std::string path = transcript_path.c_str();
-        status = CommonUtil::CreateDirectory(path);
-        if (!status.ok()) {
-            std::cerr << "Error: Failed to create transcript path: " << path << std::endl;
-            kill(0, SIGUSR1);
-        }
-
-        ScriptRecorder& recorder = ScriptRecorder::GetInstance();
-        recorder.SetScriptPath(path);
     }
+
+    // prepare for transcript
+    std::experimental::filesystem::path db_path(options_.meta_.path_);
+    auto transcript_path = db_path.parent_path();
+    transcript_path /= "transcript";
+    std::string path = transcript_path.c_str();
+    status = CommonUtil::CreateDirectory(path);
+    if (!status.ok()) {
+        std::cerr << "Error: Failed to create transcript path: " << path << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    ScriptRecorder& recorder = ScriptRecorder::GetInstance();
+    recorder.SetScriptPath(path);
 
     return Status::OK();
 }
@@ -180,27 +181,32 @@ TranscriptProxy::ListIDInSegment(const std::string& collection_name, int64_t seg
 Status
 TranscriptProxy::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr,
                        engine::QueryResultPtr& result) {
+    ScriptRecorder::GetInstance().Query(context, query_ptr, result);
     return db_->Query(context, query_ptr, result);
 }
 
 Status
 TranscriptProxy::LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
                                 const std::vector<std::string>& field_names, bool force) {
+    ScriptRecorder::GetInstance().LoadCollection(context, collection_name, field_names, force);
     return db_->LoadCollection(context, collection_name, field_names, force);
 }
 
 Status
 TranscriptProxy::Flush(const std::string& collection_name) {
+    ScriptRecorder::GetInstance().Flush(collection_name);
     return db_->Flush(collection_name);
 }
 
 Status
 TranscriptProxy::Flush() {
+    ScriptRecorder::GetInstance().Flush();
     return db_->Flush();
 }
 
 Status
 TranscriptProxy::Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) {
+    ScriptRecorder::GetInstance().Compact(context, collection_name, threshold);
     return db_->Compact(context, collection_name, threshold);
 }
 

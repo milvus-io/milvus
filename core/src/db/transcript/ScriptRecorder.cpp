@@ -13,6 +13,7 @@
 #include "db/transcript/ScriptCodec.h"
 #include "db/Utils.h"
 #include "utils/CommonUtil.h"
+#include "utils/Json.h"
 
 #include <experimental/filesystem>
 
@@ -33,6 +34,7 @@ ScriptRecorder::SetScriptPath(const std::string& path) {
     CommonUtil::GetCurrentTimeStr(time_str);
     script_path /= time_str;
     script_path_ = script_path.c_str();
+    CommonUtil::CreateDirectory(script_path_);
 }
 
 ScriptFilePtr
@@ -45,68 +47,109 @@ ScriptRecorder::GetFile() {
         std::string file_name = std::to_string(current_time) + ".txt";
         file_path /= file_name;
 
+        file_->OpenWrite(file_path.c_str());
     }
 
     return file_;
 }
 
 Status
-ScriptRecorder::CreateCollection(const snapshot::CreateCollectionContext& context) {
+ScriptRecorder::WriteJson(milvus::json& json_obj) {
     auto file = GetFile();
-
+    std::string str = json_obj.dump();
+    file->WriteLine(str);
 
     return Status::OK();
+}
+
+Status
+ScriptRecorder::CreateCollection(const snapshot::CreateCollectionContext& context) {
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionCreateCollection);
+    ScriptCodec::Encode(json_obj, context);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::DropCollection(const std::string& collection_name) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionDropCollection);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::HasCollection(const std::string& collection_name, bool& has_or_not) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionHasCollection);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::ListCollections(std::vector<std::string>& names) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionListCollections);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
                                   snapshot::FieldElementMappings& fields_schema) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionGetCollectionInfo);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionGetCollectionStats);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::CountEntities(const std::string& collection_name, int64_t& row_count) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionCountEntities);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::CreatePartition(const std::string& collection_name, const std::string& partition_name) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionCreatePartition);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::DropPartition(const std::string& collection_name, const std::string& partition_name) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionDropPartition);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionHasPartition);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionListPartitions);
+
+    return WriteJson(json_obj);
 }
 
 Status
@@ -114,70 +157,111 @@ ScriptRecorder::CreateIndex(const server::ContextPtr& context,
                             const std::string& collection_name,
                             const std::string& field_name,
                             const CollectionIndex& index) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionCreateIndex);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::DropIndex(const std::string& collection_name, const std::string& field_name) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionDropIndex);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::DescribeIndex(const std::string& collection_name,
                               const std::string& field_name,
                               CollectionIndex& index) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionDescribeIndex);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
                        idx_t op_id) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionInsert);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
                               const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
                               DataChunkPtr& data_chunk) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionGetEntityByID);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionDeleteEntityByID);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionListIDInSegment);
+    ScriptCodec::EncodeSegmentID(json_obj, segment_id);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::Query(const server::ContextPtr& context,
                       const query::QueryPtr& query_ptr,
                       engine::QueryResultPtr& result) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionQuery);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
                                const std::vector<std::string>& field_names, bool force) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionLoadCollection);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
+    ScriptCodec::EncodeFieldNames(json_obj, field_names);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::Flush(const std::string& collection_name) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionFlush);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::Flush() {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionFlush);
+
+    return WriteJson(json_obj);
 }
 
 Status
 ScriptRecorder::Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) {
-    return Status::OK();
+    milvus::json json_obj;
+    ScriptCodec::EncodeAction(json_obj, ActionCompact);
+    ScriptCodec::EncodeThreshold(json_obj, threshold);
+
+    return WriteJson(json_obj);
 }
 
 }  // namespace engine

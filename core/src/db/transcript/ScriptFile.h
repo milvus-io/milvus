@@ -14,7 +14,8 @@
 #include "db/Types.h"
 #include "utils/Status.h"
 
-#include <iostream>
+#include <fstream>
+#include <ostream>
 #include <memory>
 #include <string>
 
@@ -33,18 +34,21 @@ class ScriptFile {
     OpenRead(const std::string& path);
 
     Status
-    CloseFile();
-
-    Status
     WriteLine(const std::string& str);
 
-    Status
+    bool
     ReadLine(std::string& str);
 
     bool
     ExceedMaxSize(int64_t append_size);
 
  private:
+    Status
+    CloseFile();
+
+ private:
+    std::ifstream reader_;
+    std::ofstream writer_;
 
     int64_t file_size_ = 0;
 };

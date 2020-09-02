@@ -188,7 +188,7 @@ struct DBOptions {
     std::string wal_path_;
 
     // transcript configurations
-    bool transcript_enable_ = false;
+    bool transcript_enable_ = true;
     std::string replay_script_path_;  // for replay
 };
 

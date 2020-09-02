@@ -24,34 +24,63 @@ ScriptFile::~ScriptFile() {
 
 Status
 ScriptFile::OpenWrite(const std::string& path) {
-    CloseFile();
+    if (writer_.is_open()) {
+        writer_.close();
+    }
+
+    file_size_ = 0;
+    writer_.open(path.c_str(), std::ios::out | std::ios::app);
 
     return Status::OK();
 }
 
 Status
 ScriptFile::OpenRead(const std::string& path) {
-    CloseFile();
-
+    if (reader_.is_open()) {
+        reader_.close();
+    }
+    reader_.open(path.c_str(), std::ios::in);
 
     return Status::OK();
 }
 
 Status
 ScriptFile::CloseFile() {
-
+    if (reader_.is_open()) {
+        reader_.close();
+    }
+    if (writer_.is_open()) {
+        writer_.close();
+    }
+    file_size_ = 0;
 
     return Status::OK();
 }
 
 Status
 ScriptFile::WriteLine(const std::string& str) {
+    if (writer_.is_open()) {
+        writer_.write(str.c_str(), str.size());
+        writer_.write("\n", 1);
+        writer_.flush();
+        file_size_ += str.size() + 1;
+    }
+
     return Status::OK();
 }
 
-Status
+bool
 ScriptFile::ReadLine(std::string& str) {
-    return Status::OK();
+    if (reader_.is_open()) {
+        std::string str;
+        while (getline(reader_, str)) {
+            if (!str.empty()) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 bool
