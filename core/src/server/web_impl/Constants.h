@@ -29,6 +29,8 @@ extern const char* NAME_ENGINE_TYPE_ANNOY;
 extern const char* NAME_ENGINE_TYPE_RHNSWFLAT;
 extern const char* NAME_ENGINE_TYPE_RHNSWPQ;
 extern const char* NAME_ENGINE_TYPE_RHNSWSQ;
+extern const char* NAME_ENGINE_TYPE_NGTPANNG;
+extern const char* NAME_ENGINE_TYPE_NGTONNG;
 
 extern const char* NAME_METRIC_TYPE_L2;
 extern const char* NAME_METRIC_TYPE_IP;

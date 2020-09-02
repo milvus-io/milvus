@@ -263,7 +263,7 @@ void
 ClientTest::CreateIndex(const std::string& collection_name, int64_t nlist) {
     milvus_sdk::TimeRecorder rc("Create index");
     std::cout << "Wait until create all index done" << std::endl;
-    JSON json_params = {{"index_type", "IVF_FLAT"}, {"metric_type", "L2"}, {"params", {{"nlist", nlist}}}};
+    JSON json_params = {{"index_type", "NGT_PANNG"}, {"metric_type", "L2"}};
     milvus::IndexParam index1 = {collection_name, "field_vec", json_params.dump()};
     milvus_sdk::Utils::PrintIndexParam(index1);
     milvus::Status stat = conn_->CreateIndex(index1);

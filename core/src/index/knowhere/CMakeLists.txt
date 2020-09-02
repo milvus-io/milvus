@@ -13,6 +13,7 @@
 
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty)
+include_directories(${INDEX_SOURCE_DIR}/thirdparty/NGT/lib)
 
 if (MILVUS_SUPPORT_SPTAG)
     include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
@@ -68,6 +69,9 @@ set(vector_index_srcs
         knowhere/index/vector_index/IndexRHNSWFlat.cpp
         knowhere/index/vector_index/IndexRHNSWSQ.cpp
         knowhere/index/vector_index/IndexRHNSWPQ.cpp
+        knowhere/index/vector_index/IndexNGT.cpp
+        knowhere/index/vector_index/IndexNGTPANNG.cpp
+        knowhere/index/vector_index/IndexNGTONNG.cpp
         )
 
 set(vector_offset_index_srcs
@@ -91,6 +95,7 @@ set(depend_libs
         gfortran
         pthread
         fiu
+        ngt
         )
 
 if (MILVUS_SUPPORT_SPTAG)

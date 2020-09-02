@@ -21,6 +21,8 @@
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/IndexNGTONNG.h"
+#include "knowhere/index/vector_index/IndexNGTPANNG.h"
 #include "knowhere/index/vector_index/IndexRHNSWFlat.h"
 #include "knowhere/index/vector_index/IndexRHNSWPQ.h"
 #include "knowhere/index/vector_index/IndexRHNSWSQ.h"
@@ -99,6 +101,10 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
         return std::make_shared<knowhere::IndexRHNSWPQ>();
     } else if (type == IndexEnum::INDEX_RHNSWSQ) {
         return std::make_shared<knowhere::IndexRHNSWSQ>();
+    } else if (type == IndexEnum::INDEX_NGTPANNG) {
+        return std::make_shared<knowhere::IndexNGTPANNG>();
+    } else if (type == IndexEnum::INDEX_NGTONNG) {
+        return std::make_shared<knowhere::IndexNGTONNG>();
     } else {
         return nullptr;
     }
