@@ -11,12 +11,12 @@ from milvus import DataType
 from utils import *
 
 dim = 128
-segment_row_count = 5000
+segment_row_count = 1000
 top_k_limit = 2048
 collection_id = "search"
 tag = "1970-01-01"
 insert_interval_time = 1.5
-nb = 6000
+nb = 1200
 top_k = 10
 nq = 1
 nprobe = 1
@@ -33,12 +33,12 @@ default_query, default_query_vecs = gen_query_vectors(field_name, entities, top_
 default_binary_query, default_binary_query_vecs = gen_query_vectors(binary_field_name, binary_entities, top_k, nq)
 
 
-def init_data(connect, collection, nb=6000, partition_tags=None, auto_id=True):
+def init_data(connect, collection, nb=1200, partition_tags=None, auto_id=True):
     '''
     Generate entities and add it in collection
     '''
     global entities
-    if nb == 6000:
+    if nb == 1200:
         insert_entities = entities
     else:
         insert_entities = gen_entities(nb, is_normal=True)
@@ -56,14 +56,14 @@ def init_data(connect, collection, nb=6000, partition_tags=None, auto_id=True):
     return insert_entities, ids
 
 
-def init_binary_data(connect, collection, nb=6000, insert=True, partition_tags=None):
+def init_binary_data(connect, collection, nb=1200, insert=True, partition_tags=None):
     '''
     Generate entities and add it in collection
     '''
     ids = []
     global binary_entities
     global raw_vectors
-    if nb == 6000:
+    if nb == 1200:
         insert_entities = binary_entities
         insert_raw_vectors = raw_vectors
     else:

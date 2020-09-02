@@ -11,11 +11,11 @@ from utils import *
 
 
 dim = 128
-segment_row_count = 5000
+segment_row_count = 1000
 collection_id = "test_get"
 DELETE_TIMEOUT = 60
 tag = "1970-01-01"
-nb = 6000
+nb = 1200
 entity = gen_entities(1)
 binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)

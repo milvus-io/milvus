@@ -9,12 +9,12 @@ from milvus import DataType
 from utils import *
 
 dim = 128
-segment_row_count = 5000
+segment_row_count = 1000
 collection_id = "test_insert"
 ADD_TIMEOUT = 60
 tag = "1970-01-01"
 insert_interval_time = 1.5
-nb = 6000
+nb = 1200
 field_name = default_float_vec_field_name 
 entity = gen_entities(1)
 raw_vector, binary_entity = gen_binary_entities(1)

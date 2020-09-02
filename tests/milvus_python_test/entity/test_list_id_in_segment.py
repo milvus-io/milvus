@@ -8,8 +8,8 @@ import pytest
 from utils import *
 
 dim = 128
-segment_row_count = 100000
-nb = 6000
+segment_row_count = 1000
+nb = 1200
 tag = "1970-01-01"
 field_name = default_float_vec_field_name
 binary_field_name = default_binary_vec_field_name

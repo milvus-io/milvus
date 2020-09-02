@@ -8,14 +8,14 @@ import pytest
 import sklearn.preprocessing
 from utils import *
 
-nb = 6000
+nb = 1200
 dim = 128
 index_file_size = 10
 BUILD_TIMEOUT = 300
 nprobe = 1
 top_k = 5
 tag = "1970-01-01"
-NLIST = 4046
+NLIST = 128
 INVALID_NLIST = 100000000
 field_name = "float_vector"
 binary_field_name = "binary_vector"
@@ -26,7 +26,7 @@ entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 query, query_vecs = gen_query_vectors(field_name, entities, top_k, 1)
-default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 1024}, "metric_type": "L2"}
+default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
 
 class TestIndexBase:
@@ -46,7 +46,7 @@ class TestIndexBase:
         params=[
             1,
             10,
-            1500
+            1111
         ],
     )
     def get_nq(self, request):
@@ -526,7 +526,7 @@ class TestIndexBinary:
         params=[
             1,
             10,
-            1500
+            1111
         ],
     )
     def get_nq(self, request):

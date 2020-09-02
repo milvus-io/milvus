@@ -7,7 +7,7 @@ from multiprocessing import Process
 from utils import *
 
 collection_id = "load_collection"
-nb = 6000
+nb = 1200
 default_fields = gen_default_fields() 
 entities = gen_entities(nb)
 field_name = default_float_vec_field_name

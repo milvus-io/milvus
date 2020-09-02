@@ -10,11 +10,11 @@ from utils import *
 
 
 dim = 128
-segment_row_count = 5000
+segment_row_count = 1000
 collection_id = "test_delete"
 DELETE_TIMEOUT = 60
 tag = "1970-01-01"
-nb = 6000
+nb = 1200
 field_name = default_float_vec_field_name
 entity = gen_entities(1)
 raw_vector, binary_entity = gen_binary_entities(1)
@@ -420,6 +420,7 @@ class TestDeleteInvalid(object):
         with pytest.raises(Exception) as e:
             status = connect.delete_entity_by_id(collection, [1, invalid_id])
 
+    @pytest.mark.level(2)
     def test_delete_entity_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:

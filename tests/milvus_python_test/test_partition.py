@@ -9,12 +9,12 @@ from utils import *
 
 
 dim = 128
-segment_row_count = 5000
+segment_row_count = 1000
 collection_id = "partition"
 nprobe = 1
 tag = "1970-01-01"
 TIMEOUT = 120
-nb = 6000
+nb = 1200
 tag = "partition_tag"
 field_name = "float_vector"
 entity = gen_entities(1)
@@ -374,6 +374,7 @@ class TestNameInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
+    @pytest.mark.level(2)
     def test_drop_partition_with_invalid_collection_name(self, connect, collection, get_collection_name):
         '''
         target: test drop partition, with invalid collection name, check status returned
@@ -396,6 +397,7 @@ class TestNameInvalid(object):
         with pytest.raises(Exception) as e:
             connect.drop_partition(collection, tag_name)
 
+    @pytest.mark.level(2)
     def test_list_partitions_with_invalid_collection_name(self, connect, collection, get_collection_name):
         '''
         target: test show partitions, with invalid collection name, check status returned

@@ -7,14 +7,14 @@ import pytest
 from utils import *
 
 dim = 128
-segment_row_count = 5000
+segment_row_count = 1000
 index_file_size = 10
 collection_id = "test_flush"
 DELETE_TIMEOUT = 60
 nprobe = 1
 tag = "1970-01-01"
 top_k = 1
-nb = 6000
+nb = 1200
 tag = "partition_tag"
 field_name = "float_vector"
 entity = gen_entities(1)

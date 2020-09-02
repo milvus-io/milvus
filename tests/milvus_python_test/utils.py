@@ -16,9 +16,9 @@ epsilon = 0.000001
 default_flush_interval = 1
 big_flush_interval = 1000
 dimension = 128
-nb = 6000
+nb = 1200
 top_k = 10
-segment_row_count = 5000
+segment_row_count = 1000
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
 
@@ -121,6 +121,10 @@ def get_milvus(host, port, uri=None, handler=None, **kwargs):
     else:
         milvus = Milvus(host=host, port=port, handler=handler, try_connect=try_connect)
     return milvus
+
+
+def reset_build_index_threshold(connect):
+    connect.set_config("engine", "build_index_threshold", 1024)
 
 
 def disable_flush(connect):
