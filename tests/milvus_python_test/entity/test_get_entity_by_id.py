@@ -6,9 +6,9 @@ import threading
 import logging
 from multiprocessing import Pool, Process
 import concurrent.futures
+from threading import current_thread
 import pytest
 from utils import *
-
 
 dim = 128
 segment_row_count = 5000
@@ -23,10 +23,12 @@ raw_vectors, binary_entities = gen_binary_entities(nb)
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {default_float_vec_field_name: {"topk": 10, "query": gen_vectors(1, dim), "params": {"nprobe": 10}}}}
+            {"vector": {
+                default_float_vec_field_name: {"topk": 10, "query": gen_vectors(1, dim), "params": {"nprobe": 10}}}}
         ]
     }
 }
+
 
 class TestGetBase:
     """
@@ -34,6 +36,7 @@ class TestGetBase:
       The following cases are used to test `get_entity_by_id` function
     ******************************************************************
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
@@ -178,6 +181,7 @@ class TestGetBase:
       The following cases are used to test `get_entity_by_id` function, with tags
     ******************************************************************
     """
+
     def test_get_entities_tag(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -247,7 +251,7 @@ class TestGetBase:
         tag_new = "tag_new"
         connect.create_partition(collection, tag)
         connect.create_partition(collection, tag_new)
-        new_entities = gen_entities(nb+1)
+        new_entities = gen_entities(nb + 1)
         ids = connect.insert(collection, entities, partition_tag=tag)
         ids_new = connect.insert(collection, new_entities, partition_tag=tag_new)
         connect.flush([collection])
@@ -256,8 +260,8 @@ class TestGetBase:
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
-        for i in range(get_pos, get_pos*2):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), new_entities[-1]["values"][i-get_pos])
+        for i in range(get_pos, get_pos * 2):
+            assert_equal_vector(res[i].get(default_float_vec_field_name), new_entities[-1]["values"][i - get_pos])
 
     @pytest.mark.level(2)
     def test_get_entities_indexed_tag(self, connect, collection, get_simple_index, get_pos):
@@ -280,6 +284,7 @@ class TestGetBase:
       The following cases are used to test `get_entity_by_id` function, with fields params
     ******************************************************************
     """
+
     def test_get_entity_field(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id, get one
@@ -290,7 +295,7 @@ class TestGetBase:
         connect.flush([collection])
         get_ids = [ids[get_pos]]
         fields = ["int64"]
-        res = connect.get_entity_by_id(collection, get_ids, fields = fields)
+        res = connect.get_entity_by_id(collection, get_ids, fields=fields)
         # assert fields
         res = res.dict()
         assert res[0]["field"] == fields[0]
@@ -307,7 +312,7 @@ class TestGetBase:
         connect.flush([collection])
         get_ids = [ids[get_pos]]
         fields = ["int64", "float", default_float_vec_field_name]
-        res = connect.get_entity_by_id(collection, get_ids, fields = fields)
+        res = connect.get_entity_by_id(collection, get_ids, fields=fields)
         # assert fields
         res = res.dict()
         assert len(res) == len(fields)
@@ -331,7 +336,7 @@ class TestGetBase:
         get_ids = [ids[get_pos]]
         fields = ["int1288"]
         with pytest.raises(Exception) as e:
-            res = connect.get_entity_by_id(collection, get_ids, fields = fields)
+            res = connect.get_entity_by_id(collection, get_ids, fields=fields)
 
     # TODO: assert exception
     def test_get_entity_fields_not_match(self, connect, collection, get_pos):
@@ -345,7 +350,7 @@ class TestGetBase:
         get_ids = [ids[get_pos]]
         fields = ["int1288"]
         with pytest.raises(Exception) as e:
-            res = connect.get_entity_by_id(collection, get_ids, fields = fields)
+            res = connect.get_entity_by_id(collection, get_ids, fields=fields)
 
     def test_get_entity_id_not_exised(self, connect, collection):
         '''
@@ -355,7 +360,7 @@ class TestGetBase:
         '''
         ids = connect.insert(collection, entity)
         connect.flush([collection])
-        res = connect.get_entity_by_id(collection, [1]) 
+        res = connect.get_entity_by_id(collection, [1])
         assert res[0] is None
 
     def test_get_entity_collection_not_existed(self, connect, collection):
@@ -375,6 +380,7 @@ class TestGetBase:
       The following cases are used to test `get_entity_by_id` function, after deleted
     ******************************************************************
     """
+
     def test_get_entity_after_delete(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
@@ -507,22 +513,53 @@ class TestGetBase:
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         get_id = ids[100:200]
+
         def get():
             res = connect.get_entity_by_id(collection, get_id)
             assert len(res) == len(get_id)
             for i in range(len(res)):
-                assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][100+i])
+                assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][100 + i])
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_results = {executor.submit(
                 get): i for i in range(10)}
             for future in concurrent.futures.as_completed(future_results):
                 future.result()
 
+    @pytest.mark.level(2)
+    def test_get_entity_by_id_insert_multi_threads(self, connect, collection):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            def get(group_ids, group_entities):
+                res = connect.get_entity_by_id(collection, group_ids)
+                assert len(res) == len(group_ids)
+                logging.getLogger().info(current_thread().getName()+" get")
+                for i in range(len(res)):
+                    assert_equal_vector(res[i].get(default_float_vec_field_name), group_entities[-1]["values"][i])
+
+            def insert(group_vectors):
+                for group_vector in group_vectors:
+                    group_entities = [
+                        {"field": "int64", "type": DataType.INT64, "values": [i for i in range(step)]},
+                        {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(step)]},
+                        {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": group_vector}
+                    ]
+                    group_ids = connect.insert(collection, group_entities)
+                    logging.getLogger().info(current_thread().getName()+" insert")
+                    connect.flush([collection])
+                    executor.submit(get, group_ids, group_entities)
+
+            step = 100
+            vectors = gen_vectors(nb, dimension, False)
+            group_vectors = [vectors[i:i + step] for i in range(0, len(vectors), step)]
+            task = executor.submit(insert, group_vectors)
+            task.result()
+
 
 class TestGetInvalid(object):
     """
     Test get entities with invalid params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_strs()
