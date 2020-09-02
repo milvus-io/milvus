@@ -24,6 +24,7 @@
 #include <fiu/fiu-local.h>
 
 #include "config/ServerConfig.h"
+#include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/IterateHandler.h"
@@ -38,6 +39,7 @@ namespace engine {
 
 MemCollection::MemCollection(int64_t collection_id, const DBOptions& options)
     : collection_id_(collection_id), options_(options) {
+    GetSegmentRowCount(collection_id_, segment_row_count_);
 }
 
 Status
@@ -55,7 +57,9 @@ MemCollection::Add(int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id)
     int64_t chunk_size = utils::GetSizeOfChunk(chunk);
 
     Status status;
-    if (current_mem_segment == nullptr || current_mem_segment->GetCurrentMem() + chunk_size > MAX_MEM_SEGMENT_SIZE) {
+    if (current_mem_segment == nullptr || chunk->count_ >= segment_row_count_ ||
+        current_mem_segment->GetCurrentRowCount() >= segment_row_count_ ||
+        current_mem_segment->GetCurrentMem() + chunk_size > MAX_MEM_SEGMENT_SIZE) {
         MemSegmentPtr new_mem_segment = std::make_shared<MemSegment>(collection_id_, partition_id, options_);
         status = new_mem_segment->Add(chunk, op_id);
         if (status.ok()) {
@@ -161,11 +165,13 @@ MemCollection::ApplyDeleteToFile() {
 
         // Step 1: Check delete_id in mem
         std::set<idx_t> ids_to_check;
-        segment::IdBloomFilterPtr pre_bloom_filter;
-        STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
-        for (auto& id : ids_to_delete) {
-            if (pre_bloom_filter->Check(id)) {
-                ids_to_check.insert(id);
+        {
+            segment::IdBloomFilterPtr pre_bloom_filter;
+            STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
+            for (auto& id : ids_to_delete) {
+                if (pre_bloom_filter->Check(id)) {
+                    ids_to_check.insert(id);
+                }
             }
         }
 
@@ -229,6 +235,17 @@ MemCollection::ApplyDeleteToFile() {
 
         // Step 4: update delete docs and bloom filter
         {
+            // Load previous delete_id and merge into 'delete_ids'
+            segment::DeletedDocsPtr prev_del_docs;
+            STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
+            std::vector<engine::offset_t> pre_del_offsets;
+            if (prev_del_docs) {
+                pre_del_offsets = prev_del_docs->GetDeletedDocs();
+                for (auto& offset : pre_del_offsets) {
+                    ids_to_check.insert(uids[offset]);
+                }
+            }
+
             segment::IdBloomFilterPtr bloom_filter;
             STATUS_CHECK(segment_writer->CreateBloomFilter(bloom_filter_file_path, bloom_filter));
             std::vector<engine::offset_t> delete_docs_offset;
@@ -240,22 +257,8 @@ MemCollection::ApplyDeleteToFile() {
                 }
             }
 
-            STATUS_CHECK(segments_op->CommitRowCountDelta(segment->GetID(), delete_docs_offset.size(), true));
-
-            // Load previous delete_id and merge into 'delete_ids'
-            segment::DeletedDocsPtr prev_del_docs;
-            STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
-            if (prev_del_docs) {
-                auto& pre_del_offsets = prev_del_docs->GetDeletedDocs();
-                size_t delete_docs_size = delete_docs_offset.size();
-                for (auto& offset : pre_del_offsets) {
-                    if (!std::binary_search(delete_docs_offset.begin(), delete_docs_offset.begin() + delete_docs_size,
-                                            offset)) {
-                        delete_docs_offset.emplace_back(offset);
-                    }
-                }
-            }
-            std::sort(delete_docs_offset.begin(), delete_docs_offset.end());
+            STATUS_CHECK(segments_op->CommitRowCountDelta(segment->GetID(),
+                                                          delete_docs_offset.size() - pre_del_offsets.size(), true));
 
             auto delete_docs = std::make_shared<segment::DeletedDocs>(delete_docs_offset);
             STATUS_CHECK(segment_writer->WriteDeletedDocs(del_docs_path, delete_docs));

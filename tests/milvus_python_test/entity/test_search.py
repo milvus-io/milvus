@@ -1508,8 +1508,9 @@ class TestSearchInvalid(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection_name, default_query)
 
-    @pytest.mark.level(1)
-    def test_search_with_invalid_tag(self, connect, collection):
+    # TODO(yukun)
+    @pytest.mark.level(2)
+    def _test_search_with_invalid_tag(self, connect, collection):
         tag = " "
         with pytest.raises(Exception) as e:
             res = connect.search(collection, default_query, partition_tags=tag)

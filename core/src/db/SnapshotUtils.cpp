@@ -215,9 +215,8 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
                     continue;
                 }
 
-                milvus::json json_file;
-                auto element = pair.second->GetElement();
                 if (pair.second->GetFile()) {
+                    milvus::json json_file;
                     json_file[JSON_DATA_SIZE] = pair.second->GetFile()->GetSize();
                     json_file[JSON_PATH] =
                         engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", pair.second->GetFile());
@@ -225,14 +224,15 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
 
                     // if the element is index, print index name/type
                     // else print element name
+                    auto element = pair.second->GetElement();
                     if (element->GetFEtype() == engine::FieldElementType::FET_INDEX) {
                         json_file[JSON_NAME] = element->GetName();
                         json_file[JSON_INDEX_TYPE] = element->GetTypeName();
                     } else {
                         json_file[JSON_NAME] = element->GetName();
                     }
+                    json_files.push_back(json_file);
                 }
-                json_files.push_back(json_file);
             }
         }
 
@@ -259,6 +259,38 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
     json_info[JSON_ROW_COUNT] = total_row_count;
     json_info[JSON_DATA_SIZE] = total_data_size;
     json_info[JSON_PARTITIONS] = json_partitions;
+
+    return Status::OK();
+}
+
+Status
+GetSegmentRowCount(const std::string& collection_name, int64_t& segment_row_count) {
+    segment_row_count = DEFAULT_SEGMENT_ROW_COUNT;
+    snapshot::ScopedSnapshotT latest_ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
+
+    // get row count per segment
+    auto collection = latest_ss->GetCollection();
+    const json params = collection->GetParams();
+    if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
+        segment_row_count = params[PARAM_SEGMENT_ROW_COUNT];
+    }
+
+    return Status::OK();
+}
+
+Status
+GetSegmentRowCount(int64_t collection_id, int64_t& segment_row_count) {
+    segment_row_count = DEFAULT_SEGMENT_ROW_COUNT;
+    snapshot::ScopedSnapshotT latest_ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_id));
+
+    // get row count per segment
+    auto collection = latest_ss->GetCollection();
+    const json params = collection->GetParams();
+    if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
+        segment_row_count = params[PARAM_SEGMENT_ROW_COUNT];
+    }
 
     return Status::OK();
 }

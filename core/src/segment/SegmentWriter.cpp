@@ -19,11 +19,10 @@
 
 #include <algorithm>
 #include <memory>
-#include <utility>
+#include <set>
 
 #include "SegmentReader.h"
 #include "codecs/Codec.h"
-#include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "storage/disk/DiskIOReader.h"
@@ -252,6 +251,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     TimeRecorderAuto recorder("SegmentWriter::Merge");
 
     // load raw data
+    // After load fields, the data has been cached in segment.
     status = segment_reader->LoadFields();
     if (!status.ok()) {
         return status;
@@ -270,19 +270,37 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
         return status;
     }
 
-    if (src_deleted_docs) {
-        std::vector<engine::offset_t> delete_ids = src_deleted_docs->GetDeletedDocs();
-        src_segment->DeleteEntity(delete_ids);
-    }
-
-    // merge filed raw data
-    engine::DataChunkPtr chunk = std::make_shared<engine::DataChunk>();
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+    engine::SegmentPtr duplicated_segment = std::make_shared<engine::Segment>();
+    std::set<std::string> field_names;
     for (auto& iter : field_visitors_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
+        duplicated_segment->AddField(field);
+
         std::string name = field->GetName();
+        field_names.insert(name);
+    }
+
+    for (auto& name : field_names) {
         engine::BinaryDataPtr raw_data;
-        segment_reader->LoadField(name, raw_data);
+        src_segment->GetFixedFieldData(name, raw_data);
+        engine::BinaryDataPtr duplicated_raw_data = std::make_shared<engine::BinaryData>();
+        duplicated_raw_data->data_.resize(raw_data->Size());
+        memcpy(duplicated_raw_data->data_.data(), raw_data->data_.data(), raw_data->Size());
+        duplicated_segment->SetFixedFieldData(name, duplicated_raw_data);
+    }
+
+    // TODO: Do not delete data from src segment
+    if (src_deleted_docs) {
+        std::vector<engine::offset_t> delete_ids = src_deleted_docs->GetDeletedDocs();
+        duplicated_segment->DeleteEntity(delete_ids);
+    }
+
+    // merge field raw data
+    engine::DataChunkPtr chunk = std::make_shared<engine::DataChunk>();
+    for (auto& name : field_names) {
+        engine::BinaryDataPtr raw_data;
+        duplicated_segment->GetFixedFieldData(name, raw_data);
         chunk->fixed_fields_[name] = raw_data;
     }
 

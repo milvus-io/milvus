@@ -406,8 +406,8 @@ public class Utils {
                 .build();
     }
 
-    public static Index genDefaultIndex(String collectionName, String indexType, String metricType, int nlist) {
-        return new Index.Builder(collectionName, "float_vector")
+    public static Index genDefaultIndex(String collectionName, String fieldName, String indexType, String metricType, int nlist) {
+        return new Index.Builder(collectionName, fieldName)
                 .withParamsInJson(new JsonBuilder()
                         .param("index_type", indexType)
                         .param("metric_type", metricType)
