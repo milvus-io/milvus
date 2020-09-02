@@ -1,5 +1,9 @@
 package com;
 
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import io.milvus.client.*;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
@@ -61,6 +65,7 @@ public class TestSearchEntities {
         assert(res.getResponse().ok());
         List<Long> ids = res.getEntityIds();
         client.flush(collectionName);
+        System.out.println(dsl);
         SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
         SearchResponse res_search = client.search(searchParam);
         for (int i = 0; i < Constants.nq; i++) {
@@ -166,17 +171,55 @@ public class TestSearchEntities {
         assert(!res_search.getResponse().ok());
     }
 
-//    // Binary tests
-//    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void testSearchCollectionNotExistedBinary(MilvusClient client, String collectionName)  {
-//        String collectionNameNew = Utils.genUniqueStr(collectionName);
-//        SearchParam searchParam = new SearchParam.Builder(collectionNameNew)
-//                .withBinaryVectors(queryVectorsBinary)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k).build();
-//        SearchResponse res_search = client.search(searchParam);
-//        assert (!res_search.getResponse().ok());
-//    }
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testSearchMultiMust(MilvusClient client, String collectionName){
+        JSONObject vectorParam = Utils.genVectorParam(Constants.defaultMetricType, Constants.vectors.subList(0,nq), top_k, n_probe);
+        JSONObject boolParam = new JSONObject();
+        JSONObject mustParam = new JSONObject();
+        JSONArray jsonArray = new JSONArray();
+        // [vector]
+        jsonArray.add(vectorParam);
+        JSONObject mustParam1 = new JSONObject();
+        // must:[]
+        mustParam1.put("must", jsonArray);
+        JSONArray jsonArray1 = new JSONArray();
+        // [must:[]]
+        jsonArray1.add(mustParam1);
+        mustParam.put("must", jsonArray1);
+        boolParam.put("bool", mustParam);
+//        insert
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getEntityIds();
+        client.flush(collectionName);
+        String query = boolParam.toJSONString();
+        System.out.println(boolParam.toJSONString());
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(query).build();
+        SearchResponse resSearch = client.search(searchParam);
+        assert(resSearch.getResponse().ok());
+        Assert.assertEquals(resSearch.getResultIdsList().size(), Constants.nq);
+        Assert.assertEquals(resSearch.getResultDistancesList().size(), Constants.nq);
+        Assert.assertEquals(resSearch.getResultIdsList().get(0).size(), Constants.nb);
+    }
+
+    // Binary tests
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void testSearchCollectionNotExistedBinary(MilvusClient client, String collectionName)  {
+        String collectionNameNew = Utils.genUniqueStr(collectionName);
+        String queryKey = "placeholder";
+        Map<String, List<ByteBuffer>> binaryQueryEntities = new HashMap<>();
+        binaryQueryEntities.put(queryKey, queryVectorsBinary);
+        JSONObject binaryVectorParam = Utils.genBinaryVectorParam(Constants.defaultBinaryMetricType, queryKey, top_k, n_probe);
+        String dsl = Utils.genDefaultSearchParam(binaryVectorParam);
+        System.out.println(dsl);
+        SearchParam searchParam = new SearchParam.Builder(collectionNameNew)
+                .withBinaryEntities(binaryQueryEntities)
+                .withDSL(dsl)
+                .build();
+        SearchResponse resSearch = client.search(searchParam);
+        Assert.assertFalse(resSearch.getResponse().ok());
+    }
 //
 //    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
 //    public void test_search_index_IVFLAT_binary(MilvusClient client, String collectionName)  {

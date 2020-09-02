@@ -22,6 +22,8 @@ public final class Constants {
 
     public static final String vectorType = "float";
 
+    public static final String binaryVectorType = "binary";
+
     public static final String defaultMetricType = "L2";
 
     public static final String indexType = "IVF_SQ8";

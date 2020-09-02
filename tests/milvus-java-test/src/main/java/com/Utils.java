@@ -147,7 +147,7 @@ public class Utils {
         return indexParams;
     }
 
-    public static String setSearchParam(String metricType, List<List<Float>> queryVectors, int topk, int nprobe) {
+    static JSONObject genVectorParam(String metricType, List<List<Float>> queryVectors, int topk, int nprobe) {
         JSONObject searchParam = new JSONObject();
         JSONObject fieldParam = new JSONObject();
         fieldParam.put("topk", topk);
@@ -160,13 +160,44 @@ public class Utils {
         JSONObject vectorParams = new JSONObject();
         vectorParams.put(Constants.floatFieldName, fieldParam);
         searchParam.put("vector", vectorParams);
-        JSONObject param = new JSONObject();
+        return searchParam;
+    }
+
+    static JSONObject genBinaryVectorParam(String metricType, String queryVectors, int topk, int nprobe) {
+        JSONObject searchParam = new JSONObject();
+        JSONObject fieldParam = new JSONObject();
+        fieldParam.put("topk", topk);
+        fieldParam.put("metric_type", metricType);
+        fieldParam.put("query", queryVectors);
+        fieldParam.put("type", Constants.binaryVectorType);
+        JSONObject tmpSearchParam = new JSONObject();
+        tmpSearchParam.put("nprobe", nprobe);
+        fieldParam.put("params", tmpSearchParam);
+        JSONObject vectorParams = new JSONObject();
+        vectorParams.put(Constants.binaryFieldName, fieldParam);
+        searchParam.put("vector", vectorParams);
+        return searchParam;
+    }
+
+    public static String setSearchParam(String metricType, List<List<Float>> queryVectors, int topk, int nprobe) {
+        JSONObject searchParam = genVectorParam(metricType, queryVectors, topk, nprobe);
+        JSONObject boolParam = new JSONObject();
         JSONObject mustParam = new JSONObject();
         JSONArray tmp = new JSONArray();
         tmp.add(searchParam);
         mustParam.put("must", tmp);
-        param.put("bool", mustParam);
-        return JSONObject.toJSONString(param);
+        boolParam.put("bool", mustParam);
+        return JSONObject.toJSONString(boolParam);
+    }
+
+    public static String genDefaultSearchParam(JSONObject vectorParam) {
+        JSONObject boolParam = new JSONObject();
+        JSONObject mustParam = new JSONObject();
+        JSONArray tmp = new JSONArray();
+        tmp.add(vectorParam);
+        mustParam.put("must", tmp);
+        boolParam.put("bool", mustParam);
+        return JSONObject.toJSONString(boolParam);
     }
 
     public static String setBinarySearchParam(String metricType, List<ByteBuffer> queryVectors, int topk, int nprobe) {
