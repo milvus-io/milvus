@@ -45,13 +45,18 @@ FetchContent_Declare(
 
 include(FetchContent)
 FetchContent_GetProperties( pulsar )
-SET(BUILD_TESTS CACHE BOOL OFF FORCE)
+
 if (NOT pulsar_POPULATED)
     FetchContent_Populate(pulsar)
 
     file(REMOVE ${pulsar_SOURCE_DIR}/pulsar-client-cpp/CMakeLists.txt)
     message("${pulsar_SOURCE_DIR}/pulsar-client-cpp/CMakeLists.txt")
     EXECUTE_PROCESS(COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists ${pulsar_SOURCE_DIR}/pulsar-client-cpp/CMakeLists.txt)
+
+    SET(BUILD_TESTS CACHE BOOL OFF FORCE)
+    # pulsar-cpp-client CMakeLists.txt need variables below, set them for build without install libprotobuf_dev
+    SET(Protobuf_INCLUDE_DIRS CACHE PATH ${CMAKE_BINARY_DIR}/thirdparty/grpc/grpc-src/third_party/protobuf/src FORCE)
+    SET(Protobuf_LITE_LIBRARIES CACHE PATH ${CMAKE_BINARY_DIR}/thirdparty/grpc/grpc-build/third_party/protobuf FORCE)
 
     # Adding the following targets:
     # pulsar-client-cpp
