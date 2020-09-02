@@ -53,7 +53,7 @@ func (s *minioDriver) put(ctx context.Context, key Key, value Value, timestamp T
 		return err
 	}
 
-	err = s.driver.Put(ctx, []byte(minioKey), value)
+	err = s.driver.Put(ctx, minioKey, value)
 	return err
 }
 
@@ -70,7 +70,7 @@ func (s *minioDriver) scanLE(ctx context.Context, key Key, timestamp Timestamp, 
 
 	var timestamps []Timestamp
 	for _, key := range keys {
-		_, timestamp, _, _ := codec.MvccDecode(string(key))
+		_, timestamp, _, _ := codec.MvccDecode(key)
 		timestamps = append(timestamps, timestamp)
 	}
 
@@ -90,7 +90,7 @@ func (s *minioDriver) scanGE(ctx context.Context, key Key, timestamp Timestamp, 
 
 	var timestamps []Timestamp
 	for _, key := range keys {
-		_, timestamp, _, _ := codec.MvccDecode(string(key))
+		_, timestamp, _, _ := codec.MvccDecode(key)
 		timestamps = append(timestamps, timestamp)
 	}
 
@@ -139,7 +139,7 @@ func (s *minioDriver) GetRow(ctx context.Context, key Key, timestamp Timestamp) 
 		return nil, err
 	}
 
-	_, _, suffix, err := MvccDecode(string(keys[0]))
+	_, _, suffix, err := MvccDecode(keys[0])
 	if err != nil{
 		return nil, err
 	}
@@ -149,10 +149,10 @@ func (s *minioDriver) GetRow(ctx context.Context, key Key, timestamp Timestamp) 
 
 	return values[0], err
 }
-func (s *minioDriver) GetRows(ctx context.Context, keys []Key, timestamp Timestamp) ([]Value, error){
+func (s *minioDriver) GetRows(ctx context.Context, keys []Key, timestamps []Timestamp) ([]Value, error){
 	var values []Value
-	for _, key := range keys{
-		value, err := s.GetRow(ctx, key, timestamp)
+	for i, key := range keys{
+		value, err := s.GetRow(ctx, key, timestamps[i])
 		if err!= nil{
 			return nil, err
 		}
@@ -169,7 +169,7 @@ func (s *minioDriver) PutRow(ctx context.Context, key Key, value Value, segment 
 	err = s.driver.Put(ctx, minioKey, value)
 	return err
 }
-func (s *minioDriver) PutRows(ctx context.Context, keys []Key, values []Value, segment string, timestamp Timestamp) error{
+func (s *minioDriver) PutRows(ctx context.Context, keys []Key, values []Value, segments []string, timestamps []Timestamp) error{
 	maxThread := 100
 	batchSize := 1
 	keysLength := len(keys)
@@ -185,9 +185,9 @@ func (s *minioDriver) PutRows(ctx context.Context, keys []Key, values []Value, s
 	}
 
 	errCh := make(chan error)
-	f := func(ctx2 context.Context, keys2 []Key, values2 []Value, segments2 string, timestamp2 Timestamp) {
+	f := func(ctx2 context.Context, keys2 []Key, values2 []Value, segments2 []string, timestamps2 []Timestamp) {
 		for i := 0; i < len(keys2); i++{
-			err := s.PutRow(ctx2, keys2[i], values2[i], segments2, timestamp2)
+			err := s.PutRow(ctx2, keys2[i], values2[i], segments2[i], timestamps2[i])
 			errCh <- err
 		}
 	}
@@ -198,7 +198,7 @@ func (s *minioDriver) PutRows(ctx context.Context, keys []Key, values []Value, s
 			if len(keys) < end {
 				end = len(keys)
 			}
-			f(ctx, keys[start:end], values[start:end], segment, timestamp)
+			f(ctx, keys[start:end], values[start:end], segments[start:end], timestamps[start:end])
 		}()
 	}
 
@@ -208,6 +208,33 @@ func (s *minioDriver) PutRows(ctx context.Context, keys []Key, values []Value, s
 		}
 	}
 	return nil
+}
+
+func (s *minioDriver) GetSegments(ctx context.Context, key Key, timestamp Timestamp) ([]string, error){
+	keyEnd, err := MvccEncode(key, timestamp, "")
+	if err != nil{
+		return nil, err
+	}
+	keys, _, err := s.driver.Scan(ctx, append(key, byte('_')), keyEnd, -1,true)
+	if err != nil {
+		return nil, err
+	}
+	segmentsSet := map[string]bool{}
+	for _, key := range keys {
+		_, _, segment, err := MvccDecode(key)
+		if err != nil {
+			panic("must no error")
+		}
+		segmentsSet[segment] = true
+	}
+
+	var segments []string
+	for k, v := range segmentsSet {
+		if v == true {
+			segments = append(segments, k)
+		}
+	}
+	return segments, err
 }
 
 func (s *minioDriver) DeleteRow(ctx context.Context, key Key, timestamp Timestamp) error{
@@ -220,7 +247,7 @@ func (s *minioDriver) DeleteRow(ctx context.Context, key Key, timestamp Timestam
 	return err
 }
 
-func (s *minioDriver) DeleteRows(ctx context.Context, keys []Key, timestamp Timestamp) error{
+func (s *minioDriver) DeleteRows(ctx context.Context, keys []Key, timestamps []Timestamp) error{
 	maxThread := 100
 	batchSize := 1
 	keysLength := len(keys)
@@ -236,9 +263,9 @@ func (s *minioDriver) DeleteRows(ctx context.Context, keys []Key, timestamp Time
 	}
 
 	errCh := make(chan error)
-	f := func(ctx2 context.Context, keys2 []Key, timestamp2 Timestamp) {
+	f := func(ctx2 context.Context, keys2 []Key, timestamps2 []Timestamp) {
 		for i := 0; i < len(keys2); i++{
-			err := s.DeleteRow(ctx2, keys2[i], timestamp2)
+			err := s.DeleteRow(ctx2, keys2[i], timestamps2[i])
 			errCh <- err
 		}
 	}
@@ -249,7 +276,7 @@ func (s *minioDriver) DeleteRows(ctx context.Context, keys []Key, timestamp Time
 			if len(keys) < end {
 				end = len(keys)
 			}
-			f(ctx, keys[start:end], timestamp)
+			f(ctx, keys[start:end], timestamps[start:end])
 		}()
 	}
 

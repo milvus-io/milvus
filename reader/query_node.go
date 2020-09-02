@@ -16,8 +16,8 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"github.com/czs007/suvlim/pulsar"
-	"github.com/czs007/suvlim/pulsar/schema"
+	"github.com/czs007/suvlim/pulsar/client-go"
+	"github.com/czs007/suvlim/pulsar/client-go/schema"
 	"sync"
 	"time"
 )
@@ -40,13 +40,13 @@ type QueryNodeTimeSync struct {
 type QueryNode struct {
 	QueryNodeId               uint64
 	Collections               []*Collection
-	messageClient 			  pulsar.MessageClient
+	messageClient 			  client_go.MessageClient
 	queryNodeTimeSync         *QueryNodeTimeSync
 	buffer					  QueryNodeDataBuffer
 }
 
 func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
-	mc := pulsar.MessageClient{}
+	mc := client_go.MessageClient{}
 
 	queryNodeTimeSync := &QueryNodeTimeSync {
 		deleteTimeSync: timeSync,
@@ -91,12 +91,13 @@ func (node *QueryNode) doQueryNode (wg *sync.WaitGroup) {
 }
 
 func (node *QueryNode) PrepareBatchMsg() {
-	node.messageClient.PrepareBatchMsg(pulsar.JobType(0))
+	node.messageClient.PrepareBatchMsg(client_go.JobType(0))
 }
 
 func (node *QueryNode) StartMessageClient() {
 	topics := []string{"insert", "delete"}
-	node.messageClient.InitClient("pulsar://localhost:6650", topics)
+	// TODO: add consumerMsgSchema
+	node.messageClient.InitClient("pulsar://localhost:6650", topics, "")
 
 	go node.messageClient.ReceiveMessage()
 }
@@ -272,7 +273,7 @@ func (node *QueryNode) Delete(deleteMessages []*schema.DeleteMsg, wg *sync.WaitG
 	// TODO: does all entities from a common batch are in the same segment?
 	var targetSegment = node.GetSegmentByEntityId(entityIds[0])
 
-	var result = SegmentDelete(targetSegment, collectionName, &entityIds, &timestamps)
+	var result = SegmentDelete(targetSegment, &entityIds, &timestamps)
 
 	wg.Done()
 	return publishResult(&result, clientId)
@@ -322,8 +323,8 @@ func (node *QueryNode) Search(searchMessages []*schema.SearchMsg, wg *sync.WaitG
 		return schema.Status{}
 	}
 
-	var result = SegmentSearch(targetSegment, collectionName, queryString, &timestamps, &records)
+	var result = SegmentSearch(targetSegment, queryString, &timestamps, &records)
 
 	wg.Done()
-	return publishResult(&result, clientId)
+	return publishSearchResult(result, clientId)
 }

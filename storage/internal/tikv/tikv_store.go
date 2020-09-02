@@ -230,7 +230,7 @@ func (s *TikvStore) PutRow(ctx context.Context, key Key, value Value, segment st
 	return s.put(ctx, key, value, timestamp, segment)
 }
 
-func (s *TikvStore) PutRows(ctx context.Context, keys []Key, values []Value, segment string, timestamps []Timestamp) error {
+func (s *TikvStore) PutRows(ctx context.Context, keys []Key, values []Value, segments []string, timestamps []Timestamp) error {
 	if len(keys) != len(values) {
 		return errors.New("the len of keys is not equal to the len of values")
 	}
@@ -240,7 +240,7 @@ func (s *TikvStore) PutRows(ctx context.Context, keys []Key, values []Value, seg
 
 	encodedKeys := make([]Key, len(keys))
 	for i, key := range keys {
-		encodedKeys[i] = EncodeKey(key, timestamps[i], segment)
+		encodedKeys[i] = EncodeKey(key, timestamps[i], segments[i])
 	}
 	return s.engine.BatchPut(ctx, encodedKeys, values)
 }
@@ -249,11 +249,11 @@ func (s *TikvStore) DeleteRow(ctx context.Context, key Key, timestamp Timestamp)
 	return s.put(ctx, key, Value{0x00}, timestamp, string(DeleteMark))
 }
 
-func (s *TikvStore) DeleteRows(ctx context.Context, keys []Key, timestamp Timestamp) error {
+func (s *TikvStore) DeleteRows(ctx context.Context, keys []Key, timestamps []Timestamp) error {
 	encodeKeys := make([]Key, len(keys))
 	values := make([]Value, len(keys))
 	for i, key := range keys {
-		encodeKeys[i] = EncodeKey(key, timestamp, string(DeleteMark))
+		encodeKeys[i] = EncodeKey(key, timestamps[i], string(DeleteMark))
 		values[i] = Value{0x00}
 	}
 	return s.engine.BatchPut(ctx, encodeKeys, values)

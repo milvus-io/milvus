@@ -1,7 +1,7 @@
 package reader
 
 import (
-	schema2 "suvlim/pulsar/client-go/schema"
+	schema2 "github.com/czs007/suvlim/pulsar/client-go/schema"
 )
 
 type IndexConfig struct {}
