@@ -262,9 +262,7 @@ SearchTask::IndexType() {
                 auto fe_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
                 if (fe_visitor) {
                     auto element = fe_visitor->GetElement();
-                    if (element->GetParams().contains(engine::PARAM_INDEX_TYPE)) {
-                        index_type_ = element->GetParams()[engine::PARAM_INDEX_TYPE];
-                    }
+                    index_type_ = element->GetTypeName();
                 }
                 return index_type_;
             }
