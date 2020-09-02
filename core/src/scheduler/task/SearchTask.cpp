@@ -221,11 +221,22 @@ SearchTask::MergeTopkToResultSet(const engine::ResultIds& src_ids, const engine:
 
 int64_t
 SearchTask::nq() {
-    if (!query_ptr_) {
+    if (query_ptr_) {
         auto vector_query = query_ptr_->vectors.begin();
         if (vector_query != query_ptr_->vectors.end()) {
             if (vector_query->second) {
-                return vector_query->second->nq;
+                auto vector_param = vector_query->second;
+                auto field_visitor = snapshot_->GetField(vector_query->second->field_name);
+                if (field_visitor) {
+                    if (field_visitor->GetParams().contains(engine::PARAM_DIMENSION)) {
+                        int64_t dim = field_visitor->GetParams()[engine::PARAM_DIMENSION];
+                        if (!vector_param->query_vector.float_data.empty()) {
+                            return vector_param->query_vector.float_data.size() / dim;
+                        } else if (!vector_param->query_vector.binary_data.empty()) {
+                            return vector_param->query_vector.binary_data.size() * 8 / dim;
+                        }
+                    }
+                }
             }
         }
     }
@@ -235,7 +246,7 @@ SearchTask::nq() {
 milvus::json
 SearchTask::ExtraParam() {
     milvus::json param;
-    if (!query_ptr_) {
+    if (query_ptr_) {
         auto vector_query = query_ptr_->vectors.begin();
         if (vector_query != query_ptr_->vectors.end()) {
             if (vector_query->second) {
