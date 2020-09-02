@@ -48,6 +48,7 @@ MemSegment::Add(const DataChunkPtr& chunk, idx_t op_id) {
     actions_.emplace_back(action);
 
     current_mem_ += utils::GetSizeOfChunk(chunk);
+    total_row_count_ += chunk->count_;
 
     return Status::OK();
 }

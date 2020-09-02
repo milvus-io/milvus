@@ -286,6 +286,12 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
         field_json["extra_params"] = field.second.field_params_;
         json_out["fields"].push_back(field_json);
     }
+    if (schema.extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
+        json_out[engine::PARAM_SEGMENT_ROW_COUNT] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT];
+    }
+    if (schema.extra_params_.contains(engine::PARAM_UID_AUTOGEN)) {
+        json_out[engine::PARAM_UID_AUTOGEN] = schema.extra_params_[engine::PARAM_UID_AUTOGEN];
+    }
     return Status::OK();
 }
 
@@ -671,77 +677,81 @@ Status
 WebRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
                                            query::QueryPtr& query_ptr) {
     auto status = Status::OK();
-    if (query_json.empty()) {
-        return Status{SERVER_INVALID_ARGUMENT, "BoolQuery is null"};
-    }
-    for (auto& el : query_json.items()) {
-        if (el.key() == "must") {
-            boolean_query->SetOccur(query::Occur::MUST);
-            auto must_json = el.value();
-            if (!must_json.is_array()) {
-                std::string msg = "Must json string is not an array";
-                return Status{SERVER_INVALID_DSL_PARAMETER, msg};
-            }
-
-            for (auto& json : must_json) {
-                auto must_query = std::make_shared<query::BooleanQuery>();
-                if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
-                    STATUS_CHECK(ProcessBooleanQueryJson(json, must_query, query_ptr));
-                    boolean_query->AddBooleanQuery(must_query);
-                } else {
-                    std::string field_name;
-                    STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name, query_ptr));
-                    if (!field_name.empty()) {
-                        query_ptr->index_fields.insert(field_name);
-                    }
-                }
-            }
-        } else if (el.key() == "should") {
-            boolean_query->SetOccur(query::Occur::SHOULD);
-            auto should_json = el.value();
-            if (!should_json.is_array()) {
-                std::string msg = "Should json string is not an array";
-                return Status{SERVER_INVALID_DSL_PARAMETER, msg};
-            }
-
-            for (auto& json : should_json) {
-                auto should_query = std::make_shared<query::BooleanQuery>();
-                if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
-                    STATUS_CHECK(ProcessBooleanQueryJson(json, should_query, query_ptr));
-                    boolean_query->AddBooleanQuery(should_query);
-                } else {
-                    std::string field_name;
-                    STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name, query_ptr));
-                    if (!field_name.empty()) {
-                        query_ptr->index_fields.insert(field_name);
-                    }
-                }
-            }
-        } else if (el.key() == "must_not") {
-            boolean_query->SetOccur(query::Occur::MUST_NOT);
-            auto should_json = el.value();
-            if (!should_json.is_array()) {
-                std::string msg = "Must_not json string is not an array";
-                return Status{SERVER_INVALID_DSL_PARAMETER, msg};
-            }
-
-            for (auto& json : should_json) {
-                if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
-                    auto must_not_query = std::make_shared<query::BooleanQuery>();
-                    STATUS_CHECK(ProcessBooleanQueryJson(json, must_not_query, query_ptr));
-                    boolean_query->AddBooleanQuery(must_not_query);
-                } else {
-                    std::string field_name;
-                    STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name, query_ptr));
-                    if (!field_name.empty()) {
-                        query_ptr->index_fields.insert(field_name);
-                    }
-                }
-            }
-        } else {
-            std::string msg = "BoolQuery json string does not include bool query";
-            return Status{SERVER_INVALID_DSL_PARAMETER, msg};
+    try {
+        if (query_json.empty()) {
+            return Status{SERVER_INVALID_ARGUMENT, "BoolQuery is null"};
         }
+        for (auto& el : query_json.items()) {
+            if (el.key() == "must") {
+                boolean_query->SetOccur(query::Occur::MUST);
+                auto must_json = el.value();
+                if (!must_json.is_array()) {
+                    std::string msg = "Must json string is not an array";
+                    return Status{SERVER_INVALID_DSL_PARAMETER, msg};
+                }
+
+                for (auto& json : must_json) {
+                    auto must_query = std::make_shared<query::BooleanQuery>();
+                    if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
+                        STATUS_CHECK(ProcessBooleanQueryJson(json, must_query, query_ptr));
+                        boolean_query->AddBooleanQuery(must_query);
+                    } else {
+                        std::string field_name;
+                        STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name, query_ptr));
+                        if (!field_name.empty()) {
+                            query_ptr->index_fields.insert(field_name);
+                        }
+                    }
+                }
+            } else if (el.key() == "should") {
+                boolean_query->SetOccur(query::Occur::SHOULD);
+                auto should_json = el.value();
+                if (!should_json.is_array()) {
+                    std::string msg = "Should json string is not an array";
+                    return Status{SERVER_INVALID_DSL_PARAMETER, msg};
+                }
+
+                for (auto& json : should_json) {
+                    auto should_query = std::make_shared<query::BooleanQuery>();
+                    if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
+                        STATUS_CHECK(ProcessBooleanQueryJson(json, should_query, query_ptr));
+                        boolean_query->AddBooleanQuery(should_query);
+                    } else {
+                        std::string field_name;
+                        STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name, query_ptr));
+                        if (!field_name.empty()) {
+                            query_ptr->index_fields.insert(field_name);
+                        }
+                    }
+                }
+            } else if (el.key() == "must_not") {
+                boolean_query->SetOccur(query::Occur::MUST_NOT);
+                auto should_json = el.value();
+                if (!should_json.is_array()) {
+                    std::string msg = "Must_not json string is not an array";
+                    return Status{SERVER_INVALID_DSL_PARAMETER, msg};
+                }
+
+                for (auto& json : should_json) {
+                    if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
+                        auto must_not_query = std::make_shared<query::BooleanQuery>();
+                        STATUS_CHECK(ProcessBooleanQueryJson(json, must_not_query, query_ptr));
+                        boolean_query->AddBooleanQuery(must_not_query);
+                    } else {
+                        std::string field_name;
+                        STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name, query_ptr));
+                        if (!field_name.empty()) {
+                            query_ptr->index_fields.insert(field_name);
+                        }
+                    }
+                }
+            } else {
+                std::string msg = "BoolQuery json string does not include bool query";
+                return Status{SERVER_INVALID_DSL_PARAMETER, msg};
+            }
+        }
+    } catch (std::exception& ex) {
+        return Status(SERVER_INVALID_DSL_PARAMETER, ex.what());
     }
 
     return status;
@@ -1228,6 +1238,11 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     for (auto& field : json_str["fields"]) {
         FieldSchema field_schema;
         std::string field_name = field["field_name"];
+
+        if (fields.find(field_name) != fields.end()) {
+            auto status = Status(SERVER_INVALID_FIELD_NAME, "Collection mapping has duplicate field names");
+            ASSIGN_RETURN_STATUS_DTO(status)
+        }
 
         field_schema.field_params_ = field["extra_params"];
 

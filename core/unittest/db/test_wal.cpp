@@ -40,13 +40,38 @@ using DeleteEntityOperation = milvus::engine::DeleteEntityOperation;
 using DeleteEntityOperationPtr = milvus::engine::DeleteEntityOperationPtr;
 using WalProxy = milvus::engine::WalProxy;
 
-void CreateChunk(DataChunkPtr& chunk, int64_t row_count, int64_t& chunk_size) {
+const char* COLLECTION_NAME = "wal_tbl";
+const char* VECTOR_FIELD_NAME = "vector";
+const char* INT_FIELD_NAME = "int";
+
+milvus::Status
+CreateCollection() {
+    CreateCollectionContext context;
+    auto collection_schema = std::make_shared<Collection>(COLLECTION_NAME);
+    context.collection = collection_schema;
+    auto vector_field = std::make_shared<Field>(VECTOR_FIELD_NAME, 0, milvus::engine::DataType::VECTOR_FLOAT);
+    auto int_field = std::make_shared<Field>(INT_FIELD_NAME, 0, milvus::engine::DataType::INT32);
+    context.fields_schema[vector_field] = {};
+    context.fields_schema[int_field] = {};
+
+    // default id is auto-generated
+    auto params = context.collection->GetParams();
+    params[milvus::engine::PARAM_UID_AUTOGEN] = true;
+    params[milvus::engine::PARAM_SEGMENT_ROW_COUNT] = 1000;
+    context.collection->SetParams(params);
+
+    auto op = std::make_shared<milvus::engine::snapshot::CreateCollectionOperation>(context);
+    return op->Push();
+}
+
+void
+CreateChunk(DataChunkPtr& chunk, int64_t row_count, int64_t& chunk_size) {
     chunk = std::make_shared<DataChunk>();
     chunk->count_ = row_count;
     chunk_size = 0;
     {
         // int32 type field
-        std::string field_name = "f1";
+        std::string field_name = INT_FIELD_NAME;
         auto bin = std::make_shared<BinaryData>();
         bin->data_.resize(chunk->count_ * sizeof(int32_t));
         int32_t* p = (int32_t*)(bin->data_.data());
@@ -59,7 +84,7 @@ void CreateChunk(DataChunkPtr& chunk, int64_t row_count, int64_t& chunk_size) {
     {
         // vector type field
         int64_t dimension = 128;
-        std::string field_name = "f2";
+        std::string field_name = VECTOR_FIELD_NAME;
         auto bin = std::make_shared<BinaryData>();
         bin->data_.resize(chunk->count_ * sizeof(float) * dimension);
         float* p = (float*)(bin->data_.data());
@@ -76,7 +101,7 @@ void CreateChunk(DataChunkPtr& chunk, int64_t row_count, int64_t& chunk_size) {
 class DummyDB : public DBProxy {
  public:
     DummyDB(const DBOptions& options)
-    : DBProxy(nullptr, options) {
+        : DBProxy(nullptr, options) {
     }
 
     Status
@@ -99,6 +124,7 @@ class DummyDB : public DBProxy {
     }
 
     int64_t InsertCount() const { return insert_count_; }
+
     int64_t DeleteCount() const { return delete_count_; }
 
  private:
@@ -199,7 +225,6 @@ TEST_F(WalTest, WalFileTest) {
 }
 
 TEST_F(WalTest, WalFileCodecTest) {
-    std::string collection_name = "c1";
     std::string partition_name = "p1";
     std::string file_path = "/tmp/milvus_wal/test_file";
     auto file = std::make_shared<WalFile>();
@@ -215,7 +240,7 @@ TEST_F(WalTest, WalFileCodecTest) {
             auto pre_size = file->Size();
 
             DeleteEntityOperationPtr operation = std::make_shared<DeleteEntityOperation>();
-            operation->collection_name_ = collection_name;
+            operation->collection_name_ = COLLECTION_NAME;
             IDNumbers ids = {i + 1, i + 2, i + 3};
             operation->entity_ids_ = ids;
             idx_t op_id = i + 10000;
@@ -241,7 +266,7 @@ TEST_F(WalTest, WalFileCodecTest) {
             ASSERT_TRUE(status.ok());
 
             InsertEntityOperationPtr operation = std::make_shared<InsertEntityOperation>();
-            operation->collection_name_ = collection_name;
+            operation->collection_name_ = COLLECTION_NAME;
             operation->partition_name = partition_name;
 
             DataChunkPtr chunk;
@@ -273,7 +298,7 @@ TEST_F(WalTest, WalFileCodecTest) {
 
         Status iter_status;
         int32_t op_index = 0;
-        while(iter_status.ok()) {
+        while (iter_status.ok()) {
             WalOperationPtr operation;
             iter_status = WalOperationCodec::IterateOperation(file, operation, 0);
             if (operation == nullptr) {
@@ -313,7 +338,7 @@ TEST_F(WalTest, WalFileCodecTest) {
                     ASSERT_NE(iter->second, nullptr);
                     ASSERT_EQ(pair.second->data_, iter->second->data_);
                 }
-            } else if(operation->Type() == WalOperationType::DELETE_ENTITY) {
+            } else if (operation->Type() == WalOperationType::DELETE_ENTITY) {
                 DeleteEntityOperationPtr op_1 = std::static_pointer_cast<DeleteEntityOperation>(operation);
                 DeleteEntityOperationPtr op_2 = std::static_pointer_cast<DeleteEntityOperation>(compare_operation);
                 ASSERT_EQ(op_1->entity_ids_, op_2->entity_ids_);
@@ -326,21 +351,23 @@ TEST_F(WalTest, WalFileCodecTest) {
 }
 
 TEST_F(WalTest, WalProxyTest) {
-    std::string collection_name = "col_1";
+    auto status = CreateCollection();
+    ASSERT_TRUE(status.ok());
+
     std::string partition_name = "part_1";
 
     // write over more than 400MB data, 2 wal files
     for (int64_t i = 1; i <= 1000; i++) {
         if (i % 10 == 0) {
             IDNumbers ids = {1, 2, 3};
-            auto status = db_->DeleteEntityByID(collection_name, ids, 0);
+            status = db_->DeleteEntityByID(COLLECTION_NAME, ids, 0);
             ASSERT_TRUE(status.ok());
         } else {
             DataChunkPtr chunk;
             int64_t chunk_size = 0;
-            CreateChunk(chunk, 1000, chunk_size);
+            CreateChunk(chunk, (i % 20) * 100, chunk_size);
 
-            auto status = db_->Insert(collection_name, partition_name, chunk, 0);
+            status = db_->Insert(COLLECTION_NAME, partition_name, chunk, 0);
             ASSERT_TRUE(status.ok());
         }
     }
@@ -348,7 +375,7 @@ TEST_F(WalTest, WalProxyTest) {
     // find out the wal files
     DBOptions opt = GetOptions();
     std::experimental::filesystem::path collection_path = opt.wal_path_;
-    collection_path.append(collection_name);
+    collection_path.append(COLLECTION_NAME);
 
     using DirectoryIterator = std::experimental::filesystem::recursive_directory_iterator;
     std::set<idx_t> op_ids;
@@ -364,7 +391,7 @@ TEST_F(WalTest, WalProxyTest) {
 
             // read all operation ids
             auto file = std::make_shared<WalFile>();
-            auto status = file->OpenFile(file_path, WalFile::READ);
+            status = file->OpenFile(file_path, WalFile::READ);
             ASSERT_TRUE(status.ok());
 
             Status iter_status;
@@ -380,7 +407,7 @@ TEST_F(WalTest, WalProxyTest) {
 
     // notify operation done, the wal files will be removed after all operations done
     for (auto id : op_ids) {
-        auto status = WalManager::GetInstance().OperationDone(collection_name, id);
+        status = WalManager::GetInstance().OperationDone(COLLECTION_NAME, id);
         ASSERT_TRUE(status.ok());
     }
 
@@ -405,8 +432,6 @@ TEST_F(WalTest, WalProxyTest) {
 }
 
 TEST_F(WalTest, WalManagerTest) {
-    std::string collection_name = "collection";
-
     // construct mock db
     DBOptions options;
     options.wal_path_ = "/tmp/milvus_wal";
@@ -422,16 +447,16 @@ TEST_F(WalTest, WalManagerTest) {
     int64_t delete_count = 0;
     for (int64_t i = 1; i <= 1000; i++) {
         if (i % 100 == 0) {
-            auto status =  WalManager::GetInstance().DropCollection(collection_name);
+            auto status = WalManager::GetInstance().DropCollection(COLLECTION_NAME);
             ASSERT_TRUE(status.ok());
         } else if (i % 10 == 0) {
             IDNumbers ids = {1, 2, 3};
 
             auto op = std::make_shared<DeleteEntityOperation>();
-            op->collection_name_ = collection_name;
+            op->collection_name_ = COLLECTION_NAME;
             op->entity_ids_ = ids;
 
-            auto status =  WalManager::GetInstance().RecordOperation(op, db_1);
+            auto status = WalManager::GetInstance().RecordOperation(op, db_1);
             ASSERT_TRUE(status.ok());
 
             delete_count++;
@@ -441,11 +466,11 @@ TEST_F(WalTest, WalManagerTest) {
             CreateChunk(chunk, 1000, chunk_size);
 
             auto op = std::make_shared<InsertEntityOperation>();
-            op->collection_name_ = collection_name;
+            op->collection_name_ = COLLECTION_NAME;
             op->partition_name = "";
             op->data_chunk_ = chunk;
 
-            auto status =  WalManager::GetInstance().RecordOperation(op, db_1);
+            auto status = WalManager::GetInstance().RecordOperation(op, db_1);
             ASSERT_TRUE(status.ok());
 
             insert_count++;
@@ -464,10 +489,10 @@ TEST_F(WalTest, WalManagerTest) {
             IDNumbers ids = {1, 2, 3};
 
             auto op = std::make_shared<DeleteEntityOperation>();
-            op->collection_name_ = collection_name;
+            op->collection_name_ = COLLECTION_NAME;
             op->entity_ids_ = ids;
 
-            auto status =  WalManager::GetInstance().RecordOperation(op, nullptr);
+            auto status = WalManager::GetInstance().RecordOperation(op, nullptr);
             ASSERT_TRUE(status.ok());
 
             delete_count++;
@@ -477,11 +502,11 @@ TEST_F(WalTest, WalManagerTest) {
             CreateChunk(chunk, 1000, chunk_size);
 
             auto op = std::make_shared<InsertEntityOperation>();
-            op->collection_name_ = collection_name;
+            op->collection_name_ = COLLECTION_NAME;
             op->partition_name = "";
             op->data_chunk_ = chunk;
 
-            auto status =  WalManager::GetInstance().RecordOperation(op, nullptr);
+            auto status = WalManager::GetInstance().RecordOperation(op, nullptr);
             ASSERT_TRUE(status.ok());
 
             insert_count++;

@@ -34,6 +34,9 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3407 Server get stuck if create index after entities inserted with no manual flush
 -   \#3446 ListIDInSegment get wrong result when delete more than one ids
 -   \#3448 RHNSWFlatTest failed
+-   \#3511 SearchTask::nq() should not return 0
+-   \#3514 Search failed with regex tag name
+-   \#3533 scheduler/selector needs to judge the index type
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
