@@ -18,16 +18,15 @@
 #include "codecs/DeletedDocsFormat.h"
 
 #include <unistd.h>
-
-#include <experimental/filesystem>
+#include <utility>
 
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "codecs/ExtraFileInfo.h"
 #include "db/Utils.h"
-#include "storage/ExtraFileInfo.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -47,20 +46,20 @@ DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& 
                         segment::DeletedDocsPtr& deleted_docs) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
 
-    CHECK_MAGIC_VALID(fs_ptr, full_file_path);
-    CHECK_SUM_VALID(fs_ptr, full_file_path);
     if (!fs_ptr->reader_ptr_->Open(full_file_path)) {
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open deleted docs file: " + full_file_path);
     }
+    CHECK_MAGIC_VALID(fs_ptr);
+    CHECK_SUM_VALID(fs_ptr);
 
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
-    size_t num_bytes;
-    fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t));
+    HeaderMap map = ReadHeaderValues(fs_ptr);
+    size_t num_bytes = stol(map.at("size"));
 
     auto deleted_docs_size = num_bytes / sizeof(engine::offset_t);
     std::vector<engine::offset_t> deleted_docs_list;
     deleted_docs_list.resize(deleted_docs_size);
 
+    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->reader_ptr_->Read(deleted_docs_list.data(), num_bytes);
     fs_ptr->reader_ptr_->Close();
 
@@ -77,21 +76,23 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
     auto deleted_docs_list = deleted_docs->GetDeletedDocs();
     size_t num_bytes = sizeof(engine::offset_t) * deleted_docs->GetCount();
 
-    // TODO: add extra info
-    std::unordered_map<std::string, std::string> maps;
-    WRITE_MAGIC(fs_ptr, full_file_path)
-    WRITE_HEADER(fs_ptr, full_file_path, maps);
-
-    if (!fs_ptr->writer_ptr_->InOpen(full_file_path)) {
+    if (!fs_ptr->writer_ptr_->Open(full_file_path)) {
         return Status(SERVER_CANNOT_CREATE_FILE, "Fail to write file: " + full_file_path);
     }
-
     try {
-        fs_ptr->writer_ptr_->Seekp(MAGIC_SIZE + HEADER_SIZE);
-        fs_ptr->writer_ptr_->Write(&num_bytes, sizeof(size_t));
+        // TODO: add extra info
+        WRITE_MAGIC(fs_ptr);
+        HeaderMap maps;
+        maps.insert(std::make_pair("size", std::to_string(num_bytes)));
+        std::string header = HeaderWrapper(maps);
+        WRITE_HEADER(fs_ptr, header);
+
         fs_ptr->writer_ptr_->Write(deleted_docs_list.data(), num_bytes);
+
+        WriteSum(fs_ptr, header, reinterpret_cast<char*>(deleted_docs_list.data()), num_bytes);
+
         fs_ptr->writer_ptr_->Close();
-        WRITE_SUM(fs_ptr, full_file_path);
+        //        WRITE_SUM(fs_ptr, full_file_path);
     } catch (std::exception& ex) {
         std::string err_msg = "Failed to write delete doc: " + std::string(ex.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -106,15 +107,14 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
 Status
 DeletedDocsFormat::ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, size_t& size) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
-    CHECK_MAGIC_VALID(fs_ptr, full_file_path);
-    CHECK_SUM_VALID(fs_ptr, full_file_path);
     if (!fs_ptr->writer_ptr_->Open(full_file_path)) {
         return Status(SERVER_CANNOT_CREATE_FILE, "Fail to open deleted docs file: " + full_file_path);
     }
+    CHECK_MAGIC_VALID(fs_ptr);
+    CHECK_SUM_VALID(fs_ptr);
 
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
-    size_t num_bytes;
-    fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t));
+    HeaderMap map = ReadHeaderValues(fs_ptr);
+    size_t num_bytes = stol(map.at("size"));
 
     size = num_bytes / sizeof(engine::offset_t);
     fs_ptr->reader_ptr_->Close();
