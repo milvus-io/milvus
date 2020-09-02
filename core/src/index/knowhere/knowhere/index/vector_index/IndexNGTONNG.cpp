@@ -33,14 +33,15 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
 
     MetricType metric_type = config[Metric::TYPE];
 
-    if (metric_type == Metric::L2)
+    if (metric_type == Metric::L2) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeL2;
-    else if (metric_type == Metric::HAMMING)
+    } else if (metric_type == Metric::HAMMING) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeHamming;
-    else if (metric_type == Metric::JACCARD)
+    } else if (metric_type == Metric::JACCARD) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeJaccard;
-    else
+    } else {
         KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
+    }
     index_ =
         std::shared_ptr<NGT::Index>(NGT::Index::createGraphAndTree(reinterpret_cast<const float*>(p_data), prop, rows));
 

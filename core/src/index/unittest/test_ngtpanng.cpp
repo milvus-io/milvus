@@ -102,7 +102,7 @@ TEST_P(NGTPANNGTest, ngtpanng_serialize) {
     {
         // serialize index
         index_->BuildAll(base_dataset, conf);
-        auto binaryset = index_->Serialize();
+        auto binaryset = index_->Serialize(milvus::knowhere::Config());
 
         auto bin_obj_data = binaryset.GetByName("ngt_obj_data");
         std::string filename1 = "/tmp/ngt_obj_data_serialize.bin";
@@ -140,7 +140,7 @@ TEST_P(NGTPANNGTest, ngtpanng_serialize) {
         index_->Load(binaryset);
         ASSERT_EQ(index_->Count(), nb);
         ASSERT_EQ(index_->Dim(), dim);
-		auto result = index_->Query(query_dataset, conf);
-		AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+        auto result = index_->Query(query_dataset, conf);
+        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     }
 }

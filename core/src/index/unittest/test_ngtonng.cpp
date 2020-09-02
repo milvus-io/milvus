@@ -102,7 +102,7 @@ TEST_P(NGTONNGTest, ngtonng_serialize) {
     {
         // serialize index
         index_->BuildAll(base_dataset, conf);
-        auto binaryset = index_->Serialize();
+        auto binaryset = index_->Serialize(milvus::knowhere::Config());
 
         auto bin_obj_data = binaryset.GetByName("ngt_obj_data");
         std::string filename1 = "/tmp/ngt_obj_data_serialize.bin";
