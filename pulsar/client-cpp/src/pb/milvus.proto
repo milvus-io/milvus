@@ -742,3 +742,93 @@ service MilvusService {
 
     rpc SearchPB(SearchParamPB) returns (QueryResult) {}
 }
+
+///////////////////////////////////////////////////////////////////
+enum OpType {
+    Insert      = 0;
+    Delete      = 1;
+    Search      = 2;
+    TimeSync    = 3;
+    Key2Seg     = 4;
+    Statistics  = 5;
+}
+
+message Key2SegmentRecord {
+    repeated uint64 segment_id = 1;
+}
+
+message AttrRowRecord {
+    int32 int32_value = 1;
+    int64 int64_value = 2;
+    float float_value = 3;
+    double double_value = 4;
+}
+
+message VectorRowParam {
+    string json = 1;
+    VectorRowRecord row_record = 2;
+}
+
+message FieldRowValue {
+    string field_name = 1;
+    DataType type = 2;
+    AttrRowRecord attr_record = 3;
+    VectorRowRecord vector_record = 4;
+}
+
+message PulsarMessage {
+    string collection_name = 1;
+    repeated FieldRowValue fields = 2;
+    uint64 entity_id = 3;
+    string partition_tag = 4;
+    VectorRowParam vector_param =5;
+    Key2SegmentRecord segments = 6;
+    int64  timestamp = 7;
+    int64 client_id = 8;
+    OpType msg_type = 9;
+    string topic_name = 10;
+    int64 partition_id = 11;
+    uint64 segment_id = 12;
+}
+
+message InsertMsg {
+    string collection_name = 1;
+    repeated FieldRowValue fields = 2;
+    uint64 entity_id = 3;
+    string partition_tag = 4;
+    int64  timestamp = 5;
+    int64 client_id = 6;
+    OpType msg_type = 7;
+    string topic_name = 8;
+    int64 partition_id = 9;
+    uint64 segment_id = 10;
+}
+
+message DeleteMsg {
+    string collection_name = 1;
+    uint64 entity_id = 3;
+    int64  timestamp = 5;
+    int64 client_id = 6;
+    OpType msg_type = 7;
+}
+
+message SearchMsg {
+    string collection_name = 1;
+    string partition_tag = 2;
+    VectorRowParam vector_param = 3;
+    int64  timestamp = 4;
+    int64 client_id = 5;
+    OpType msg_type = 6;
+}
+
+message TimeSyncMsg {
+    int64  timestamp = 1;
+    int64 client_id = 2;
+    OpType msg_type = 3;
+    }
+
+message Key2SegMsg {
+    int64 client_id = 1;
+    Key2SegmentRecord segments = 2;
+    OpType msg_type = 3;
+}

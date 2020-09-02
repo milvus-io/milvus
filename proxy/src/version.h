@@ -10,6 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #define MILVUS_VERSION "0.10.0"
-#define BUILD_TYPE "Debug"
-#define BUILD_TIME "2020-08-28 11:25.21"
-#define LAST_COMMIT_ID "ed93e96c6aa3050312a0b7950f04a1193e36bd10"
+#define BUILD_TYPE "Release"
+#define BUILD_TIME "2020-09-02 17:22.14"
+#define LAST_COMMIT_ID "9598d59d297b62bb5327043817e64c74ae9b25df"
