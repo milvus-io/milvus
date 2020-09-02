@@ -2,7 +2,6 @@ import time
 import random
 import pdb
 import copy
-import threading
 import logging
 from multiprocessing import Pool, Process
 import concurrent.futures
@@ -528,15 +527,43 @@ class TestGetBase:
 
     @pytest.mark.level(2)
     def test_get_entity_by_id_insert_multi_threads(self, connect, collection):
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
+        get_id = ids[:1000]
+
+        def insert():
+            # logging.getLogger().info(current_thread().getName() + " insert")
+            step = 1000
+            for i in range(nb // step):
+                group_entities = gen_entities(step, False)
+                connect.insert(collection, group_entities)
+                connect.flush([collection])
+
+        def get():
+            # logging.getLogger().info(current_thread().getName() + " get")
+            res = connect.get_entity_by_id(collection, get_id)
+            assert len(res) == len(get_id)
+            for i in range(len(res)):
+                assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            for i in range(20):
+                fun = random.choices([get, insert])[0]
+                future = executor.submit(fun)
+                future.result()
+
+    @pytest.mark.level(2)
+    def test_get_entity_by_id_insert_multi_threads(self, connect, collection):
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             def get(group_ids, group_entities):
+                # logging.getLogger().info(current_thread().getName() + " get")
                 res = connect.get_entity_by_id(collection, group_ids)
                 assert len(res) == len(group_ids)
-                logging.getLogger().info(current_thread().getName()+" get")
                 for i in range(len(res)):
                     assert_equal_vector(res[i].get(default_float_vec_field_name), group_entities[-1]["values"][i])
 
             def insert(group_vectors):
+                # logging.getLogger().info(current_thread().getName() + " insert")
                 for group_vector in group_vectors:
                     group_entities = [
                         {"field": "int64", "type": DataType.INT64, "values": [i for i in range(step)]},
@@ -544,8 +571,7 @@ class TestGetBase:
                         {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": group_vector}
                     ]
                     group_ids = connect.insert(collection, group_entities)
-                    logging.getLogger().info(current_thread().getName()+" insert")
-                    connect.flush([collection])
+                    # connect.flush([collection])
                     executor.submit(get, group_ids, group_entities)
 
             step = 100

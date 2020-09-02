@@ -2,7 +2,6 @@ import time
 import pdb
 import copy
 import threading
-import logging
 from multiprocessing import Pool, Process
 import pytest
 from milvus import DataType
@@ -15,7 +14,7 @@ ADD_TIMEOUT = 60
 tag = "1970-01-01"
 insert_interval_time = 1.5
 nb = 6000
-field_name = default_float_vec_field_name 
+field_name = default_float_vec_field_name
 entity = gen_entities(1)
 raw_vector, binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
@@ -517,6 +516,18 @@ class TestInsertBase:
             th.join()
         res_count = milvus.count_entities(collection)
         assert res_count == thread_num * nb
+
+    @pytest.mark.level(2)
+    def test_insert_disable_auto_flush(self, connect, collection):
+        '''
+        target: test insert entities, with disable autoflush
+        method: disable autoflush and insert, get entity
+        expected: the count is equal to 0
+        '''
+        disable_flush(connect)
+        ids = connect.insert(collection, entities)
+        res = connect.get_entity_by_id(collection, ids[:500])
+        assert len(res) == 0
 
 
 class TestInsertAsync:
