@@ -527,6 +527,11 @@ class TestGetBase:
 
     @pytest.mark.level(2)
     def test_get_entity_by_id_insert_multi_threads(self, connect, collection):
+        '''
+        target: test.get_entity_by_id
+        method: thread do insert and get
+        expected:
+        '''
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         get_id = ids[:1000]
@@ -554,6 +559,11 @@ class TestGetBase:
 
     @pytest.mark.level(2)
     def test_get_entity_by_id_insert_multi_threads(self, connect, collection):
+        '''
+        target: test.get_entity_by_id
+        method: thread do insert and get
+        expected:
+        '''
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             def get(group_ids, group_entities):
                 # logging.getLogger().info(current_thread().getName() + " get")
