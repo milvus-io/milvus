@@ -58,9 +58,7 @@ Status
 ScriptRecorder::WriteJson(milvus::json& json_obj) {
     auto file = GetFile();
     std::string str = json_obj.dump();
-    file->WriteLine(str);
-
-    return Status::OK();
+    return file->WriteLine(str);
 }
 
 Status

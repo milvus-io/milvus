@@ -191,7 +191,6 @@ TEST(TranscriptTest, CodecTest) {
         milvus::engine::DataChunkPtr input;
         CreateChunk(input, 10);
         ScriptCodec::Encode(json_obj, input);
-        std::string sss = json_obj.dump();
 
         milvus::engine::DataChunkPtr output;
         ScriptCodec::Decode(json_obj, output);
@@ -266,4 +265,33 @@ TEST(TranscriptTest, CodecTest) {
         ScriptCodec::DecodeForce(json_obj, output);
         ASSERT_EQ(input, output);
     }
+}
+
+TEST(TranscriptTest, FileTest) {
+    std::string file_path = "/tmp/milvus_script_test.txt";
+    std::experimental::filesystem::remove(file_path);
+    int32_t repeat = 100;
+    {
+        ScriptFile file;
+        file.OpenWrite(file_path);
+        for (int32_t i = 0; i < repeat; ++i) {
+            file.WriteLine(file_path);
+        }
+
+        ASSERT_TRUE(file.ExceedMaxSize(milvus::engine::MAX_SCRIPT_FILE_SIZE));
+    }
+
+    {
+        ScriptFile file;
+        file.OpenRead(file_path);
+
+        int32_t count = 0;
+        std::string line;
+        while(file.ReadLine(line)) {
+            ASSERT_EQ(line, file_path);
+            count++;
+        }
+        ASSERT_EQ(count, repeat);
+    }
+
 }

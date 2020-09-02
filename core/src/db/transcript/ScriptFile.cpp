@@ -23,33 +23,45 @@ ScriptFile::~ScriptFile() {
 
 Status
 ScriptFile::OpenWrite(const std::string& path) {
-    if (writer_.is_open()) {
-        writer_.close();
-    }
+    try {
+        if (writer_.is_open()) {
+            writer_.close();
+        }
 
-    file_size_ = 0;
-    writer_.open(path.c_str(), std::ios::out | std::ios::app);
+        file_size_ = 0;
+        writer_.open(path.c_str(), std::ios::out | std::ios::app);
+    } catch (std::exception& ex) {
+        return Status(DB_ERROR, ex.what());
+    }
 
     return Status::OK();
 }
 
 Status
 ScriptFile::OpenRead(const std::string& path) {
-    if (reader_.is_open()) {
-        reader_.close();
+    try {
+        if (reader_.is_open()) {
+            reader_.close();
+        }
+        reader_.open(path.c_str(), std::ios::in);
+    } catch (std::exception& ex) {
+        return Status(DB_ERROR, ex.what());
     }
-    reader_.open(path.c_str(), std::ios::in);
 
     return Status::OK();
 }
 
 Status
 ScriptFile::CloseFile() {
-    if (reader_.is_open()) {
-        reader_.close();
-    }
-    if (writer_.is_open()) {
-        writer_.close();
+    try {
+        if (reader_.is_open()) {
+            reader_.close();
+        }
+        if (writer_.is_open()) {
+            writer_.close();
+        }
+    } catch (std::exception& ex) {
+        return Status(DB_ERROR, ex.what());
     }
     file_size_ = 0;
 
@@ -58,11 +70,15 @@ ScriptFile::CloseFile() {
 
 Status
 ScriptFile::WriteLine(const std::string& str) {
-    if (writer_.is_open()) {
-        writer_.write(str.c_str(), str.size());
-        writer_.write("\n", 1);
-        writer_.flush();
-        file_size_ += str.size() + 1;
+    try {
+        if (writer_.is_open()) {
+            writer_.write(str.c_str(), str.size());
+            writer_.write("\n", 1);
+            writer_.flush();
+            file_size_ += str.size() + 1;
+        }
+    } catch (std::exception& ex) {
+        return Status(DB_ERROR, ex.what());
     }
 
     return Status::OK();
