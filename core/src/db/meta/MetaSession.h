@@ -301,7 +301,7 @@ MetaSession::Select(const std::string& field, const std::vector<U>& values,
         if (size_p != nullptr) {
             iter = raw.find(F_SIZE);
             if (iter != raw.end()) {
-                auto size = std::stol(iter->second);
+                uint64_t size = std::stoul(iter->second);
                 size_p->SetSize(size);
             }
         }
@@ -310,7 +310,7 @@ MetaSession::Select(const std::string& field, const std::vector<U>& values,
         if (rc_p != nullptr) {
             iter = raw.find(F_ROW_COUNT);
             if (iter != raw.end()) {
-                auto rc = std::stol(iter->second);
+                uint64_t rc = std::stoul(iter->second);
                 rc_p->SetRowCount(rc);
             }
         }
