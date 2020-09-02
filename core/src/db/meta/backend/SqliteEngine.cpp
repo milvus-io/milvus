@@ -42,8 +42,8 @@ static const MetaField MetaStateField = MetaField(F_STATE, "TINYINT", "NOT NULL"
 static const MetaField MetaCreatedOnField = MetaField(F_CREATED_ON, "BIGINT", "NOT NULL");
 static const MetaField MetaUpdatedOnField = MetaField(F_UPDATED_ON, "BIGINT", "NOT NULL");
 static const MetaField MetaParamsField = MetaField(F_PARAMS, "VARCHAR(255)", "NOT NULL");
-static const MetaField MetaSizeField = MetaField(F_SIZE, "BIGINT", "NOT NULL");
-static const MetaField MetaRowCountField = MetaField(F_ROW_COUNT, "BIGINT", "NOT NULL");
+static const MetaField MetaSizeField = MetaField(F_SIZE, "UNSIGNED BIG INT", "NOT NULL");
+static const MetaField MetaRowCountField = MetaField(F_ROW_COUNT, "UNSIGNED BIG INT", "NOT NULL");
 static const MetaField MetaTypeNameField = MetaField(F_TYPE_NAME, "VARCHAR(255)", "NOT NULL");
 
 // Environment schema
