@@ -26,7 +26,8 @@ set(LINK_LIBRARY
 				 log
 				 storage
 				 crc32c
-				 libstdc++fs.a )
+				 libstdc++fs.a
+				 )
 target_link_libraries( codecs PUBLIC ${LINK_LIBRARY} )
 
 
@@ -39,7 +40,8 @@ if ( BUILD_UNIT_TEST )
              gtest
              gtest_main
              gmock
-             gmock_main )
+             gmock_main
+			 fiu )
 
      add_test ( NAME     ExtraFileInfoTest
                 COMMAND  $<TARGET_FILE:ExtraFileInfoTest>
