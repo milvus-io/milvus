@@ -15,6 +15,7 @@ import "C"
 import (
 	"github.com/czs007/suvlim/errors"
 	"github.com/czs007/suvlim/pulsar/client-go/schema"
+	"strconv"
 	"unsafe"
 )
 
@@ -92,10 +93,10 @@ func SegmentInsert(segment *Segment, entityIds *[]uint64, timestamps *[]uint64, 
 	}
 	const sizeofPerRow = 4 + DIM * 4
 
-	var status = C.Insert(segment.SegmentPtr, (*C.ulong)(entityIds), (*C.ulong)(timestamps), unsafe.Pointer(&rawData[0]), C.int(sizeofPerRow), C.long(N))
+	var status = C.Insert(segment.SegmentPtr, C.long(N), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]), unsafe.Pointer(&rawData[0]), C.int(sizeofPerRow), C.long(N))
 
 	if status != 0 {
-		return nil, errors.New("Insert failed, error code = " + status)
+		return nil, errors.New("Insert failed, error code = " + strconv.Itoa(int(status)))
 	}
 
 	return ResultEntityIds{}, nil
@@ -111,10 +112,10 @@ func SegmentDelete(segment *Segment, entityIds *[]uint64, timestamps *[]uint64) 
 	*/
 	size := len(*entityIds)
 
-	var status = C.Delete(segment.SegmentPtr, C.long(size), (*C.ulong)(entityIds), (*C.ulong)(timestamps))
+	var status = C.Delete(segment.SegmentPtr, C.long(size), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]))
 
 	if status != 0 {
-		return nil, errors.New("Delete failed, error code = " + status)
+		return nil, errors.New("Delete failed, error code = " + strconv.Itoa(int(status)))
 	}
 
 	return ResultEntityIds{}, nil
@@ -140,7 +141,7 @@ func SegmentSearch(segment *Segment, queryString string, timestamps *[]uint64, v
 
 		var status = C.Search(segment.SegmentPtr, unsafe.Pointer(nil), C.ulong(timestamp), (*C.long)(&resultIds[0]), (*C.float)(&resultDistances[0]))
 		if status != 0 {
-			return nil, errors.New("Search failed, error code = " + status)
+			return nil, errors.New("Search failed, error code = " + strconv.Itoa(int(status)))
 		}
 
 		results = append(results, SearchResult{ResultIds: resultIds, ResultDistances: resultDistances})
