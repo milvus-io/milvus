@@ -13,6 +13,7 @@
 
 #include <fiu/fiu-local.h>
 
+#include <src/index/thirdparty/faiss/IndexFlat.h>
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -243,6 +244,32 @@ SearchTask::ExtraParam() {
         }
     }
     return param;
+}
+
+std::string
+SearchTask::IndexType() {
+    if (!index_type_.empty()) {
+        return index_type_;
+    }
+    auto seg_visitor = engine::SegmentVisitor::Build(snapshot_, segment_id_);
+    index_type_ = "FLAT";
+
+    if (seg_visitor) {
+        for (const auto& name : query_ptr_->index_fields) {
+            auto field_visitor = seg_visitor->GetFieldVisitor(name);
+            auto type = field_visitor->GetField()->GetFtype();
+            if (type == engine::DataType::VECTOR_FLOAT || type == engine::DataType::VECTOR_BINARY) {
+                auto fe_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+                if (fe_visitor) {
+                    auto element = fe_visitor->GetElement();
+                    index_type_ = element->GetTypeName();
+                }
+                return index_type_;
+            }
+        }
+    }
+    //printf("index_type_:%s\n",index_type_.c_str());
+    return index_type_;
 }
 
 }  // namespace scheduler
