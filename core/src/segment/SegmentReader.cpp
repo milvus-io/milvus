@@ -19,7 +19,6 @@
 
 #include <experimental/filesystem>
 #include <memory>
-#include <utility>
 
 #include "cache/CpuCacheMgr.h"
 #include "codecs/Codec.h"
@@ -106,7 +105,7 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
     try {
         segment_ptr_->GetFixedFieldData(field_name, raw);
         if (raw != nullptr) {
-            return Status::OK();  // alread exist
+            return Status::OK();  // already exist
         }
 
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
