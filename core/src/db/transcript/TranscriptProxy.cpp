@@ -53,7 +53,7 @@ TranscriptProxy::Start() {
     }
 
     ScriptRecorder& recorder = ScriptRecorder::GetInstance();
-    recorder.SetScriptPath(path);
+    recorder.SetScriptRoot(path);
 
     return Status::OK();
 }

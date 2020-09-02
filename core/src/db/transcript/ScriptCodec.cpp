@@ -74,6 +74,10 @@ ScriptCodec::EncodeAction(milvus::json& json_obj, const std::string& action_type
 
 Status
 ScriptCodec::Encode(milvus::json& json_obj, const snapshot::CreateCollectionContext& context) {
+    if (context.collection == nullptr) {
+        return Status::OK();
+    }
+
     json_obj[J_COLLECTION_NAME] = context.collection->GetName();
 
     // params

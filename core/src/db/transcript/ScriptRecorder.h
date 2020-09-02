@@ -26,7 +26,10 @@ class ScriptRecorder {
     GetInstance();
 
     void
-    SetScriptPath(const std::string& path);
+    SetScriptRoot(const std::string& path);
+
+    std::string
+    GetScriptPath() const;
 
     Status
     CreateCollection(const snapshot::CreateCollectionContext& context);

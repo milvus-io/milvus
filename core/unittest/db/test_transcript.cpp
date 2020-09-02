@@ -18,6 +18,7 @@
 #include <string>
 #include <experimental/filesystem>
 
+#include "db/DBProxy.h"
 #include "db/utils.h"
 #include "db/transcript/ScriptFile.h"
 #include "db/transcript/ScriptCodec.h"
@@ -26,6 +27,7 @@
 
 namespace {
 
+using DBProxy = milvus::engine::DBProxy;
 using VaribleData = milvus::engine::VaribleData;
 
 using ScriptFile = milvus::engine::ScriptFile;
@@ -98,6 +100,174 @@ CreateChunk(DataChunkPtr& chunk, int64_t row_count) {
         chunk->variable_fields_.insert(std::make_pair(field_name, bin));
     }
 }
+
+class DummyDB : public DBProxy {
+ public:
+    DummyDB(const DBOptions& options)
+        : DBProxy(nullptr, options) {
+    }
+
+    Status
+    CreateCollection(const milvus::engine::snapshot::CreateCollectionContext& context) override {
+        actions_record_.emplace_back(milvus::engine::ActionCreateCollection);
+        return Status::OK();
+    }
+
+    Status
+    DropCollection(const std::string& collection_name) override {
+        actions_record_.emplace_back(milvus::engine::ActionDropCollection);
+        return Status::OK();
+    }
+
+    Status
+    HasCollection(const std::string& collection_name, bool& has_or_not) override {
+        actions_record_.emplace_back(milvus::engine::ActionHasCollection);
+        return Status::OK();
+    }
+
+    Status
+    ListCollections(std::vector<std::string>& names) override {
+        actions_record_.emplace_back(milvus::engine::ActionListCollections);
+        return Status::OK();
+    }
+
+    Status
+    GetCollectionInfo(const std::string& collection_name, milvus::engine::snapshot::CollectionPtr& collection,
+                      milvus::engine::snapshot::FieldElementMappings& fields_schema) override {
+        actions_record_.emplace_back(milvus::engine::ActionGetCollectionInfo);
+        return Status::OK();
+    }
+
+    Status
+    GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) override {
+        actions_record_.emplace_back(milvus::engine::ActionGetCollectionStats);
+        return Status::OK();
+    }
+
+    Status
+    CountEntities(const std::string& collection_name, int64_t& row_count) override {
+        actions_record_.emplace_back(milvus::engine::ActionCountEntities);
+        return Status::OK();
+    }
+
+    Status
+    CreatePartition(const std::string& collection_name, const std::string& partition_name) override {
+        actions_record_.emplace_back(milvus::engine::ActionCreatePartition);
+        return Status::OK();
+    }
+
+    Status
+    DropPartition(const std::string& collection_name, const std::string& partition_name) override {
+        actions_record_.emplace_back(milvus::engine::ActionDropPartition);
+        return Status::OK();
+    }
+
+    Status
+    HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) override {
+        actions_record_.emplace_back(milvus::engine::ActionHasPartition);
+        return Status::OK();
+    }
+
+    Status
+    ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) override {
+        actions_record_.emplace_back(milvus::engine::ActionListPartitions);
+        return Status::OK();
+    }
+
+    Status
+    CreateIndex(const milvus::server::ContextPtr& context,
+                const std::string& collection_name,
+                const std::string& field_name,
+                const milvus::engine::CollectionIndex& index) override {
+        actions_record_.emplace_back(milvus::engine::ActionCreateIndex);
+        return Status::OK();
+    }
+
+    Status
+    DropIndex(const std::string& collection_name, const std::string& field_name) override {
+        actions_record_.emplace_back(milvus::engine::ActionDropIndex);
+        return Status::OK();
+    }
+
+    Status
+    DescribeIndex(const std::string& collection_name,
+                  const std::string& field_name,
+                  milvus::engine::CollectionIndex& index) override {
+        actions_record_.emplace_back(milvus::engine::ActionDescribeIndex);
+        return Status::OK();
+    }
+
+    Status
+    Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
+           idx_t op_id) override {
+        actions_record_.emplace_back(milvus::engine::ActionInsert);
+        return Status::OK();
+    }
+
+    Status
+    GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
+                  const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
+                  DataChunkPtr& data_chunk) override {
+        actions_record_.emplace_back(milvus::engine::ActionGetEntityByID);
+        return Status::OK();
+    }
+
+    Status
+    DeleteEntityByID(const std::string& collection_name,
+                     const milvus::engine::IDNumbers& entity_ids,
+                     idx_t op_id) override {
+        actions_record_.emplace_back(milvus::engine::ActionDeleteEntityByID);
+        return Status::OK();
+    }
+
+    Status
+    ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) override {
+        actions_record_.emplace_back(milvus::engine::ActionListIDInSegment);
+        return Status::OK();
+    }
+
+    Status
+    Query(const milvus::server::ContextPtr& context,
+          const milvus::query::QueryPtr& query_ptr,
+          milvus::engine::QueryResultPtr& result) override {
+        actions_record_.emplace_back(milvus::engine::ActionQuery);
+        return Status::OK();
+    }
+
+    Status
+    LoadCollection(const milvus::server::ContextPtr& context, const std::string& collection_name,
+                   const std::vector<std::string>& field_names, bool force) override {
+        actions_record_.emplace_back(milvus::engine::ActionLoadCollection);
+        return Status::OK();
+    }
+
+    Status
+    Flush(const std::string& collection_name) override {
+        actions_record_.emplace_back(milvus::engine::ActionFlush);
+        return Status::OK();
+    }
+
+    Status
+    Flush() override {
+        actions_record_.emplace_back(milvus::engine::ActionFlush);
+        return Status::OK();
+    }
+
+    Status
+    Compact(const milvus::server::ContextPtr& context, const std::string& collection_name, double threshold) override {
+        actions_record_.emplace_back(milvus::engine::ActionCompact);
+        return Status::OK();
+    }
+
+    const std::vector<std::string>& Actions() const {
+        return actions_record_;
+    }
+
+ private:
+    std::vector<std::string> actions_record_;
+};
+
+using DummyDBPtr = std::shared_ptr<DummyDB>;
 
 } // namespace
 
@@ -287,11 +457,168 @@ TEST(TranscriptTest, FileTest) {
 
         int32_t count = 0;
         std::string line;
-        while(file.ReadLine(line)) {
+        while (file.ReadLine(line)) {
             ASSERT_EQ(line, file_path);
             count++;
         }
         ASSERT_EQ(count, repeat);
     }
 
+}
+
+TEST(TranscriptTest, ReplayTest) {
+    DBOptions options;
+    DummyDBPtr db = std::make_shared<DummyDB>(options);
+
+    std::string transcript_path = "/tmp/milvus_transcript";
+    ScriptRecorder& recorder = ScriptRecorder::GetInstance();
+    recorder.SetScriptRoot(transcript_path);
+
+    // register action functions
+    std::string collection_name = "collection";
+    std::string partition_name = "partition";
+    std::string field_name = "field";
+    std::vector<std::string> actions;
+    std::vector<std::function<void()>> functions;
+    functions.emplace_back([&]() {
+        milvus::engine::snapshot::CreateCollectionContext context;
+        recorder.CreateCollection(context);
+        actions.emplace_back(milvus::engine::ActionCreateCollection);
+    });
+    functions.emplace_back([&]() {
+        recorder.DropCollection(collection_name);
+        actions.emplace_back(milvus::engine::ActionDropCollection);
+    });
+    functions.emplace_back([&]() {
+        bool has = false;
+        recorder.HasCollection(collection_name, has);
+        actions.emplace_back(milvus::engine::ActionHasCollection);
+    });
+    functions.emplace_back([&]() {
+        std::vector<std::string> names;
+        recorder.ListCollections(names);
+        actions.emplace_back(milvus::engine::ActionListCollections);
+    });
+    functions.emplace_back([&]() {
+        milvus::engine::snapshot::CollectionPtr collection;
+        milvus::engine::snapshot::FieldElementMappings fields_schema;
+        recorder.GetCollectionInfo(collection_name, collection, fields_schema);
+        actions.emplace_back(milvus::engine::ActionGetCollectionInfo);
+    });
+    functions.emplace_back([&]() {
+        milvus::json collection_stats;
+        recorder.GetCollectionStats(collection_name, collection_stats);
+        actions.emplace_back(milvus::engine::ActionGetCollectionStats);
+    });
+    functions.emplace_back([&]() {
+        int64_t count = 0;
+        recorder.CountEntities(collection_name, count);
+        actions.emplace_back(milvus::engine::ActionCountEntities);
+    });
+    functions.emplace_back([&]() {
+        recorder.CreatePartition(collection_name, partition_name);
+        actions.emplace_back(milvus::engine::ActionCreatePartition);
+    });
+    functions.emplace_back([&]() {
+        recorder.DropPartition(collection_name, partition_name);
+        actions.emplace_back(milvus::engine::ActionDropPartition);
+    });
+    functions.emplace_back([&]() {
+        bool has = false;
+        recorder.HasPartition(collection_name, partition_name, has);
+        actions.emplace_back(milvus::engine::ActionHasPartition);
+    });
+    functions.emplace_back([&]() {
+        std::vector<std::string> partition_names;
+        recorder.ListPartitions(collection_name, partition_names);
+        actions.emplace_back(milvus::engine::ActionListPartitions);
+    });
+    functions.emplace_back([&]() {
+        milvus::engine::CollectionIndex index;
+        recorder.CreateIndex(nullptr, collection_name, field_name, index);
+        actions.emplace_back(milvus::engine::ActionCreateIndex);
+    });
+    functions.emplace_back([&]() {
+        recorder.DropIndex(collection_name, field_name);
+        actions.emplace_back(milvus::engine::ActionDropIndex);
+    });
+    functions.emplace_back([&]() {
+        milvus::engine::CollectionIndex index;
+        index.index_type_ = "PQ";
+        recorder.DescribeIndex(collection_name, field_name, index);
+        actions.emplace_back(milvus::engine::ActionDescribeIndex);
+    });
+    functions.emplace_back([&]() {
+        milvus::engine::DataChunkPtr chunk;
+        recorder.Insert(collection_name, partition_name, chunk, 0);
+        actions.emplace_back(milvus::engine::ActionInsert);
+    });
+    functions.emplace_back([&]() {
+        IDNumbers id_array = {1, 2, 3};
+        std::vector<std::string> field_names = {field_name};
+        std::vector<bool> valid_row;
+        DataChunkPtr data_chunk;
+        recorder.GetEntityByID(collection_name, id_array, field_names, valid_row, data_chunk);
+        actions.emplace_back(milvus::engine::ActionGetEntityByID);
+    });
+    functions.emplace_back([&]() {
+        IDNumbers id_array = {1, 2, 3};
+        recorder.DeleteEntityByID(collection_name, id_array, 0);
+        actions.emplace_back(milvus::engine::ActionDeleteEntityByID);
+    });
+    functions.emplace_back([&]() {
+        IDNumbers id_array;
+        recorder.ListIDInSegment(collection_name, 1, id_array);
+        actions.emplace_back(milvus::engine::ActionListIDInSegment);
+    });
+//    functions.emplace_back([&]() {
+//        milvus::query::QueryPtr query_ptr;
+//        milvus::engine::QueryResultPtr result;
+//        recorder.Query(nullptr, query_ptr, result);
+//        actions.emplace_back(milvus::engine::ActionQuery);
+//    });
+    functions.emplace_back([&]() {
+        IDNumbers id_array = {1, 2, 3};
+        std::vector<std::string> field_names = {field_name};
+        recorder.LoadCollection(nullptr, collection_name, field_names, true);
+        actions.emplace_back(milvus::engine::ActionLoadCollection);
+    });
+    functions.emplace_back([&]() {
+        recorder.Flush(collection_name);
+        actions.emplace_back(milvus::engine::ActionFlush);
+    });
+    functions.emplace_back([&]() {
+        recorder.Flush();
+        actions.emplace_back(milvus::engine::ActionFlush);
+    });
+    functions.emplace_back([&]() {
+        recorder.Compact(nullptr, collection_name, 0.5);
+        actions.emplace_back(milvus::engine::ActionCompact);
+    });
+
+    // random actions
+    for (int32_t i = 0; i < 10; i++) {
+        auto rand = lrand48();
+        auto index = rand % functions.size();
+        auto& function = functions.at(index);
+        function();
+    }
+
+    // each action at least do one time
+    for (size_t i = 0; i < functions.size(); ++i) {
+        auto& function = functions.at(i);
+        function();
+    }
+
+    // replay
+    ScriptReplay replay;
+    std::string script_path = recorder.GetScriptPath();
+    auto status = replay.Replay(db, script_path);
+    ASSERT_TRUE(status.ok());
+
+    const std::vector<std::string>& record_actions = db->Actions();
+    ASSERT_EQ(actions.size(), record_actions.size());
+    ASSERT_EQ(actions, record_actions);
+
+    std::experimental::filesystem::remove_all(transcript_path);
 }

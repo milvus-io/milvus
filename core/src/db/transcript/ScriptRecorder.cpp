@@ -28,7 +28,7 @@ ScriptRecorder::GetInstance() {
 }
 
 void
-ScriptRecorder::SetScriptPath(const std::string& path) {
+ScriptRecorder::SetScriptRoot(const std::string& path) {
     std::experimental::filesystem::path script_path(path);
 
     std::string time_str;
@@ -36,6 +36,11 @@ ScriptRecorder::SetScriptPath(const std::string& path) {
     script_path /= time_str;
     script_path_ = script_path.c_str();
     CommonUtil::CreateDirectory(script_path_);
+}
+
+std::string
+ScriptRecorder::GetScriptPath() const {
+    return script_path_;
 }
 
 ScriptFilePtr
