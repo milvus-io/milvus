@@ -1235,6 +1235,11 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
         FieldSchema field_schema;
         std::string field_name = field["field_name"];
 
+        if (fields.find(field_name) != fields.end()) {
+            auto status = Status(SERVER_INVALID_FIELD_NAME, "Collection mapping has duplicate field names");
+            ASSIGN_RETURN_STATUS_DTO(status)
+        }
+
         field_schema.field_params_ = field["extra_params"];
 
         std::string field_type = field["field_type"];
