@@ -68,7 +68,7 @@ type VectorRowRecord struct {
 }
 
 type VectorRecord struct {
-	Records []*VectorRowRecord
+	Records *VectorRowRecord
 }
 
 type FieldValue struct {
@@ -123,7 +123,7 @@ type Message interface {
 type InsertMsg struct {
 	CollectionName string
 	Fields         []*FieldValue
-	EntityId       int64
+	EntityId       uint64
 	PartitionTag   string
 	SegmentId      uint64
 	Timestamp      uint64
@@ -133,7 +133,7 @@ type InsertMsg struct {
 
 type DeleteMsg struct {
 	CollectionName string
-	EntityId       int64
+	EntityId       uint64
 	Timestamp      uint64
 	ClientId       int64
 	MsgType        OpType

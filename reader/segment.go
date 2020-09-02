@@ -13,6 +13,7 @@ package reader
 */
 import "C"
 import (
+	"github.com/czs007/suvlim/errors"
 	"github.com/czs007/suvlim/pulsar/client-go/schema"
 	"unsafe"
 )
@@ -61,7 +62,7 @@ func (s *Segment) Close() {
 }
 
 ////////////////////////////////////////////////////////////////////////////
-func SegmentInsert(segment *Segment, entityIds *[]int64, timestamps *[]uint64, dataChunk [][]*schema.FieldValue) ResultEntityIds {
+func SegmentInsert(segment *Segment, entityIds *[]uint64, timestamps *[]uint64, dataChunk [][]*schema.FieldValue) (ResultEntityIds, error) {
 	// TODO: remove hard code schema
 	// auto schema_tmp = std::make_shared<Schema>();
 	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
@@ -78,21 +79,29 @@ func SegmentInsert(segment *Segment, entityIds *[]int64, timestamps *[]uint64, d
 	           signed long int count);
 	*/
 
-	//msgCount := len(dataChunk)
-	//cEntityIds := (*C.ulong)(entityIds)
-	//
-	//// dataChunk to raw data
-	//var rawData []byte
-	//var i int
-	//for i = 0; i < msgCount; i++ {
-	//	rawVector := dataChunk[i][0].VectorRecord.Records
-	//	rawData = append(rawData, rawVector...)
-	//}
+	// TODO: remove hard code & fake dataChunk
+	const DIM = 4
+	const N = 3
+	var vec = [DIM]float32{1.1, 2.2, 3.3, 4.4}
+	var rawData []int8
+	for i := 0; i <= N; i++ {
+		for _, ele := range vec {
+			rawData=append(rawData, int8(ele))
+		}
+		rawData=append(rawData, int8(i))
+	}
+	const sizeofPerRow = 4 + DIM * 4
 
-	return ResultEntityIds{}
+	var status = C.Insert(segment.SegmentPtr, (*C.ulong)(entityIds), (*C.ulong)(timestamps), unsafe.Pointer(&rawData[0]), C.int(sizeofPerRow), C.long(N))
+
+	if status != 0 {
+		return nil, errors.New("Insert failed, error code = " + status)
+	}
+
+	return ResultEntityIds{}, nil
 }
 
-func SegmentDelete(segment *Segment, entityIds *[]int64, timestamps *[]uint64) ResultEntityIds {
+func SegmentDelete(segment *Segment, entityIds *[]uint64, timestamps *[]uint64) (ResultEntityIds, error) {
 	/*C.Delete
 	int
 	Delete(CSegmentBase c_segment,
@@ -102,13 +111,16 @@ func SegmentDelete(segment *Segment, entityIds *[]int64, timestamps *[]uint64) R
 	*/
 	size := len(*entityIds)
 
-	// TODO: add query result status check
-	var _ = C.Delete(segment.SegmentPtr, C.long(size), (*C.ulong)(entityIds), (*C.ulong)(timestamps))
+	var status = C.Delete(segment.SegmentPtr, C.long(size), (*C.ulong)(entityIds), (*C.ulong)(timestamps))
 
-	return ResultEntityIds{}
+	if status != 0 {
+		return nil, errors.New("Delete failed, error code = " + status)
+	}
+
+	return ResultEntityIds{}, nil
 }
 
-func SegmentSearch(segment *Segment, queryString string, timestamps *[]uint64, vectorRecord *[]schema.VectorRecord) *[]SearchResult {
+func SegmentSearch(segment *Segment, queryString string, timestamps *[]uint64, vectorRecord *[]schema.VectorRecord) (*[]SearchResult, error) {
 	/*C.Search
 	int
 	Search(CSegmentBase c_segment,
@@ -126,11 +138,13 @@ func SegmentSearch(segment *Segment, queryString string, timestamps *[]uint64, v
 		resultIds := make([]int64, TopK)
 		resultDistances  := make([]float32, TopK)
 
-		// TODO: add query result status check
-		var _ = C.Search(segment.SegmentPtr, unsafe.Pointer(nil), C.ulong(timestamp), (*C.long)(&resultIds[0]), (*C.float)(&resultDistances[0]))
+		var status = C.Search(segment.SegmentPtr, unsafe.Pointer(nil), C.ulong(timestamp), (*C.long)(&resultIds[0]), (*C.float)(&resultDistances[0]))
+		if status != 0 {
+			return nil, errors.New("Search failed, error code = " + status)
+		}
 
 		results = append(results, SearchResult{ResultIds: resultIds, ResultDistances: resultDistances})
 	}
 
-	return &results
+	return &results, nil
 }
