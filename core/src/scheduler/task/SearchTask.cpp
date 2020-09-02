@@ -268,6 +268,9 @@ SearchTask::IndexType() {
     if (seg_visitor) {
         for (const auto& name : query_ptr_->index_fields) {
             auto field_visitor = seg_visitor->GetFieldVisitor(name);
+            if (!field_visitor) {
+                continue;
+            }
             auto type = field_visitor->GetField()->GetFtype();
             if (type == engine::DataType::VECTOR_FLOAT || type == engine::DataType::VECTOR_BINARY) {
                 auto fe_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
