@@ -726,6 +726,12 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
     for (int i = 0; i < request->fields_size(); ++i) {
         const auto& field = request->fields(i);
 
+        if (fields.find(field.name()) != fields.end()) {
+            auto status = Status(SERVER_INVALID_FIELD_NAME, "Collection mapping has duplicate field name");
+            SET_RESPONSE(response, status, context)
+            return ::grpc::Status::OK;
+        }
+
         FieldSchema field_schema;
         field_schema.field_type_ = static_cast<engine::DataType>(field.type());
 
