@@ -15,8 +15,8 @@
 #include "utils/Status.h"
 
 #include <fstream>
-#include <ostream>
 #include <memory>
+#include <ostream>
 #include <string>
 
 namespace milvus {

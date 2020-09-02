@@ -11,11 +11,12 @@
 
 #pragma once
 
-#include <string>
-
 #include "db/DB.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
+
+#include <string>
+#include <vector>
 
 namespace milvus {
 namespace engine {
@@ -46,7 +47,7 @@ extern const char* ActionCompact;
 
 // json keys
 extern const char* J_ACTION_TYPE;
-extern const char* J_ACTION_TS; // action timestamp
+extern const char* J_ACTION_TS;  // action timestamp
 
 class ScriptCodec {
  public:
@@ -77,7 +78,6 @@ class ScriptCodec {
 
     static Status
     Encode(milvus::json& json_obj, const IDNumbers& id_array);
-
 
     static Status
     EncodeSegmentID(milvus::json& json_obj, int64_t segment_id);
@@ -118,7 +118,6 @@ class ScriptCodec {
 
     static Status
     Decode(milvus::json& json_obj, IDNumbers& id_array);
-
 
     static Status
     DecodeSegmentID(milvus::json& json_obj, int64_t& segment_id);

@@ -15,6 +15,7 @@
 #include "db/transcript/ScriptFile.h"
 
 #include <string>
+#include <vector>
 
 namespace milvus {
 namespace engine {
@@ -56,7 +57,7 @@ class ScriptRecorder {
     DropPartition(const std::string& collection_name, const std::string& partition_name);
 
     Status
-    HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist);
+    HasPartition(const std::string& collection_name, const std::string& partition_name, bool& exist);
 
     Status
     ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names);
@@ -77,8 +78,7 @@ class ScriptRecorder {
 
     Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
-                  const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
-                  DataChunkPtr& data_chunk);
+                  const std::vector<std::string>& field_names, std::vector<bool>& valid_row, DataChunkPtr& data_chunk);
 
     Status
     DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id);
@@ -103,7 +103,8 @@ class ScriptRecorder {
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold);
 
  private:
-    ScriptFilePtr GetFile();
+    ScriptFilePtr
+    GetFile();
 
     Status
     WriteJson(milvus::json& json_obj);

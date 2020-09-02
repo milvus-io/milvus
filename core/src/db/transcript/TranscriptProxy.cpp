@@ -38,7 +38,7 @@ TranscriptProxy::Start() {
     // replay script in necessary
     if (!options_.replay_script_path_.empty()) {
         ScriptReplay replay;
-        return replay.Replay(db_, options_.replay_script_path_);
+        STATUS_CHECK(replay.Replay(db_, options_.replay_script_path_));
     }
 
     // prepare for transcript

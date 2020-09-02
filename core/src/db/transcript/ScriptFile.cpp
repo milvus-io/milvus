@@ -17,7 +17,6 @@
 namespace milvus {
 namespace engine {
 
-
 ScriptFile::~ScriptFile() {
     CloseFile();
 }
@@ -71,8 +70,8 @@ ScriptFile::WriteLine(const std::string& str) {
 
 bool
 ScriptFile::ReadLine(std::string& str) {
+    str = "";
     if (reader_.is_open()) {
-        std::string str;
         while (getline(reader_, str)) {
             if (!str.empty()) {
                 return true;

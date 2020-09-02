@@ -10,12 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/transcript/ScriptRecorder.h"
-#include "db/transcript/ScriptCodec.h"
 #include "db/Utils.h"
+#include "db/transcript/ScriptCodec.h"
 #include "utils/CommonUtil.h"
 #include "utils/Json.h"
 
 #include <experimental/filesystem>
+#include <memory>
 
 namespace milvus {
 namespace engine {
@@ -75,6 +76,7 @@ Status
 ScriptRecorder::DropCollection(const std::string& collection_name) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionDropCollection);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
 
     return WriteJson(json_obj);
 }
@@ -83,6 +85,7 @@ Status
 ScriptRecorder::HasCollection(const std::string& collection_name, bool& has_or_not) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionHasCollection);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
 
     return WriteJson(json_obj);
 }
@@ -100,6 +103,7 @@ ScriptRecorder::GetCollectionInfo(const std::string& collection_name, snapshot::
                                   snapshot::FieldElementMappings& fields_schema) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionGetCollectionInfo);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
 
     return WriteJson(json_obj);
 }
@@ -108,6 +112,7 @@ Status
 ScriptRecorder::GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionGetCollectionStats);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
 
     return WriteJson(json_obj);
 }
@@ -116,6 +121,7 @@ Status
 ScriptRecorder::CountEntities(const std::string& collection_name, int64_t& row_count) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionCountEntities);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
 
     return WriteJson(json_obj);
 }
@@ -124,6 +130,8 @@ Status
 ScriptRecorder::CreatePartition(const std::string& collection_name, const std::string& partition_name) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionCreatePartition);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
+    ScriptCodec::EncodePartitionName(json_obj, partition_name);
 
     return WriteJson(json_obj);
 }
@@ -132,14 +140,18 @@ Status
 ScriptRecorder::DropPartition(const std::string& collection_name, const std::string& partition_name) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionDropPartition);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
+    ScriptCodec::EncodePartitionName(json_obj, partition_name);
 
     return WriteJson(json_obj);
 }
 
 Status
-ScriptRecorder::HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) {
+ScriptRecorder::HasPartition(const std::string& collection_name, const std::string& partition_name, bool& exist) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionHasPartition);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
+    ScriptCodec::EncodePartitionName(json_obj, partition_name);
 
     return WriteJson(json_obj);
 }
@@ -148,17 +160,19 @@ Status
 ScriptRecorder::ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionListPartitions);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
 
     return WriteJson(json_obj);
 }
 
 Status
-ScriptRecorder::CreateIndex(const server::ContextPtr& context,
-                            const std::string& collection_name,
-                            const std::string& field_name,
-                            const CollectionIndex& index) {
+ScriptRecorder::CreateIndex(const server::ContextPtr& context, const std::string& collection_name,
+                            const std::string& field_name, const CollectionIndex& index) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionCreateIndex);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
+    ScriptCodec::EncodeFieldName(json_obj, field_name);
+    ScriptCodec::Encode(json_obj, index);
 
     return WriteJson(json_obj);
 }
@@ -167,16 +181,19 @@ Status
 ScriptRecorder::DropIndex(const std::string& collection_name, const std::string& field_name) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionDropIndex);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
+    ScriptCodec::EncodeFieldName(json_obj, field_name);
 
     return WriteJson(json_obj);
 }
 
 Status
-ScriptRecorder::DescribeIndex(const std::string& collection_name,
-                              const std::string& field_name,
+ScriptRecorder::DescribeIndex(const std::string& collection_name, const std::string& field_name,
                               CollectionIndex& index) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionDescribeIndex);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
+    ScriptCodec::EncodeFieldName(json_obj, field_name);
 
     return WriteJson(json_obj);
 }
@@ -186,6 +203,9 @@ ScriptRecorder::Insert(const std::string& collection_name, const std::string& pa
                        idx_t op_id) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionInsert);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
+    ScriptCodec::EncodePartitionName(json_obj, partition_name);
+    ScriptCodec::Encode(json_obj, data_chunk);
 
     return WriteJson(json_obj);
 }
@@ -196,6 +216,9 @@ ScriptRecorder::GetEntityByID(const std::string& collection_name, const IDNumber
                               DataChunkPtr& data_chunk) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionGetEntityByID);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
+    ScriptCodec::Encode(json_obj, id_array);
+    ScriptCodec::EncodeFieldNames(json_obj, field_names);
 
     return WriteJson(json_obj);
 }
@@ -204,6 +227,8 @@ Status
 ScriptRecorder::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionDeleteEntityByID);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
+    ScriptCodec::Encode(json_obj, entity_ids);
 
     return WriteJson(json_obj);
 }
@@ -212,17 +237,19 @@ Status
 ScriptRecorder::ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionListIDInSegment);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
     ScriptCodec::EncodeSegmentID(json_obj, segment_id);
+    ScriptCodec::Encode(json_obj, entity_ids);
 
     return WriteJson(json_obj);
 }
 
 Status
-ScriptRecorder::Query(const server::ContextPtr& context,
-                      const query::QueryPtr& query_ptr,
+ScriptRecorder::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr,
                       engine::QueryResultPtr& result) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionQuery);
+    ScriptCodec::Encode(json_obj, query_ptr);
 
     return WriteJson(json_obj);
 }
@@ -234,6 +261,7 @@ ScriptRecorder::LoadCollection(const server::ContextPtr& context, const std::str
     ScriptCodec::EncodeAction(json_obj, ActionLoadCollection);
     ScriptCodec::EncodeCollectionName(json_obj, collection_name);
     ScriptCodec::EncodeFieldNames(json_obj, field_names);
+    ScriptCodec::EncodeForce(json_obj, force);
 
     return WriteJson(json_obj);
 }
@@ -259,6 +287,7 @@ Status
 ScriptRecorder::Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) {
     milvus::json json_obj;
     ScriptCodec::EncodeAction(json_obj, ActionCompact);
+    ScriptCodec::EncodeCollectionName(json_obj, collection_name);
     ScriptCodec::EncodeThreshold(json_obj, threshold);
 
     return WriteJson(json_obj);
