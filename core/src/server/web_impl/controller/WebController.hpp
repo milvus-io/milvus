@@ -60,13 +60,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_DEFAULT_CORS(State)
-
-    ENDPOINT("GET", "/state", State) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/state\'");
-        tr.ElapseFromBegin("Total cost ");
-        return createDtoResponse(Status::CODE_200, StatusDto::createShared());
-    }
+//    ADD_DEFAULT_CORS(State)
+//
+//    ENDPOINT("GET", "/state", State) {
+//        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/state\'");
+//        tr.ElapseFromBegin("Total cost ");
+//        return createDtoResponse(Status::CODE_200, StatusDto::createShared());
+//    }
 
     ADD_DEFAULT_CORS(GetDevices)
 
@@ -658,7 +658,7 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_DEFAULT_CORS(Delete)
 
     ENDPOINT("DELETE", "/collections/{collection_name}/entities", Delete, PATH(String, collection_name),
-        BODY_STRING(String, body)) {
+             BODY_STRING(String, body)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/collections/" + collection_name->std_str() +
                         "/vectors\'");
         tr.RecordSection("Received request.");
@@ -684,7 +684,6 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         return response;
     }
-
 
     //    ADD_DEFAULT_CORS(EntityOp)
     //
@@ -766,6 +765,30 @@ class WebController : public oatpp::web::server::api::ApiController {
             default:
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(*(status_dto->code)) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
+
+        return response;
+    }
+
+    ADD_DEFAULT_CORS(Status)
+
+    ENDPOINT("GET", "/status", Status) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + R"(GET /status/)");
+        tr.RecordSection("Received request.");
+
+        WebRequestHandler handler = WebRequestHandler();
+        OString result = "";
+        auto status_dto = handler.ServerStatus(result);
+        std::shared_ptr<OutgoingResponse> response;
+        switch (*(status_dto->code)) {
+            case StatusCode::SUCCESS:
+                response = createResponse(Status::CODE_200, result);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
+        }
+
         tr.ElapseFromBegin("Done. Status: code = " + std::to_string(*(status_dto->code)) +
                            ", reason = " + status_dto->message->std_str() + ". Total cost");
 

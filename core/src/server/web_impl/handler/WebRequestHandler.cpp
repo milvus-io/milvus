@@ -1923,6 +1923,14 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
     ASSIGN_RETURN_STATUS_DTO(status);
 }
 
+StatusDtoT
+WebRequestHandler::ServerStatus(OString& response_str) {
+    std::string result_str;
+    auto status = CommandLine("status", result_str);
+    response_str = status.ok() ? result_str.c_str() : "NULL";
+    ASSIGN_RETURN_STATUS_DTO(status);
+}
+
 }  // namespace web
 }  // namespace server
 }  // namespace milvus
