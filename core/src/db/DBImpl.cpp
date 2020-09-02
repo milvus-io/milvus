@@ -621,9 +621,15 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, ss, options_, query_ptr, segment_ids);
 
     cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before query
+
+    SuspendIfFirst();
+
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitFinish();
+
+    ResumeIfLast();
+
     cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after query
 
     if (!job->status().ok()) {
@@ -992,8 +998,12 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
         LOG_ENGINE_DEBUG_ << "Create BuildIndexJob for " << segment_ids.size() << " segments of " << collection_name;
         cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before build index
         scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_ids);
+
+        IncreaseLiveBuildTaskNum();
         scheduler::JobMgrInst::GetInstance()->Put(job);
         job->WaitFinish();
+        DecreaseLiveBuildTaskNum();
+
         cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after build index
 
         // record failed segments, avoid build index hang
@@ -1109,6 +1119,24 @@ DBImpl::ResumeIfLast() {
         LOG_ENGINE_TRACE_ << "live_search_num_: " << live_search_num_;
         knowhere::BuildResume();
     }
+}
+
+void
+DBImpl::IncreaseLiveBuildTaskNum() {
+    std::lock_guard<std::mutex> lock(live_build_count_mutex_);
+    ++live_build_num_;
+}
+
+void
+DBImpl::DecreaseLiveBuildTaskNum() {
+    std::lock_guard<std::mutex> lock(live_build_count_mutex_);
+    --live_build_num_;
+}
+
+bool
+DBImpl::IsBuildingIndex() {
+    std::lock_guard<std::mutex> lock(live_build_count_mutex_);
+    return live_build_num_ < 0;
 }
 
 void

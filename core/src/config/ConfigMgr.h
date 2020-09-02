@@ -14,6 +14,7 @@
 #include <list>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -69,6 +70,11 @@ class ConfigMgr : public BaseConfigMgr {
         return config_file_;
     }
 
+    bool
+    RequireRestart() {
+        return require_restart_;
+    }
+
  public:
     ConfigMgr();
 
@@ -113,6 +119,8 @@ class ConfigMgr : public BaseConfigMgr {
     const std::unordered_map<std::string, BaseConfigPtr> config_list_;
     std::mutex mutex_;
     std::string config_file_;
+    bool require_restart_ = false;
+    std::set<std::string> effective_immediately_;
 };
 
 }  // namespace milvus

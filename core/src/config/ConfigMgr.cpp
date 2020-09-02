@@ -101,6 +101,16 @@ BaseConfigMgr::Notify(const std::string& name) {
 ConfigMgr ConfigMgr::instance;
 
 ConfigMgr::ConfigMgr() : config_list_(InitConfig()) {
+    effective_immediately_ = {
+        "cache.cache_size",
+        "gpu.cache_size",
+        "gpu.gpu_search_threshold",
+        "storage.auto_flush_interval",
+        "engine.build_index_threshold",
+        "engine.search_combine_nq",
+        "engine.use_blas_threshold",
+        "engine.omp_thread_num",
+    };
 }
 
 void
@@ -154,6 +164,10 @@ ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
                 Save(FilePath());
                 lock.unlock();
                 Notify(name);
+                /* if not found in effective immediately list, need restart */
+                if (effective_immediately_.find(name) == effective_immediately_.end()) {
+                    require_restart_ |= true;
+                }
             } catch (...) {
                 /* rollback */
                 ThrowIfNotSuccess(config->Set(old_value, false));
