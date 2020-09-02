@@ -597,7 +597,7 @@ TEST(TranscriptTest, ReplayTest) {
     });
 
     // random actions
-    for (int32_t i = 0; i < 10; i++) {
+    for (int32_t i = 0; i < 100; i++) {
         auto rand = lrand48();
         auto index = rand % functions.size();
         auto& function = functions.at(index);
