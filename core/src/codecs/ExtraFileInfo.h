@@ -36,12 +36,14 @@ namespace codec {
 
 #define CHECK_MAGIC_VALID(PTR)                                               \
     if (!CheckMagic(PTR)) {                                                  \
+        LOG_ENGINE_DEBUG_ << "Wrong Magic bytes"; \
         throw Exception(SERVER_FILE_MAGIC_BYTES_ERROR, "wrong magic bytes"); \
     }
 
 #define CHECK_SUM_VALID(PTR)                                                                 \
     if (!CheckSum(PTR)) {                                                                    \
-        throw Exception(SERVER_FILE_SUM_BYTES_ERROR, "wrong sum bytes,file may be changed"); \
+        LOG_ENGINE_DEBUG_ << "Wrong sum bytes, file has been changed"; \
+        throw Exception(SERVER_FILE_SUM_BYTES_ERROR, "wrong sum bytes,file has been changed"); \
     }
 
 #define WRITE_MAGIC(PTR)            \
