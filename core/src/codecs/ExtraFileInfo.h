@@ -36,37 +36,37 @@ namespace codec {
 
 #define CHECK_MAGIC_VALID(PTR)                                               \
     if (!CheckMagic(PTR)) {                                                  \
-        LOG_ENGINE_DEBUG_ << "Wrong Magic bytes"; \
+        LOG_ENGINE_DEBUG_ << "Wrong Magic bytes";                            \
         throw Exception(SERVER_FILE_MAGIC_BYTES_ERROR, "Wrong magic bytes"); \
     }
 
-#define CHECK_SUM_VALID(PTR)                                                                 \
-    if (!CheckSum(PTR)) {                                                                    \
-        LOG_ENGINE_DEBUG_ << "Wrong sum bytes, file has been changed"; \
+#define CHECK_SUM_VALID(PTR)                                                                    \
+    if (!CheckSum(PTR)) {                                                                       \
+        LOG_ENGINE_DEBUG_ << "Wrong sum bytes, file has been changed";                          \
         throw Exception(SERVER_FILE_SUM_BYTES_ERROR, "Wrong sum bytes, file has been changed"); \
     }
 
-#define WRITE_MAGIC(PTR)            \
-    try {                           \
-        WriteMagic(PTR);            \
-    } catch (...) {                 \
+#define WRITE_MAGIC(PTR)                           \
+    try {                                          \
+        WriteMagic(PTR);                           \
+    } catch (...) {                                \
         LOG_ENGINE_DEBUG_ << "Write Magic failed"; \
-        throw "Write Magic failed"; \
+        throw "Write Magic failed";                \
     }
-#define WRITE_HEADER(PTR, KV)       \
-    try {                           \
-        WriteHeaderValues(PTR, KV); \
-    } catch (...) {                 \
+#define WRITE_HEADER(PTR, KV)                       \
+    try {                                           \
+        WriteHeaderValues(PTR, KV);                 \
+    } catch (...) {                                 \
         LOG_ENGINE_DEBUG_ << "Write header failed"; \
-        throw "Write header failed";   \
+        throw "Write header failed";                \
     }
 
-#define WRITE_SUM(PTR, HEADER, NUM_BYTES, DATA) \
-    try {                                       \
-        WriteSum(PTR, HEADER, NUM_BYTES, DATA); \
-    } catch (...) {                             \
+#define WRITE_SUM(PTR, HEADER, NUM_BYTES, DATA)  \
+    try {                                        \
+        WriteSum(PTR, HEADER, NUM_BYTES, DATA);  \
+    } catch (...) {                              \
         LOG_ENGINE_DEBUG_ << "Write sum failed"; \
-        throw "Write sum failed";               \
+        throw "Write sum failed";                \
     }
 
 void
