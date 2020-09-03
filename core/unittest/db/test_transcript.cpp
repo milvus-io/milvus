@@ -853,8 +853,10 @@ TEST(TranscriptTest, ProxyTest) {
         function();
     }
 
-    const std::vector<std::string>& record_actions = db->Actions();
-    ASSERT_EQ(actions.size(), record_actions.size());
+    {
+        const std::vector<std::string>& record_actions = db->Actions();
+        ASSERT_EQ(actions.size(), record_actions.size());
+    }
 
     // replay
     {
