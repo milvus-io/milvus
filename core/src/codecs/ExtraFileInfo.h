@@ -89,7 +89,7 @@ std::unordered_map<std::string, std::string>
 ReadHeaderValues(const storage::FSHandlerPtr& fs_ptr);
 
 bool
-WriteHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string kv);
+WriteHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string& kv);
 
 std::string
 HeaderWrapper(const std::unordered_map<std::string, std::string>& maps);
