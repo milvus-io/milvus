@@ -14,6 +14,7 @@
 #include "db/DB.h"
 #include "db/transcript/ScriptFile.h"
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -22,11 +23,9 @@ namespace engine {
 
 class ScriptRecorder {
  public:
-    static ScriptRecorder&
-    GetInstance();
+    explicit ScriptRecorder(const std::string& path);
 
-    void
-    SetScriptRoot(const std::string& path);
+    ~ScriptRecorder();
 
     std::string
     GetScriptPath() const;
@@ -113,11 +112,11 @@ class ScriptRecorder {
     WriteJson(milvus::json& json_obj);
 
  private:
-    ScriptRecorder() = default;
-
     std::string script_path_;
     ScriptFilePtr file_;
 };
+
+using ScriptRecorderPtr = std::shared_ptr<ScriptRecorder>;
 
 }  // namespace engine
 }  // namespace milvus

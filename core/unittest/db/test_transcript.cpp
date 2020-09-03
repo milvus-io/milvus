@@ -557,8 +557,7 @@ TEST(TranscriptTest, ReplayTest) {
     DummyDBPtr db = std::make_shared<DummyDB>(options);
 
     std::string transcript_path = "/tmp/milvus_transcript";
-    ScriptRecorder& recorder = ScriptRecorder::GetInstance();
-    recorder.SetScriptRoot(transcript_path);
+    ScriptRecorder recorder(transcript_path);
 
     // register action functions
     std::string collection_name = "collection";
@@ -859,9 +858,9 @@ TEST(TranscriptTest, ProxyTest) {
 
     // replay
     {
+        options.replay_script_path_ = proxy.GetScriptRecorder()->GetScriptPath();
         proxy.Stop();
         DummyDBPtr db_replay = std::make_shared<DummyDB>(options);
-        options.replay_script_path_ = ScriptRecorder::GetInstance().GetScriptPath();
         TranscriptProxy proxy_replay(db_replay, options);
         proxy_replay.Start();
 

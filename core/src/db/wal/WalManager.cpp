@@ -29,12 +29,34 @@ const char* WAL_DEL_FILE_NAME = "del";
 namespace {
 
 bool
-StrToID(const std::string& str, idx_t& id) try {
-    id = std::stol(str);
-    return true;
-} catch (std::exception& ex) {
-    return false;
+StrToID(const std::string& str, idx_t& id) {
+    try {
+        id = std::stol(str);
+        return true;
+    } catch (std::exception& ex) {
+        return false;
+    }
 }
+
+void
+FindWalFiles(const std::experimental::filesystem::path& folder,
+             std::map<idx_t, std::experimental::filesystem::path>& files) {
+    using DirectoryIterator = std::experimental::filesystem::recursive_directory_iterator;
+    DirectoryIterator iter(folder);
+    DirectoryIterator end;
+    for (; iter != end; ++iter) {
+        auto path_inner = (*iter).path();
+        std::string file_name = path_inner.filename().c_str();
+        if (file_name == WAL_MAX_OP_FILE_NAME || file_name == WAL_DEL_FILE_NAME) {
+            continue;
+        }
+        idx_t op_id = 0;
+        if (StrToID(file_name, op_id)) {
+            files.insert(std::make_pair(op_id, path_inner));
+        }
+    }
+}
+
 }  // namespace
 
 WalManager::WalManager() : cleanup_thread_pool_(1, 1) {
@@ -172,19 +194,7 @@ WalManager::Recovery(const DBPtr& db) {
 
             // iterate files
             std::map<idx_t, std::experimental::filesystem::path> id_files;
-            DirectoryIterator iter_inner(path_outer);
-            DirectoryIterator end_inner;
-            for (; iter_inner != end_inner; ++iter_inner) {
-                auto path_inner = (*iter_inner).path();
-                std::string file_name = path_inner.filename().c_str();
-                if (file_name == WAL_MAX_OP_FILE_NAME) {
-                    continue;
-                }
-                idx_t op_id = 0;
-                if (StrToID(file_name, op_id)) {
-                    id_files.insert(std::make_pair(op_id, path_inner));
-                }
-            }
+            FindWalFiles(path_outer, id_files);
 
             // the max operation id
             idx_t max_op_id = 0;
@@ -463,19 +473,7 @@ WalManager::CleanupThread() {
 
         // iterate files
         std::map<idx_t, std::experimental::filesystem::path> wal_files;
-        DirectoryIterator file_iter(collection_path);
-        DirectoryIterator end_iter;
-        for (; file_iter != end_iter; ++file_iter) {
-            auto file_path = (*file_iter).path();
-            std::string file_name = file_path.filename().c_str();
-            if (file_name == WAL_MAX_OP_FILE_NAME) {
-                continue;
-            }
-            idx_t op_id = 0;
-            if (StrToID(file_name, op_id)) {
-                wal_files.insert(std::make_pair(op_id, file_path));
-            }
-        }
+        FindWalFiles(collection_path, wal_files);
 
         // no wal file
         if (wal_files.empty()) {

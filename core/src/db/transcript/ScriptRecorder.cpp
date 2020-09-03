@@ -21,14 +21,7 @@
 namespace milvus {
 namespace engine {
 
-ScriptRecorder&
-ScriptRecorder::GetInstance() {
-    static ScriptRecorder s_recorder;
-    return s_recorder;
-}
-
-void
-ScriptRecorder::SetScriptRoot(const std::string& path) {
+ScriptRecorder::ScriptRecorder(const std::string& path) {
     std::experimental::filesystem::path script_path(path);
 
     std::string time_str;
@@ -36,6 +29,9 @@ ScriptRecorder::SetScriptRoot(const std::string& path) {
     script_path /= time_str;
     script_path_ = script_path.c_str();
     CommonUtil::CreateDirectory(script_path_);
+}
+
+ScriptRecorder::~ScriptRecorder() {
 }
 
 std::string
