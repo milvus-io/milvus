@@ -354,10 +354,9 @@ ScriptCodec::Decode(milvus::json& json_obj, snapshot::CreateCollectionContext& c
     // mappings
     if (json_obj.find(J_MAPPINGS) != json_obj.end()) {
         milvus::json& fields = json_obj[J_MAPPINGS];
-        for (size_t i = 0; i < fields.size(); ++i) {
-            auto& field = fields[i];
-            std::string field_name = field[J_FIELD_NAME].get<std::string>();
-            DataType field_type = static_cast<DataType>(field[J_FIELD_TYPE].get<int32_t>());
+        for (auto& field : fields) {
+            auto field_name = field[J_FIELD_NAME].get<std::string>();
+            auto field_type = static_cast<DataType>(field[J_FIELD_TYPE].get<int32_t>());
             milvus::json& field_params = field[J_PARAMS];
             auto field_ptr = std::make_shared<engine::snapshot::Field>(field_name, 0, field_type, field_params);
             context.fields_schema[field_ptr] = {};
@@ -435,10 +434,8 @@ ScriptCodec::Decode(milvus::json& json_obj, DataChunkPtr& data_chunk) {
     // fixed fields
     if (json_obj.find(J_FIXED_FIELDS) != json_obj.end()) {
         auto& fields = json_obj[J_FIXED_FIELDS];
-        for (size_t i = 0; i < fields.size(); ++i) {
-            auto& field = fields[i];
-
-            std::string name = field[J_FIELD_NAME].get<std::string>();
+        for (auto& field : fields) {
+            auto name = field[J_FIELD_NAME].get<std::string>();
             BinaryDataPtr bin = std::make_shared<BinaryData>();
             bin->data_ = field[J_CHUNK_DATA].get<std::vector<uint8_t>>();
             data_chunk->fixed_fields_.insert(std::make_pair(name, bin));
@@ -448,10 +445,8 @@ ScriptCodec::Decode(milvus::json& json_obj, DataChunkPtr& data_chunk) {
     // variable fields
     if (json_obj.find(J_VARIABLE_FIELDS) != json_obj.end()) {
         auto& fields = json_obj[J_VARIABLE_FIELDS];
-        for (size_t i = 0; i < fields.size(); ++i) {
-            auto& field = fields[i];
-
-            std::string name = field[J_FIELD_NAME].get<std::string>();
+        for (auto& field : fields) {
+            auto name = field[J_FIELD_NAME].get<std::string>();
             VaribleDataPtr bin = std::make_shared<VaribleData>();
             bin->data_ = field[J_CHUNK_DATA].get<std::vector<uint8_t>>();
             bin->offset_ = field[J_CHUNK_OFFSETS].get<std::vector<int64_t>>();
@@ -497,8 +492,7 @@ ScriptCodec::Decode(milvus::json& json_obj, query::QueryPtr& query_ptr) {
 
     if (json_obj.find(J_METRIC_TYPES) != json_obj.end()) {
         milvus::json& metrics = json_obj[J_METRIC_TYPES];
-        for (size_t i = 0; i < metrics.size(); ++i) {
-            milvus::json& metric = metrics[i];
+        for (auto& metric : metrics) {
             std::string field_name = metric[J_FIELD_NAME];
             std::string metric_type = metric[J_METRIC_TYPE];
             query_ptr->metric_types.insert(std::make_pair(field_name, metric_type));
@@ -508,8 +502,7 @@ ScriptCodec::Decode(milvus::json& json_obj, query::QueryPtr& query_ptr) {
     // vector queries
     if (json_obj.find(J_VECTOR_QUERIES) != json_obj.end()) {
         milvus::json& vector_queries = json_obj[J_VECTOR_QUERIES];
-        for (size_t i = 0; i < vector_queries.size(); ++i) {
-            milvus::json& vector_query = vector_queries[i];
+        for (auto& vector_query : vector_queries) {
             std::string key = vector_query[J_KEY];
 
             milvus::query::VectorQueryPtr query = std::make_shared<milvus::query::VectorQuery>();
