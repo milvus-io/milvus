@@ -62,35 +62,6 @@ DBWrapper::StartService() {
     opt.transcript_enable_ = config.transcript.enable();
     opt.replay_script_path_ = config.transcript.replay();
 
-    // engine config
-    int64_t omp_thread = config.engine.omp_thread_num();
-
-    if (omp_thread > 0) {
-        omp_set_num_threads(omp_thread);
-        LOG_SERVER_DEBUG_ << "Specify openmp thread number: " << omp_thread;
-    } else {
-        int64_t sys_thread_cnt = 8;
-        if (GetSystemAvailableThreads(sys_thread_cnt)) {
-            omp_thread = static_cast<int32_t>(ceil(sys_thread_cnt * 0.5));
-            omp_set_num_threads(omp_thread);
-        }
-    }
-
-    // init faiss global variable
-    int64_t use_blas_threshold = config.engine.use_blas_threshold();
-    faiss::distance_compute_blas_threshold = use_blas_threshold;
-
-    int64_t clustering_type = config.engine.clustering_type();
-    switch (clustering_type) {
-        case ClusteringType::K_MEANS:
-        default:
-            faiss::clustering_type = faiss::ClusteringType::K_MEANS;
-            break;
-        case ClusteringType::K_MEANS_PLUS_PLUS:
-            faiss::clustering_type = faiss::ClusteringType::K_MEANS_PLUS_PLUS;
-            break;
-    }
-    
     // create db root folder
     s = CommonUtil::CreateDirectory(opt.meta_.path_);
     if (!s.ok()) {
