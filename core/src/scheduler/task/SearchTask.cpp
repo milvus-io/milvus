@@ -276,6 +276,9 @@ SearchTask::IndexType() {
     if (seg_visitor) {
         for (const auto& name : query_ptr_->index_fields) {
             auto field_visitor = seg_visitor->GetFieldVisitor(name);
+            if (!field_visitor) {
+                continue;
+            }
             auto type = field_visitor->GetField()->GetFtype();
             if (!field_visitor) {
                 continue;
