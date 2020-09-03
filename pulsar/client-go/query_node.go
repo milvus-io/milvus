@@ -2,7 +2,7 @@ package client_go
 
 import (
 	"fmt"
-	"suvlim/pulsar/client-go/schema"
+	"github.com/czs007/suvlim/pulsar/client-go/schema"
 	"sync"
 	"time"
 )
@@ -34,7 +34,7 @@ func (qn *QueryNode)ReceiveMessage() {
 	qn.mc.ReceiveMessage()
 }
 
-func main() {
+func queryNodeMain() {
 
 	mc := MessageClient{}
 	topics := []string{"insert", "delete"}

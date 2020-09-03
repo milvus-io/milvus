@@ -3,8 +3,8 @@ package client_go
 import (
 	"context"
 	"github.com/apache/pulsar/pulsar-client-go/pulsar"
+	"github.com/czs007/suvlim/pulsar/client-go/schema"
 	"log"
-	"suvlim/pulsar/client-go/schema"
 )
 
 var (

@@ -21,54 +21,113 @@ import (
 
 const SegmentLifetime = 20000
 
+const (
+	SegmentOpened = 0
+	SegmentClosed = 1
+)
+
 type Segment struct {
 	SegmentPtr C.CSegmentBase
 	SegmentId	uint64
 	SegmentCloseTime uint64
 }
 
-func (s *Segment) GetRowCount() int64 {
-	// TODO: C type to go type
-	//return C.GetRowCount(s)
-	return 0
+func (s *Segment) GetStatus() int {
+	/*C.IsOpened
+	bool
+	IsOpened(CSegmentBase c_segment);
+	*/
+	var isOpened = C.IsOpened(s.SegmentPtr)
+	if isOpened {
+		return SegmentOpened
+	} else {
+		return SegmentClosed
+	}
 }
 
-func (s *Segment) GetStatus() int {
-	// TODO: C type to go type
-	//return C.GetStatus(s)
-	return 0
+func (s *Segment) GetSegmentID() uint64 {
+	/*C.GetSegmentId
+	unsigned long
+	GetSegmentId(CSegmentBase c_segment);
+	*/
+	var segmentID = C.GetSegmentId(s.SegmentPtr)
+	return uint64(segmentID)
+}
+
+func (s *Segment) SetSegmentID(segmentID uint64) {
+	/*C.SetSegmentId
+	void
+	SetSegmentId(CSegmentBase c_segment, unsigned long segment_id);
+	*/
+	C.SetSegmentId(s.SegmentPtr, C.ulong(segmentID))
 }
 
 func (s *Segment) GetMaxTimestamp() uint64 {
-	// TODO: C type to go type
-	//return C.GetMaxTimestamp(s)
-	return 0
+	/*C.GetTimeEnd
+	unsigned long
+	GetTimeEnd(CSegmentBase c_segment);
+	*/
+	var maxTimestamp = C.GetTimeEnd(s.SegmentPtr)
+	return uint64(maxTimestamp)
+}
+
+func (s *Segment) SetMaxTimestamp(maxTimestamp uint64) {
+	/*C.SetTimeEnd
+	void
+	SetTimeEnd(CSegmentBase c_segment, unsigned long time_end);
+	*/
+	C.SetTimeEnd(s.SegmentPtr, C.ulong(maxTimestamp))
 }
 
 func (s *Segment) GetMinTimestamp() uint64 {
-	// TODO: C type to go type
-	//return C.GetMinTimestamp(s)
-	return 0
+	/*C.GetTimeBegin
+	unsigned long
+	GetTimeBegin(CSegmentBase c_segment);
+	*/
+	var minTimestamp = C.GetTimeBegin(s.SegmentPtr)
+	return uint64(minTimestamp)
 }
 
-func (s *Segment) GetDeletedCount() uint64 {
-	// TODO: C type to go type
-	//return C.GetDeletedCount(s)
-	return 0
+func (s *Segment) SetMinTimestamp(minTimestamp uint64) {
+	/*C.SetTimeBegin
+	void
+	SetTimeBegin(CSegmentBase c_segment, unsigned long time_begin);
+	*/
+	C.SetTimeBegin(s.SegmentPtr, C.ulong(minTimestamp))
 }
 
-func (s *Segment) Close() {
-	// TODO: C type to go type
-	//C.CloseSegment(s)
+func (s *Segment) GetRowCount() int64 {
+	/*C.GetRowCount
+	long int
+	GetRowCount(CSegmentBase c_segment);
+	*/
+	var rowCount = C.GetRowCount(s.SegmentPtr)
+	return int64(rowCount)
+}
+
+func (s *Segment) GetDeletedCount() int64 {
+	/*C.GetDeletedCount
+	long int
+	GetDeletedCount(CSegmentBase c_segment);
+	*/
+	var deletedCount = C.GetDeletedCount(s.SegmentPtr)
+	return int64(deletedCount)
+}
+
+func (s *Segment) Close() error {
+	/*C.Close
+	int
+	Close(CSegmentBase c_segment);
+	*/
+	var status = C.Close(s.SegmentPtr)
+	if status != 0 {
+		return errors.New("Close segment failed, error code = " + strconv.Itoa(int(status)))
+	}
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////
 func SegmentInsert(segment *Segment, entityIds *[]uint64, timestamps *[]uint64, dataChunk [][]*schema.FieldValue) (ResultEntityIds, error) {
-	// TODO: remove hard code schema
-	// auto schema_tmp = std::make_shared<Schema>();
-	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
-	// schema_tmp->AddField("age", DataType::INT32);
-
 	/*C.Insert
 	int
 	Insert(CSegmentBase c_segment,
@@ -80,6 +139,10 @@ func SegmentInsert(segment *Segment, entityIds *[]uint64, timestamps *[]uint64, 
 	           signed long int count);
 	*/
 
+	// TODO: remove hard code schema
+	// auto schema_tmp = std::make_shared<Schema>();
+	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
+	// schema_tmp->AddField("age", DataType::INT32);
 	// TODO: remove hard code & fake dataChunk
 	const DIM = 4
 	const N = 3

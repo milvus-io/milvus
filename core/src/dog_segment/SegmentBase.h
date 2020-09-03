@@ -92,7 +92,7 @@ class SegmentBase {
     uint64_t get_segment_id() {
         return segment_id_;
     }
-    uint64_t set_segment_id(uint64_t segment_id) {
+    void set_segment_id(uint64_t segment_id) {
         this->segment_id_ = segment_id;
     }
 
