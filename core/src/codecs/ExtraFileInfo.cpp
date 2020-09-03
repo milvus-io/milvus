@@ -123,7 +123,7 @@ CheckSum(const storage::FSHandlerPtr& fs_ptr) {
 }
 
 bool
-WriteHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string kv) {
+WriteHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string& kv) {
     fs_ptr->writer_ptr_->Write(kv.data(), HEADER_SIZE);
     return true;
 }
