@@ -151,7 +151,7 @@ CreateQuery(milvus::query::QueryPtr& query) {
 
 class DummyDB : public DBProxy {
  public:
-    DummyDB(const DBOptions& options)
+    explicit DummyDB(const DBOptions& options)
         : DBProxy(nullptr, options) {
     }
 
