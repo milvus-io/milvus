@@ -24,6 +24,7 @@
 #include "db/transcript/ScriptCodec.h"
 #include "db/transcript/ScriptRecorder.h"
 #include "db/transcript/ScriptReplay.h"
+#include "db/transcript/TranscriptProxy.h"
 
 namespace {
 
@@ -34,6 +35,7 @@ using ScriptFile = milvus::engine::ScriptFile;
 using ScriptCodec = milvus::engine::ScriptCodec;
 using ScriptRecorder = milvus::engine::ScriptRecorder;
 using ScriptReplay = milvus::engine::ScriptReplay;
+using TranscriptProxy = milvus::engine::TranscriptProxy;
 
 const char* COLLECTION_NAME = "wal_tbl";
 const char* VECTOR_FIELD_NAME = "vector";
@@ -99,6 +101,52 @@ CreateChunk(DataChunkPtr& chunk, int64_t row_count) {
         }
         chunk->variable_fields_.insert(std::make_pair(field_name, bin));
     }
+}
+
+void
+CreateQuery(milvus::query::QueryPtr& query) {
+    query = std::make_shared<milvus::query::Query>();
+    query->collection_id = COLLECTION_NAME;
+    query->partitions = {"p1", "p2", "p3"};
+    query->field_names = {"f1", "f2", "f3"};
+    query->index_fields = {"a", "b", "c"};
+    query->metric_types = {
+        {"a", "IP"},
+        {"b", "L2"},
+    };
+
+    // vector queries
+    for (int i = 0; i < 3; ++i) {
+        milvus::query::VectorQueryPtr vector_query = std::make_shared<milvus::query::VectorQuery>();
+        vector_query->field_name = "f" + std::to_string(i);
+        vector_query->metric_type = "L2";
+        vector_query->extra_params["nlist"] = 16384;
+        vector_query->topk = i + 10;
+        vector_query->nq = i + 100;
+        vector_query->boost = false;
+        vector_query->query_vector.float_data = {0.1, 0.2, 0.3, 0.4};
+        vector_query->query_vector.binary_data = {1, 2, 3, 4, 5, 6};
+        query->vectors.insert(std::make_pair(std::to_string(i), vector_query));
+    }
+
+    // general query
+    query->root = std::make_shared<milvus::query::GeneralQuery>();
+    query->root->leaf = std::make_shared<milvus::query::LeafQuery>();
+    query->root->leaf->vector_placeholder = "placeholder";
+    query->root->leaf->query_boost = 0.6;
+    query->root->leaf->term_query = std::make_shared<milvus::query::TermQuery>();
+    query->root->leaf->term_query->json_obj["term"] = 1;
+    query->root->leaf->range_query = std::make_shared<milvus::query::RangeQuery>();
+    query->root->leaf->range_query->json_obj["range"] = 10.0;
+    query->root->bin = std::make_shared<milvus::query::BinaryQuery>();
+    query->root->bin->query_boost = 99.9;
+    query->root->bin->relation = milvus::query::QueryRelation::R3;
+    query->root->bin->left_query = std::make_shared<milvus::query::GeneralQuery>();
+    query->root->bin->left_query->leaf = std::make_shared<milvus::query::LeafQuery>();
+    query->root->bin->left_query->leaf->vector_placeholder = "holder";
+    query->root->bin->right_query = std::make_shared<milvus::query::GeneralQuery>();
+    query->root->bin->right_query->bin = std::make_shared<milvus::query::BinaryQuery>();
+    query->root->bin->right_query->bin->query_boost = 33.3;
 }
 
 class DummyDB : public DBProxy {
@@ -410,10 +458,48 @@ TEST(TranscriptTest, CodecTest) {
     {
         milvus::json json_obj;
         milvus::query::QueryPtr input;
+        CreateQuery(input);
         ScriptCodec::Encode(json_obj, input);
 
         milvus::query::QueryPtr output;
         ScriptCodec::Decode(json_obj, output);
+        ASSERT_NE(output, nullptr);
+        ASSERT_EQ(input->collection_id, output->collection_id);
+        ASSERT_EQ(input->partitions, output->partitions);
+        ASSERT_EQ(input->field_names, output->field_names);
+        ASSERT_EQ(input->index_fields, output->index_fields);
+        ASSERT_EQ(input->metric_types, output->metric_types);
+        ASSERT_EQ(input->vectors.size(), output->vectors.size());
+
+        // vector queries
+        for (auto& pair : input->vectors) {
+            ASSERT_GT(output->vectors.count(pair.first), 0);
+            auto& query_1 = output->vectors[pair.first];
+            auto& query_2 = pair.second;
+            ASSERT_NE(query_1, nullptr);
+            ASSERT_NE(query_2, nullptr);
+            ASSERT_EQ(query_1->field_name, query_2->field_name);
+            ASSERT_EQ(query_1->extra_params, query_2->extra_params);
+            ASSERT_EQ(query_1->topk, query_2->topk);
+            ASSERT_EQ(query_1->nq, query_2->nq);
+            ASSERT_EQ(query_1->metric_type, query_2->metric_type);
+            ASSERT_EQ(query_1->boost, query_2->boost);
+            ASSERT_EQ(query_1->query_vector.float_data, query_2->query_vector.float_data);
+            ASSERT_EQ(query_1->query_vector.binary_data, query_2->query_vector.binary_data);
+        }
+
+        // general query
+        ASSERT_NE(output->root, nullptr);
+        ASSERT_NE(output->root->leaf, nullptr);
+        ASSERT_EQ(output->root->leaf->query_boost, input->root->leaf->query_boost);
+        ASSERT_EQ(output->root->leaf->vector_placeholder, input->root->leaf->vector_placeholder);
+        ASSERT_NE(output->root->leaf->term_query, nullptr);
+        ASSERT_EQ(output->root->leaf->term_query->json_obj, input->root->leaf->term_query->json_obj);
+        ASSERT_NE(output->root->leaf->range_query, nullptr);
+        ASSERT_EQ(output->root->leaf->range_query->json_obj, input->root->leaf->range_query->json_obj);
+        ASSERT_NE(output->root->bin, nullptr);
+        ASSERT_EQ(output->root->bin->relation, input->root->bin->relation);
+        ASSERT_EQ(output->root->bin->query_boost, input->root->bin->query_boost);
     }
 
     {
@@ -571,12 +657,12 @@ TEST(TranscriptTest, ReplayTest) {
         recorder.ListIDInSegment(collection_name, 1, id_array);
         actions.emplace_back(milvus::engine::ActionListIDInSegment);
     });
-//    functions.emplace_back([&]() {
-//        milvus::query::QueryPtr query_ptr;
-//        milvus::engine::QueryResultPtr result;
-//        recorder.Query(nullptr, query_ptr, result);
-//        actions.emplace_back(milvus::engine::ActionQuery);
-//    });
+    functions.emplace_back([&]() {
+        milvus::query::QueryPtr query_ptr;
+        milvus::engine::QueryResultPtr result;
+        recorder.Query(nullptr, query_ptr, result);
+        actions.emplace_back(milvus::engine::ActionQuery);
+    });
     functions.emplace_back([&]() {
         IDNumbers id_array = {1, 2, 3};
         std::vector<std::string> field_names = {field_name};
@@ -621,4 +707,169 @@ TEST(TranscriptTest, ReplayTest) {
     ASSERT_EQ(actions, record_actions);
 
     std::experimental::filesystem::remove_all(transcript_path);
+}
+
+TEST(TranscriptTest, ProxyTest) {
+    std::string test_path = "/tmp/milvus_test";
+    DBOptions options;
+    options.transcript_enable_ = true;
+    options.meta_.path_ = test_path + "/db";
+    DummyDBPtr db = std::make_shared<DummyDB>(options);
+    TranscriptProxy proxy(db, options);
+    proxy.Start();
+
+    // register action functions
+    std::string collection_name = "collection";
+    std::string partition_name = "partition";
+    std::string field_name = "field";
+    std::vector<std::string> actions;
+    std::vector<std::function<void()>> functions;
+    functions.emplace_back([&]() {
+    milvus::engine::snapshot::CreateCollectionContext context;
+        proxy.CreateCollection(context);
+        actions.emplace_back(milvus::engine::ActionCreateCollection);
+    });
+    functions.emplace_back([&]() {
+        proxy.DropCollection(collection_name);
+        actions.emplace_back(milvus::engine::ActionDropCollection);
+    });
+    functions.emplace_back([&]() {
+    bool has = false;
+        proxy.HasCollection(collection_name, has);
+        actions.emplace_back(milvus::engine::ActionHasCollection);
+    });
+    functions.emplace_back([&]() {
+        std::vector<std::string> names;
+        proxy.ListCollections(names);
+        actions.emplace_back(milvus::engine::ActionListCollections);
+    });
+    functions.emplace_back([&]() {
+        milvus::engine::snapshot::CollectionPtr collection;
+        milvus::engine::snapshot::FieldElementMappings fields_schema;
+        proxy.GetCollectionInfo(collection_name, collection, fields_schema);
+        actions.emplace_back(milvus::engine::ActionGetCollectionInfo);
+    });
+    functions.emplace_back([&]() {
+        milvus::json collection_stats;
+        proxy.GetCollectionStats(collection_name, collection_stats);
+        actions.emplace_back(milvus::engine::ActionGetCollectionStats);
+    });
+    functions.emplace_back([&]() {
+        int64_t count = 0;
+        proxy.CountEntities(collection_name, count);
+        actions.emplace_back(milvus::engine::ActionCountEntities);
+    });
+    functions.emplace_back([&]() {
+        proxy.CreatePartition(collection_name, partition_name);
+        actions.emplace_back(milvus::engine::ActionCreatePartition);
+    });
+    functions.emplace_back([&]() {
+        proxy.DropPartition(collection_name, partition_name);
+        actions.emplace_back(milvus::engine::ActionDropPartition);
+    });
+    functions.emplace_back([&]() {
+        bool has = false;
+        proxy.HasPartition(collection_name, partition_name, has);
+        actions.emplace_back(milvus::engine::ActionHasPartition);
+    });
+    functions.emplace_back([&]() {
+        std::vector<std::string> partition_names;
+        proxy.ListPartitions(collection_name, partition_names);
+        actions.emplace_back(milvus::engine::ActionListPartitions);
+    });
+    functions.emplace_back([&]() {
+        milvus::engine::CollectionIndex index;
+        proxy.CreateIndex(nullptr, collection_name, field_name, index);
+        actions.emplace_back(milvus::engine::ActionCreateIndex);
+    });
+    functions.emplace_back([&]() {
+        proxy.DropIndex(collection_name, field_name);
+        actions.emplace_back(milvus::engine::ActionDropIndex);
+    });
+    functions.emplace_back([&]() {
+        milvus::engine::CollectionIndex index;
+        index.index_type_ = "PQ";
+        proxy.DescribeIndex(collection_name, field_name, index);
+        actions.emplace_back(milvus::engine::ActionDescribeIndex);
+    });
+    functions.emplace_back([&]() {
+        milvus::engine::DataChunkPtr chunk;
+        proxy.Insert(collection_name, partition_name, chunk, 0);
+        actions.emplace_back(milvus::engine::ActionInsert);
+    });
+    functions.emplace_back([&]() {
+        IDNumbers id_array = {1, 2, 3};
+        std::vector<std::string> field_names = {field_name};
+        std::vector<bool> valid_row;
+        DataChunkPtr data_chunk;
+        proxy.GetEntityByID(collection_name, id_array, field_names, valid_row, data_chunk);
+        actions.emplace_back(milvus::engine::ActionGetEntityByID);
+    });
+    functions.emplace_back([&]() {
+        IDNumbers id_array = {1, 2, 3};
+        proxy.DeleteEntityByID(collection_name, id_array, 0);
+        actions.emplace_back(milvus::engine::ActionDeleteEntityByID);
+    });
+    functions.emplace_back([&]() {
+        IDNumbers id_array;
+        proxy.ListIDInSegment(collection_name, 1, id_array);
+        actions.emplace_back(milvus::engine::ActionListIDInSegment);
+    });
+    functions.emplace_back([&]() {
+        milvus::query::QueryPtr query_ptr;
+        milvus::engine::QueryResultPtr result;
+        proxy.Query(nullptr, query_ptr, result);
+        actions.emplace_back(milvus::engine::ActionQuery);
+    });
+    functions.emplace_back([&]() {
+        IDNumbers id_array = {1, 2, 3};
+        std::vector<std::string> field_names = {field_name};
+        proxy.LoadCollection(nullptr, collection_name, field_names, true);
+        actions.emplace_back(milvus::engine::ActionLoadCollection);
+    });
+    functions.emplace_back([&]() {
+        proxy.Flush(collection_name);
+        actions.emplace_back(milvus::engine::ActionFlush);
+    });
+    functions.emplace_back([&]() {
+        proxy.Flush();
+        actions.emplace_back(milvus::engine::ActionFlush);
+    });
+    functions.emplace_back([&]() {
+        proxy.Compact(nullptr, collection_name, 0.5);
+        actions.emplace_back(milvus::engine::ActionCompact);
+    });
+
+    // random actions
+    for (int32_t i = 0; i < 100; i++) {
+        auto rand = lrand48();
+        auto index = rand % functions.size();
+        auto& function = functions.at(index);
+        function();
+    }
+
+    // each action at least do one time
+    for (size_t i = 0; i < functions.size(); ++i) {
+        auto& function = functions.at(i);
+        function();
+    }
+
+    const std::vector<std::string>& record_actions = db->Actions();
+    ASSERT_EQ(actions.size(), record_actions.size());
+
+    // replay
+    {
+        proxy.Stop();
+        DummyDBPtr db_replay = std::make_shared<DummyDB>(options);
+        options.replay_script_path_ = ScriptRecorder::GetInstance().GetScriptPath();
+        TranscriptProxy proxy_replay(db_replay, options);
+        proxy_replay.Start();
+
+        const std::vector<std::string>& record_actions = db_replay->Actions();
+        ASSERT_EQ(actions.size(), record_actions.size());
+        ASSERT_EQ(actions, record_actions);
+        proxy_replay.Stop();
+    }
+
+    std::experimental::filesystem::remove_all(test_path);
 }

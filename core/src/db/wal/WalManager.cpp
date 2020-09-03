@@ -26,6 +26,17 @@ namespace engine {
 const char* WAL_MAX_OP_FILE_NAME = "max_op";
 const char* WAL_DEL_FILE_NAME = "del";
 
+namespace {
+
+bool
+StrToID(const std::string& str, idx_t& id) try {
+    id = std::stol(str);
+    return true;
+} catch (std::exception& ex) {
+    return false;
+}
+}  // namespace
+
 WalManager::WalManager() : cleanup_thread_pool_(1, 1) {
 }
 
@@ -169,8 +180,10 @@ WalManager::Recovery(const DBPtr& db) {
                 if (file_name == WAL_MAX_OP_FILE_NAME) {
                     continue;
                 }
-                idx_t op_id = std::stol(file_name);
-                id_files.insert(std::make_pair(op_id, path_inner));
+                idx_t op_id = 0;
+                if (StrToID(file_name, op_id)) {
+                    id_files.insert(std::make_pair(op_id, path_inner));
+                }
             }
 
             // the max operation id
@@ -458,8 +471,10 @@ WalManager::CleanupThread() {
             if (file_name == WAL_MAX_OP_FILE_NAME) {
                 continue;
             }
-            idx_t op_id = std::stol(file_name);
-            wal_files.insert(std::make_pair(op_id, file_path));
+            idx_t op_id = 0;
+            if (StrToID(file_name, op_id)) {
+                wal_files.insert(std::make_pair(op_id, file_path));
+            }
         }
 
         // no wal file

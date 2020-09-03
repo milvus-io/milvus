@@ -132,6 +132,13 @@ class ScriptCodec {
     DecodeForce(milvus::json& json_obj, bool& force);
 
  private:
+    static Status
+    EncodeGeneralQuery(milvus::json& json_obj, query::GeneralQueryPtr& query);
+
+    static Status
+    DecodeGeneralQuery(milvus::json& json_obj, query::GeneralQueryPtr& query);
+
+ private:
     ScriptCodec() = delete;
 };
 

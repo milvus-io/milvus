@@ -12,6 +12,7 @@
 #include "db/transcript/ScriptCodec.h"
 
 #include <memory>
+#include <set>
 #include <utility>
 
 namespace milvus {
@@ -63,6 +64,26 @@ const char* J_FIXED_FIELDS = "fixed_fields";
 const char* J_VARIABLE_FIELDS = "variable_fields";
 const char* J_CHUNK_DATA = "data";
 const char* J_CHUNK_OFFSETS = "offsets";
+
+const char* J_PARTITIONS = "partitions";
+const char* J_FIELDS = "fields";
+const char* J_METRIC_TYPES = "metric_types";
+const char* J_KEY = "key";
+const char* J_VECTOR_QUERIES = "vector_queries";
+const char* J_TOPK = "topk";
+const char* J_NQ = "nq";
+const char* J_BOOST = "boost";
+const char* J_FLOAT_DATA = "float_data";
+const char* J_BIN_DATA = "bin_data";
+const char* J_GENERAL_QUERY = "general_query";
+const char* J_QUERY_LEAF = "leaf";
+const char* J_QUERY_BIN = "bin";
+const char* J_QUERY_RELATION = "relation";
+const char* J_QUERY_LEFT = "left";
+const char* J_QUERY_RIGHT = "right";
+const char* J_QUERY_TERM = "term";
+const char* J_QUERY_RANGE = "range";
+const char* J_QUERY_PLACEHOLDER = "placeholder";
 
 // encode methods
 Status
@@ -197,6 +218,93 @@ ScriptCodec::Encode(milvus::json& json_obj, const query::QueryPtr& query_ptr) {
         return Status::OK();
     }
 
+    EncodeCollectionName(json_obj, query_ptr->collection_id);
+    json_obj[J_PARTITIONS] = query_ptr->partitions;
+    json_obj[J_FIELD_NAMES] = query_ptr->field_names;
+    json_obj[J_FIELDS] = query_ptr->index_fields;
+    milvus::json metrics;
+    for (auto& pair : query_ptr->metric_types) {
+        milvus::json metric;
+        metric[J_FIELD_NAME] = pair.first;
+        metric[J_METRIC_TYPE] = pair.second;
+        metrics.push_back(metric);
+    }
+    json_obj[J_METRIC_TYPES] = metrics;
+
+    // vector query
+    milvus::json vector_queries;
+    for (auto& pair : query_ptr->vectors) {
+        milvus::query::VectorQueryPtr& query = pair.second;
+        if (query == nullptr) {
+            continue;
+        }
+
+        milvus::json vector_query;
+        vector_query[J_KEY] = pair.first;
+        vector_query[J_FIELD_NAME] = query->field_name;
+        vector_query[J_PARAMS] = query->extra_params;
+        vector_query[J_TOPK] = query->topk;
+        vector_query[J_NQ] = query->nq;
+        vector_query[J_METRIC_TYPE] = query->metric_type;
+        vector_query[J_BOOST] = query->boost;
+        vector_query[J_FLOAT_DATA] = query->query_vector.float_data;
+        vector_query[J_BIN_DATA] = query->query_vector.binary_data;
+
+        vector_queries.push_back(vector_query);
+    }
+    json_obj[J_VECTOR_QUERIES] = vector_queries;
+
+    // general query
+    if (query_ptr->root) {
+        milvus::json general_query;
+        EncodeGeneralQuery(general_query, query_ptr->root);
+        json_obj[J_GENERAL_QUERY] = general_query;
+    }
+
+    return Status::OK();
+}
+
+Status
+ScriptCodec::EncodeGeneralQuery(milvus::json& json_obj, query::GeneralQueryPtr& query) {
+    if (query == nullptr) {
+        return Status::OK();
+    }
+
+    if (query->leaf) {
+        milvus::json json_leaf;
+        json_leaf[J_QUERY_PLACEHOLDER] = query->leaf->vector_placeholder;
+        json_leaf[J_BOOST] = query->leaf->query_boost;
+        if (query->leaf->term_query) {
+            milvus::json json_term;
+            json_term[J_PARAMS] = query->leaf->term_query->json_obj;
+            json_leaf[J_QUERY_TERM] = json_term;
+        }
+        if (query->leaf->range_query) {
+            milvus::json json_range;
+            json_range[J_PARAMS] = query->leaf->range_query->json_obj;
+            json_leaf[J_QUERY_RANGE] = json_range;
+        }
+
+        json_obj[J_QUERY_LEAF] = json_leaf;
+    }
+    if (query->bin) {
+        milvus::json json_bin;
+        json_bin[J_QUERY_RELATION] = query->bin->relation;
+        json_bin[J_BOOST] = query->bin->query_boost;
+
+        if (query->bin->left_query) {
+            milvus::json json_left;
+            EncodeGeneralQuery(json_left, query->bin->left_query);
+            json_bin[J_QUERY_LEFT] = json_left;
+        }
+        if (query->bin->right_query) {
+            milvus::json json_right;
+            EncodeGeneralQuery(json_right, query->bin->right_query);
+            json_bin[J_QUERY_RIGHT] = json_right;
+        }
+
+        json_obj[J_QUERY_BIN] = json_bin;
+    }
     return Status::OK();
 }
 
@@ -245,12 +353,12 @@ ScriptCodec::Decode(milvus::json& json_obj, snapshot::CreateCollectionContext& c
 
     // mappings
     if (json_obj.find(J_MAPPINGS) != json_obj.end()) {
-        milvus::json fields = json_obj[J_MAPPINGS];
+        milvus::json& fields = json_obj[J_MAPPINGS];
         for (size_t i = 0; i < fields.size(); ++i) {
-            auto field = fields[i];
+            auto& field = fields[i];
             std::string field_name = field[J_FIELD_NAME].get<std::string>();
             DataType field_type = static_cast<DataType>(field[J_FIELD_TYPE].get<int32_t>());
-            milvus::json field_params = field[J_PARAMS];
+            milvus::json& field_params = field[J_PARAMS];
             auto field_ptr = std::make_shared<engine::snapshot::Field>(field_name, 0, field_type, field_params);
             context.fields_schema[field_ptr] = {};
         }
@@ -291,13 +399,12 @@ ScriptCodec::DecodeFieldName(milvus::json& json_obj, std::string& field_name) {
 
 Status
 ScriptCodec::DecodeFieldNames(milvus::json& json_obj, std::vector<std::string>& field_names) {
-    milvus::json names = json_obj[J_FIELD_NAMES];
-    for (size_t i = 0; i < names.size(); ++i) {
-        auto name = names[i].get<std::string>();
-        field_names.push_back(name);
+    if (json_obj.find(J_FIELD_NAMES) != json_obj.end()) {
+        field_names = json_obj[J_FIELD_NAMES].get<std::vector<std::string>>();
+        return Status::OK();
     }
 
-    return Status::OK();
+    return Status(DB_ERROR, "element doesn't exist");
 }
 
 Status
@@ -327,11 +434,11 @@ ScriptCodec::Decode(milvus::json& json_obj, DataChunkPtr& data_chunk) {
 
     // fixed fields
     if (json_obj.find(J_FIXED_FIELDS) != json_obj.end()) {
-        auto fields = json_obj[J_FIXED_FIELDS];
+        auto& fields = json_obj[J_FIXED_FIELDS];
         for (size_t i = 0; i < fields.size(); ++i) {
-            auto field = fields[i];
+            auto& field = fields[i];
 
-            std::string name = field[J_FIELD_NAME];
+            std::string name = field[J_FIELD_NAME].get<std::string>();
             BinaryDataPtr bin = std::make_shared<BinaryData>();
             bin->data_ = field[J_CHUNK_DATA].get<std::vector<uint8_t>>();
             data_chunk->fixed_fields_.insert(std::make_pair(name, bin));
@@ -340,11 +447,11 @@ ScriptCodec::Decode(milvus::json& json_obj, DataChunkPtr& data_chunk) {
 
     // variable fields
     if (json_obj.find(J_VARIABLE_FIELDS) != json_obj.end()) {
-        auto fields = json_obj[J_VARIABLE_FIELDS];
+        auto& fields = json_obj[J_VARIABLE_FIELDS];
         for (size_t i = 0; i < fields.size(); ++i) {
-            auto field = fields[i];
+            auto& field = fields[i];
 
-            std::string name = field[J_FIELD_NAME];
+            std::string name = field[J_FIELD_NAME].get<std::string>();
             VaribleDataPtr bin = std::make_shared<VaribleData>();
             bin->data_ = field[J_CHUNK_DATA].get<std::vector<uint8_t>>();
             bin->offset_ = field[J_CHUNK_OFFSETS].get<std::vector<int64_t>>();
@@ -358,13 +465,12 @@ ScriptCodec::Decode(milvus::json& json_obj, DataChunkPtr& data_chunk) {
 
 Status
 ScriptCodec::Decode(milvus::json& json_obj, IDNumbers& id_array) {
-    milvus::json ids = json_obj[J_ID_ARRAY];
-    for (size_t i = 0; i < ids.size(); ++i) {
-        auto id = ids[i].get<idx_t>();
-        id_array.push_back(id);
+    if (json_obj.find(J_ID_ARRAY) != json_obj.end()) {
+        id_array = json_obj[J_ID_ARRAY].get<IDNumbers>();
+        return Status::OK();
     }
 
-    return Status::OK();
+    return Status(DB_ERROR, "element doesn't exist");
 }
 
 Status
@@ -379,6 +485,100 @@ ScriptCodec::DecodeSegmentID(milvus::json& json_obj, int64_t& segment_id) {
 
 Status
 ScriptCodec::Decode(milvus::json& json_obj, query::QueryPtr& query_ptr) {
+    query_ptr = std::make_shared<query::Query>();
+    DecodeCollectionName(json_obj, query_ptr->collection_id);
+    DecodeFieldNames(json_obj, query_ptr->field_names);
+    if (json_obj.find(J_PARTITIONS) != json_obj.end()) {
+        query_ptr->partitions = json_obj[J_PARTITIONS].get<std::vector<std::string>>();
+    }
+    if (json_obj.find(J_FIELDS) != json_obj.end()) {
+        query_ptr->index_fields = json_obj[J_FIELDS].get<std::set<std::string>>();
+    }
+
+    if (json_obj.find(J_METRIC_TYPES) != json_obj.end()) {
+        milvus::json& metrics = json_obj[J_METRIC_TYPES];
+        for (size_t i = 0; i < metrics.size(); ++i) {
+            milvus::json& metric = metrics[i];
+            std::string field_name = metric[J_FIELD_NAME];
+            std::string metric_type = metric[J_METRIC_TYPE];
+            query_ptr->metric_types.insert(std::make_pair(field_name, metric_type));
+        }
+    }
+
+    // vector queries
+    if (json_obj.find(J_VECTOR_QUERIES) != json_obj.end()) {
+        milvus::json& vector_queries = json_obj[J_VECTOR_QUERIES];
+        for (size_t i = 0; i < vector_queries.size(); ++i) {
+            milvus::json& vector_query = vector_queries[i];
+            std::string key = vector_query[J_KEY];
+
+            milvus::query::VectorQueryPtr query = std::make_shared<milvus::query::VectorQuery>();
+            query->field_name = vector_query[J_FIELD_NAME];
+            query->extra_params = vector_query[J_PARAMS];
+            query->topk = vector_query[J_TOPK];
+            query->nq = vector_query[J_NQ];
+            query->metric_type = vector_query[J_METRIC_TYPE];
+            query->boost = vector_query[J_BOOST];
+            query->query_vector.float_data = vector_query[J_FLOAT_DATA].get<std::vector<float>>();
+            query->query_vector.binary_data = vector_query[J_BIN_DATA].get<std::vector<uint8_t>>();
+
+            query_ptr->vectors.insert(std::make_pair(key, query));
+        }
+    }
+
+    // general query
+    if (json_obj.find(J_GENERAL_QUERY) != json_obj.end()) {
+        milvus::json& json_query = json_obj[J_GENERAL_QUERY];
+        query_ptr->root = std::make_shared<query::GeneralQuery>();
+        DecodeGeneralQuery(json_query, query_ptr->root);
+    }
+
+    return Status::OK();
+}
+
+Status
+ScriptCodec::DecodeGeneralQuery(milvus::json& json_obj, query::GeneralQueryPtr& query) {
+    if (query == nullptr) {
+        return Status::OK();
+    }
+
+    if (json_obj.find(J_QUERY_LEAF) != json_obj.end()) {
+        milvus::json& json_leaf = json_obj[J_QUERY_LEAF];
+        query->leaf = std::make_shared<query::LeafQuery>();
+        query->leaf->vector_placeholder = json_leaf[J_QUERY_PLACEHOLDER];
+        query->leaf->query_boost = json_leaf[J_BOOST];
+
+        if (json_leaf.find(J_QUERY_TERM) != json_leaf.end()) {
+            milvus::json& json_term = json_leaf[J_QUERY_TERM];
+            query->leaf->term_query = std::make_shared<query::TermQuery>();
+            query->leaf->term_query->json_obj = json_term[J_PARAMS];
+        }
+        if (json_leaf.find(J_QUERY_RANGE) != json_leaf.end()) {
+            milvus::json& json_range = json_leaf[J_QUERY_RANGE];
+            query->leaf->range_query = std::make_shared<query::RangeQuery>();
+            query->leaf->range_query->json_obj = json_range[J_PARAMS];
+        }
+    }
+
+    if (json_obj.find(J_QUERY_BIN) != json_obj.end()) {
+        milvus::json& json_bin = json_obj[J_QUERY_BIN];
+        query->bin = std::make_shared<query::BinaryQuery>();
+        query->bin->relation = json_bin[J_QUERY_RELATION];
+        query->bin->query_boost = json_bin[J_BOOST];
+
+        if (json_bin.find(J_QUERY_LEFT) != json_bin.end()) {
+            milvus::json& json_left = json_bin[J_QUERY_LEFT];
+            query->bin->left_query = std::make_shared<query::GeneralQuery>();
+            DecodeGeneralQuery(json_left, query->bin->left_query);
+        }
+
+        if (json_bin.find(J_QUERY_RIGHT) != json_bin.end()) {
+            milvus::json& json_right = json_bin[J_QUERY_RIGHT];
+            query->bin->right_query = std::make_shared<query::GeneralQuery>();
+            DecodeGeneralQuery(json_right, query->bin->right_query);
+        }
+    }
+
     return Status::OK();
 }
 
