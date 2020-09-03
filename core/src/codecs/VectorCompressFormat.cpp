@@ -90,7 +90,7 @@ VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::stri
 
         fs_ptr->writer_ptr_->Write(compress->data.get(), compress->size);
 
-        WriteSum(fs_ptr, header, reinterpret_cast<char*>(compress->data.get()), compress->size);
+        WRITE_SUM(fs_ptr, header, reinterpret_cast<char*>(compress->data.get()), compress->size);
 
         fs_ptr->writer_ptr_->Close();
 

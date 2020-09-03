@@ -182,7 +182,7 @@ StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const 
             offset += sizeof(binary_length) + binary_length;
         }
         fs_ptr->writer_ptr_->Write(data.data(), data.size());
-        WriteSum(fs_ptr, header, reinterpret_cast<char*>(data.data()), data.size());
+        WRITE_SUM(fs_ptr, header, reinterpret_cast<char*>(data.data()), data.size());
         fs_ptr->writer_ptr_->Close();
 
         double span = recorder.RecordSection("End");

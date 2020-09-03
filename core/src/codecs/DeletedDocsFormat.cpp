@@ -89,7 +89,7 @@ DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string&
 
         fs_ptr->writer_ptr_->Write(deleted_docs_list.data(), num_bytes);
 
-        WriteSum(fs_ptr, header, reinterpret_cast<char*>(deleted_docs_list.data()), num_bytes);
+        WRITE_SUM(fs_ptr, header, reinterpret_cast<char*>(deleted_docs_list.data()), num_bytes);
 
         fs_ptr->writer_ptr_->Close();
         //        WRITE_SUM(fs_ptr, full_file_path);

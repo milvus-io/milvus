@@ -19,7 +19,7 @@
 const char* MAGIC = "Milvus";
 const int64_t MAGIC_SIZE = 6;
 const int64_t HEADER_SIZE = 4090;
-const int64_t SUM_SIZE = 16;
+const int64_t SUM_SIZE = sizeof(uint32_t);
 
 bool
 validate(std::string s) {

@@ -223,7 +223,7 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
         }
 
         fs_ptr->writer_ptr_->Write(data.data(), data.size());
-        WriteSum(fs_ptr, header, reinterpret_cast<char*>(data.data()), data.size());
+        WRITE_SUM(fs_ptr, header, reinterpret_cast<char*>(data.data()), data.size());
 
         fs_ptr->writer_ptr_->Close();
 

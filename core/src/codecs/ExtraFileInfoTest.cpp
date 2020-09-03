@@ -57,7 +57,7 @@ TEST_F(ExtraFileInfoTest, WriteFileTest) {
 
     fs_ptr->writer_ptr_->Write(raw.data(), num_bytes);
 
-    WriteSum(fs_ptr, header, raw.data(), num_bytes);
+    WRITE_SUM(fs_ptr, header, raw.data(), num_bytes);
     fs_ptr->writer_ptr_->Close();
 
     if (!fs_ptr->reader_ptr_->Open(file_path.c_str())) {
