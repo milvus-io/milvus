@@ -60,13 +60,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-//    ADD_DEFAULT_CORS(State)
-//
-//    ENDPOINT("GET", "/state", State) {
-//        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/state\'");
-//        tr.ElapseFromBegin("Total cost ");
-//        return createDtoResponse(Status::CODE_200, StatusDto::createShared());
-//    }
+    ADD_DEFAULT_CORS(State)
+
+    ENDPOINT("GET", "/state", State) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/state\'");
+        tr.ElapseFromBegin("Total cost ");
+        return createDtoResponse(Status::CODE_200, StatusDto::createShared());
+    }
 
     ADD_DEFAULT_CORS(GetDevices)
 
