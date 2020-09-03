@@ -34,8 +34,6 @@ extern const char* WAL_DEL_FILE_NAME;
 
 class WalManager {
  public:
-    WalManager();
-
     static WalManager&
     GetInstance();
 
@@ -58,6 +56,8 @@ class WalManager {
     Recovery(const DBPtr& db);
 
  private:
+    WalManager();
+
     Status
     Init();
 
