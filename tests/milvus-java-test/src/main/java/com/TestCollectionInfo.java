@@ -25,7 +25,7 @@ public class TestCollectionInfo {
         System.out.println(res.getMessage());
         JSONObject collectionInfo = Utils.getCollectionInfo(res.getMessage());
         int rowCount = collectionInfo.getIntValue("row_count");
-        assert(rowCount == nb-1);
+        assert(rowCount == nb - 1);
     }
 
     // case-02
