@@ -27,10 +27,10 @@ const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 constexpr int64_t COLLECTION_DIMENSION = 64;
 constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ENTITY_COUNT = 6000;
+constexpr int64_t BATCH_ENTITY_COUNT = 10000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
-constexpr int64_t NPROBE = 2050;
+constexpr int64_t NPROBE = 1000;
 constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
 constexpr int64_t ADD_ENTITY_LOOP = 1;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
@@ -113,7 +113,7 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     field_ptr4->extra_params = extra_params_4.dump();
 
     JSON extra_params;
-    extra_params["segment_row_count"] = 1024;
+    extra_params["segment_row_count"] = 50000;
     extra_params["auto_id"] = false;
     milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr3, field_ptr4}};
 
