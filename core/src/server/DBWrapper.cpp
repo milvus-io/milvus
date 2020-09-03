@@ -16,14 +16,10 @@
 #include <string>
 #include <vector>
 
-#include <faiss/Clustering.h>
-#include <faiss/utils/distances.h>
-
 #include "config/ServerConfig.h"
 #include "db/DBFactory.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "utils/CommonUtil.h"
-#include "utils/ConfigUtils.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 
