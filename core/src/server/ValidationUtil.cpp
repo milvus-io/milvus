@@ -116,7 +116,7 @@ ValidateCollectionName(const std::string& collection_name) {
     int64_t table_name_size = collection_name.size();
     for (int64_t i = 1; i < table_name_size; ++i) {
         char name_char = collection_name[i];
-        if (name_char != '_' && std::isalnum(name_char) == 0) {
+        if (name_char != '_' && name_char != '$' && std::isalnum(name_char) == 0) {
             std::string msg = invalid_msg + "Collection name can only contain numbers, letters, and underscores.";
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_COLLECTION_NAME, msg);
@@ -424,6 +424,40 @@ ValidateSearchTopk(int64_t top_k) {
 Status
 ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
     for (const std::string& tag : partition_tags) {
+        // Partition nametag shouldn't be empty.
+        if (tag.empty()) {
+            std::string msg = "Partition tag should not be empty.";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_PARTITION_TAG, msg);
+        }
+
+        std::string invalid_msg = "Invalid partition tag: " + tag + ". ";
+        // Partition tag size shouldn't exceed 255.
+        if (tag.size() > engine::MAX_NAME_LENGTH) {
+            std::string msg = invalid_msg + "The length of a partition tag must be less than 255 characters.";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_PARTITION_TAG, msg);
+        }
+
+        // Partition tag first character should be underscore or character.
+        char first_char = tag[0];
+        if (first_char != '_' && std::isalnum(first_char) == 0) {
+            std::string msg = invalid_msg + "The first character of a partition tag must be an underscore or letter.";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_PARTITION_TAG, msg);
+        }
+
+        int64_t tag_size = tag.size();
+        for (int64_t i = 1; i < tag_size; ++i) {
+            char name_char = tag[i];
+            if (name_char != '_' && name_char != '$' && std::isalnum(name_char) == 0) {
+                std::string msg = invalid_msg + "Partition tag can only contain numbers, letters, and underscores.";
+                LOG_SERVER_ERROR_ << msg;
+                return Status(SERVER_INVALID_PARTITION_TAG, msg);
+            }
+        }
+
+#if 0
         // trim side-blank of tag, only compare valid characters
         // for example: " ab cd " is treated as "ab cd"
         std::string valid_tag = tag;
@@ -441,18 +475,7 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_PARTITION_TAG, msg);
         }
-    }
-
-    return Status::OK();
-}
-
-Status
-ValidateInsertDataSize(const engine::DataChunkPtr& data) {
-    int64_t chunk_size = engine::utils::GetSizeOfChunk(data);
-    if (chunk_size > engine::MAX_INSERT_DATA_SIZE) {
-        std::string msg = "The amount of data inserted each time cannot exceed " +
-                          std::to_string(engine::MAX_INSERT_DATA_SIZE / engine::MB) + " MB";
-        return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
+#endif
     }
 
     return Status::OK();
