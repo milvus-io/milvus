@@ -1,22 +1,23 @@
 package com;
 
-import com.sun.xml.internal.bind.v2.runtime.reflect.opt.Const;
 import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 import java.util.List;
+import java.nio.ByteBuffer;
 
 public class TestCollectionCount_v2 {
     int segmentRowCount = 5000;
     int dimension = Constants.dimension;
     int nb = Constants.nb;
+    List<List<Float>> vectors = Constants.vectors;
+    List<ByteBuffer> vectorsBinary = Constants.vectorsBinary;
 
     // case-04
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testCollectionCount(MilvusClient client, String collectionName) throws InterruptedException {
 
-        InsertParam insertParam =
-                Utils.genDefaultInsertParam(collectionName, Constants.dimension, Constants.nb, Constants.vectors);
+        InsertParam insertParam = Utils.genDefaultInsertParam(collectionName, dimension, nb, vectors);
         InsertResponse insertResponse = client.insert(insertParam);
         // Insert returns a list of entity ids that you will be using (if you did not supply the yourself) to reference the entities you just inserted
         List<Long> vectorIds = insertResponse.getEntityIds();
@@ -30,8 +31,7 @@ public class TestCollectionCount_v2 {
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testCollectionCountBinary(MilvusClient client, String collectionName) throws InterruptedException {
         // Add vectors
-        InsertParam insertParam = Utils.genDefaultBinaryInsertParam(collectionName, Constants.dimension, Constants.nb,
-                                                                    Constants.vectorsBinary);
+        InsertParam insertParam = Utils.genDefaultBinaryInsertParam(collectionName, dimension, nb, vectorsBinary);
         client.insert(insertParam);
         client.flush(collectionName);
         Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
@@ -49,8 +49,7 @@ public class TestCollectionCount_v2 {
             Response createRes = client.createCollection(collectionSchema);
             Assert.assertEquals(createRes.ok(), true);
             // Add vectors
-            InsertParam insertParam = Utils.genDefaultInsertParam(collectionNameNew, Constants.dimension, Constants.nb,
-                                                                  Constants.vectors);
+            InsertParam insertParam = Utils.genDefaultInsertParam(collectionNameNew, dimension, nb, vectors);
             InsertResponse insertRes = client.insert(insertParam);
             Assert.assertEquals(insertRes.ok(), true);
             Response flushRes = client.flush(collectionNameNew);
