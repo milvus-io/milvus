@@ -10,7 +10,7 @@ from utils import *
 dim = 128
 segment_row_count = 100000
 nb = 6000
-tag = "1970-01-01"
+tag = "1970_01_01"
 field_name = default_float_vec_field_name
 binary_field_name = default_binary_vec_field_name
 collection_id = "list_id_in_segment"
