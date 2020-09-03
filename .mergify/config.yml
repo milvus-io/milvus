@@ -20,6 +20,9 @@ pull_request_rules:
       conditions:
         - "label=automerge"
         - "label=skip-ci"
+        - "#approved-reviews-by>=1"
+        - "#review-requested=0"
+        - "#changes-requested-reviews-by=0"
         - "status-success=DCO"
         - "status-success=Codacy/PR Quality Review"
       actions:
