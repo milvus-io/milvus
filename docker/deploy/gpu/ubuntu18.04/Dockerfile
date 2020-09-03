@@ -9,6 +9,8 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
+FROM milvusdb/milvus-dev:amd64-ubuntu-18.04-core AS openblas
+
 FROM nvidia/cuda:10.1-devel-ubuntu18.04
 
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
@@ -25,7 +27,6 @@ RUN ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so /usr/lib/x86_64-linux-gnu/
 COPY ./milvus /var/lib/milvus
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/var/lib/milvus/lib"
 
-FROM milvusdb/milvus-dev:amd64-ubuntu-18.04-core AS openblas
 COPY --from=openblas /usr/lib/libopenblas*.so* /var/lib/milvus/lib/
 
 WORKDIR /var/lib/milvus
