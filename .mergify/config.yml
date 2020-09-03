@@ -1,5 +1,5 @@
 pull_request_rules:
-    - name: Automatic merge on approval
+    - name: Automatic merge on approval if CI is passed
       conditions:
         - "label=automerge"
         - "#approved-reviews-by>=1"
@@ -12,6 +12,16 @@ pull_request_rules:
         - "status-success=Codacy/PR Quality Review"
         - "status-success=Cpplint / Milvus CppLint"
         - "status-success=Cpplint / Milvus GPU Version CppLint"
+      actions:
+        merge:
+          method: squash
+
+    - name: Automatic merge on approval if CI is skipped
+      conditions:
+        - "label=automerge"
+        - "label=skip-ci"
+        - "status-success=DCO"
+        - "status-success=Codacy/PR Quality Review"
       actions:
         merge:
           method: squash
