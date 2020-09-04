@@ -8,6 +8,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Feature
 -   \#3213 Allow users to specify a distance type at runtime for Flat index
 -   \#3254 Allow more choices for the parameter ‘m’ of CPU IVF_PQ
+-   \#3606 Searching auto turn into CPU when the parameter 'nprobe' of IVF is larger than 2048
 
 ## Improvement
 
