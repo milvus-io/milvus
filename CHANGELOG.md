@@ -36,6 +36,8 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3453 Fix server crashed during stability test
 -   \#3482 Server crashed during adding entities
 -   \#3490 Fix ut DBTest.DeleteEntitiesTest assert fail
+-   \#3511 SearchTask::nq() should not return 0
+-   \#3514 Search failed with regex tag name
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
