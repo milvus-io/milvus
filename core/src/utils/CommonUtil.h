@@ -41,6 +41,9 @@ class CommonUtil {
                   const std::string& format = "%d-%d-%d %d:%d:%d");
 
     static void
+    GetCurrentTimeStr(std::string& time_str);
+
+    static void
     ConvertTime(time_t time_integer, tm& time_struct);
     static void
     ConvertTime(tm time_struct, time_t& time_integer);

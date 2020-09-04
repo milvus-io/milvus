@@ -56,10 +56,15 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
+    // wal
     opt.wal_enable_ = config.wal.enable();
     if (opt.wal_enable_) {
         opt.wal_path_ = config.wal.path();
     }
+
+    // transcript
+    opt.transcript_enable_ = config.transcript.enable();
+    opt.replay_script_path_ = config.transcript.replay();
 
     // engine config
     int64_t omp_thread = config.engine.omp_thread_num();

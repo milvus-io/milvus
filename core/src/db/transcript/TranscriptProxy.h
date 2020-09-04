@@ -12,6 +12,7 @@
 #pragma once
 
 #include "db/DBProxy.h"
+#include "db/transcript/ScriptRecorder.h"
 
 #include <memory>
 #include <string>
@@ -23,6 +24,11 @@ namespace engine {
 class TranscriptProxy : public DBProxy {
  public:
     TranscriptProxy(const DBPtr& db, const DBOptions& options);
+
+    ScriptRecorderPtr
+    GetScriptRecorder() const {
+        return recorder_;
+    }
 
     Status
     Start() override;
@@ -106,6 +112,7 @@ class TranscriptProxy : public DBProxy {
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) override;
 
  private:
+    ScriptRecorderPtr recorder_;
 };
 
 }  // namespace engine
