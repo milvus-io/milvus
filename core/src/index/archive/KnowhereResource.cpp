@@ -13,10 +13,13 @@
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
+#include <faiss/Clustering.h>
+#include <faiss/utils/distances.h>
 
 #include "config/ServerConfig.h"
 #include "faiss/FaissHook.h"
 #include "scheduler/Utils.h"
+#include "utils/ConfigUtils.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
 
@@ -58,6 +61,35 @@ KnowhereResource::Initialize() {
         LOG_ENGINE_DEBUG_ << "FAISS hook " << cpu_flag;
     } else {
         return Status(KNOWHERE_UNEXPECTED_ERROR, "FAISS hook fail, CPU not supported!");
+    }
+
+    // engine config
+    int64_t omp_thread = config.engine.omp_thread_num();
+
+    if (omp_thread > 0) {
+        omp_set_num_threads(omp_thread);
+        LOG_SERVER_DEBUG_ << "Specify openmp thread number: " << omp_thread;
+    } else {
+        int64_t sys_thread_cnt = 8;
+        if (milvus::server::GetSystemAvailableThreads(sys_thread_cnt)) {
+            omp_thread = static_cast<int32_t>(ceil(sys_thread_cnt * 0.5));
+            omp_set_num_threads(omp_thread);
+        }
+    }
+
+    // init faiss global variable
+    int64_t use_blas_threshold = config.engine.use_blas_threshold();
+    faiss::distance_compute_blas_threshold = use_blas_threshold;
+
+    int64_t clustering_type = config.engine.clustering_type();
+    switch (clustering_type) {
+        case ClusteringType::K_MEANS:
+        default:
+            faiss::clustering_type = faiss::ClusteringType::K_MEANS;
+            break;
+        case ClusteringType::K_MEANS_PLUS_PLUS:
+            faiss::clustering_type = faiss::ClusteringType::K_MEANS_PLUS_PLUS;
+            break;
     }
 
 #ifdef MILVUS_GPU_VERSION

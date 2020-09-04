@@ -90,7 +90,11 @@ InsertReq::OnExecute() {
         }
 
         // step 5: return entity id to client
-        chunk_data_[engine::FIELD_UID] = data_chunk->fixed_fields_[engine::FIELD_UID]->data_;
+        auto iter = data_chunk->fixed_fields_.find(engine::FIELD_UID);
+        if (iter == data_chunk->fixed_fields_.end() || iter->second == nullptr) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Insert action return empty id array");
+        }
+        chunk_data_[engine::FIELD_UID] = iter->second->data_;
 
         rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {

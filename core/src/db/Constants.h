@@ -29,6 +29,7 @@ constexpr int32_t MAX_SEGMENT_ROW_COUNT = 4 * 1024 * 1024;  // max row count of 
 constexpr int64_t DEFAULT_SEGMENT_ROW_COUNT = 512 * 1024;   // default row count per segment when creating collection
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * MB;          // max data size in one insert action
 constexpr int64_t MAX_WAL_FILE_SIZE = 256 * MB;             // max file size of wal file
+constexpr int64_t MAX_SCRIPT_FILE_SIZE = 256 * MB;          // max file size of transcript file
 
 constexpr int64_t BUILD_INEDX_RETRY_TIMES = 3;  // retry times if build index failed
 

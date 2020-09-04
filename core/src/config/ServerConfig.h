@@ -171,6 +171,11 @@ struct ServerConfig {
             Bool enable{false};
         } lock;
     } system;
+
+    struct Transcript {
+        Bool enable{false};
+        String replay{""};
+    } transcript;
 };
 
 extern ServerConfig config;
