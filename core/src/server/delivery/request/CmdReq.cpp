@@ -44,8 +44,6 @@ CmdReq::OnExecute() {
         result_ = MILVUS_VERSION;
     } else if (cmd_ == "status") {
         result_ = "OK";
-    } else if (cmd_ == "tasktable") {
-        result_ = scheduler::ResMgrInst::GetInstance()->DumpTaskTables();
     } else if (cmd_ == "mode") {
 #ifdef MILVUS_GPU_VERSION
         result_ = "GPU";
