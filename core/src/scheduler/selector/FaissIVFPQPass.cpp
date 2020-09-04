@@ -12,6 +12,8 @@
 #include "scheduler/selector/FaissIVFPQPass.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/ServerConfig.h"
+#include "faiss/gpu/utils/DeviceUtils.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
@@ -47,6 +49,9 @@ FaissIVFPQPass::Run(const TaskPtr& task) {
     }
 
     auto search_task = std::static_pointer_cast<SearchTask>(task);
+    if (search_task->IndexType() != knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
+        return false;
+    }
 
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
@@ -54,6 +59,10 @@ FaissIVFPQPass::Run(const TaskPtr& task) {
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_task->nq() < threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFPQPass: nq < gpu_search_threshold, specify cpu to search!");
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else if (search_task->ExtraParam()[knowhere::IndexParams::nprobe].get<int64_t>() >
+               faiss::gpu::getMaxKSelection()) {
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFFlatPass: nprobe > gpu_max_nprobe_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFPQPass: nq >= gpu_search_threshold, specify gpu %d to search!",
