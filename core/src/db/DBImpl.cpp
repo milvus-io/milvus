@@ -35,6 +35,7 @@
 #include "scheduler/job/SearchJob.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
+#include "server/ValidationUtil.h"
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
@@ -300,6 +301,7 @@ DBImpl::HasPartition(const std::string& collection_name, const std::string& part
     CHECK_INITIALIZED;
 
     snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(server::ValidatePartitionTags({partition_tag}));
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     auto partition_tags = std::move(ss->GetPartitionNames());

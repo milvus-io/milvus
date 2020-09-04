@@ -182,6 +182,12 @@ ConfigMgr::ConfigMgr() {
 
         {"system.lock.enable",
          CreateBoolConfig("system.lock.enable", false, &config.system.lock.enable.value, true, nullptr, nullptr)},
+
+        /* transcript */
+        {"transcript.enable",
+         CreateBoolConfig("transcript.enable", false, &config.transcript.enable.value, false, nullptr, nullptr)},
+        {"transcript.replay",
+         CreateStringConfig("transcript.replay", false, &config.transcript.replay.value, "", nullptr, nullptr)},
     };
 }
 

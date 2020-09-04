@@ -228,7 +228,8 @@ class TestListIdInSegmentBase:
         ids, seg_id = get_segment_id(connect, collection, nb=nb, index_params=get_simple_index)
         vector_ids = connect.list_id_in_segment(collection, seg_id)
         # TODO: 
-        assert vector_ids == ids
+        segment_row_count = connect.get_collection_info(collection)["segment_row_count"]
+        assert vector_ids == ids[0:segment_row_count]
 
 
 class TestListIdInSegmentBinary:

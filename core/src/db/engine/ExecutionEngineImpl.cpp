@@ -411,6 +411,16 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
                     return Status{SERVER_INVALID_ARGUMENT, msg};
                 }
             }
+            // TODO(yukun): optimize
+            if (general_query->bin->is_not) {
+                for (uint64_t i = 0; i < entity_count_; ++i) {
+                    if (bitset->test(i)) {
+                        bitset->clear(i);
+                    } else {
+                        bitset->set(i);
+                    }
+                }
+            }
         }
         return status;
     } else {
