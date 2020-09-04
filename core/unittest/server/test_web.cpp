@@ -335,7 +335,7 @@ class WebControllerTest : public ::testing::Test {
         auto& config = milvus::ConfigMgr::GetInstance();
 
 //        milvus::ConfigMgr::GetInstance().Init();
-        config.Load(config_path);
+        config.LoadFile(config_path);
 //        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "mock://:@:/");
 
         milvus::engine::snapshot::Snapshots::GetInstance().StartService();
@@ -373,7 +373,7 @@ class WebControllerTest : public ::testing::Test {
         fs.flush();
         fs.close();
 
-        milvus::ConfigMgr::GetInstance().Load(config_path);
+        milvus::ConfigMgr::GetInstance().LoadFile(config_path);
 
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
         OATPP_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, objectMapper);

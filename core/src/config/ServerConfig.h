@@ -173,7 +173,6 @@ struct ServerConfig {
 };
 
 extern ServerConfig config;
-extern std::mutex _config_mutex;
 
 std::vector<std::string>
 ParsePreloadCollection(const std::string&);

@@ -17,24 +17,29 @@ namespace milvus::server {
 
 Status
 Timezone::SetTimezone(std::string time_zone) {
-    if (time_zone.length() == 3) {
-        time_zone = "CUT";
-    } else {
-        int time_bias = std::stoi(time_zone.substr(3, std::string::npos));
-        if (time_bias == 0) {
+    try {
+        if (time_zone.length() == 3) {
             time_zone = "CUT";
-        } else if (time_bias > 0) {
-            time_zone = "CUT" + std::to_string(-time_bias);
         } else {
-            time_zone = "CUT+" + std::to_string(-time_bias);
+            int time_bias = std::stoi(time_zone.substr(3, std::string::npos));
+            if (time_bias == 0) {
+                time_zone = "CUT";
+            } else if (time_bias > 0) {
+                time_zone = "CUT" + std::to_string(-time_bias);
+            } else {
+                time_zone = "CUT+" + std::to_string(-time_bias);
+            }
         }
-    }
 
-    if (setenv("TZ", time_zone.c_str(), 1) != 0) {
-        return Status(SERVER_UNEXPECTED_ERROR, "Fail to setenv");
-    }
-    tzset();
+        if (setenv("TZ", time_zone.c_str(), 1) != 0) {
+            std::string msg = "Cannot set timezone: " + time_zone + ", setenv failed.";
+            return Status(SERVER_UNEXPECTED_ERROR, msg);
+        }
+        tzset();
 
-    return Status::OK();
+        return Status::OK();
+    } catch (...) {
+        return Status(SERVER_UNEXPECTED_ERROR, "Cannot set timezone: " + time_zone);
+    }
 }
 }  // namespace milvus::server
