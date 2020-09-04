@@ -24,6 +24,10 @@ class ScriptReplay {
 
     Status
     Replay(const DBPtr& db, const std::string& replay_script_path);
+
+ private:
+    Status
+    PerformAction(const DBPtr& db, const std::string& str_action);
 };
 
 }  // namespace engine

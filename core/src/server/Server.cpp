@@ -188,6 +188,7 @@ Server::Start() {
 #else
         LOG_SERVER_INFO_ << "CPU edition";
 #endif
+        LOG_ENGINE_INFO_ << "Last commit id: " << LAST_COMMIT_ID;
         STATUS_CHECK(CpuChecker::CheckCpuInstructionSet());
 #ifdef MILVUS_GPU_VERSION
         STATUS_CHECK(GpuChecker::CheckGpuEnvironment());

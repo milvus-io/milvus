@@ -1,6 +1,9 @@
 package com;
 
+import com.alibaba.fastjson.JSONObject;
+
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -21,6 +24,8 @@ public final class Constants {
     public static final double epsilon = 0.001;
 
     public static final String vectorType = "float";
+
+    public static final String binaryVectorType = "binary";
 
     public static final String defaultMetricType = "L2";
 

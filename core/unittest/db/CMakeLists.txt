@@ -17,6 +17,7 @@ set( TEST_FILES ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_meta.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_event.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_transcript.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_wal.cpp
                 )
 

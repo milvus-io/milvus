@@ -11,47 +11,49 @@
 
 #pragma once
 
+#include "db/Types.h"
+#include "utils/Status.h"
+
 #include <fstream>
 #include <memory>
+#include <ostream>
 #include <string>
-#include "storage/IOWriter.h"
 
 namespace milvus {
-namespace storage {
+namespace engine {
 
-class DiskIOWriter : public IOWriter {
+class ScriptFile {
  public:
-    DiskIOWriter() = default;
-    ~DiskIOWriter() = default;
+    ScriptFile() = default;
+    virtual ~ScriptFile();
 
-    // No copy and move
-    DiskIOWriter(const DiskIOWriter&) = delete;
-    DiskIOWriter(DiskIOWriter&&) = delete;
+    Status
+    OpenWrite(const std::string& path);
 
-    DiskIOWriter&
-    operator=(const DiskIOWriter&) = delete;
-    DiskIOWriter&
-    operator=(DiskIOWriter&&) = delete;
+    Status
+    OpenRead(const std::string& path);
+
+    Status
+    WriteLine(const std::string& str);
 
     bool
-    Open(const std::string& name) override;
+    ReadLine(std::string& str);
 
-    void
-    Write(const void* ptr, int64_t size) override;
+    bool
+    ExceedMaxSize(int64_t append_size);
 
-    int64_t
-    Length() override;
+ private:
+    Status
+    CloseFile();
 
-    void
-    Close() override;
+ private:
+    std::ifstream reader_;
+    std::ofstream writer_;
 
- public:
-    std::string name_;
-    int64_t len_;
-    std::fstream fs_;
+    int64_t file_size_ = 0;
 };
 
-using DiskIOWriterPtr = std::shared_ptr<DiskIOWriter>;
+using ScriptFilePtr = std::shared_ptr<ScriptFile>;
 
-}  // namespace storage
+}  // namespace engine
 }  // namespace milvus
