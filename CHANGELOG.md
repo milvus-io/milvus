@@ -31,6 +31,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2957 There is no exisitence check of annoy search parameter
 -   \#3406 No debug and info log generated after server started
 -   \#3407 Server get stuck if create index after entities inserted with no manual flush
+-   \#3427 Error should be specified if searching a collection not existed
 -   \#3446 ListIDInSegment get wrong result when delete more than one ids
 -   \#3448 RHNSWFlatTest failed
 -   \#3453 Fix server crashed during stability test
