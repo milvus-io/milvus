@@ -13,9 +13,6 @@
 
 #include <gtest/gtest.h>
 
-static const char* CONFIG_PATH = "/tmp/milvus_test/";
-static const char* CONFIG_FILE = "milvus.yaml";
-
 class StorageTest : public ::testing::Test {
  protected:
     void

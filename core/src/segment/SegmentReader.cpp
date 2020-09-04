@@ -23,6 +23,7 @@
 
 #include "cache/CpuCacheMgr.h"
 #include "codecs/Codec.h"
+#include "config/ServerConfig.h"
 #include "db/SnapshotUtils.h"
 #include "db/Types.h"
 #include "db/Utils.h"
@@ -33,6 +34,9 @@
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
+#include "storage/s3/S3IOReader.h"
+#include "storage/s3/S3IOWriter.h"
+#include "storage/s3/S3Operation.h"
 #include "utils/Log.h"
 
 namespace milvus {
@@ -50,9 +54,20 @@ SegmentReader::Initialize() {
     std::string directory =
         engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
 
-    storage::IOReaderPtr reader_ptr = std::make_shared<storage::DiskIOReader>();
-    storage::IOWriterPtr writer_ptr = std::make_shared<storage::DiskIOWriter>();
-    storage::OperationPtr operation_ptr = std::make_shared<storage::DiskOperation>(directory);
+    bool s3_enable = config.storage.s3_enable();
+    storage::IOReaderPtr reader_ptr;
+    storage::IOWriterPtr writer_ptr;
+    storage::OperationPtr operation_ptr;
+    if (!s3_enable) {
+        reader_ptr = std::make_shared<storage::DiskIOReader>();
+        writer_ptr = std::make_shared<storage::DiskIOWriter>();
+        operation_ptr = std::make_shared<storage::DiskOperation>(directory);
+    } else {
+        reader_ptr = std::make_shared<storage::S3IOReader>();
+        writer_ptr = std::make_shared<storage::S3IOWriter>();
+        operation_ptr = std::make_shared<storage::S3Operation>(directory);
+    }
+
     fs_ptr_ = std::make_shared<storage::FSHandler>(reader_ptr, writer_ptr, operation_ptr);
 
     segment_ptr_ = std::make_shared<engine::Segment>();

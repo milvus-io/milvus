@@ -16,14 +16,13 @@
 #include <fiu/fiu-local.h>
 #include <fiu-control.h>
 
-#include "config/Config.h"
-#include "easyloggingpp/easylogging++.h"
+// #include "easyloggingpp/easylogging++.h"
 #include "storage/s3/S3ClientWrapper.h"
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"
 #include "storage/utils.h"
 
-INITIALIZE_EASYLOGGINGPP
+// INITIALIZE_EASYLOGGINGPP
 
 TEST_F(StorageTest, S3_CLIENT_TEST) {
     fiu_init(0);
@@ -36,7 +35,7 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
     const std::string content = "abcdefghijklmnopqrstuvwxyz";
 
     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
-    fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
+    //fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
     ASSERT_TRUE(storage_inst.StartService().ok());
 
     ///////////////////////////////////////////////////////////////////////////
@@ -86,7 +85,7 @@ TEST_F(StorageTest, S3_RW_TEST) {
     const std::string content = "abcdefg";
 
     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
-    fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
+    //fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
     ASSERT_TRUE(storage_inst.StartService().ok());
 
     {

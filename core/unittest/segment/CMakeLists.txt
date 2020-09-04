@@ -11,30 +11,37 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
+include_directories(${MILVUS_ENGINE_SRC}/index)
+include_directories(${MILVUS_ENGINE_SRC}/index/unittest)
+
 set(test_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_s3_client.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_disk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_segment_rw.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
         )
 
-include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
-link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+set(index_util_files
+        ${MILVUS_ENGINE_SRC}/index/unittest/utils.cpp
+        )
 
-add_executable(test_storage
+set(util_files
+        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
+        ${MILVUS_ENGINE_SRC}/utils/Status.cpp
+        )
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-access-control")  # access to private member function
+
+add_executable(test_segment
         ${test_files}
+        ${index_util_files}
+        ${util_files}
+        ${common_files}
         )
 
-target_link_libraries(test_storage
-        ${UNITTEST_LIBS}
+target_link_libraries(test_segment
         stdc++
-        server
-        milvus_engine
+        knowhere
         metrics
-        config
-        utils
-        tracing
-        query
-        log
+        ${unittest_libs}
         )
 
-install(TARGETS test_storage DESTINATION unittest)
+install(TARGETS test_segment DESTINATION unittest)

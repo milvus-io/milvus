@@ -105,6 +105,12 @@ struct ServerConfig {
     struct Storage {
         String path{"unknown"};
         Integer auto_flush_interval{0};
+        Bool s3_enable{true};
+        String s3_address{"127.0.0.1"};
+        String s3_port{"9000"};
+        String s3_access_key{"minioadmin"};
+        String s3_secret_key{"minioadmin"};
+        String s3_bucket{"milvus-bucket"};
     } storage;
 
     struct Cache {

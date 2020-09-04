@@ -25,7 +25,7 @@
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
-#include "storage/ExtraFileInfo.h"
+//#include "storage/ExtraFileInfo.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -45,14 +45,14 @@ Status
 VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                            knowhere::BinaryPtr& data) {
     milvus::TimeRecorder recorder("VectorIndexFormat::ReadRaw");
-    CHECK_MAGIC_VALID(fs_ptr, file_path);
-    CHECK_SUM_VALID(fs_ptr, file_path);
+    //CHECK_MAGIC_VALID(fs_ptr, file_path);
+    //CHECK_SUM_VALID(fs_ptr, file_path);
 
     if (!fs_ptr->reader_ptr_->Open(file_path)) {
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open raw file: " + file_path);
     }
 
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
+    //fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
     size_t num_bytes;
     fs_ptr->reader_ptr_->Read(&num_bytes, sizeof(size_t));
 
@@ -61,7 +61,8 @@ VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::strin
     data->data = std::shared_ptr<uint8_t[]>(new uint8_t[num_bytes]);
 
     // Beginning of file is num_bytes
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE + sizeof(size_t));
+    //fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE + sizeof(size_t));
+    fs_ptr->reader_ptr_->Seekg(sizeof(size_t));
     fs_ptr->reader_ptr_->Read(data->data.get(), num_bytes);
     fs_ptr->reader_ptr_->Close();
 
@@ -78,18 +79,20 @@ VectorIndexFormat::ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::str
     milvus::TimeRecorder recorder("VectorIndexFormat::ReadIndex");
 
     std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
-    CHECK_MAGIC_VALID(fs_ptr, full_file_path);
-    CHECK_SUM_VALID(fs_ptr, full_file_path);
+    //CHECK_MAGIC_VALID(fs_ptr, full_file_path);
+    //CHECK_SUM_VALID(fs_ptr, full_file_path);
     if (!fs_ptr->reader_ptr_->Open(full_file_path)) {
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open vector index: " + full_file_path);
     }
 
-    int64_t length = fs_ptr->reader_ptr_->Length() - SUM_SIZE;
+    //int64_t length = fs_ptr->reader_ptr_->Length() - SUM_SIZE;
+    int64_t length = fs_ptr->reader_ptr_->Length();
     if (length <= 0) {
         return Status(SERVER_UNEXPECTED_ERROR, "Invalid vector index length: " + full_file_path);
     }
 
-    int64_t rp = MAGIC_SIZE + HEADER_SIZE;
+    //int64_t rp = MAGIC_SIZE + HEADER_SIZE;
+    int64_t rp = 0;
     fs_ptr->reader_ptr_->Seekg(rp);
 
     LOG_ENGINE_DEBUG_ << "Start to ReadIndex(" << full_file_path << ") length: " << length << " bytes";
@@ -189,17 +192,18 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
 
     std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
     // TODO: add extra info
-    std::unordered_map<std::string, std::string> maps;
-    WRITE_MAGIC(fs_ptr, full_file_path);
-    WRITE_HEADER(fs_ptr, full_file_path, maps);
+    //std::unordered_map<std::string, std::string> maps;
+    //WRITE_MAGIC(fs_ptr, full_file_path);
+    //WRITE_HEADER(fs_ptr, full_file_path, maps);
     auto binaryset = index->Serialize(knowhere::Config());
 
-    if (!fs_ptr->writer_ptr_->InOpen(full_file_path)) {
+    //if (!fs_ptr->writer_ptr_->InOpen(full_file_path)) {
+    if (!fs_ptr->writer_ptr_->Open(full_file_path)) {
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open vector index: " + full_file_path);
     }
 
     try {
-        fs_ptr->writer_ptr_->Seekp(MAGIC_SIZE + HEADER_SIZE);
+        //fs_ptr->writer_ptr_->Seekp(MAGIC_SIZE + HEADER_SIZE);
         for (auto& iter : binaryset.binary_map_) {
             if (iter.first == RAW_DATA || iter.first == QUANTIZATION_DATA) {
                 continue;  // the two kinds of data will be written into another file
@@ -217,7 +221,7 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
         }
         fs_ptr->writer_ptr_->Close();
 
-        WRITE_SUM(fs_ptr, full_file_path);
+        //WRITE_SUM(fs_ptr, full_file_path);
 
         double span = recorder.RecordSection("End");
         double rate = fs_ptr->writer_ptr_->Length() * 1000000.0 / span / 1024 / 1024;

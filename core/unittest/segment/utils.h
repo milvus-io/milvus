@@ -9,17 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <fstream>
-#include <string>
+#pragma once
 
-#include "config/ServerConfig.h"
-#include "storage/utils.h"
-#include "utils/CommonUtil.h"
+#include <gtest/gtest.h>
 
-void
-StorageTest::SetUp() {
-}
+static const char* CONFIG_PATH = "/tmp/milvus_test/";
+static const char* CONFIG_FILE = "server_config.yaml";
 
-void
-StorageTest::TearDown() {
-}
+class SegmentTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};

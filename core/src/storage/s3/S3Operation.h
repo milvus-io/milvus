@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -26,36 +25,30 @@
 namespace milvus {
 namespace storage {
 
-class DiskOperation : public Operation {
+class S3Operation : public Operation {
  public:
-    explicit DiskOperation(const std::string& dir_path);
+    explicit S3Operation(const std::string& dir_path);
 
     void
-    CreateDirectory();
+    CreateDirectory() override;
 
     const std::string&
-    GetDirectory() const;
+    GetDirectory() const override;
 
     void
-    ListDirectory(std::vector<std::string>& file_paths);
+    ListDirectory(std::vector<std::string>& file_paths) override;
 
     bool
-    DeleteFile(const std::string& file_path);
+    DeleteFile(const std::string& file_path) override;
 
     bool
     Move(const std::string& tar_name, const std::string& src_name) override;
-
-    // TODO(zhiru):
-    //  open(), sync(), close()
-    //  function that opens a stream for reading file
-    //  function that creates a new, empty file and returns an stream for appending data to this file
-    //  function that creates a new, empty, temporary file and returns an stream for appending data to this file
 
  private:
     const std::string dir_path_;
 };
 
-using DiskOperationPtr = std::shared_ptr<DiskOperation>;
+using S3OperationPtr = std::shared_ptr<S3Operation>;
 
 }  // namespace storage
 }  // namespace milvus
