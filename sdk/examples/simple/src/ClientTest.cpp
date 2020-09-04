@@ -202,7 +202,7 @@ ClientTest::GetEntityByID(const std::string& collection_name, const std::vector<
 }
 
 void
-ClientTest::SearchEntities(const std::string& collection_name, int64_t topk,
+ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int64_t nprobe,
                            const std::string metric_type) {
     nlohmann::json dsl_json, vector_param_json;
     milvus_sdk::Utils::GenDSLJson(dsl_json, vector_param_json, metric_type);
