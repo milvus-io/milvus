@@ -367,7 +367,7 @@ WebRequestHandler::GetPageEntities(const std::string& collection_name, const std
         real_offset = 0;
     }
     if (segment_ids.empty()) {
-        json_out["entities"] = {};
+        json_out["entities"] = json::array();
         return Status::OK();
     }
     std::vector<std::string> field_names;
@@ -1781,7 +1781,7 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
             }
             status = GetPageEntities(collection_name->std_str(), partition_tag, page_size, offset, json_out);
             if (!status.ok()) {
-                json_out["entities"] = {};
+                json_out["entities"] = json::array();
             }
             AddStatusToJson(json_out, status.code(), status.message());
             response = json_out.dump().c_str();
