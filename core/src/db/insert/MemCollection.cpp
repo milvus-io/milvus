@@ -24,6 +24,7 @@
 #include <fiu/fiu-local.h>
 
 #include "config/ServerConfig.h"
+#include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/IterateHandler.h"
@@ -38,6 +39,7 @@ namespace engine {
 
 MemCollection::MemCollection(int64_t collection_id, const DBOptions& options)
     : collection_id_(collection_id), options_(options) {
+    GetSegmentRowCount(collection_id_, segment_row_count_);
 }
 
 Status
@@ -55,7 +57,9 @@ MemCollection::Add(int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id)
     int64_t chunk_size = utils::GetSizeOfChunk(chunk);
 
     Status status;
-    if (current_mem_segment == nullptr || current_mem_segment->GetCurrentMem() + chunk_size > MAX_MEM_SEGMENT_SIZE) {
+    if (current_mem_segment == nullptr || chunk->count_ >= segment_row_count_ ||
+        current_mem_segment->GetCurrentRowCount() >= segment_row_count_ ||
+        current_mem_segment->GetCurrentMem() + chunk_size > MAX_MEM_SEGMENT_SIZE) {
         MemSegmentPtr new_mem_segment = std::make_shared<MemSegment>(collection_id_, partition_id, options_);
         status = new_mem_segment->Add(chunk, op_id);
         if (status.ok()) {
@@ -113,11 +117,20 @@ Status
 MemCollection::Serialize() {
     TimeRecorder recorder("MemCollection::Serialize collection " + std::to_string(collection_id_));
 
-    // apply deleted ids to exist setment files
-    auto status = ApplyDeleteToFile();
-    if (!status.ok()) {
-        LOG_ENGINE_DEBUG_ << "Failed to apply deleted ids to segment files" << status.message();
-        // Note: don't return here, continue serialize mem segments
+    // Operation ApplyDelete need retry if ss stale error found
+    while (true) {
+        auto status = ApplyDeleteToFile();
+        if (status.ok()) {
+            ids_to_delete_.clear();
+            break;
+        } else if (status.code() == SS_STALE_ERROR) {
+            LOG_ENGINE_ERROR_ << "Failed to apply deleted ids to segment files: file stale. Try again";
+            continue;
+        } else {
+            LOG_ENGINE_ERROR_ << "Failed to apply deleted ids to segment files: " << status.ToString();
+            // Note: don't return here, continue serialize mem segments
+            break;
+        }
     }
 
     // serialize mem to new segment files
@@ -142,15 +155,16 @@ MemCollection::Serialize() {
 
 Status
 MemCollection::ApplyDeleteToFile() {
+    if (ids_to_delete_.empty()) {
+        return Status::OK();
+    }
+
     // iterate each segment to delete entities
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_));
 
     snapshot::OperationContext context;
     auto segments_op = std::make_shared<snapshot::CompoundSegmentsOperation>(context, ss);
-
-    std::unordered_set<idx_t> ids_to_delete;
-    ids_to_delete.swap(ids_to_delete_);
 
     int64_t segment_iterated = 0;
     auto segment_executor = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* iterator) -> Status {
@@ -164,7 +178,7 @@ MemCollection::ApplyDeleteToFile() {
         {
             segment::IdBloomFilterPtr pre_bloom_filter;
             STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
-            for (auto& id : ids_to_delete) {
+            for (auto& id : ids_to_delete_) {
                 if (pre_bloom_filter->Check(id)) {
                     ids_to_check.insert(id);
                 }

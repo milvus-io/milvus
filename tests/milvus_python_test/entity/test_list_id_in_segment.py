@@ -10,7 +10,7 @@ from utils import *
 dim = 128
 segment_row_count = 100000
 nb = 6000
-tag = "1970-01-01"
+tag = "1970_01_01"
 field_name = default_float_vec_field_name
 binary_field_name = default_binary_vec_field_name
 collection_id = "list_id_in_segment"
@@ -228,7 +228,8 @@ class TestListIdInSegmentBase:
         ids, seg_id = get_segment_id(connect, collection, nb=nb, index_params=get_simple_index)
         vector_ids = connect.list_id_in_segment(collection, seg_id)
         # TODO: 
-        assert vector_ids == ids
+        segment_row_count = connect.get_collection_info(collection)["segment_row_count"]
+        assert vector_ids == ids[0:segment_row_count]
 
 
 class TestListIdInSegmentBinary:

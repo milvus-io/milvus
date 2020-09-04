@@ -130,6 +130,9 @@ InitConfig() {
          CreateEnumConfig("engine.simd_type", &SimdMap, &config.engine.simd_type.value, SimdType::AUTO)},
 
         {"system.lock.enable", CreateBoolConfig("system.lock.enable", &config.system.lock.enable.value, true)},
+
+        {"transcript.enable", CreateBoolConfig("transcript.enable", &config.transcript.enable.value, false)},
+        {"transcript.replay", CreateStringConfig("transcript.replay", &config.transcript.replay.value, "")},
     };
 }
 

@@ -174,7 +174,7 @@ Server::Start() {
         if (is_read_only) {
             STATUS_CHECK(Directory::Access("", "", config.logs.path()));
         } else {
-            STATUS_CHECK(Directory::Access(config.storage.path(), config.wal.path(), config.logs.path()));
+            STATUS_CHECK(Directory::Access(config.storage.path(), wal_path, config.logs.path()));
 
             if (config.system.lock.enable()) {
                 STATUS_CHECK(Directory::Lock(config.storage.path(), wal_path));
@@ -188,6 +188,7 @@ Server::Start() {
 #else
         LOG_SERVER_INFO_ << "CPU edition";
 #endif
+        LOG_ENGINE_INFO_ << "Last commit id: " << LAST_COMMIT_ID;
         STATUS_CHECK(CpuChecker::CheckCpuInstructionSet());
 #ifdef MILVUS_GPU_VERSION
         STATUS_CHECK(GpuChecker::CheckGpuEnvironment());

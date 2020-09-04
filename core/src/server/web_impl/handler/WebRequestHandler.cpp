@@ -20,8 +20,8 @@
 
 #include <fiu/fiu-local.h>
 
-#include "config/ServerConfig.h"
 #include "config/ConfigMgr.h"
+#include "config/ServerConfig.h"
 #include "db/Utils.h"
 #include "metrics/SystemInfo.h"
 #include "query/BinaryQuery.h"
@@ -1229,6 +1229,11 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     for (auto& field : json_str["fields"]) {
         FieldSchema field_schema;
         std::string field_name = field["field_name"];
+
+        if (fields.find(field_name) != fields.end()) {
+            auto status = Status(SERVER_INVALID_FIELD_NAME, "Collection mapping has duplicate field names");
+            ASSIGN_RETURN_STATUS_DTO(status)
+        }
 
         field_schema.field_params_ = field["extra_params"];
 

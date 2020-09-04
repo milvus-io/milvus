@@ -109,6 +109,7 @@ struct BinaryQuery {
     GeneralQueryPtr right_query;
     QueryRelation relation;
     float query_boost;
+    bool is_not = false;
 };
 
 struct Query {

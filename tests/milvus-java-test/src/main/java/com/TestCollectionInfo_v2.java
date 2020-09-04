@@ -1,7 +1,6 @@
 package com;
 
 import com.alibaba.fastjson.JSONObject;
-import com.sun.xml.internal.bind.v2.runtime.reflect.opt.Const;
 import io.milvus.client.*;
 import org.testng.annotations.Test;
 
@@ -17,6 +16,7 @@ public class TestCollectionInfo_v2 {
     List<ByteBuffer> vectorsBinary = Constants.vectorsBinary;
     String indexType = Constants.indexType;
     String metricType = Constants.defaultMetricType;
+    String floatFieldName = Constants.floatFieldName;
 
     // case-01
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -31,7 +31,7 @@ public class TestCollectionInfo_v2 {
         System.out.println(res.getMessage());
         JSONObject collectionInfo = Utils.getCollectionInfo(res.getMessage());
         int rowCount = collectionInfo.getIntValue("row_count");
-        assert(rowCount == nb-1);
+        assert(rowCount == nb - 1);
     }
 
     // case-02
@@ -40,7 +40,7 @@ public class TestCollectionInfo_v2 {
         InsertParam insertParam = Utils.genDefaultInsertParam(collectionName, dimension, nb, vectors);
         InsertResponse resInsert = client.insert(insertParam);
         client.flush(collectionName);
-        Index index = Utils.genDefaultIndex(collectionName, indexType, metricType, n_list);
+        Index index = Utils.genDefaultIndex(collectionName, floatFieldName, indexType, metricType, n_list);
         Response createIndexResponse = client.createIndex(index);
         assert(createIndexResponse.ok());
         List<Long> idsBefore = resInsert.getEntityIds();
