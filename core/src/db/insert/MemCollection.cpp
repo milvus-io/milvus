@@ -117,11 +117,20 @@ Status
 MemCollection::Serialize() {
     TimeRecorder recorder("MemCollection::Serialize collection " + std::to_string(collection_id_));
 
-    // apply deleted ids to exist setment files
-    auto status = ApplyDeleteToFile();
-    if (!status.ok()) {
-        LOG_ENGINE_DEBUG_ << "Failed to apply deleted ids to segment files" << status.message();
-        // Note: don't return here, continue serialize mem segments
+    // Operation ApplyDelete need retry if ss stale error found
+    while (true) {
+        auto status = ApplyDeleteToFile();
+        if (status.ok()) {
+            ids_to_delete_.clear();
+            break;
+        } else if (status.code() == SS_STALE_ERROR) {
+            LOG_ENGINE_ERROR_ << "Failed to apply deleted ids to segment files: file stale. Try again";
+            continue;
+        } else {
+            LOG_ENGINE_ERROR_ << "Failed to apply deleted ids to segment files: " << status.ToString();
+            // Note: don't return here, continue serialize mem segments
+            break;
+        }
     }
 
     // serialize mem to new segment files
@@ -146,15 +155,16 @@ MemCollection::Serialize() {
 
 Status
 MemCollection::ApplyDeleteToFile() {
+    if (ids_to_delete_.empty()) {
+        return Status::OK();
+    }
+
     // iterate each segment to delete entities
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_));
 
     snapshot::OperationContext context;
     auto segments_op = std::make_shared<snapshot::CompoundSegmentsOperation>(context, ss);
-
-    std::unordered_set<idx_t> ids_to_delete;
-    ids_to_delete.swap(ids_to_delete_);
 
     int64_t segment_iterated = 0;
     auto segment_executor = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* iterator) -> Status {
@@ -168,7 +178,7 @@ MemCollection::ApplyDeleteToFile() {
         {
             segment::IdBloomFilterPtr pre_bloom_filter;
             STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
-            for (auto& id : ids_to_delete) {
+            for (auto& id : ids_to_delete_) {
                 if (pre_bloom_filter->Check(id)) {
                     ids_to_check.insert(id);
                 }
