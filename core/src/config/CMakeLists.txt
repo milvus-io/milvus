@@ -12,7 +12,8 @@
 #-------------------------------------------------------------------------------
 
 # library
-set( CONFIG_SRCS    ConfigMgr.h
+set( CONFIG_SRCS    ConfigInit.cpp
+                    ConfigMgr.h
                     ConfigMgr.cpp
                     ConfigType.h
                     ConfigType.cpp
@@ -42,11 +43,26 @@ if ( BUILD_UNIT_TEST )
     set(GTEST_LIBS gtest gtest_main gmock gmock_main)
 
     create_executable(
+            TARGET      ConfigMgrTest
+            SRCS        ConfigMgrTest
+            LIBS        config-fiu ${GTEST_LIBS}
+            DEFS        FIU_ENABLE
+    )
+
+    add_test ( NAME     ConfigMgrTest
+            COMMAND  $<TARGET_FILE:ConfigMgrTest>
+            )
+
+    create_executable(
             TARGET      ServerConfigTest
             SRCS        ServerConfigTest
             LIBS        config-fiu ${GTEST_LIBS}
             DEFS        FIU_ENABLE
     )
+
+    add_test ( NAME     ServerConfigTest
+            COMMAND  $<TARGET_FILE:ServerConfigTest>
+            )
 
     create_executable(
             TARGET      ConfigTypeTest
@@ -54,10 +70,6 @@ if ( BUILD_UNIT_TEST )
             LIBS        config-fiu ${GTEST_LIBS}
             DEFS        FIU_ENABLE
     )
-
-    add_test ( NAME     ServerConfigTest
-               COMMAND  $<TARGET_FILE:ServerConfigTest>
-             )
 
     add_test ( NAME     ConfigTypeTest
                COMMAND  $<TARGET_FILE:ConfigTypeTest>
