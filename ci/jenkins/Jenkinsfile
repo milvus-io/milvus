@@ -97,6 +97,7 @@ pipeline {
                     TARGET_REPO = "${params.DOKCER_REGISTRY_URL}/milvus/engine"
                     SOURCE_TAG = "${CHANGE_TARGET ? CHANGE_TARGET : SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
                     TARGET_TAG = "${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
+                    DOCKER_BUILDKIT = 1
                 }
                 agent {
                     kubernetes {
