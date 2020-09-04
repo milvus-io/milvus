@@ -203,6 +203,7 @@ DBTest::TearDown() {
     db_->Stop();
     db_ = nullptr; // db must be stopped before JobMgr and Snapshot
 
+    //TODO: Clear GPU Cache if needed
     milvus::cache::CpuCacheMgr::GetInstance().ClearCache();
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
