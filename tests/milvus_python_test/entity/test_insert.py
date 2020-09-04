@@ -518,6 +518,19 @@ class TestInsertBase:
         res_count = milvus.count_entities(collection)
         assert res_count == thread_num * nb
 
+    # TODO: unable to set config
+    @pytest.mark.level(2)
+    def _test_insert_disable_auto_flush(self, connect, collection):
+        '''
+        target: test insert entities, with disable autoflush
+        method: disable autoflush and insert, get entity
+        expected: the count is equal to 0
+        '''
+        disable_flush(connect)
+        ids = connect.insert(collection, entities)
+        res = connect.get_entity_by_id(collection, ids[:500])
+        assert len(res) == 0
+
 
 class TestInsertAsync:
     @pytest.fixture(scope="function", autouse=True)

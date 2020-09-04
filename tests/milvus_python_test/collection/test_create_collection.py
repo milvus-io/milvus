@@ -93,7 +93,8 @@ class TestCreateCollection:
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
 
-    def test_create_collection_auto_flush_disabled(self, connect):
+    # TODO: set config invalid
+    def _test_create_collection_auto_flush_disabled(self, connect):
         '''
         target: test create normal collection, with large auto_flush_interval
         method: create collection with corrent params
