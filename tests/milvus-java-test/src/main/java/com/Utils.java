@@ -179,22 +179,22 @@ public class Utils {
         return searchParam;
     }
 
+    public static String genDefaultSearchParam(List<JSONObject> leafParams) {
+        JSONObject boolParam = new JSONObject();
+        JSONObject mustParam = new JSONObject();
+        JSONArray tmp = new JSONArray();
+        leafParams.stream().forEach(leafParam-> tmp.add(leafParam));
+        mustParam.put("must", tmp);
+        boolParam.put("bool", mustParam);
+        return JSONObject.toJSONString(boolParam);
+    }
+
     public static String setSearchParam(String metricType, List<List<Float>> queryVectors, int topk, int nprobe) {
         JSONObject searchParam = genVectorParam(metricType, queryVectors, topk, nprobe);
         JSONObject boolParam = new JSONObject();
         JSONObject mustParam = new JSONObject();
         JSONArray tmp = new JSONArray();
         tmp.add(searchParam);
-        mustParam.put("must", tmp);
-        boolParam.put("bool", mustParam);
-        return JSONObject.toJSONString(boolParam);
-    }
-
-    public static String genDefaultSearchParam(JSONObject vectorParam) {
-        JSONObject boolParam = new JSONObject();
-        JSONObject mustParam = new JSONObject();
-        JSONArray tmp = new JSONArray();
-        tmp.add(vectorParam);
         mustParam.put("must", tmp);
         boolParam.put("bool", mustParam);
         return JSONObject.toJSONString(boolParam);
