@@ -87,7 +87,7 @@ public class TestIndex {
         assert(!res_create.ok());
     }
 
-    // # 3407
+    // #3408 #3590
     // case-08
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testCreateIndexInvalidMetricTypeBinary(MilvusClient client, String collectionName) {
