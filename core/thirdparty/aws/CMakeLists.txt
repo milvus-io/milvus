@@ -40,6 +40,7 @@ if ( NOT aws_POPULATED )
 
     # Adding the following targets:
     # AWS::aws-cpp-sdk-s3
+    # AWS::aws-cpp-sdk-core
     add_subdirectory( ${aws_SOURCE_DIR}
                       ${aws_BINARY_DIR}
                       EXCLUDE_FROM_ALL )
