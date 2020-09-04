@@ -11,7 +11,7 @@ segment_row_count = 5000
 nprobe = 1
 top_k = 1
 epsilon = 0.0001
-tag = "1970-01-01"
+tag = "1970_01_01"
 nb = 6000
 nlist = 1024
 collection_id = "collection_stats"
@@ -171,11 +171,11 @@ class TestStatsBase:
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
-        compact_before = stats["partitions"][0]["segments"][0]["data_size"]
+        compact_before = stats["partitions"][0]["row_count"]
         connect.compact(collection)
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
-        compact_after = stats["partitions"][0]["segments"][0]["data_size"]
+        compact_after = stats["partitions"][0]["row_count"]
         # pdb.set_trace()
         assert compact_before == compact_after
 
@@ -301,7 +301,7 @@ class TestStatsBase:
         connect.flush(collection_list)
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
-            assert stats["partitions"][0]["segments"][0]["row_count"] == nb
+            assert stats["partitions"][0]["row_count"] == nb
             connect.drop_collection(collection_list[i])
 
     @pytest.mark.level(2)

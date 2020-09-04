@@ -97,6 +97,9 @@ public class TestIndex {
         String indexParamNew = Utils.setIndexParam(Constants.defaultBinaryIndexType, metric_type, Constants.n_list);
         Index createIndexParam = new Index.Builder(collectionName, Constants.binaryFieldName).withParamsInJson(indexParamNew).build();
         Response res_create = client.createIndex(createIndexParam);
+//        JSONArray filesJsonArray = Utils.parseJsonArray(res_create.getMessage(), "files");
+        Response statsResponse = client.getCollectionStats(collectionName);
+        System.out.println(statsResponse.getMessage());
         assert (!res_create.ok());
     }
 

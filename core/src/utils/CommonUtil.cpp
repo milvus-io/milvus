@@ -177,6 +177,26 @@ CommonUtil::TimeStrToTime(const std::string& time_str, time_t& time_integer, tm&
 }
 
 void
+CommonUtil::GetCurrentTimeStr(std::string& time_str) {
+    auto t = std::time(nullptr);
+    struct tm ltm;
+    localtime_r(&t, &ltm);
+
+    time_str = "";
+    time_str += std::to_string(ltm.tm_year + 1900);
+    time_str += "-";
+    time_str += std::to_string(ltm.tm_mon + 1);
+    time_str += "-";
+    time_str += std::to_string(ltm.tm_mday);
+    time_str += "_";
+    time_str += std::to_string(ltm.tm_hour);
+    time_str += ":";
+    time_str += std::to_string(ltm.tm_min);
+    time_str += ":";
+    time_str += std::to_string(ltm.tm_sec);
+}
+
+void
 CommonUtil::ConvertTime(time_t time_integer, tm& time_struct) {
     localtime_r(&time_integer, &time_struct);
 }

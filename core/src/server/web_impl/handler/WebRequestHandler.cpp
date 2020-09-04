@@ -286,6 +286,12 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
         field_json["extra_params"] = field.second.field_params_;
         json_out["fields"].push_back(field_json);
     }
+    if (schema.extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
+        json_out[engine::PARAM_SEGMENT_ROW_COUNT] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT];
+    }
+    if (schema.extra_params_.contains(engine::PARAM_UID_AUTOGEN)) {
+        json_out[engine::PARAM_UID_AUTOGEN] = schema.extra_params_[engine::PARAM_UID_AUTOGEN];
+    }
     return Status::OK();
 }
 
@@ -1232,6 +1238,11 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     for (auto& field : json_str["fields"]) {
         FieldSchema field_schema;
         std::string field_name = field["field_name"];
+
+        if (fields.find(field_name) != fields.end()) {
+            auto status = Status(SERVER_INVALID_FIELD_NAME, "Collection mapping has duplicate field names");
+            ASSIGN_RETURN_STATUS_DTO(status)
+        }
 
         field_schema.field_params_ = field["extra_params"];
 

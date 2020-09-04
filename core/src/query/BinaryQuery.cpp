@@ -82,6 +82,7 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
                     return GenBinaryQuery(query, binary_query);
                 }
                 case Occur::MUST_NOT:
+                    binary_query->is_not = true;
                 case Occur::SHOULD: {
                     binary_query->relation = QueryRelation::OR;
                     return GenBinaryQuery(query, binary_query);
@@ -101,6 +102,7 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
                 return GenBinaryQuery(bc, binary_query);
             }
             case Occur::MUST_NOT:
+                binary_query->is_not = true;
             case Occur::SHOULD: {
                 binary_query->relation = QueryRelation::OR;
                 return GenBinaryQuery(bc, binary_query);
@@ -173,14 +175,17 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
         binary_query->right_query->bin = must_not_bquery;
     } else if (bquery_num == 2) {
         if (must_bquery == nullptr) {
+            // should + must_not
             binary_query->relation = QueryRelation::R3;
             binary_query->left_query->bin = must_not_bquery;
             binary_query->right_query->bin = should_bquery;
         } else if (should_bquery == nullptr) {
+            // must + must_not
             binary_query->relation = QueryRelation::R4;
             binary_query->left_query->bin = must_bquery;
             binary_query->right_query->bin = must_not_bquery;
         } else {
+            // must + should
             binary_query->relation = QueryRelation::R3;
             binary_query->left_query->bin = must_bquery;
             binary_query->right_query->bin = should_bquery;

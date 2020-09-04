@@ -11,24 +11,49 @@
 
 #pragma once
 
-#include "db/DB.h"
+#include "db/Types.h"
+#include "utils/Status.h"
 
+#include <fstream>
+#include <memory>
+#include <ostream>
 #include <string>
 
 namespace milvus {
 namespace engine {
 
-class ScriptReplay {
+class ScriptFile {
  public:
-    ScriptReplay() = default;
+    ScriptFile() = default;
+    virtual ~ScriptFile();
 
     Status
-    Replay(const DBPtr& db, const std::string& replay_script_path);
+    OpenWrite(const std::string& path);
+
+    Status
+    OpenRead(const std::string& path);
+
+    Status
+    WriteLine(const std::string& str);
+
+    bool
+    ReadLine(std::string& str);
+
+    bool
+    ExceedMaxSize(int64_t append_size);
 
  private:
     Status
-    PerformAction(const DBPtr& db, const std::string& str_action);
+    CloseFile();
+
+ private:
+    std::ifstream reader_;
+    std::ofstream writer_;
+
+    int64_t file_size_ = 0;
 };
+
+using ScriptFilePtr = std::shared_ptr<ScriptFile>;
 
 }  // namespace engine
 }  // namespace milvus

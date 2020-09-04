@@ -14,7 +14,7 @@ index_file_size = 10
 CONFIG_TIMEOUT = 80
 nprobe = 1
 top_k = 1
-tag = "1970-01-01"
+tag = "1970_01_01"
 nb = 6000
 
 
