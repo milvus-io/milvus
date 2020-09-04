@@ -6,8 +6,8 @@ TEST(CLIENT_CPP, Producer) {
   auto client= std::make_shared<message_client::MsgClient>("pulsar://localhost:6650");
   message_client::MsgProducer producer(client,"test");
   pb::TestData data;
-  data.set_id("test");
-  data.set_name("hahah");
+  data.set_id("100");
+  data.set_name("pulsar");
   std::string to_string = data.SerializeAsString();
   producer.send(to_string);
   producer.close();

@@ -2,7 +2,7 @@ set(src-cpp
         Client.cpp
         Consumer.cpp
         Producer.cpp
-        pb/pulsar.pb.cc)
+        pb/suvlim.pb.cc)
 
 add_library(message_client_cpp SHARED
         ${src-cpp}

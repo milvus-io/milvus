@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package milvus.grpc;
+package suvlim.grpc;
 
 enum ErrorCode {
     SUCCESS = 0;
@@ -700,9 +700,9 @@ enum SyncType {
     WRITE = 1;
 }
 message TimeSyncMsg{
-    int64 peer_Id = 1;
-    int64 Timestamp = 2;
-    SyncType sync_type = 3;
+	int64 peer_Id = 1;
+	int64 Timestamp = 2;
+	SyncType sync_type = 3;
 }
 
 message SegmentRecord {
@@ -711,6 +711,6 @@ message SegmentRecord {
 }
 
 message Key2SegMsg {
-    int64 client_id = 1;
-    SegmentRecord records = 2;
+	int64 client_id = 1;
+	SegmentRecord records = 2;
 }

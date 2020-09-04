@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package milvus.grpc;
+package pb;
 
 enum ErrorCode {
     SUCCESS = 0;
@@ -133,70 +133,147 @@ message VectorRowRecord {
     bytes binary_data = 2;                      //binary vector data
 }
 
+/**
+ * @brief Attribute record
+ */
+message AttrRecord {
+    repeated int32 int32_value = 1;
+    repeated int64 int64_value = 2;
+    repeated float float_value = 3;
+    repeated double double_value = 4;
+}
+
+/**
+ * @brief Vector records
+ */
+message VectorRecord {
+    repeated VectorRowRecord records = 1;
+}
+
+/**
+ * @brief Field values
+ */
+message FieldValue {
+    string field_name = 1;
+    DataType type = 2;
+    AttrRecord attr_record = 3;
+    VectorRecord vector_record = 4;
+}
+
+/**
+ * @brief Parameters for insert action
+ */
+message InsertParam {
+    string collection_name = 1;
+    repeated FieldValue fields = 2;
+    repeated int64 entity_id_array = 3;            //optional
+    string partition_tag = 4;
+    repeated KeyValuePair extra_params = 5;
+}
+
+/**
+ * @brief Entity ids
+ */
 message EntityIds {
     Status status = 1;
     repeated int64 entity_id_array = 2;
 }
 
-message VectorRecord {
-    repeated VectorRowRecord records = 1;
-}
-
+/**
+ * @brief Search vector parameters
+ */
 message VectorParam {
     string json = 1;
     VectorRecord row_record = 2;
 }
 
-//////////////////////////row schema and data///////////////////////////////////
 /**
- * @brief schema
+ * @brief Parameters for search action
+ * @dsl example:
+ *    {
+ *   "query": {
+ *       "bool": {
+ *           "must": [
+ *               {
+ *                   "must":[
+ *                       {
+ *                           "should": [
+ *                               {
+ *                                   "term": {
+ *                                       "gender": ["male"]
+ *                                   }
+ *                               },
+ *                               {
+ *                                   "range": {
+ *                                       "height": {"gte": "170.0", "lte": "180.0"}
+ *                                   }
+ *                               }
+ *                           ]
+ *                       },
+ *                       {
+ *                           "must_not": [
+ *                               {
+ *                                   "term": {
+ *                                       "age": [20, 21, 22, 23, 24, 25]
+ *                                   }
+ *                               },
+ *                               {
+ *                                   "Range": {
+ *                                       "weight": {"lte": "100"}
+ *                                   }
+ *                               }
+ *                           ]
+ *                       }
+ *                   ]
+ *               },
+ *               {
+ *                   "must": [
+ *                       {
+ *                           "vector": {
+ *                               "face_img": {
+ *                                   "topk": 10,
+ *                                   "metric_type": "L2",
+ *                                   "query": [],
+ *                                   "params": {
+ *                                       "nprobe": 10
+ *                                   }
+ *                               }
+ *                           }
+ *                       }
+ *                   ]
+ *               }
+ *           ]
+ *       }
+ *   },
+ *   "fields": ["age", "face_img"]
+ *   }
  */
-message FieldMeta {
-    string field_name = 1;
-    DataType type = 2;
-    int64 dim = 3;
-}
-
-message Schema {
-    repeated FieldMeta field_metas = 1;
-}
-
-message RowData {
-    bytes blob = 1;
-}
-
-//////////////////////suvlim-proxy///////////////////////////////////
-message InsertParam {
-    string collection_name = 1;
-    Schema schema = 2;
-    repeated RowData rows_data = 3;
-    repeated int64 entity_id_array = 4;            //optional
-    string partition_tag = 5;
-    repeated KeyValuePair extra_params = 6;
-}
-
 message SearchParam {
     string collection_name = 1;
-    repeated VectorParam vector_param = 2;
-    string dsl = 3;          //optional
-    repeated string partition_tag = 4; //why
+    repeated string partition_tag_array = 2;
+    repeated VectorParam vector_param = 3;
+    string dsl = 4;
     repeated KeyValuePair extra_params = 5;
 }
 
+/**
+ * @brief Parameters for searching in segments
+ */
 message SearchInSegmentParam {
     repeated string file_id_array = 1;
     SearchParam search_param = 2;
 }
 
+/**
+ * @brief Entities
+ */
 message Entities {
     Status status = 1;
     repeated int64 ids = 2;
     repeated bool valid_row = 3;
-    repeated RowData rows_data = 4;
+    repeated FieldValue fields = 4;
 }
 
-
-///////////////////////////milvus-server///////////////////////////
 /**
  * @brief Query result
  */
@@ -664,53 +741,4 @@ service MilvusService {
     /********************************New Interface********************************************/
 
     rpc SearchPB(SearchParamPB) returns (QueryResult) {}
-}
-
-////////////////////pulsar//////////////////////////////////////
-enum OpType {
-    INSERT = 0;
-    DELETE = 1;
-}
-
-message InsertOrDeleteMsg {
-    string collection_name = 1;
-    RowData rows_data = 2;
-    int64 uid = 3;            //optional
-    string partition_tag = 4;
-    int64 timestamp =5;
-    int64 segment_id = 6;
-    int64 channel_id = 7;
-    OpType op = 8;
-    int64 client_id = 9;
-    repeated KeyValuePair extra_params = 10;
-}
-
-message SearchMsg {
-    string collection_name = 1;
-    VectorRowRecord records = 2;
-    string partition_tag = 3;
-    int64 uid = 4;
-    int64 timestamp =5;
-    int64 client_id = 6;
-    repeated KeyValuePair extra_params = 7;
-}
-
-enum SyncType {
-    READ = 0;
-    WRITE = 1;
-}
-message TimeSyncMsg{
-    int64 peer_Id = 1;
-    int64 Timestamp = 2;
-    SyncType sync_type = 3;
-}
-
-message SegmentRecord {
-    int64 uid = 1;
-    repeated int64 segment_id = 2;
-}
-
-message Key2SegMsg {
-    int64 client_id = 1;
-    SegmentRecord records = 2;
 }

@@ -2,6 +2,7 @@
 
 #include "pulsar/Producer.h"
 #include "Client.h"
+#include "pb/suvlim.pb.h"
 
 namespace message_client {
 
@@ -15,6 +16,9 @@ public:
   Result createProducer(const std::string& topic);
   Result send(const Message& msg);
   Result send(const std::string& msg);
+  Result send(const suvlim::grpc::InsertOrDeleteMsg& msg);
+  Result send(const suvlim::grpc::SearchMsg& msg);
+  Result Send(const suvlim::grpc::GetEntityIDsParam)
   Result close();
 
   const Producer&
