@@ -482,6 +482,18 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
 }
 
 Status
+ValidateInsertDataSize(const engine::DataChunkPtr& data) {
+    int64_t chunk_size = engine::utils::GetSizeOfChunk(data);
+    if (chunk_size > engine::MAX_INSERT_DATA_SIZE) {
+        std::string msg = "The amount of data inserted each time cannot exceed " +
+                          std::to_string(engine::MAX_INSERT_DATA_SIZE / engine::MB) + " MB";
+        return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
+    }
+
+    return Status::OK();
+}
+
+Status
 ValidateCompactThreshold(double threshold) {
     if (threshold > 1.0 || threshold < 0.0) {
         std::string msg = "Invalid compact threshold: " + std::to_string(threshold) + ". Should be in range [0.0, 1.0]";
