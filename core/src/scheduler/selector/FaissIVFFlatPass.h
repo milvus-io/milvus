@@ -29,7 +29,7 @@
 namespace milvus {
 namespace scheduler {
 
-class FaissIVFFlatPass : public Pass, public server::GpuResourceConfigHandler {
+class FaissIVFFlatPass : public FaissFlatPass, public server::GpuResourceConfigHandler {
  public:
     FaissIVFFlatPass() = default;
 

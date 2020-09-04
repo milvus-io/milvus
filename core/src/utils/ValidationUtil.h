@@ -22,7 +22,7 @@
 namespace milvus {
 namespace server {
 
-constexpr int64_t QUERY_MAX_TOPK = 2048;
+constexpr int64_t QUERY_MAX_TOPK = 16384;
 
 class ValidationUtil {
  private:
