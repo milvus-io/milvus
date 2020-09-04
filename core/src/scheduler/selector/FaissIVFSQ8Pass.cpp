@@ -12,11 +12,13 @@
 #include "scheduler/selector/FaissIVFSQ8Pass.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
+#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace scheduler {
@@ -59,6 +61,11 @@ FaissIVFSQ8Pass::Run(const TaskPtr& task) {
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_job->nq() < (uint64_t)threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8Pass: nq < gpu_search_threshold, specify cpu to search!",
+                                    "search", 0);
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else if (search_job->extra_params()[knowhere::IndexParams::nprobe].get<int64_t>() <
+               milvus::server::QUERY_MAX_TOPK) {
+        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFFlatPass: nprobe > gpu_nprobe_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
