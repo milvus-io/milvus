@@ -5,9 +5,6 @@ import org.apache.commons.cli.*;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.SkipException;
 import org.testng.TestNG;
-import org.testng.annotations.AfterMethod;
-import org.testng.annotations.AfterSuite;
-import org.testng.annotations.AfterTest;
 import org.testng.annotations.DataProvider;
 import org.testng.xml.XmlClass;
 import org.testng.xml.XmlSuite;
@@ -32,6 +29,14 @@ public class MainClass {
 
     public static void setPort(int port) {
         MainClass.PORT = port;
+    }
+
+    public static String getHost() {
+        return MainClass.HOST;
+    }
+
+    public static int getPort() {
+        return MainClass.PORT;
     }
 
     @DataProvider(name="DefaultConnectArgs")
@@ -115,17 +120,6 @@ public class MainClass {
         return binaryIdCollection;
     }
 
-    @AfterSuite
-    public void dropCollection(){
-//        MilvusClient client = new MilvusGrpcClient();
-//        List<String> collectionNames = client.listCollections().getCollectionNames();
-//        collectionNames.forEach(client::dropCollection);
-        System.out.println("after suite");
-    }
-    @AfterMethod
-    public void after(){
-        System.out.println("after method");
-    }
 
     public static void main(String[] args) {
         CommandLineParser parser = new DefaultParser();
@@ -155,20 +149,21 @@ public class MainClass {
         test.setName("TmpTest");
         List<XmlClass> classes = new ArrayList<XmlClass>();
 
-        classes.add(new XmlClass("com.TestPing"));
-        classes.add(new XmlClass("com.TestInsertEntities"));
-        classes.add(new XmlClass("com.TestConnect"));
-        classes.add(new XmlClass("com.TestDeleteEntities"));
-        classes.add(new XmlClass("com.TestIndex"));
-        classes.add(new XmlClass("com.TestCompact"));
-        classes.add(new XmlClass("com.TestSearchEntities"));
-        classes.add(new XmlClass("com.TestCollection"));
-        classes.add(new XmlClass("com.TestCollectionCount"));
-        classes.add(new XmlClass("com.TestFlush"));
-        classes.add(new XmlClass("com.TestPartition"));
-        classes.add(new XmlClass("com.TestGetEntityByID"));
-        classes.add(new XmlClass("com.TestCollectionInfo"));
+//        classes.add(new XmlClass("com.TestPing"));
+//        classes.add(new XmlClass("com.TestInsertEntities"));
+//        classes.add(new XmlClass("com.TestConnect"));
+//        classes.add(new XmlClass("com.TestDeleteEntities"));
+//        classes.add(new XmlClass("com.TestIndex"));
+//        classes.add(new XmlClass("com.TestCompact"));
+//        classes.add(new XmlClass("com.TestSearchEntities"));
+//        classes.add(new XmlClass("com.TestCollection"));
+//        classes.add(new XmlClass("com.TestCollectionCount"));
+//        classes.add(new XmlClass("com.TestFlush"));
+//        classes.add(new XmlClass("com.TestPartition"));
+//        classes.add(new XmlClass("com.TestGetEntityByID"));
+//        classes.add(new XmlClass("com.TestCollectionInfo"));
 //        classes.add(new XmlClass("com.TestSearchByIds"));
+        classes.add(new XmlClass("com.TestBeforeAndAfter"));
 
         test.setXmlClasses(classes) ;
 

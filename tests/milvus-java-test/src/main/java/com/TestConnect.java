@@ -39,7 +39,7 @@ public class TestConnect {
     }
 
     @Test(dataProvider="InvalidConnectArgs")
-    public void testConnectInvalidConnect_args(String ip, int port) {
+    public void testConnectInvalidConnectArgs(String ip, int port) {
         MilvusClient client = new MilvusGrpcClient();
         Response res = null;
         try {
