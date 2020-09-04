@@ -459,7 +459,8 @@ class TestGetBase:
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entity[-1]["values"][0])
 
-    def test_get_entities_after_delete_disable_autoflush(self, connect, collection, get_pos):
+    # TODO: unable to set config
+    def _test_get_entities_after_delete_disable_autoflush(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
         method: disable autoflush, add entities, and delete, get entity by the given id
@@ -581,7 +582,7 @@ class TestGetBase:
                         {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": group_vector}
                     ]
                     group_ids = connect.insert(collection, group_entities)
-                    # connect.flush([collection])
+                    connect.flush([collection])
                     executor.submit(get, group_ids, group_entities)
 
             step = 100
