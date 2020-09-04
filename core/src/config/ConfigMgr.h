@@ -14,11 +14,12 @@
 #include <list>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include "config/ServerConfig.h"
+#include "config/ConfigType.h"
 
 namespace milvus {
 
@@ -31,7 +32,28 @@ class ConfigObserver {
 };
 using ConfigObserverPtr = std::shared_ptr<ConfigObserver>;
 
-class ConfigMgr {
+class BaseConfigMgr {
+ protected:
+    BaseConfigMgr() = default;
+
+ public:
+    // Shared pointer should not be used here
+    void
+    Attach(const std::string& name, ConfigObserver* observer);
+
+    void
+    Detach(const std::string& name, ConfigObserver* observer);
+
+ protected:
+    void
+    Notify(const std::string& name);
+
+ private:
+    std::unordered_map<std::string, std::list<ConfigObserver*>> observers_;
+    std::mutex observer_mutex_;
+};
+
+class ConfigMgr : public BaseConfigMgr {
  public:
     static ConfigMgr&
     GetInstance() {
@@ -40,6 +62,18 @@ class ConfigMgr {
 
  private:
     static ConfigMgr instance;
+
+    /* TODO: move into ServerConfig */
+ public:
+    std::string&
+    FilePath() {
+        return config_file_;
+    }
+
+    bool
+    RequireRestart() {
+        return require_restart_;
+    }
 
  public:
     ConfigMgr();
@@ -57,37 +91,36 @@ class ConfigMgr {
     Init();
 
     void
-    Load(const std::string& path);
+    LoadFile(const std::string& path);
 
+    /* for testing */
+    void
+    LoadMemory(const std::string& yaml_string);
+
+    /* throws std::exception only */
     void
     Set(const std::string& name, const std::string& value, bool update = true);
 
+    /* throws std::exception only */
     std::string
     Get(const std::string& name) const;
 
     std::string
     Dump() const;
+
     std::string
     JsonDump() const;
 
- public:
-    // Shared pointer should not be used here
-    void
-    Attach(const std::string& name, ConfigObserver* observer);
-
-    void
-    Detach(const std::string& name, ConfigObserver* observer);
-
  private:
     void
-    Notify(const std::string& name);
+    Save(const std::string& path);
 
  private:
-    std::unordered_map<std::string, BaseConfigPtr> config_list_;
+    const std::unordered_map<std::string, BaseConfigPtr> config_list_;
     std::mutex mutex_;
-
-    std::unordered_map<std::string, std::list<ConfigObserver*>> observers_;
-    std::mutex observer_mutex_;
+    std::string config_file_;
+    bool require_restart_ = false;
+    std::set<std::string> effective_immediately_;
 };
 
 }  // namespace milvus
