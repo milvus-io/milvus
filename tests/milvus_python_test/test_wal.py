@@ -6,13 +6,10 @@ from multiprocessing import Pool, Process
 import pytest
 from utils import *
 
-dim = 128
 collection_id = "test_wal"
-segment_row_count = 1000
 WAL_TIMEOUT = 60
 tag = "1970_01_01"
 insert_interval_time = 1.5
-nb = 1200
 field_name = "float_vector"
 entity = gen_entities(1)
 binary_entity = gen_binary_entities(1)

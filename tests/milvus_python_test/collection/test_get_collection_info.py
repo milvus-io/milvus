@@ -7,7 +7,6 @@ import threading
 from multiprocessing import Process
 from utils import *
 
-nb = 1200
 collection_id = "info"
 default_fields = gen_default_fields() 
 segment_row_count = 1000

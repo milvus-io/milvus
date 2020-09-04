@@ -6,13 +6,10 @@ from multiprocessing import Pool, Process
 import pytest
 from utils import *
 
-dim = 128
-segment_row_count = 1000
 nprobe = 1
 top_k = 1
 epsilon = 0.0001
-tag = "1970-01-01"
-nb = 1200
+tag = "1970_01_01"
 nlist = 128
 collection_id = "collection_stats"
 field_name = "float_vector"

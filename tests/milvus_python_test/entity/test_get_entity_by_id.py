@@ -9,17 +9,9 @@ from threading import current_thread
 import pytest
 from utils import *
 
-dim = 128
-segment_row_count = 1000
 collection_id = "test_get"
 DELETE_TIMEOUT = 60
-<<<<<<< HEAD
-tag = "1970-01-01"
-nb = 1200
-=======
 tag = "1970_01_01"
-nb = 6000
->>>>>>> 0.11.0
 entity = gen_entities(1)
 binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)

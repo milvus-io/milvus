@@ -71,7 +71,7 @@ def connect(request):
         port = http_port
     try:
         milvus = get_milvus(host=ip, port=port, handler=handler)
-        reset_build_index_threshold(milvus)
+        # reset_build_index_threshold(milvus)
     except Exception as e:
         logging.getLogger().error(str(e))
         pytest.exit("Milvus server can not connected, exit pytest ...")

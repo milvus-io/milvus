@@ -10,13 +10,10 @@ import numpy as np
 from milvus import DataType
 from utils import *
 
-dim = 128
-segment_row_count = 1000
 top_k_limit = 2048
 collection_id = "search"
 tag = "1970_01_01"
 insert_interval_time = 1.5
-nb = 1200
 top_k = 10
 nq = 1
 nprobe = 1

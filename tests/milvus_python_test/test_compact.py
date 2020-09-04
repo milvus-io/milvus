@@ -6,15 +6,11 @@ from multiprocessing import Pool, Process
 import pytest
 from utils import *
 
-dim = 128
-index_file_size = 10
 COMPACT_TIMEOUT = 180
 nprobe = 1
 top_k = 1
-tag = "1970-01-01"
-nb = 1200
+tag = "1970_01_01"
 nq = 2
-segment_row_count = 1000
 entity = gen_entities(1)
 entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)
@@ -253,8 +249,7 @@ class TestCompactBase:
         connect.flush([collection])
         info = connect.get_collection_stats(collection)
         logging.getLogger().info(info["partitions"])
-
-        delete_ids = ids[:3000]
+        delete_ids = ids[:nb//2]
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         connect.flush([collection])

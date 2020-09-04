@@ -8,13 +8,10 @@ import pytest
 from utils import *
 
 
-dim = 128
-segment_row_count = 1000
 collection_id = "partition"
 nprobe = 1
 tag = "1970_01_01"
 TIMEOUT = 120
-nb = 1200
 tag = "partition_tag"
 field_name = "float_vector"
 entity = gen_entities(1)

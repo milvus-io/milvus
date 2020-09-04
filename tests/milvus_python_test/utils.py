@@ -15,7 +15,7 @@ port = 19530
 epsilon = 0.000001
 default_flush_interval = 1
 big_flush_interval = 1000
-dimension = 128
+dim = 128
 nb = 1200
 top_k = 10
 segment_row_count = 1000
@@ -215,7 +215,7 @@ def gen_single_filter_fields():
 def gen_single_vector_fields():
     fields = []
     for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
-        field = {"field": data_type.name, "type": data_type, "params": {"dim": dimension}}
+        field = {"field": data_type.name, "type": data_type, "params": {"dim": dim}}
         fields.append(field)
     return fields
 
@@ -225,7 +225,7 @@ def gen_default_fields(auto_id=True):
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}},
+            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dim}},
         ],
         "segment_row_count": segment_row_count,
         "auto_id" : auto_id 
@@ -238,7 +238,7 @@ def gen_binary_default_fields(auto_id=True):
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": dimension}}
+            {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": dim}}
         ],
         "segment_row_count": segment_row_count,
         "auto_id" : auto_id 
@@ -247,7 +247,7 @@ def gen_binary_default_fields(auto_id=True):
 
 
 def gen_entities(nb, is_normal=False):
-    vectors = gen_vectors(nb, dimension, is_normal)
+    vectors = gen_vectors(nb, dim, is_normal)
     entities = [
         {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
@@ -257,7 +257,7 @@ def gen_entities(nb, is_normal=False):
 
 
 def gen_binary_entities(nb):
-    raw_vectors, vectors = gen_binary_vectors(nb, dimension)
+    raw_vectors, vectors = gen_binary_vectors(nb, dim)
     entities = [
         {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
@@ -266,7 +266,7 @@ def gen_binary_entities(nb):
     return raw_vectors, entities
 
 
-def gen_entities_by_fields(fields, nb, dimension):
+def gen_entities_by_fields(fields, nb, dim):
     entities = []
     for field in fields:
         if field["type"] in [DataType.INT32, DataType.INT64]:
@@ -274,9 +274,9 @@ def gen_entities_by_fields(fields, nb, dimension):
         elif field["type"] in [DataType.FLOAT, DataType.DOUBLE]:
             field_value = [3.0 for i in range(nb)]
         elif field["type"] == DataType.BINARY_VECTOR:
-            field_value = gen_binary_vectors(nb, dimension)[1]
+            field_value = gen_binary_vectors(nb, dim)[1]
         elif field["type"] == DataType.FLOAT_VECTOR:
-            field_value = gen_vectors(nb, dimension)
+            field_value = gen_vectors(nb, dim)
         field.update({"values": field_value})
         entities.append(field)
     return entities
@@ -405,7 +405,7 @@ def add_field(entities, field_name=None):
 
 def add_vector_field(entities, is_normal=False):
     nb = len(entities[0]["values"])
-    vectors = gen_vectors(nb, dimension, is_normal)
+    vectors = gen_vectors(nb, dim, is_normal)
     field = {
         "field": gen_unique_str(),
         "type": DataType.FLOAT_VECTOR,
@@ -460,7 +460,7 @@ def update_field_value(entities, old_type, new_value):
     return tmp_entities
 
 
-def add_vector_field(nb, dimension=dimension):
+def add_vector_field(nb, dimension=dim):
     field_name = gen_unique_str()
     field = {
         "field": field_name,

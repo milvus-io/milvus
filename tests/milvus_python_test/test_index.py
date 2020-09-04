@@ -8,13 +8,10 @@ import pytest
 import sklearn.preprocessing
 from utils import *
 
-nb = 1200
-dim = 128
-index_file_size = 10
 BUILD_TIMEOUT = 300
 nprobe = 1
 top_k = 5
-tag = "1970-01-01"
+tag = "1970_01_01"
 NLIST = 128
 INVALID_NLIST = 100000000
 field_name = "float_vector"

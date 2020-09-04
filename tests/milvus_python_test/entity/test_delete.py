@@ -8,13 +8,9 @@ from multiprocessing import Pool, Process
 import pytest
 from utils import *
 
-
-dim = 128
-segment_row_count = 1000
 collection_id = "test_delete"
 DELETE_TIMEOUT = 60
-tag = "1970-01-01"
-nb = 1200
+tag = "1970_01_01"
 field_name = default_float_vec_field_name
 entity = gen_entities(1)
 raw_vector, binary_entity = gen_binary_entities(1)
