@@ -51,12 +51,12 @@ class Status {
 
     bool
     ok() const {
-        return state_ == nullptr || code() == 0;
+        return state_.empty() || code() == 0;
     }
 
     StatusCode
     code() const {
-        return (state_ == nullptr) ? 0 : *(StatusCode*)(state_);
+        return (state_.empty()) ? 0 : *(StatusCode*)(state_.data());
     }
 
     std::string
@@ -73,7 +73,7 @@ class Status {
     MoveFrom(Status& s);
 
  private:
-    char* state_ = nullptr;
+    std::string state_;
 };  // Status
 
 }  // namespace milvus
