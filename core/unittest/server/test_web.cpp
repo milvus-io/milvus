@@ -338,7 +338,7 @@ class WebControllerTest : public ::testing::Test {
         auto& config = milvus::ConfigMgr::GetInstance();
 
         //        milvus::ConfigMgr::GetInstance().Init();
-        config.Load(config_path);
+        config.LoadFile(config_path);
         //        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "mock://:@:/");
 
         milvus::engine::snapshot::Snapshots::GetInstance().StartService();
@@ -376,7 +376,7 @@ class WebControllerTest : public ::testing::Test {
         fs.flush();
         fs.close();
 
-        milvus::ConfigMgr::GetInstance().Load(config_path);
+        milvus::ConfigMgr::GetInstance().LoadFile(config_path);
 
         OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, clientConnectionProvider);
         OATPP_COMPONENT(std::shared_ptr<oatpp::data::mapping::ObjectMapper>, objectMapper);
@@ -746,7 +746,7 @@ TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
     //    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 
-TEST_F(WebControllerTest, GET_ENTITY_WITH_NO_PARAMS){
+TEST_F(WebControllerTest, GET_ENTITY_WITH_NO_PARAMS) {
     auto collection_name = "test_get_collection_test" + RandomName();
     nlohmann::json mapping_json;
     CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);

@@ -20,6 +20,7 @@
 
 #include <fiu/fiu-local.h>
 
+#include "config/ConfigMgr.h"
 #include "config/ServerConfig.h"
 #include "db/Utils.h"
 #include "metrics/SystemInfo.h"
@@ -534,11 +535,6 @@ WebRequestHandler::GetConfig(std::string& result_str) {
             }
         }
 #endif
-        // check if server require start
-        bool required = false;
-        // TODO: Use new cofnig mgr
-        // Config::GetInstance().GetServerRestartRequired(required);
-        j["restart_required"] = required;
         result_str = j.dump();
     }
 
@@ -559,9 +555,9 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
         std::ostringstream ss;
         if (evalue.is_string()) {
             std::string vle = evalue;
-            ss << "set_config " << el.key() << " " << vle;
+            ss << "set " << el.key() << " " << vle;
         } else {
-            ss << "set_config " << el.key() << " " << evalue;
+            ss << "set " << el.key() << " " << evalue;
         }
         cmds.emplace_back(ss.str());
     }
@@ -579,11 +575,6 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
 
     nlohmann::json result;
     AddStatusToJson(result, StatusCode::SUCCESS, msg);
-
-    bool required = false;
-    // Config::GetInstance().GetServerRestartRequired(required);
-    result["restart_required"] = required;
-
     result_str = result.dump();
 
     return Status::OK();
@@ -1943,6 +1934,14 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
 
     response_str = status.ok() ? result_str.c_str() : "NULL";
 
+    ASSIGN_RETURN_STATUS_DTO(status);
+}
+
+StatusDtoT
+WebRequestHandler::ServerStatus(OString& response_str) {
+    std::string result_str;
+    auto status = CommandLine("status", result_str);
+    response_str = status.ok() ? result_str.c_str() : "NULL";
     ASSIGN_RETURN_STATUS_DTO(status);
 }
 

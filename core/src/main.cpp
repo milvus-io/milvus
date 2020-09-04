@@ -132,7 +132,8 @@ main(int argc, char* argv[]) {
 
     try {
         milvus::ConfigMgr::GetInstance().Init();
-        milvus::ConfigMgr::GetInstance().Load(config_filename);
+        milvus::ConfigMgr::GetInstance().LoadFile(config_filename);
+        milvus::ConfigMgr::GetInstance().FilePath() = config_filename;
     } catch (milvus::ConfigStatus& cs) {
         std::cerr << "Load config(" << config_filename << ") failed: " << cs.message << std::endl;
         goto FAIL;

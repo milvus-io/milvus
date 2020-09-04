@@ -53,7 +53,7 @@ TEST_F(ValidBoolConfigTest, init_load_update_get_test) {
                             std::placeholders::_3);
 
     bool bool_value = true;
-    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, &bool_value, false, validate, update);
+    auto bool_config = CreateBoolConfig_("b", _MODIFIABLE, &bool_value, false, validate, update);
     ASSERT_EQ(bool_value, true);
     ASSERT_EQ(bool_config->modifiable_, true);
 
@@ -112,7 +112,7 @@ TEST_F(ValidStringConfigTest, init_load_update_get_test) {
                             std::placeholders::_3);
 
     std::string string_value;
-    auto string_config = CreateStringConfig("s", _MODIFIABLE, &string_value, "Magic", validate, update);
+    auto string_config = CreateStringConfig_("s", _MODIFIABLE, &string_value, "Magic", validate, update);
     ASSERT_EQ(string_value, "");
     ASSERT_EQ(string_config->modifiable_, true);
 
@@ -171,7 +171,7 @@ TEST_F(ValidIntegerConfigTest, init_load_update_get_test) {
                             std::placeholders::_3);
 
     int64_t integer_value = 0;
-    auto integer_config = CreateIntegerConfig("i", _MODIFIABLE, -100, 100, &integer_value, 42, validate, update);
+    auto integer_config = CreateIntegerConfig_("i", _MODIFIABLE, -100, 100, &integer_value, 42, validate, update);
     ASSERT_EQ(integer_value, 0);
     ASSERT_EQ(integer_config->modifiable_, true);
 
@@ -231,7 +231,8 @@ TEST_F(ValidFloatingConfigTest, init_load_update_get_test) {
                             std::placeholders::_3);
 
     double floating_value = 0.0;
-    auto floating_config = CreateFloatingConfig("f", _MODIFIABLE, -10.0, 10.0, &floating_value, 3.14, validate, update);
+    auto floating_config =
+        CreateFloatingConfig_("f", _MODIFIABLE, -10.0, 10.0, &floating_value, 3.14, validate, update);
     ASSERT_FLOAT_EQ(floating_value, 0.0);
     ASSERT_EQ(floating_config->modifiable_, true);
 
@@ -302,7 +303,7 @@ TEST_F(ValidEnumConfigTest, init_load_update_get_test) {
         {"c", 3},
     };
     int64_t enum_value = 0;
-    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, &enum_value, 1, validate, update);
+    auto enum_config = CreateEnumConfig_("e", _MODIFIABLE, &testEnum, &enum_value, 1, validate, update);
     ASSERT_EQ(enum_value, 0);
     ASSERT_EQ(enum_config->modifiable_, true);
 
@@ -368,7 +369,7 @@ TEST_F(ValidSizeConfigTest, init_load_update_get_test) {
                             std::placeholders::_3);
 
     int64_t size_value = 0;
-    auto size_config = CreateSizeConfig("i", _MODIFIABLE, 0, 1024 * 1024, &size_value, 1024, validate, update);
+    auto size_config = CreateSizeConfig_("i", _MODIFIABLE, 0, 1024 * 1024, &size_value, 1024, validate, update);
     ASSERT_EQ(size_value, 0);
     ASSERT_EQ(size_config->modifiable_, true);
 
@@ -437,11 +438,11 @@ class ValidTest : public testing::Test {
     void
     SetUp() override {
         config_list = {
-            CreateBoolConfig("running", true, &server.running, true, nullptr, nullptr),
-            CreateStringConfig("hostname", true, &server.hostname, "Magic", nullptr, nullptr),
-            CreateEnumConfig("socket_family", false, &family, &server.family, 2, nullptr, nullptr),
-            CreateIntegerConfig("port", true, 1024, 65535, &server.port, 19530, nullptr, nullptr),
-            CreateFloatingConfig("uptime", true, 0, 9999.0, &server.uptime, 0, nullptr, nullptr),
+            CreateBoolConfig_("running", true, &server.running, true, nullptr, nullptr),
+            CreateStringConfig_("hostname", true, &server.hostname, "Magic", nullptr, nullptr),
+            CreateEnumConfig_("socket_family", false, &family, &server.family, 2, nullptr, nullptr),
+            CreateIntegerConfig_("port", true, 1024, 65535, &server.port, 19530, nullptr, nullptr),
+            CreateFloatingConfig_("uptime", true, 0, 9999.0, &server.uptime, 0, nullptr, nullptr),
         };
     }
 
