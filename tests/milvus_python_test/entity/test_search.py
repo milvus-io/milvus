@@ -1569,6 +1569,8 @@ class TestSearchInvalid(object):
         index_type = get_simple_index["index_type"]
         if index_type in ["FLAT"]:
             pytest.skip("skip in FLAT index")
+        if index_type != get_search_params["index_type"]:
+            pytest.skip("skip if index_type not matched")
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
         query, vecs = gen_query_vectors(field_name, entities, top_k, 1, search_params=search_params["search_params"])
