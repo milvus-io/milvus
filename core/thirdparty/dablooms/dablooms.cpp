@@ -201,18 +201,6 @@ void hash_func(counting_bloom_t *bloom, const char *key, size_t key_len, uint32_
     }
 }
 
-int free_counting_bloom(counting_bloom_t *bloom)
-{
-    if (bloom != NULL) {
-        free(bloom->hashes);
-        bloom->hashes = NULL;
-        free_bitmap(bloom->bitmap);
-        free(bloom);
-        bloom = NULL;
-    }
-    return 0;
-}
-
 counting_bloom_t *counting_bloom_init(unsigned int capacity, double error_rate, long offset)
 {
     counting_bloom_t *bloom;
@@ -233,23 +221,6 @@ counting_bloom_t *counting_bloom_init(unsigned int capacity, double error_rate, 
     bloom->hashes = (uint32_t *)calloc(bloom->nfuncs, sizeof(uint32_t));
 
     return bloom;
-}
-
-counting_bloom_t *new_counting_bloom(unsigned int capacity, double error_rate, const char *filename)
-{
-    counting_bloom_t *cur_bloom;
-    int fd;
-
-    if ((fd = open(filename, O_RDWR | O_CREAT | O_TRUNC, (mode_t)0600)) < 0) {
-        perror("Error, Opening File Failed");
-        fprintf(stderr, " %s \n", filename);
-        return NULL;
-    }
-
-    cur_bloom = counting_bloom_init(capacity, error_rate, 0);
-    cur_bloom->bitmap = new_bitmap(fd, cur_bloom->num_bytes);
-    cur_bloom->header = (counting_bloom_header_t *)(cur_bloom->bitmap->array);
-    return cur_bloom;
 }
 
 int counting_bloom_add(counting_bloom_t *bloom, const char *s, size_t len)
@@ -366,54 +337,9 @@ counting_bloom_t *new_counting_bloom_from_scale(scaling_bloom_t *bloom)
     return cur_bloom;
 }
 
-counting_bloom_t *new_counting_bloom_from_file(unsigned int capacity, double error_rate, const char *filename)
-{
-    int fd;
-    off_t size;
-
-    counting_bloom_t *bloom;
-
-    if ((fd = open(filename, O_RDWR, (mode_t)0600)) < 0) {
-        fprintf(stderr, "Error, Could not open file %s: %s\n", filename, strerror(errno));
-        return NULL;
-    }
-    if ((size = lseek(fd, 0, SEEK_END)) < 0) {
-        perror("Error, calling lseek() to tell file size");
-        close(fd);
-        return NULL;
-    }
-    if (size == 0) {
-        fprintf(stderr, "Error, File size zero\n");
-    }
-
-    bloom = counting_bloom_init(capacity, error_rate, 0);
-
-    if (size != bloom->num_bytes) {
-        free_counting_bloom(bloom);
-        fprintf(stderr, "Error, Actual filesize and expected filesize are not equal\n");
-        return NULL;
-    }
-    if ((bloom->bitmap = new_bitmap(fd, size)) == NULL) {
-        fprintf(stderr, "Error, Could not create bitmap with file\n");
-        free_counting_bloom(bloom);
-        return NULL;
-    }
-
-    bloom->header = (counting_bloom_header_t *)(bloom->bitmap->array);
-
-    return bloom;
-}
-
 uint64_t scaling_bloom_clear_seqnums(scaling_bloom_t *bloom)
 {
-    uint64_t seqnum;
-
-    if (bloom->header->disk_seqnum != 0) {
-        // disk_seqnum cleared on disk before any other changes
-        bloom->header->disk_seqnum = 0;
-        bitmap_flush(bloom->bitmap);
-    }
-    seqnum = bloom->header->mem_seqnum;
+    uint64_t seqnum = bloom->header->mem_seqnum;
     bloom->header->mem_seqnum = 0;
     return seqnum;
 }
@@ -494,25 +420,11 @@ int scaling_bloom_flush(scaling_bloom_t *bloom)
     if (bitmap_flush(bloom->bitmap) != 0) {
         return -1;
     }
-    // all changes written to disk before disk_seqnum set
-    if (bloom->header->disk_seqnum == 0) {
-        bloom->header->disk_seqnum = bloom->header->mem_seqnum;
-        return bitmap_flush(bloom->bitmap);
-    }
-    return 0;
+
+    return bitmap_flush(bloom->bitmap);
 }
 
-uint64_t scaling_bloom_mem_seqnum(scaling_bloom_t *bloom)
-{
-    return bloom->header->mem_seqnum;
-}
-
-uint64_t scaling_bloom_disk_seqnum(scaling_bloom_t *bloom)
-{
-    return bloom->header->disk_seqnum;
-}
-
-scaling_bloom_t *scaling_bloom_init(unsigned int capacity, double error_rate, const char *filename, int fd)
+scaling_bloom_t *scaling_bloom_init(unsigned int capacity, double error_rate, int fd)
 {
     scaling_bloom_t *bloom;
 
@@ -549,7 +461,7 @@ scaling_bloom_t *new_scaling_bloom(unsigned int capacity, double error_rate, con
         return NULL;
     }
 
-    bloom = scaling_bloom_init(capacity, error_rate, filename, fd);
+    bloom = scaling_bloom_init(capacity, error_rate, fd);
 
     if (!(cur_bloom = new_counting_bloom_from_scale(bloom))) {
         fprintf(stderr, "Error, Could not create counting bloom\n");
@@ -584,7 +496,7 @@ scaling_bloom_t *new_scaling_bloom_from_file(unsigned int capacity, double error
         fprintf(stderr, "Error, File size zero\n");
     }
 
-    bloom = scaling_bloom_init(capacity, error_rate, filename, fd);
+    bloom = scaling_bloom_init(capacity, error_rate, fd);
 
     size -= sizeof(scaling_bloom_header_t);
     while (size) {
