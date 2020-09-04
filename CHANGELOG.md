@@ -34,6 +34,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3446 ListIDInSegment get wrong result when delete more than one ids
 -   \#3448 RHNSWFlatTest failed
 -   \#3453 Fix server crashed during stability test
+-   \#3490 Fix ut DBTest.DeleteEntitiesTest assert fail
 -   \#3482 Server crashed during adding entities
 -   \#3490 Fix ut DBTest.DeleteEntitiesTest assert fail
 -   \#3511 SearchTask::nq() should not return 0
