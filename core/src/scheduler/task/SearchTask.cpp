@@ -107,7 +107,6 @@ SearchTask::OnExecute() {
     if (execution_engine_ == nullptr) {
         return Status(DB_ERROR, "execution engine is null");
     }
-    printf("search execute\n");
     //    auto search_job = std::static_pointer_cast<scheduler::SearchJob>(std::shared_ptr<scheduler::Job>(job_));
     auto search_job = static_cast<scheduler::SearchJob*>(job_);
     try {
@@ -282,7 +281,6 @@ SearchTask::IndexType() {
             }
         }
     }
-    //printf("index_type_:%s\n",index_type_.c_str());
     return index_type_;
 }
 
