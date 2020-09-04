@@ -456,7 +456,8 @@ class TestGetBase:
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entity[-1]["values"][0])
 
-    def test_get_entities_after_delete_disable_autoflush(self, connect, collection, get_pos):
+    # TODO: unable to set config
+    def _test_get_entities_after_delete_disable_autoflush(self, connect, collection, get_pos):
         '''
         target: test.get_entity_by_id
         method: disable autoflush, add entities, and delete, get entity by the given id
@@ -519,6 +520,71 @@ class TestGetBase:
                 get): i for i in range(10)}
             for future in concurrent.futures.as_completed(future_results):
                 future.result()
+
+    @pytest.mark.level(2)
+    def test_get_entity_by_id_insert_multi_threads(self, connect, collection):
+        '''
+        target: test.get_entity_by_id
+        method: thread do insert and get
+        expected:
+        '''
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
+        get_id = ids[:1000]
+
+        def insert():
+            # logging.getLogger().info(current_thread().getName() + " insert")
+            step = 1000
+            for i in range(nb // step):
+                group_entities = gen_entities(step, False)
+                connect.insert(collection, group_entities)
+                connect.flush([collection])
+
+        def get():
+            # logging.getLogger().info(current_thread().getName() + " get")
+            res = connect.get_entity_by_id(collection, get_id)
+            assert len(res) == len(get_id)
+            for i in range(len(res)):
+                assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            for i in range(20):
+                fun = random.choices([get, insert])[0]
+                future = executor.submit(fun)
+                future.result()
+
+    @pytest.mark.level(2)
+    def test_get_entity_by_id_insert_multi_threads(self, connect, collection):
+        '''
+        target: test.get_entity_by_id
+        method: thread do insert and get
+        expected:
+        '''
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            def get(group_ids, group_entities):
+                # logging.getLogger().info(current_thread().getName() + " get")
+                res = connect.get_entity_by_id(collection, group_ids)
+                assert len(res) == len(group_ids)
+                for i in range(len(res)):
+                    assert_equal_vector(res[i].get(default_float_vec_field_name), group_entities[-1]["values"][i])
+
+            def insert(group_vectors):
+                # logging.getLogger().info(current_thread().getName() + " insert")
+                for group_vector in group_vectors:
+                    group_entities = [
+                        {"field": "int64", "type": DataType.INT64, "values": [i for i in range(step)]},
+                        {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(step)]},
+                        {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": group_vector}
+                    ]
+                    group_ids = connect.insert(collection, group_entities)
+                    connect.flush([collection])
+                    executor.submit(get, group_ids, group_entities)
+
+            step = 100
+            vectors = gen_vectors(nb, dimension, False)
+            group_vectors = [vectors[i:i + step] for i in range(0, len(vectors), step)]
+            task = executor.submit(insert, group_vectors)
+            task.result()
 
 
 class TestGetInvalid(object):
