@@ -60,13 +60,15 @@ class MemCollection {
     ApplyDeleteToFile();
 
  private:
-    int64_t collection_id_;
+    int64_t collection_id_ = 0;
     DBOptions options_;
 
     MemSegmentMap mem_segments_;
     std::mutex mem_mutex_;
 
     std::unordered_set<idx_t> ids_to_delete_;
+
+    int64_t segment_row_count_ = 0;
 };
 
 using MemCollectionPtr = std::shared_ptr<MemCollection>;

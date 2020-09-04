@@ -20,7 +20,7 @@ namespace milvus {
 namespace engine {
 
 namespace {
-const int64_t FORCE_MERGE_THREASHOLD = 30;  // force merge files older this time(in second)
+const int64_t FORCE_MERGE_THREASHOLD = 30 * 1000 * 1000;  // force merge files older this time(in microsecond)
 
 using LayerGroups = std::map<int64_t, SegmentInfoList>;
 
@@ -80,7 +80,7 @@ MergeLayerStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, i
             }
 
             if (segments.size() == 1) {
-                if (now - segments[0].create_on_ > static_cast<int64_t>(FORCE_MERGE_THREASHOLD * 1000)) {
+                if (now - segments[0].create_on_ > FORCE_MERGE_THREASHOLD) {
                     force_list.swap(segments);
                 }
             }

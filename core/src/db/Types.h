@@ -60,6 +60,9 @@ using VectorDistances = std::vector<VectorDistance>;
 using ResultIds = std::vector<faiss::Index::idx_t>;
 using ResultDistances = std::vector<faiss::Index::distance_t>;
 
+using ConCurrentBitset = faiss::ConcurrentBitset;
+using ConCurrentBitsetPtr = faiss::ConcurrentBitsetPtr;
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 enum class DataType {
     NONE = 0,

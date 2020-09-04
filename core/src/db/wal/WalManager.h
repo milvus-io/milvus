@@ -34,8 +34,6 @@ extern const char* WAL_DEL_FILE_NAME;
 
 class WalManager {
  public:
-    WalManager();
-
     static WalManager&
     GetInstance();
 
@@ -58,6 +56,8 @@ class WalManager {
     Recovery(const DBPtr& db);
 
  private:
+    WalManager();
+
     Status
     Init();
 
@@ -66,9 +66,6 @@ class WalManager {
 
     Status
     RecordDeleteOperation(const DeleteEntityOperationPtr& operation, const DBPtr& db);
-
-    Status
-    SplitChunk(const DataChunkPtr& chunk, std::vector<DataChunkPtr>& chunks);
 
     std::string
     ConstructFilePath(const std::string& collection_name, const std::string& file_name);
