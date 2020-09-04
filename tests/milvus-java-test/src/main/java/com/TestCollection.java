@@ -12,29 +12,6 @@ public class TestCollection {
     int segmentRowCount = 5000;
     int dimension = 128;
 
-    @BeforeClass
-    public MilvusClient setUp() throws ConnectFailedException {
-        MilvusClient client = new MilvusGrpcClient();
-        ConnectParam connectParam = new ConnectParam.Builder()
-                .withHost("127.0.0.1")
-                .withPort(19530)
-                .build();
-        client.connect(connectParam);
-        return client;
-    }
-
-    @AfterClass
-    public void tearDown() throws ConnectFailedException {
-        MilvusClient client = setUp();
-        List<String> collectionNames = client.listCollections().getCollectionNames();
-        // collectionNames.forEach(collection -> {client.dropCollection(collection);});
-        for(String collection: collectionNames){
-            System.out.print(collection+" ");
-            client.dropCollection(collection);
-        }
-        System.out.println("After Test");
-    }
-
     // case-01
     @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
     public void testCreateCollection(MilvusClient client, String collectionName) {
