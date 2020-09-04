@@ -346,14 +346,12 @@ inline bool Occur_Parse(
 enum OpType : int {
   INSERT = 0,
   DELETE = 1,
-  SEARCH = 2,
-  SEARCH_RESULT = 3,
   OpType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   OpType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool OpType_IsValid(int value);
 constexpr OpType OpType_MIN = INSERT;
-constexpr OpType OpType_MAX = SEARCH_RESULT;
+constexpr OpType OpType_MAX = DELETE;
 constexpr int OpType_ARRAYSIZE = OpType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* OpType_descriptor();
@@ -369,6 +367,31 @@ inline bool OpType_Parse(
     const std::string& name, OpType* value) {
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<OpType>(
     OpType_descriptor(), name, value);
+}
+enum SyncType : int {
+  READ = 0,
+  WRITE = 1,
+  SyncType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  SyncType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool SyncType_IsValid(int value);
+constexpr SyncType SyncType_MIN = READ;
+constexpr SyncType SyncType_MAX = WRITE;
+constexpr int SyncType_ARRAYSIZE = SyncType_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* SyncType_descriptor();
+template<typename T>
+inline const std::string& SyncType_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, SyncType>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function SyncType_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    SyncType_descriptor(), enum_t_value);
+}
+inline bool SyncType_Parse(
+    const std::string& name, SyncType* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<SyncType>(
+    SyncType_descriptor(), name, value);
 }
 // ===================================================================
 
@@ -1075,22 +1098,11 @@ class Mapping :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kFieldsFieldNumber = 3,
     kExtraParamsFieldNumber = 4,
     kCollectionNameFieldNumber = 2,
     kStatusFieldNumber = 1,
+    kSchemaFieldNumber = 3,
   };
-  // repeated .milvus.grpc.FieldParam fields = 3;
-  int fields_size() const;
-  void clear_fields();
-  ::milvus::grpc::FieldParam* mutable_fields(int index);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::FieldParam >*
-      mutable_fields();
-  const ::milvus::grpc::FieldParam& fields(int index) const;
-  ::milvus::grpc::FieldParam* add_fields();
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::FieldParam >&
-      fields() const;
-
   // repeated .milvus.grpc.KeyValuePair extra_params = 4;
   int extra_params_size() const;
   void clear_extra_params();
@@ -1121,15 +1133,23 @@ class Mapping :
   ::milvus::grpc::Status* mutable_status();
   void set_allocated_status(::milvus::grpc::Status* status);
 
+  // .milvus.grpc.Schema schema = 3;
+  bool has_schema() const;
+  void clear_schema();
+  const ::milvus::grpc::Schema& schema() const;
+  ::milvus::grpc::Schema* release_schema();
+  ::milvus::grpc::Schema* mutable_schema();
+  void set_allocated_schema(::milvus::grpc::Schema* schema);
+
   // @@protoc_insertion_point(class_scope:milvus.grpc.Mapping)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::FieldParam > fields_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair > extra_params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::grpc::Status* status_;
+  ::milvus::grpc::Schema* schema_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_suvlim_2eproto;
 };
@@ -7480,33 +7500,33 @@ class TimeSyncMsg :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kClientIdFieldNumber = 1,
+    kPeerIdFieldNumber = 1,
     kTimestampFieldNumber = 2,
-    kMsgTypeFieldNumber = 3,
+    kSyncTypeFieldNumber = 3,
   };
-  // int64 ClientId = 1;
-  void clear_clientid();
-  ::PROTOBUF_NAMESPACE_ID::int64 clientid() const;
-  void set_clientid(::PROTOBUF_NAMESPACE_ID::int64 value);
+  // int64 peer_Id = 1;
+  void clear_peer_id();
+  ::PROTOBUF_NAMESPACE_ID::int64 peer_id() const;
+  void set_peer_id(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // int64 Timestamp = 2;
   void clear_timestamp();
   ::PROTOBUF_NAMESPACE_ID::int64 timestamp() const;
   void set_timestamp(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // .milvus.grpc.OpType MsgType = 3;
-  void clear_msgtype();
-  ::milvus::grpc::OpType msgtype() const;
-  void set_msgtype(::milvus::grpc::OpType value);
+  // .milvus.grpc.SyncType sync_type = 3;
+  void clear_sync_type();
+  ::milvus::grpc::SyncType sync_type() const;
+  void set_sync_type(::milvus::grpc::SyncType value);
 
   // @@protoc_insertion_point(class_scope:milvus.grpc.TimeSyncMsg)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::int64 clientid_;
+  ::PROTOBUF_NAMESPACE_ID::int64 peer_id_;
   ::PROTOBUF_NAMESPACE_ID::int64 timestamp_;
-  int msgtype_;
+  int sync_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_suvlim_2eproto;
 };
@@ -7772,7 +7792,6 @@ class Key2SegMsg :
   enum : int {
     kRecordsFieldNumber = 2,
     kClientIdFieldNumber = 1,
-    kMsgTypeFieldNumber = 3,
   };
   // .milvus.grpc.SegmentRecord records = 2;
   bool has_records() const;
@@ -7787,11 +7806,6 @@ class Key2SegMsg :
   ::PROTOBUF_NAMESPACE_ID::int64 client_id() const;
   void set_client_id(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // .milvus.grpc.OpType msg_type = 3;
-  void clear_msg_type();
-  ::milvus::grpc::OpType msg_type() const;
-  void set_msg_type(::milvus::grpc::OpType value);
-
   // @@protoc_insertion_point(class_scope:milvus.grpc.Key2SegMsg)
  private:
   class _Internal;
@@ -7799,7 +7813,6 @@ class Key2SegMsg :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::milvus::grpc::SegmentRecord* records_;
   ::PROTOBUF_NAMESPACE_ID::int64 client_id_;
-  int msg_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_suvlim_2eproto;
 };
@@ -8291,34 +8304,55 @@ inline void Mapping::set_allocated_collection_name(std::string* collection_name)
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.Mapping.collection_name)
 }
 
-// repeated .milvus.grpc.FieldParam fields = 3;
-inline int Mapping::fields_size() const {
-  return fields_.size();
+// .milvus.grpc.Schema schema = 3;
+inline bool Mapping::has_schema() const {
+  return this != internal_default_instance() && schema_ != nullptr;
 }
-inline void Mapping::clear_fields() {
-  fields_.Clear();
+inline void Mapping::clear_schema() {
+  if (GetArenaNoVirtual() == nullptr && schema_ != nullptr) {
+    delete schema_;
+  }
+  schema_ = nullptr;
 }
-inline ::milvus::grpc::FieldParam* Mapping::mutable_fields(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.Mapping.fields)
-  return fields_.Mutable(index);
+inline const ::milvus::grpc::Schema& Mapping::schema() const {
+  const ::milvus::grpc::Schema* p = schema_;
+  // @@protoc_insertion_point(field_get:milvus.grpc.Mapping.schema)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::Schema*>(
+      &::milvus::grpc::_Schema_default_instance_);
 }
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::FieldParam >*
-Mapping::mutable_fields() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.Mapping.fields)
-  return &fields_;
+inline ::milvus::grpc::Schema* Mapping::release_schema() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.Mapping.schema)
+  
+  ::milvus::grpc::Schema* temp = schema_;
+  schema_ = nullptr;
+  return temp;
 }
-inline const ::milvus::grpc::FieldParam& Mapping::fields(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.Mapping.fields)
-  return fields_.Get(index);
+inline ::milvus::grpc::Schema* Mapping::mutable_schema() {
+  
+  if (schema_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::grpc::Schema>(GetArenaNoVirtual());
+    schema_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.Mapping.schema)
+  return schema_;
 }
-inline ::milvus::grpc::FieldParam* Mapping::add_fields() {
-  // @@protoc_insertion_point(field_add:milvus.grpc.Mapping.fields)
-  return fields_.Add();
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::FieldParam >&
-Mapping::fields() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.Mapping.fields)
-  return fields_;
+inline void Mapping::set_allocated_schema(::milvus::grpc::Schema* schema) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete schema_;
+  }
+  if (schema) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      schema = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, schema, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  schema_ = schema;
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.Mapping.schema)
 }
 
 // repeated .milvus.grpc.KeyValuePair extra_params = 4;
@@ -12844,18 +12878,18 @@ SearchMsg::extra_params() const {
 
 // TimeSyncMsg
 
-// int64 ClientId = 1;
-inline void TimeSyncMsg::clear_clientid() {
-  clientid_ = PROTOBUF_LONGLONG(0);
+// int64 peer_Id = 1;
+inline void TimeSyncMsg::clear_peer_id() {
+  peer_id_ = PROTOBUF_LONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 TimeSyncMsg::clientid() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.TimeSyncMsg.ClientId)
-  return clientid_;
+inline ::PROTOBUF_NAMESPACE_ID::int64 TimeSyncMsg::peer_id() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.TimeSyncMsg.peer_Id)
+  return peer_id_;
 }
-inline void TimeSyncMsg::set_clientid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+inline void TimeSyncMsg::set_peer_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
-  clientid_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.TimeSyncMsg.ClientId)
+  peer_id_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.TimeSyncMsg.peer_Id)
 }
 
 // int64 Timestamp = 2;
@@ -12872,18 +12906,18 @@ inline void TimeSyncMsg::set_timestamp(::PROTOBUF_NAMESPACE_ID::int64 value) {
   // @@protoc_insertion_point(field_set:milvus.grpc.TimeSyncMsg.Timestamp)
 }
 
-// .milvus.grpc.OpType MsgType = 3;
-inline void TimeSyncMsg::clear_msgtype() {
-  msgtype_ = 0;
+// .milvus.grpc.SyncType sync_type = 3;
+inline void TimeSyncMsg::clear_sync_type() {
+  sync_type_ = 0;
 }
-inline ::milvus::grpc::OpType TimeSyncMsg::msgtype() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.TimeSyncMsg.MsgType)
-  return static_cast< ::milvus::grpc::OpType >(msgtype_);
+inline ::milvus::grpc::SyncType TimeSyncMsg::sync_type() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.TimeSyncMsg.sync_type)
+  return static_cast< ::milvus::grpc::SyncType >(sync_type_);
 }
-inline void TimeSyncMsg::set_msgtype(::milvus::grpc::OpType value) {
+inline void TimeSyncMsg::set_sync_type(::milvus::grpc::SyncType value) {
   
-  msgtype_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.TimeSyncMsg.MsgType)
+  sync_type_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.TimeSyncMsg.sync_type)
 }
 
 // -------------------------------------------------------------------
@@ -13001,20 +13035,6 @@ inline void Key2SegMsg::set_allocated_records(::milvus::grpc::SegmentRecord* rec
   }
   records_ = records;
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.Key2SegMsg.records)
-}
-
-// .milvus.grpc.OpType msg_type = 3;
-inline void Key2SegMsg::clear_msg_type() {
-  msg_type_ = 0;
-}
-inline ::milvus::grpc::OpType Key2SegMsg::msg_type() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.Key2SegMsg.msg_type)
-  return static_cast< ::milvus::grpc::OpType >(msg_type_);
-}
-inline void Key2SegMsg::set_msg_type(::milvus::grpc::OpType value) {
-  
-  msg_type_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.Key2SegMsg.msg_type)
 }
 
 #ifdef __GNUC__
@@ -13139,6 +13159,11 @@ template <> struct is_proto_enum< ::milvus::grpc::OpType> : ::std::true_type {};
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::grpc::OpType>() {
   return ::milvus::grpc::OpType_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::grpc::SyncType> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::grpc::SyncType>() {
+  return ::milvus::grpc::SyncType_descriptor();
 }
 
 PROTOBUF_NAMESPACE_CLOSE

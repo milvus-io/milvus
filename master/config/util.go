@@ -16,7 +16,6 @@ package config
 import (
 	"net/url"
 	"regexp"
-
 	"github.com/czs007/suvlim/errors"
 )
 

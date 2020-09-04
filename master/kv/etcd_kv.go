@@ -16,12 +16,9 @@ package kv
 import (
 	"context"
 	"path"
-
-	//"strings"
 	"time"
-
 	"github.com/czs007/suvlim/util/etcdutil"
-	"github.com/pingcap/errors"
+	"github.com/czs007/suvlim/errors"
 	"github.com/pingcap/log"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"

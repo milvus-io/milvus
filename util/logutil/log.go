@@ -23,7 +23,7 @@ import (
 	"sync"
 
 	"github.com/coreos/pkg/capnslog"
-	"github.com/pingcap/errors"
+	"github.com/czs007/suvlim/errors"
 	zaplog "github.com/pingcap/log"
 	log "github.com/sirupsen/logrus"
 	"go.etcd.io/etcd/raft"

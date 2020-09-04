@@ -20,7 +20,8 @@ class MsgProducer {
   Result send(const std::string &msg);
   Result send(const milvus::grpc::InsertOrDeleteMsg &msg);
   Result send(const milvus::grpc::SearchMsg &msg);
-  Result Send(const milvus::grpc::GetEntityIDsParam);
+  Result send(const milvus::grpc::GetEntityIDsParam &msg);
+  Result send(const milvus::grpc::TimeSyncMsg & msg);
   Result close();
 
   const Producer &

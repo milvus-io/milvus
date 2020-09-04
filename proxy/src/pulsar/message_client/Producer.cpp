@@ -22,6 +22,26 @@ namespace message_client {
         return send(pulsar_msg);
     }
 
+    Result MsgProducer::send(const milvus::grpc::InsertOrDeleteMsg &msg) {
+      auto msg_str = msg.SerializeAsString();
+      return send(msg_str);
+    }
+
+    Result MsgProducer::send(const milvus::grpc::SearchMsg &msg) {
+      auto msg_str = msg.SerializeAsString();
+      return send(msg_str);
+    }
+
+    Result MsgProducer::send(const milvus::grpc::GetEntityIDsParam &msg) {
+      auto msg_str =  msg.SerializeAsString();
+      return send(msg_str);
+    }
+
+    Result MsgProducer::send(const milvus::grpc::TimeSyncMsg &msg) {
+      auto msg_str = msg.SerializeAsString();
+      return send(msg_str);
+    }
+
     Result MsgProducer::close() {
         return producer_.close();
     }
