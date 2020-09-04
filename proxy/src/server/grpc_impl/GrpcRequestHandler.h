@@ -20,13 +20,16 @@
 #include <string>
 #include <unordered_map>
 #include "query/BinaryQuery.h"
-#include "grpc/gen-milvus/milvus.grpc.pb.h"
+#include "grpc/gen-milvus/suvlim.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 #include "opentracing/tracer.h"
 #include "server/context/Context.h"
 #include "server/delivery/ReqHandler.h"
 #include "server/grpc_impl/interceptor/GrpcInterceptorHookHandler.h"
 #include "src/utils/Status.h"
+#include "pulsar/message_client/Consumer.h"
+#include "pulsar/message_client/Producer.h"
+#include "pulsar/message_client/ClientV2.h"
 
 namespace milvus {
 namespace server {
@@ -331,7 +334,11 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query, std::string& field_name);
 
  private:
+    // May remove req_handler ?
     ReqHandler req_handler_;
+
+    // delivery and receive pulsar message
+    std::shared_ptr<message_client::MsgClientV2> msg_client_;
 
     std::unordered_map<std::string, std::shared_ptr<Context>> context_map_;
     std::shared_ptr<opentracing::Tracer> tracer_;

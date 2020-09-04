@@ -213,6 +213,10 @@ GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer
     : tracer_(tracer), random_num_generator_() {
     std::random_device random_device;
     random_num_generator_.seed(random_device());
+    // TODO: do not hardcode pulsar message configure and init
+    std::string pulsar_server_address = "pulsar://localhost:6650";
+    msg_client_ = std::make_shared<message_client::MsgClientV2>(0, pulsar_server_address);
+    msg_client_->Init("topic-mut", "topic-query", "topic-result");
 }
 
 void
@@ -722,6 +726,8 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
+
+    // TODO: add pulsar message proucer
     return ::grpc::Status::OK;
 
 }

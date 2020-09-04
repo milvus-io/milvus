@@ -11,8 +11,8 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( GRPC_SERVICE_FILES ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
+set( GRPC_SERVICE_FILES ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/suvlim.grpc.pb.cc
+                        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/suvlim.pb.cc
                         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
                         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
                         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/hello.grpc.pb.cc
