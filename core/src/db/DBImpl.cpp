@@ -954,6 +954,10 @@ DBImpl::TimingMetricThread() {
 
 void
 DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names, bool reset_retry_times) {
+    if (collection_names.empty()) {
+        return;  // no need to start thread
+    }
+
     // build index has been finished?
     {
         std::lock_guard<std::mutex> lck(index_result_mutex_);
@@ -1063,6 +1067,10 @@ DBImpl::WaitBuildIndexFinish() {
 
 void
 DBImpl::StartMergeTask(const std::set<int64_t>& collection_ids, bool force_merge_all) {
+    if (collection_ids.empty()) {
+        return;  // no need to start thread
+    }
+
     // merge task has been finished?
     {
         std::lock_guard<std::mutex> lck(merge_result_mutex_);
