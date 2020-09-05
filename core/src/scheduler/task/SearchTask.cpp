@@ -285,5 +285,11 @@ SearchTask::IndexType() {
     return index_type_;
 }
 
+int64_t
+SearchTask::topk() {
+    auto vector_param = query_ptr_->vectors.begin()->second;
+    return vector_param->topk;
+}
+
 }  // namespace scheduler
 }  // namespace milvus

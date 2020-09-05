@@ -58,6 +58,9 @@ class SearchTask : public Task {
     std::string
     IndexType();
 
+    int64_t
+    topk();
+
  private:
     void
     CreateExecEngine();
