@@ -59,7 +59,7 @@ TEST(OptimizerTest, TEST_OPTIMIZER) {
     fiu_disable("check_config_gpu_search_threshold_fail");
 
     auto file = std::make_shared<SegmentSchema>();
-    file->engine_type_ = (int)engine::EngineType::FAISS_IVF;
+    file->engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
     file->index_params_ = "{ \"nlist\": 100 }";
     file->dimension_ = 64;
     auto search_task = std::make_shared<XSearchTask>(nullptr, file, nullptr);

@@ -23,14 +23,19 @@
 #include <unordered_map>
 #include <vector>
 
-#include "scheduler/selector/FaissFlatPass.h"
+#include "config/handler/GpuResourceConfigHandler.h"
+#include "scheduler/selector/Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class FaissIVFPass : public FaissFlatPass {
+class FaissIVFPass :  public Pass, public server::GpuResourceConfigHandler {
  public:
     FaissIVFPass() = default;
+
+ public:
+    void
+    Init() override;
 
  public:
     bool
@@ -38,7 +43,6 @@ class FaissIVFPass : public FaissFlatPass {
 
  private:
     int64_t idx_ = 0;
-    std::string passtype = "FaissIVFPass";
 };
 
 using FaissIVFPassPtr = std::shared_ptr<FaissIVFPass>;

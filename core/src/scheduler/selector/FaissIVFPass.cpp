@@ -22,6 +22,25 @@
 
 namespace milvus {
 namespace scheduler {
+
+void
+FaissIVFPass::Init() {
+    server::Config& config = server::Config::GetInstance();
+    Status s = config.GetGpuResourceConfigGpuSearchThreshold(threshold_);
+    if (!s.ok()) {
+        threshold_ = std::numeric_limits<int32_t>::max();
+    }
+    s = config.GetGpuResourceConfigSearchResources(search_gpus_);
+    if (!s.ok()) {
+        throw std::exception();
+    }
+
+    SetIdentity("FaissIVFPass");
+    AddGpuEnableListener();
+    AddGpuSearchThresholdListener();
+    AddGpuSearchResourcesListener();
+}
+
 bool
 FaissIVFPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::SearchTask) {

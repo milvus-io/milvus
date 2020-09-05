@@ -34,7 +34,7 @@ FaissFlatPass::Init() {
         throw std::exception();
     }
 
-    SetIdentity(passtype);
+    SetIdentity("FaissFlatPass");
     AddGpuEnableListener();
     AddGpuSearchThresholdListener();
     AddGpuSearchResourcesListener();
