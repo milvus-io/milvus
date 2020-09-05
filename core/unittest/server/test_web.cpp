@@ -295,8 +295,11 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("GET", "/collections/{collection_name}/entities", getEntityByID,
              PATH(String, collection_name, "collection_name"), QUERY(String, ids))
 
-    API_CALL("GET", "/collections/{collection_name}/entities", search,
-             PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
+    API_CALL("GET", "/collections/{collection_name}/entities", search, PATH(String, collection_name, "collection_name"),
+             BODY_STRING(String, body))
+
+    API_CALL("GET", "/collections/{collection_name}/entities", getEntityWithNoParams,
+             PATH(String, collection_name, "collection_name"))
 
     API_CALL("POST", "/collections/{collection_name}/entities", insert,
              PATH(String, collection_name, "collection_name"), BODY_STRING(String, body))
@@ -327,16 +330,16 @@ class WebControllerTest : public ::testing::Test {
         fs.close();
 
         milvus::ConfigMgr::GetInstance().Init();
-//        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "mock://:@:/");
-//        milvus::ConfigMgr::GetInstance().Set("storage.path", CONTROLLER_TEST_CONFIG_DIR);
-//        milvus::ConfigMgr::GetInstance().Set("network.http.enable", "true");
-//        milvus::ConfigMgr::GetInstance().Set("network.http.port", "20121");
+        //        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "mock://:@:/");
+        //        milvus::ConfigMgr::GetInstance().Set("storage.path", CONTROLLER_TEST_CONFIG_DIR);
+        //        milvus::ConfigMgr::GetInstance().Set("network.http.enable", "true");
+        //        milvus::ConfigMgr::GetInstance().Set("network.http.port", "20121");
 
         auto& config = milvus::ConfigMgr::GetInstance();
 
-//        milvus::ConfigMgr::GetInstance().Init();
+        //        milvus::ConfigMgr::GetInstance().Init();
         config.LoadFile(config_path);
-//        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "mock://:@:/");
+        //        milvus::ConfigMgr::GetInstance().Set("general.meta_uri", "mock://:@:/");
 
         milvus::engine::snapshot::Snapshots::GetInstance().StartService();
 
@@ -741,6 +744,24 @@ TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
     //    page_size = "20";
     //    response = client_ptr->getEntity(collection_name.c_str(), offset.c_str(), page_size.c_str(), connection_ptr);
     //    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, GET_ENTITY_WITH_NO_PARAMS) {
+    auto collection_name = "test_get_collection_test" + RandomName();
+    nlohmann::json mapping_json;
+    CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
+
+    const int64_t dim = DIM;
+    const int64_t nb = 3;
+    nlohmann::json insert_json;
+    GenEntities(nb, dim, insert_json);
+
+    auto status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
+    ASSERT_TRUE(status.ok());
+
+    auto response = client_ptr->getEntity(collection_name.c_str(), "", "", "", connection_ptr);
+    std::cout << response->readBodyToString()->std_str() << std::endl;
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
 }
 
 TEST_F(WebControllerTest, SYSTEM_INFO) {
