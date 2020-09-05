@@ -11,6 +11,7 @@
 
 #include "server/delivery/ReqScheduler.h"
 #include "utils/Log.h"
+#include "server/tso/TSO.h"
 
 #include <unistd.h>
 #include <utility>
@@ -134,6 +135,9 @@ Status
 ReqScheduler::PutToQueue(const BaseReqPtr& req_ptr) {
     std::lock_guard<std::mutex> lock(queue_mtx_);
 
+    auto &tso = TSOracle::GetInstance();
+    req_ptr->SetTimestamp(tso.GetTimeStamp());
+
     std::string group_name = req_ptr->req_group();
     if (req_groups_.count(group_name) > 0) {
         req_groups_[group_name]->PutReq(req_ptr);
@@ -150,6 +154,14 @@ ReqScheduler::PutToQueue(const BaseReqPtr& req_ptr) {
     }
 
     return Status::OK();
+}
+
+int64_t ReqScheduler::GetLatestReqDeliveredTime() {
+  return latest_req_time_.load();
+}
+
+void ReqScheduler::UpdateLatestDeliveredReqTime(int64_t time) {
+  latest_req_time_.store(time);
 }
 
 }  // namespace server

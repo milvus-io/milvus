@@ -77,5 +77,9 @@ BaseReq::WaitToFinish() {
     return status_;
 }
 
+void BaseReq::SetTimestamp(uint64_t ts) {
+  timestamp_ = ts;
+}
+
 }  // namespace server
 }  // namespace milvus

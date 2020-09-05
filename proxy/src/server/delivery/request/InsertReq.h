@@ -23,22 +23,20 @@ namespace server {
 
 class InsertReq : public BaseReq {
  public:
-    static BaseReqPtr
-    Create(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
-           const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
+  static BaseReqPtr
+  Create(const ContextPtr &context, const ::milvus::grpc::InsertParam *chunk_data);
 
  protected:
-    InsertReq(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
-              const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
+  InsertReq(const ContextPtr &context, const ::milvus::grpc::InsertParam *chunk_data);
 
-    Status
-    OnExecute() override;
+  Status
+  OnExecute() override;
+
+  Status
+  OnPostExecute() override ;
 
  private:
-    const std::string collection_name_;
-    const std::string partition_name_;
-    const int64_t row_count_;
-    std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data_;
+  const ::milvus::grpc::InsertParam *insert_param_;
 };
 
 }  // namespace server

@@ -337,9 +337,6 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // May remove req_handler ?
     ReqHandler req_handler_;
 
-    // delivery and receive pulsar message
-    std::shared_ptr<message_client::MsgClientV2> msg_client_;
-
     std::unordered_map<std::string, std::shared_ptr<Context>> context_map_;
     std::shared_ptr<opentracing::Tracer> tracer_;
 
