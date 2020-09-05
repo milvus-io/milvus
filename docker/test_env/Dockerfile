@@ -23,8 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget apt-transp
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-WORKDIR /root
+COPY requirements.txt /requirements.txt
 
-ENTRYPOINT [ "/app/docker-entrypoint.sh" ]
-CMD [ "start" ]
+RUN python3 -m pip install -r /requirements.txt
+
+WORKDIR /root
