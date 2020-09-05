@@ -239,6 +239,13 @@ class WebRequestHandler {
     StatusDtoT
     SystemOp(const OString& op, const OString& body_str, OString& response_str);
 
+    /**
+     *
+     * Status
+     */
+    StatusDtoT
+    ServerStatus(OString& response_str);
+
  public:
     void
     RegisterRequestHandler(const ReqHandler& handler) {

@@ -9,34 +9,26 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "storage/disk/DiskIOWriter.h"
+#include <fiu-control.h>
+#include <fiu/fiu-local.h>
+#include <gtest/gtest.h>
+#include "ConfigMgr.h"
+
+#include "config/ServerConfig.h"
 
 namespace milvus {
-namespace storage {
 
-bool
-DiskIOWriter::Open(const std::string& name) {
-    name_ = name;
-    len_ = 0;
-    fs_ = std::fstream(name_, std::ios::out | std::ios::binary);
-    return fs_.good();
-}
+// TODO: need a safe directory for testing
+// TEST(ConfigMgrTest, set_version) {
+//    ConfigMgr::GetInstance().Init();
+//    ConfigMgr::GetInstance().LoadMemory(R"(
+// version: 0.1
+//)");
+//    ConfigMgr::GetInstance().FilePath() = "/tmp/milvus_unittest_configmgr.yaml";
+//
+//    ASSERT_EQ(ConfigMgr::GetInstance().Get("version"), "0.1");
+//    ConfigMgr::GetInstance().Set("version", "100.0");
+//    ASSERT_EQ(ConfigMgr::GetInstance().Get("version"), "100.0");
+//}
 
-void
-DiskIOWriter::Write(const void* ptr, int64_t size) {
-    fs_.write(reinterpret_cast<const char*>(ptr), size);
-    len_ += size;
-}
-
-int64_t
-DiskIOWriter::Length() {
-    return len_;
-}
-
-void
-DiskIOWriter::Close() {
-    fs_.close();
-}
-
-}  // namespace storage
 }  // namespace milvus

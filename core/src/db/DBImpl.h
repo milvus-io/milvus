@@ -123,6 +123,9 @@ class DBImpl : public DB, public ConfigObserver {
     void
     ConfigUpdate(const std::string& name) override;
 
+    bool
+    IsBuildingIndex() override;
+
  private:
     void
     InternalFlush(const std::string& collection_name = "", bool merge = true);
@@ -162,6 +165,12 @@ class DBImpl : public DB, public ConfigObserver {
 
     void
     ResumeIfLast();
+
+    void
+    IncreaseLiveBuildTaskNum();
+
+    void
+    DecreaseLiveBuildTaskNum();
 
     void
     MarkIndexFailedSegments(snapshot::ID_TYPE collection_id, const snapshot::IDS_TYPE& failed_ids);
@@ -206,6 +215,9 @@ class DBImpl : public DB, public ConfigObserver {
 
     int64_t live_search_num_ = 0;
     std::mutex suspend_build_mutex_;
+
+    int64_t live_build_num_ = 0;
+    std::mutex live_build_count_mutex_;
 };  // SSDBImpl
 
 using DBImplPtr = std::shared_ptr<DBImpl>;

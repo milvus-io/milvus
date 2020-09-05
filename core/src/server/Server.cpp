@@ -17,7 +17,7 @@
 #include <cstring>
 #include <unordered_map>
 
-#include "config/ServerConfig.h"
+#include "config/ConfigMgr.h"
 #include "db/snapshot/Snapshots.h"
 #include "index/archive/KnowhereResource.h"
 #include "log/LogMgr.h"

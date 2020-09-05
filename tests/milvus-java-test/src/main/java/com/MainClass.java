@@ -149,20 +149,21 @@ public class MainClass {
         test.setName("TmpTest");
         List<XmlClass> classes = new ArrayList<XmlClass>();
 
-        classes.add(new XmlClass("com.TestPing"));
-        classes.add(new XmlClass("com.TestInsertEntities"));
-        classes.add(new XmlClass("com.TestConnect"));
-        classes.add(new XmlClass("com.TestDeleteEntities"));
-        classes.add(new XmlClass("com.TestIndex"));
-        classes.add(new XmlClass("com.TestCompact"));
-        classes.add(new XmlClass("com.TestSearchEntities"));
-        classes.add(new XmlClass("com.TestCollection"));
-        classes.add(new XmlClass("com.TestCollectionCount"));
-        classes.add(new XmlClass("com.TestFlush"));
-        classes.add(new XmlClass("com.TestPartition"));
-        classes.add(new XmlClass("com.TestGetEntityByID"));
-        classes.add(new XmlClass("com.TestCollectionInfo"));
+//        classes.add(new XmlClass("com.TestPing"));
+//        classes.add(new XmlClass("com.TestInsertEntities"));
+//        classes.add(new XmlClass("com.TestConnect"));
+//        classes.add(new XmlClass("com.TestDeleteEntities"));
+//        classes.add(new XmlClass("com.TestIndex"));
+//        classes.add(new XmlClass("com.TestCompact"));
+//        classes.add(new XmlClass("com.TestSearchEntities"));
+//        classes.add(new XmlClass("com.TestCollection"));
+//        classes.add(new XmlClass("com.TestCollectionCount"));
+//        classes.add(new XmlClass("com.TestFlush"));
+//        classes.add(new XmlClass("com.TestPartition"));
+//        classes.add(new XmlClass("com.TestGetEntityByID"));
+//        classes.add(new XmlClass("com.TestCollectionInfo"));
 //        classes.add(new XmlClass("com.TestSearchByIds"));
+        classes.add(new XmlClass("com.TestBeforeAndAfter"));
 
         test.setXmlClasses(classes) ;
 

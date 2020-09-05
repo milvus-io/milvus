@@ -12,7 +12,7 @@
 #pragma once
 
 #include <string>
-#include "config/ConfigMgr.h"
+#include "config/ServerConfig.h"
 #include "utils/Status.h"
 
 namespace milvus::server {

@@ -3,16 +3,11 @@ package com;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import io.milvus.client.*;
-import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Factory;
 import org.testng.annotations.Test;
 
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class TestSearchEntities {
 
@@ -65,7 +60,6 @@ public class TestSearchEntities {
         assert(res.getResponse().ok());
         List<Long> ids = res.getEntityIds();
         client.flush(collectionName);
-        System.out.println(dsl);
         SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
         SearchResponse res_search = client.search(searchParam);
         for (int i = 0; i < Constants.nq; i++) {
@@ -81,10 +75,7 @@ public class TestSearchEntities {
         assert(res.getResponse().ok());
         List<Long> ids = res.getEntityIds();
         client.flush(collectionName);
-        JSONObject vectorParam = Utils.genVectorParam("IP", Constants.vectors.subList(0, nq), top_k, n_probe);
-        List<JSONObject> leafParams = new ArrayList<>();
-        leafParams.add(vectorParam);
-        String dsl = Utils.genDefaultSearchParam(leafParams);
+        String dsl = Utils.setSearchParam("IP", Constants.vectors.subList(0, nq), top_k, n_probe);
         SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
         SearchResponse res_search = client.search(searchParam);
         for (int i = 0; i < Constants.nq; i++) {
@@ -246,6 +237,7 @@ public class TestSearchEntities {
         Assert.assertFalse(resSearch.getResponse().ok());
     }
 
+    // #3599
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void  testSearchVectorNotExisted(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
@@ -269,7 +261,7 @@ public class TestSearchEntities {
         Assert.assertFalse(resSearch.getResponse().ok());
     }
 
-
+    // #3601
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void  testSearchVectorDifferentDim(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();

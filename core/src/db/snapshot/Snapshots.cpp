@@ -155,7 +155,8 @@ Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) const {
     emsg << "Snapshots::GetHolderNoLock: Specified snapshot holder for collection ";
     emsg << "\"" << name << "\""
          << " not found";
-    return Status(SS_NOT_FOUND_ERROR, emsg.str());
+    LOG_ENGINE_DEBUG_ << emsg.str();
+    return Status(SS_NOT_FOUND_ERROR, "Collection " + name + " not found.");
 }
 
 Status
