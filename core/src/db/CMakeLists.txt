@@ -88,7 +88,8 @@ set( THIRD_PARTY_LIBS   sqlite
                         ${GRPC_LIB}
                         )
 
-set( S3_CLIENT_LIB  AWS::aws-cpp-sdk-s3 )
+set( S3_CLIENT_LIB  AWS::aws-cpp-sdk-s3
+                    AWS::aws-cpp-sdk-core )
 
 if ( MILVUS_GPU_VERSION )
     set( CUDA_LIB   ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
