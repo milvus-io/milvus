@@ -12,7 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 #include <vector>
 
 #include "db/Types.h"
@@ -48,8 +47,6 @@ class MySqlEngine : public MetaEngine {
 
     std::shared_ptr<meta::MySQLConnectionPool> mysql_connection_pool_;
     bool safe_grab_ = false;  // Safely graps a connection from mysql pool
-
-    std::mutex meta_mutex_;
 };
 
 }  // namespace milvus::engine::meta
