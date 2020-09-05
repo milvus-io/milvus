@@ -207,7 +207,7 @@ SqliteEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
     std::string sql;
 
     STATUS_CHECK(MetaHelper::MetaQueryContextToSql(context, sql));
-    std::lock_guard<std::mutex> lock(meta_mutex_);
+    std::shared_lock<std::shared_mutex> lock(meta_mutex_);
 
     QueryData = &attrs;
     if (SQLITE_OK != sqlite3_exec(db_, sql.c_str(), QueryCallback, nullptr, nullptr)) {
@@ -230,7 +230,7 @@ SqliteEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contex
         sqls.push_back(sql);
     }
 
-    std::lock_guard<std::mutex> lock(meta_mutex_);
+    std::unique_lock<std::shared_mutex> lock(meta_mutex_);
     if (SQLITE_OK != sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr)) {
         std::string sql_err = "Sqlite begin transaction failed: " + ErrorMsg(db_);
         return Status(DB_ERROR, sql_err);

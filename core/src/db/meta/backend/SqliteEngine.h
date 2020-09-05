@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include <mutex>
+#include <shared_mutex>
 #include <vector>
 
 #include <sqlite3.h>
@@ -43,7 +43,7 @@ class SqliteEngine : public MetaEngine {
  private:
     DBMetaOptions options_;
     sqlite3* db_;
-    std::mutex meta_mutex_;
+    mutable std::shared_mutex meta_mutex_;
 };
 
 }  // namespace milvus::engine::meta
