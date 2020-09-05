@@ -2,7 +2,7 @@
 
 #include "pulsar/Producer.h"
 #include "Client.h"
-#include "src/grpc/gen-milvus/suvlim.pb.h"
+#include "grpc/gen-milvus/suvlim.pb.h"
 
 namespace milvus {
 namespace message_client {
