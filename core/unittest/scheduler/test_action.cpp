@@ -13,7 +13,6 @@
 #include <gtest/gtest.h>
 #include <src/scheduler/task/BuildIndexTask.h>
 #include <src/scheduler/task/SearchTask.h>
-#include <src/scheduler/optimizer/FaissIVFPass.h>
 
 #include "scheduler/optimizer/BuildIndexPass.h"
 #include "scheduler/optimizer/FaissFlatPass.h"
