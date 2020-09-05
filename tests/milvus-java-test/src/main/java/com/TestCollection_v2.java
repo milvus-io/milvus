@@ -1,12 +1,10 @@
 package com;
 
-import com.alibaba.fastjson.JSONObject;
 import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.*;
 
 import java.util.List;
-import java.util.Map;
 
 public class TestCollection_v2 {
     int segmentRowCount = 5000;

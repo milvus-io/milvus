@@ -27,8 +27,8 @@ public class Utils {
     }
 
     public static List<List<Float>> genVectors(int vectorCount, int dimension, boolean norm) {
-        List<List<Float>> vectors = new ArrayList<>();
         Random random = new Random();
+        List<List<Float>> vectors = new ArrayList<>();
         for (int i = 0; i < vectorCount; ++i) {
             List<Float> vector = new ArrayList<>();
             for (int j = 0; j < dimension; ++j) {
@@ -42,14 +42,16 @@ public class Utils {
         return vectors;
     }
 
-    static List<ByteBuffer> genBinaryVectors(long vectorCount, long dimension) {
+    static List<List<Byte>> genBinaryVectors(long vectorCount, long dimension) {
         Random random = new Random();
-        List<ByteBuffer> vectors = new ArrayList<>();
+        List<List<Byte>> vectors = new ArrayList<>();
         final long dimensionInByte = dimension / 8;
         for (long i = 0; i < vectorCount; ++i) {
-            ByteBuffer byteBuffer = ByteBuffer.allocate((int) dimensionInByte);
-            random.nextBytes(byteBuffer.array());
-            vectors.add(byteBuffer);
+            List<Byte> vector = new ArrayList<>();
+            for (int j = 0; j < dimensionInByte; ++j) {
+                vector.add((byte) random.nextInt());
+            }
+            vectors.add(vector);
         }
         return vectors;
     }
@@ -111,7 +113,7 @@ public class Utils {
         return fieldsMap;
     }
 
-    public static List<Map<String,Object>> genDefaultBinaryEntities(int dimension, int vectorCount, List<ByteBuffer> vectorsBinary){
+    public static List<Map<String,Object>> genDefaultBinaryEntities(int dimension, int vectorCount, List<List<Byte>> vectorsBinary){
         List<Map<String,Object>> binaryFieldsMap = genDefaultFields(dimension, true);
         List<Long> intValues = new ArrayList<>(vectorCount);
         List<Float> floatValues = new ArrayList<>(vectorCount);
@@ -163,7 +165,7 @@ public class Utils {
         return searchParam;
     }
 
-    static JSONObject genBinaryVectorParam(String metricType, String queryVectors, int topk, int nprobe) {
+    static JSONObject genBinaryVectorParam(String metricType, List<List<Byte>> queryVectors, int topk, int nprobe) {
         JSONObject searchParam = new JSONObject();
         JSONObject fieldParam = new JSONObject();
         fieldParam.put("topk", topk);
@@ -200,7 +202,7 @@ public class Utils {
         return JSONObject.toJSONString(boolParam);
     }
 
-    public static String setBinarySearchParam(String metricType, List<ByteBuffer> queryVectors, int topk, int nprobe) {
+    public static String setBinarySearchParam(String metricType, List<List<Byte>> queryVectors, int topk, int nprobe) {
         JSONObject searchParam = new JSONObject();
         JSONObject fieldParam = new JSONObject();
         fieldParam.put("topk", topk);
@@ -367,7 +369,7 @@ public class Utils {
     }
 
     public static InsertParam genDefaultBinaryInsertParam(String collectionName, int dimension, int vectorCount,
-                                                          List<ByteBuffer> vectorsBinary) {
+                                                          List<List<Byte>> vectorsBinary) {
         List<Long> intValues = new ArrayList<>(vectorCount);
         List<Float> floatValues = new ArrayList<>(vectorCount);
         for (int i = 0; i < vectorCount; ++i) {
@@ -390,7 +392,7 @@ public class Utils {
     }
 
     public static InsertParam genDefaultBinaryInsertParam(String collectionName, int dimension, int vectorCount,
-                                                          List<ByteBuffer> vectorsBinary, List<Long> entityIds) {
+                                                          List<List<Byte>> vectorsBinary, List<Long> entityIds) {
         List<Long> intValues = new ArrayList<>(vectorCount);
         List<Float> floatValues = new ArrayList<>(vectorCount);
         for (int i = 0; i < vectorCount; ++i) {
@@ -414,7 +416,7 @@ public class Utils {
     }
 
     public static InsertParam genDefaultBinaryInsertParam(String collectionName, int dimension, int vectorCount,
-                                                          List<ByteBuffer> vectorsBinary, String tag) {
+                                                          List<List<Byte>> vectorsBinary, String tag) {
         List<Long> intValues = new ArrayList<>(vectorCount);
         List<Float> floatValues = new ArrayList<>(vectorCount);
         for (int i = 0; i < vectorCount; ++i) {

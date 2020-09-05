@@ -10,7 +10,6 @@ import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
@@ -20,7 +19,7 @@ public class TestInsertEntities_v2 {
     String tag = "tag";
     int nb = Constants.nb;
     List<List<Float>> vectors = Constants.vectors;
-    List<ByteBuffer> vectorsBinary = Constants.vectorsBinary;
+    List<List<Byte>> vectorsBinary = Constants.vectorsBinary;
 
     // case-01
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)

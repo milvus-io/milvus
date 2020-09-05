@@ -58,12 +58,16 @@ public class TestGetEntityByID {
     // Binary tests
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testGetEntityByIdValidBinary(MilvusClient client, String collectionName) {
+        int get_length = 20;
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
         InsertResponse resInsert = client.insert(insertParam);
         List<Long> ids = resInsert.getEntityIds();
         client.flush(collectionName);
-        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, 1));
-        assert res.getFieldsMap().get(0).get(Constants.binaryFieldName).equals(Constants.vectorsBinary.get(0).rewind());
+        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, get_length));
+        for (int i = 0; i < get_length; i++) {
+            List<Map<String,Object>> fieldsMap = res.getFieldsMap();
+            assert (fieldsMap.get(i).get("binary_vector").equals(Constants.vectorsBinary.get(i)));
+        }
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
