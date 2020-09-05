@@ -191,6 +191,8 @@ ValidateIndexType(std::string& index_type) {
         knowhere::IndexEnum::INDEX_RHNSWFlat,
         knowhere::IndexEnum::INDEX_RHNSWPQ,
         knowhere::IndexEnum::INDEX_RHNSWSQ,
+        knowhere::IndexEnum::INDEX_NGTPANNG,
+        knowhere::IndexEnum::INDEX_NGTONNG,
 
         // structured index names
         engine::DEFAULT_STRUCTURED_INDEX,
