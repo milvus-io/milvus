@@ -20,6 +20,7 @@
 
 #include <fiu/fiu-local.h>
 
+#include "config/ConfigMgr.h"
 #include "config/ServerConfig.h"
 #include "db/Utils.h"
 #include "metrics/SystemInfo.h"
@@ -367,6 +368,7 @@ WebRequestHandler::GetPageEntities(const std::string& collection_name, const std
         real_offset = 0;
     }
     if (segment_ids.empty()) {
+        json_out["entities"] = json::array();
         return Status::OK();
     }
     std::vector<std::string> field_names;
@@ -533,11 +535,6 @@ WebRequestHandler::GetConfig(std::string& result_str) {
             }
         }
 #endif
-        // check if server require start
-        bool required = false;
-        // TODO: Use new cofnig mgr
-        // Config::GetInstance().GetServerRestartRequired(required);
-        j["restart_required"] = required;
         result_str = j.dump();
     }
 
@@ -558,9 +555,9 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
         std::ostringstream ss;
         if (evalue.is_string()) {
             std::string vle = evalue;
-            ss << "set_config " << el.key() << " " << vle;
+            ss << "set " << el.key() << " " << vle;
         } else {
-            ss << "set_config " << el.key() << " " << evalue;
+            ss << "set " << el.key() << " " << evalue;
         }
         cmds.emplace_back(ss.str());
     }
@@ -578,11 +575,6 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
 
     nlohmann::json result;
     AddStatusToJson(result, StatusCode::SUCCESS, msg);
-
-    bool required = false;
-    // Config::GetInstance().GetServerRestartRequired(required);
-    result["restart_required"] = required;
-
     result_str = result.dump();
 
     return Status::OK();
@@ -935,6 +927,11 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
     std::vector<bool> valid_row;
     engine::DataChunkPtr data_chunk;
     engine::snapshot::FieldElementMappings field_mappings;
+
+    if (ids.empty()) {
+        json_out["entities"] = {};
+        return Status::OK();
+    }
 
     auto status = req_handler_.GetEntityByID(context_ptr_, collection_name, ids, field_names, valid_row, field_mappings,
                                              data_chunk);
@@ -1774,6 +1771,9 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
                 partition_tag = query_params.get("partition_tag")->std_str();
             }
             status = GetPageEntities(collection_name->std_str(), partition_tag, page_size, offset, json_out);
+            if (!status.ok()) {
+                json_out["entities"] = json::array();
+            }
             AddStatusToJson(json_out, status.code(), status.message());
             response = json_out.dump().c_str();
             return status;
@@ -1829,16 +1829,25 @@ WebRequestHandler::EntityOp(const OString& collection_name, const OQueryParams& 
     std::string result_str;
 
     try {
+        nlohmann::json payload_json;
+        if (!payload->std_str().empty()) {
+            payload_json = nlohmann::json::parse(payload->std_str());
+        }
         if (query_params.get("offset") || query_params.get("page_size") || query_params.get("ids")) {
             status = GetEntity(collection_name, query_params, response);
             ASSIGN_RETURN_STATUS_DTO(status);
-        } else {
-            nlohmann::json payload_json = nlohmann::json::parse(payload->std_str());
+        } else if (!payload_json.empty()) {
             if (payload_json.contains("query")) {
                 status = Search(collection_name->c_str(), payload_json, result_str);
             } else {
-                status = Status(ILLEGAL_BODY, "Unknown body");
+                status = Status(ILLEGAL_BODY, "Unknown payload");
             }
+        } else {
+            OQueryParams self_params;
+            self_params.put("offset", "0");
+            self_params.put("page_size", "10");
+            status = GetEntity(collection_name, self_params, response);
+            ASSIGN_RETURN_STATUS_DTO(status)
         }
     } catch (nlohmann::detail::parse_error& e) {
         std::string emsg = "json error: code=" + std::to_string(e.id) + ", reason=" + e.what();
@@ -1925,6 +1934,14 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
 
     response_str = status.ok() ? result_str.c_str() : "NULL";
 
+    ASSIGN_RETURN_STATUS_DTO(status);
+}
+
+StatusDtoT
+WebRequestHandler::ServerStatus(OString& response_str) {
+    std::string result_str;
+    auto status = CommandLine("status", result_str);
+    response_str = status.ok() ? result_str.c_str() : "NULL";
     ASSIGN_RETURN_STATUS_DTO(status);
 }
 

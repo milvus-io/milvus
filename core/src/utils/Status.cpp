@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/Status.h"
+#include "memory"
 
 #include <cstring>
 
@@ -22,16 +23,14 @@ Status::Status(StatusCode code, const std::string& msg) {
     // 4 bytes store message length
     // the left bytes store message string
     auto length = static_cast<uint32_t>(msg.size());
-    auto result = new char[length + sizeof(length) + CODE_WIDTH];
-    std::memcpy(result, &code, CODE_WIDTH);
-    std::memcpy(result + CODE_WIDTH, &length, sizeof(length));
-    memcpy(result + sizeof(length) + CODE_WIDTH, msg.data(), length);
-
-    state_ = result;
+    // auto result = new char[length + sizeof(length) + CODE_WIDTH];
+    state_.resize(length + sizeof(length) + CODE_WIDTH);
+    std::memcpy(state_.data(), &code, CODE_WIDTH);
+    std::memcpy(state_.data() + CODE_WIDTH, &length, sizeof(length));
+    memcpy(state_.data() + sizeof(length) + CODE_WIDTH, msg.data(), length);
 }
 
 Status::~Status() {
-    delete state_;
 }
 
 Status::Status(const Status& s) {
@@ -56,37 +55,35 @@ Status::operator=(Status&& s) noexcept {
 
 void
 Status::CopyFrom(const Status& s) {
-    delete state_;
-    state_ = nullptr;
-    if (s.state_ == nullptr) {
+    state_.clear();
+    if (s.state_.empty()) {
         return;
     }
 
     uint32_t length = 0;
-    memcpy(&length, s.state_ + CODE_WIDTH, sizeof(length));
+    memcpy(&length, s.state_.data() + CODE_WIDTH, sizeof(length));
     int buff_len = length + sizeof(length) + CODE_WIDTH;
-    state_ = new char[buff_len];
-    memcpy(state_, s.state_, buff_len);
+    state_.resize(buff_len);
+    memcpy(state_.data(), s.state_.data(), buff_len);
 }
 
 void
 Status::MoveFrom(Status& s) {
-    delete state_;
     state_ = s.state_;
-    s.state_ = nullptr;
+    s.state_.clear();
 }
 
 std::string
 Status::message() const {
-    if (state_ == nullptr) {
+    if (state_.empty()) {
         return "OK";
     }
 
     std::string msg;
     uint32_t length = 0;
-    memcpy(&length, state_ + CODE_WIDTH, sizeof(length));
+    memcpy(&length, state_.data() + CODE_WIDTH, sizeof(length));
     if (length > 0) {
-        msg.append(state_ + sizeof(length) + CODE_WIDTH, length);
+        msg.append(state_.data() + sizeof(length) + CODE_WIDTH, length);
     }
 
     return msg;
@@ -94,7 +91,7 @@ Status::message() const {
 
 std::string
 Status::ToString() const {
-    if (state_ == nullptr) {
+    if (state_.empty()) {
         return "OK";
     }
 

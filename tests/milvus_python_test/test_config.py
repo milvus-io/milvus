@@ -25,6 +25,7 @@ class TestCacheConfig:
         if args["handler"] == "HTTP":
             pytest.skip("skip in http mode")
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def reset_configs(self, connect):
         '''
@@ -32,7 +33,7 @@ class TestCacheConfig:
         '''
         relpy = connect.set_config("cache", "cache_size", '4GB')
         config_value = connect.get_config("cache", "cache_size")
-        assert config_value == '4294967296'
+        assert config_value == '4GB'
         #relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
         #config_value = connect.get_config("cache", "insert_buffer_size")
         #assert config_value == '1073741824'
@@ -148,6 +149,7 @@ class TestCacheConfig:
         mem_total = int(mem_info["memory_total"])
         return int(mem_total / 1024 / 1024 / 1024)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cache_size_invalid_parent_key(self, connect, collection):
         '''
@@ -161,6 +163,7 @@ class TestCacheConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config(config, "cache_size", '4294967296')
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cache_invalid_child_key(self, connect, collection):
         '''
@@ -174,6 +177,7 @@ class TestCacheConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("cache", config, '4294967296')
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cache_size_valid(self, connect, collection):
         '''
@@ -184,8 +188,9 @@ class TestCacheConfig:
         self.reset_configs(connect)
         relpy = connect.set_config("cache", "cache_size", '2147483648')
         config_value = connect.get_config("cache", "cache_size")
-        assert config_value == '2147483648'
+        assert config_value == '2GB'
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.level(2)
     def test_set_cache_size_valid_multiple_times(self, connect, collection):
         '''
@@ -203,6 +208,7 @@ class TestCacheConfig:
             config_value = connect.get_config("cache", "cache_size")
             assert config_value == '2147483648'
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.level(2)
     def test_set_insert_buffer_size_invalid_parent_key(self, connect, collection):
         '''
@@ -216,6 +222,7 @@ class TestCacheConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config(config, "insert_buffer_size", '1073741824')
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_insert_buffer_size_valid(self, connect, collection):
         '''
@@ -224,9 +231,9 @@ class TestCacheConfig:
         expected: status ok, set successfully
         '''
         self.reset_configs(connect)
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
+        relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.level(2)
     def test_set_insert_buffer_size_valid_multiple_times(self, connect, collection):
         '''
@@ -242,6 +249,7 @@ class TestCacheConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cache_out_of_memory_value_A(self, connect, collection):
         '''
@@ -313,6 +321,7 @@ class TestGPUConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_gpu_invalid_child_key(self, connect, collection):
         '''
@@ -325,6 +334,7 @@ class TestGPUConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("gpu", config, 1000)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_gpu_search_threshold_invalid_parent_key(self, connect, collection):
         '''
@@ -339,6 +349,7 @@ class TestGPUConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config(config, "gpu_search_threshold", 1000)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_gpu_search_threshold_valid(self, connect, collection):
         '''
@@ -352,6 +363,7 @@ class TestGPUConfig:
         config_value = connect.get_config("gpu", "gpu_search_threshold")
         assert config_value == '2000'
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_gpu_invalid_values(self, connect, collection):
         '''
@@ -366,6 +378,7 @@ class TestGPUConfig:
                 with pytest.raises(Exception) as e:
                     relpy = connect.set_config("gpu", "gpu_search_threshold", i)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def reset_configs(self, connect):
         '''
@@ -555,6 +568,7 @@ class TestGPUConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_gpu_enable_invalid_parent_key(self, connect, collection):
         '''
@@ -570,6 +584,7 @@ class TestGPUConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config(config, "enable", "true")
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_gpu_invalid_child_key(self, connect, collection):
         '''
@@ -585,6 +600,7 @@ class TestGPUConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("gpu", config, "true")
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_gpu_enable_invalid_values(self, connect, collection):
         '''
@@ -598,6 +614,7 @@ class TestGPUConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("gpu", "enable", i)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_gpu_enable_valid(self, connect, collection):
         '''
@@ -612,6 +629,7 @@ class TestGPUConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("gpu", "enable", config)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cache_size_invalid_parent_key(self, connect, collection):
         '''
@@ -627,6 +645,7 @@ class TestGPUConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config(config, "cache_size", 2)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cache_size_valid(self, connect, collection):
         '''
@@ -638,6 +657,7 @@ class TestGPUConfig:
             pytest.skip("Only support GPU mode")
         relpy = connect.set_config("gpu", "cache_size", 2)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_cache_size_invalid_values(self, connect, collection):
         '''
@@ -653,6 +673,7 @@ class TestGPUConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("gpu", "cache_size", i)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_search_devices_invalid_parent_key(self, connect, collection):
         '''
@@ -668,6 +689,7 @@ class TestGPUConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config(config, "search_devices", "gpu0")
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_search_devices_valid(self, connect, collection):
         '''
@@ -680,6 +702,7 @@ class TestGPUConfig:
         with pytest.raises(Exception) as e:
             relpy = connect.set_config("gpu", "search_devices", "gpu0")
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_search_devices_invalid_values(self, connect, collection):
         '''
@@ -693,6 +716,7 @@ class TestGPUConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("gpu", "search_devices", i)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_build_index_devices_invalid_parent_key(self, connect, collection):
         '''
@@ -708,6 +732,7 @@ class TestGPUConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config(config, "build_index_devices", "gpu0")
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_build_index_devices_valid(self, connect, collection):
         '''
@@ -720,6 +745,7 @@ class TestGPUConfig:
         with pytest.raises(Exception) as e:
             relpy = connect.set_config("gpu", "build_index_devices", "gpu0")
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_build_index_devices_invalid_values(self, connect, collection):
         '''
@@ -824,6 +850,7 @@ class TestNetworkConfig:
         timezones.extend(["UTC+13", "UTC+14"])
         return timezones
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_network_invalid_child_key(self, connect, collection):
         '''
@@ -834,6 +861,7 @@ class TestNetworkConfig:
         with pytest.raises(Exception) as e:
             relpy = connect.set_config("network", "child_key", 19530)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_address_valid(self, connect, collection):
         '''
@@ -841,9 +869,9 @@ class TestNetworkConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("network", "bind.address", '0.0.0.0')
+        relpy = connect.set_config("network", "bind.address", '0.0.0.0')
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_port_valid(self, connect, collection):
         '''
         target: set port
@@ -851,20 +879,21 @@ class TestNetworkConfig:
         expected: status ok, set successfully
         '''
         for valid_port in [1025, 65534, 12345, "19530"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("network", "http.port", valid_port)
+            relpy = connect.set_config("network", "http.port", valid_port)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_port_invalid(self, connect, collection):
         '''
         target: set port
         method: call set_config with port number out of range(1024, 65535)
         expected: status not ok
         '''
-        for invalid_port in [1024, 65535, "0", "True", "19530 ", "100000"]:
+        for invalid_port in [1024, 65535, "0", "True", "100000"]:
             logging.getLogger().info(invalid_port)
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("network", "http.port", invalid_port)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_http_port_valid(self, connect, collection):
         '''
         target: set http.port
@@ -872,16 +901,16 @@ class TestNetworkConfig:
         expected: status ok, set successfully
         '''
         for valid_http_port in [1025, 65534, "12345", 19121]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("network", "http.port", valid_http_port)
+            relpy = connect.set_config("network", "http.port", valid_http_port)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_http_port_invalid(self, connect, collection):
         '''
         target: set http.port
         method: call set_config with http.port number out of range(1024, 65535)
         expected: status not ok
         '''
-        for invalid_http_port in [1024, 65535, "0", "True", "19530 ", "1000000"]:
+        for invalid_http_port in [1024, 65535, "0", "True", "1000000"]:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("network", "http.port", invalid_http_port)
 
@@ -946,17 +975,19 @@ class TestGeneralConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_timezone_invalid(self, connect, collection):
         '''
         target: set timezone
         method: call set_config with invalid timezone
         expected: status not ok
         '''
-        for invalid_timezone in ["utc++8", "UTC++8", "GMT+8"]:
+        for invalid_timezone in ["utc++8", "UTC++8"]:
             logging.getLogger().info(invalid_timezone)
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("general", "timezone", invalid_timezone)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_general_invalid_child_key(self, connect, collection):
         '''
@@ -967,6 +998,7 @@ class TestGeneralConfig:
         with pytest.raises(Exception) as e:
             relpy = connect.set_config("general", "child_key", 1)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_meta_uri_valid(self, connect, collection):
         '''
@@ -974,8 +1006,7 @@ class TestGeneralConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("general", "meta_uri", 'sqlite://:@:/')
+        relpy = connect.set_config("general", "meta_uri", 'sqlite://:@:/')
 
 
 class TestStorageConfig:
@@ -1037,6 +1068,7 @@ class TestStorageConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_storage_invalid_child_key(self, connect, collection):
         '''
@@ -1047,6 +1079,7 @@ class TestStorageConfig:
         with pytest.raises(Exception) as e:
             relpy = connect.set_config("storage", "child_key", "")
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_path_valid(self, connect, collection):
         '''
@@ -1054,9 +1087,9 @@ class TestStorageConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("storage", "path", '/var/lib/milvus')
+        relpy = connect.set_config("storage", "path", '/var/lib/milvus')
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_auto_flush_interval_valid(self, connect, collection):
         '''
         target: set auto_flush_interval
@@ -1069,6 +1102,7 @@ class TestStorageConfig:
             config_value = connect.get_config("storage", "auto_flush_interval")
             assert config_value == str(valid_auto_flush_interval)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_auto_flush_interval_invalid(self, connect, collection):
         '''
         target: set auto_flush_interval
@@ -1162,6 +1196,7 @@ class TestMetricConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_metric_invalid_child_key(self, connect, collection):
         '''
@@ -1172,16 +1207,17 @@ class TestMetricConfig:
         with pytest.raises(Exception) as e:
             relpy = connect.set_config("metric", "child_key", 19530)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_enable_valid(self, connect, collection):
         '''
         target: set enable
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        for valid_enable in ["Off", "false", 0, "yes", "On", "true", "1", "NO"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("metric", "enable", valid_enable)
+        for valid_enable in ["false", "true"]:
+            relpy = connect.set_config("metric", "enable", valid_enable)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_address_valid(self, connect, collection):
         '''
@@ -1189,9 +1225,9 @@ class TestMetricConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("metric", "address", '127.0.0.1')
+        relpy = connect.set_config("metric", "address", '127.0.0.1')
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_port_valid(self, connect, collection):
         '''
         target: set port
@@ -1199,16 +1235,16 @@ class TestMetricConfig:
         expected: status ok, set successfully
         '''
         for valid_port in [1025, 65534, "19530", "9091"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("metric", "port", valid_port)
+            relpy = connect.set_config("metric", "port", valid_port)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_port_invalid(self, connect, collection):
         '''
         target: set port
         method: call set_config with port number out of range(1024, 65535), or same as http.port number
         expected: status not ok
         '''
-        for invalid_port in [1024, 65535, "0", "True", "19530 ", "100000"]:
+        for invalid_port in [1024, 65535, "0", "True", "100000"]:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("metric", "port", invalid_port)
 
@@ -1317,6 +1353,7 @@ class TestWALConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_wal_invalid_child_key(self, connect, collection):
         '''
@@ -1327,26 +1364,27 @@ class TestWALConfig:
         with pytest.raises(Exception) as e:
             relpy = connect.set_config("wal", "child_key", 256)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_enable_valid(self, connect, collection):
         '''
         target: set enable
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        for valid_enable in ["Off", "false", 0, "no", "On", "true", "1", "YES"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("wal", "enable", valid_enable)
+        for valid_enable in ["false", "true"]:
+            relpy = connect.set_config("wal", "enable", valid_enable)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_recovery_error_ignore_valid(self, connect, collection):
         '''
         target: set recovery_error_ignore
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        for valid_recovery_error_ignore in ["Off", "false", "0", "no", "On", "true", "1", "YES"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("wal", "recovery_error_ignore", valid_recovery_error_ignore)
+        for valid_recovery_error_ignore in ["false", "true"]:
+            relpy = connect.set_config("wal", "recovery_error_ignore", valid_recovery_error_ignore)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_buffer_size_valid_A(self, connect, collection):
         '''
         target: set buffer_size
@@ -1354,9 +1392,9 @@ class TestWALConfig:
         expected: status ok, set successfully
         '''
         for valid_buffer_size in ["64MB", "128MB", "4096MB", "1000MB", "256MB"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("wal", "buffer_size", valid_buffer_size)
+            relpy = connect.set_config("wal", "buffer_size", valid_buffer_size)
 
+    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_wal_path_valid(self, connect, collection, args):
         '''
@@ -1364,6 +1402,5 @@ class TestWALConfig:
         method: call set_config correctly
         expected: status ok, set successfully
         '''
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("wal", "path", "/var/lib/milvus/wal")
+        relpy = connect.set_config("wal", "path", "/var/lib/milvus/wal")
 

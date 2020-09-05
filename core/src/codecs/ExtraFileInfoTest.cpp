@@ -12,11 +12,11 @@
 #include <cstring>
 #include <unordered_map>
 
-#include "easyloggingpp/easylogging++.h"
-#include "gtest/gtest.h"
-
-#include "ExtraFileInfo.h"
+#include "codecs/ExtraFileInfo.h"
 #include "crc32c/crc32c.h"
+#include "gtest/gtest.h"
+#include "utils/Log.h"
+
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
@@ -24,7 +24,7 @@
 INITIALIZE_EASYLOGGINGPP
 
 namespace milvus {
-namespace storage {
+namespace codec {
 
 /* ExtraFileInfoTest */
 class ExtraFileInfoTest : public testing::Test {
@@ -43,32 +43,37 @@ TEST_F(ExtraFileInfoTest, WriteFileTest) {
 
     auto record = std::unordered_map<std::string, std::string>();
     record.insert(std::make_pair("test", "test"));
-    WriteMagic(fs_ptr, file_path);
-    WriteHeaderValues(fs_ptr, file_path, record);
-
-    if (!fs_ptr->writer_ptr_->InOpen(file_path.c_str())) {
+    record.insert(std::make_pair("github", "github"));
+    if (!fs_ptr->writer_ptr_->Open(file_path.c_str())) {
         std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
     }
-    fs_ptr->writer_ptr_->Seekp(0, std::ios_base::end);
+    WRITE_MAGIC(fs_ptr);
 
     size_t num_bytes = raw.size();
-    fs_ptr->writer_ptr_->Write(&num_bytes, sizeof(size_t));
+    record.insert(std::make_pair("size", std::to_string(num_bytes)));
+
+    std::string header = HeaderWrapper(record);
+    WriteHeaderValues(fs_ptr, header);
+
     fs_ptr->writer_ptr_->Write(raw.data(), num_bytes);
+
+    WRITE_SUM(fs_ptr, header, raw.data(), num_bytes);
     fs_ptr->writer_ptr_->Close();
 
-    int result_sum = CalculateSum(fs_ptr, file_path);
-    WriteSum(fs_ptr, file_path, result_sum);
+    if (!fs_ptr->reader_ptr_->Open(file_path.c_str())) {
+        std::string err_msg = "Failed to open file: " + file_path + ", error: " + std::strerror(errno);
+    }
 
-    ASSERT_TRUE(CheckSum(fs_ptr, file_path));
-    ASSERT_EQ(ReadHeaderValue(fs_ptr, file_path, "test"), "test");
+    ASSERT_TRUE(CheckMagic(fs_ptr));
+    std::unordered_map<std::string, std::string> headers = ReadHeaderValues(fs_ptr);
+    ASSERT_EQ(headers.at("test"), "test");
+    ASSERT_EQ(headers.at("github"), "github");
+    ASSERT_EQ(stol(headers.at("size")), num_bytes);
 
-    ASSERT_TRUE(WriteHeaderValue(fs_ptr, file_path, "github", "github"));
-    ASSERT_EQ(ReadHeaderValue(fs_ptr, file_path, "github"), "github");
-    result_sum = CalculateSum(fs_ptr, file_path, true);
-    WriteSum(fs_ptr, file_path, result_sum, true);
-    ASSERT_TRUE(CheckMagic(fs_ptr, file_path));
-    ASSERT_TRUE(CheckSum(fs_ptr, file_path));
+    fs_ptr->reader_ptr_->Read(raw.data(), num_bytes);
+
+    ASSERT_TRUE(CheckSum(fs_ptr));
 }
-}  // namespace storage
+}  // namespace codec
 
 }  // namespace milvus
