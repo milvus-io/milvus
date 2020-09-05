@@ -123,6 +123,10 @@ Utils::IndexTypeName(const milvus::IndexType& index_type) {
             return "RHNSWPQ";
         case milvus::IndexType::ANNOY:
             return "ANNOY";
+        case milvus::IndexType::NGTPANNG:
+            return "NGTPANNG";
+        case milvus::IndexType::NGTONNG:
+            return "NGTONNG";
         default:
             return "Unknown index type";
     }

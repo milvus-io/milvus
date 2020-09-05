@@ -44,6 +44,9 @@ FaissFlatPass::Run(const TaskPtr& task) {
     }
 
     auto search_task = std::static_pointer_cast<SearchTask>(task);
+    if (search_task->IndexType() != knowhere::IndexEnum::INDEX_FAISS_IDMAP) {
+        return false;
+    }
 
     ResourcePtr res_ptr;
     if (!gpu_enable_) {

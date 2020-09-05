@@ -23,3 +23,4 @@
 | hnswlib          | [Apache 2.0](https://github.com/nmslib/hnswlib/blob/master/LICENSE)                                                            |
 | annoy            | [Apache 2.0](https://github.com/spotify/annoy/blob/master/LICENSE)                                                             |
 | crc32c           | [BSD 3-Clause](https://github.com/google/crc32c/blob/master/LICENSE)                                                           |
+| NGT              | [Apache 2.0](https://github.com/yahoojapan/NGT/blob/master/LICENSE)                                                            |

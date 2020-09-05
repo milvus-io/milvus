@@ -126,5 +126,24 @@ class RHNSWSQConfAdapter : public ConfAdapter {
     bool
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
+
+class NGTPANNGConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
+class NGTONNGConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
 }  // namespace knowhere
 }  // namespace milvus

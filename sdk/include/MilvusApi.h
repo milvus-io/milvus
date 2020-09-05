@@ -43,6 +43,8 @@ enum class IndexType {
     RHNSWFLAT = 13,
     RHNSWPQ = 14,
     RHNSWSQ = 15,
+    NGTPANNG = 16,
+    NGTONNG = 17,
 };
 
 enum class MetricType {
