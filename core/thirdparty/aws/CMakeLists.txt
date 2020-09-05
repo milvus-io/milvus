@@ -46,7 +46,7 @@ if ( NOT aws_POPULATED )
                       EXCLUDE_FROM_ALL )
 endif()
 
-get_target_property( AWS_INCLUDE_DIR yaml-cpp INTERFACE_INCLUDE_DIRECTORIES )
+get_target_property( AWS_INCLUDE_DIR  AWS::aws-cpp-sdk-core INTERFACE_INCLUDE_DIRECTORIES )
 message( STATUS ${AWS_INCLUDE_DIR} )
 
 get_property( var DIRECTORY "${aws_SOURCE_DIR}" PROPERTY COMPILE_OPTIONS )
