@@ -1514,17 +1514,17 @@ const char descriptor_table_protodef_suvlim_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\"\231\002\n\021InsertOrDeleteMsg\022\027\n\017collection_nam"
   "e\030\001 \001(\t\022\'\n\trows_data\030\002 \001(\0132\024.milvus.grpc"
   ".RowData\022\013\n\003uid\030\003 \001(\003\022\025\n\rpartition_tag\030\004"
-  " \001(\t\022\021\n\ttimestamp\030\005 \001(\003\022\022\n\nsegment_id\030\006 "
+  " \001(\t\022\021\n\ttimestamp\030\005 \001(\004\022\022\n\nsegment_id\030\006 "
   "\001(\003\022\022\n\nchannel_id\030\007 \001(\003\022\037\n\002op\030\010 \001(\0162\023.mi"
   "lvus.grpc.OpType\022\021\n\tclient_id\030\t \001(\003\022/\n\014e"
   "xtra_params\030\n \003(\0132\031.milvus.grpc.KeyValue"
   "Pair\"\316\001\n\tSearchMsg\022\027\n\017collection_name\030\001 "
   "\001(\t\022-\n\007records\030\002 \001(\0132\034.milvus.grpc.Vecto"
   "rRowRecord\022\025\n\rpartition_tag\030\003 \001(\t\022\013\n\003uid"
-  "\030\004 \001(\003\022\021\n\ttimestamp\030\005 \001(\003\022\021\n\tclient_id\030\006"
+  "\030\004 \001(\003\022\021\n\ttimestamp\030\005 \001(\004\022\021\n\tclient_id\030\006"
   " \001(\003\022/\n\014extra_params\030\007 \003(\0132\031.milvus.grpc"
   ".KeyValuePair\"[\n\013TimeSyncMsg\022\017\n\007peer_Id\030"
-  "\001 \001(\003\022\021\n\tTimestamp\030\002 \001(\003\022(\n\tsync_type\030\003 "
+  "\001 \001(\003\022\021\n\tTimestamp\030\002 \001(\004\022(\n\tsync_type\030\003 "
   "\001(\0162\025.milvus.grpc.SyncType\"0\n\rSegmentRec"
   "ord\022\013\n\003uid\030\001 \001(\003\022\022\n\nsegment_id\030\002 \003(\003\"L\n\n"
   "Key2SegMsg\022\021\n\tclient_id\030\001 \001(\003\022+\n\007records"
@@ -17221,7 +17221,7 @@ const char* InsertOrDeleteMsg::_InternalParse(const char* ptr, ::PROTOBUF_NAMESP
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 timestamp = 5;
+      // uint64 timestamp = 5;
       case 5:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 40)) {
           timestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -17353,12 +17353,12 @@ bool InsertOrDeleteMsg::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 timestamp = 5;
+      // uint64 timestamp = 5;
       case 5: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (40 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
                  input, &timestamp_)));
         } else {
           goto handle_unusual;
@@ -17488,9 +17488,9 @@ void InsertOrDeleteMsg::SerializeWithCachedSizes(
       4, this->partition_tag(), output);
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(5, this->timestamp(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(5, this->timestamp(), output);
   }
 
   // int64 segment_id = 6;
@@ -17570,9 +17570,9 @@ void InsertOrDeleteMsg::SerializeWithCachedSizes(
         4, this->partition_tag(), target);
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(5, this->timestamp(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(5, this->timestamp(), target);
   }
 
   // int64 segment_id = 6;
@@ -17664,10 +17664,10 @@ size_t InsertOrDeleteMsg::ByteSizeLong() const {
         this->uid());
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
         this->timestamp());
   }
 
@@ -17925,7 +17925,7 @@ const char* SearchMsg::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 timestamp = 5;
+      // uint64 timestamp = 5;
       case 5:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 40)) {
           timestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -18035,12 +18035,12 @@ bool SearchMsg::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 timestamp = 5;
+      // uint64 timestamp = 5;
       case 5: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (40 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
                  input, &timestamp_)));
         } else {
           goto handle_unusual;
@@ -18130,9 +18130,9 @@ void SearchMsg::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(4, this->uid(), output);
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(5, this->timestamp(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(5, this->timestamp(), output);
   }
 
   // int64 client_id = 6;
@@ -18196,9 +18196,9 @@ void SearchMsg::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(4, this->uid(), target);
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(5, this->timestamp(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(5, this->timestamp(), target);
   }
 
   // int64 client_id = 6;
@@ -18274,10 +18274,10 @@ size_t SearchMsg::ByteSizeLong() const {
         this->uid());
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
         this->timestamp());
   }
 
@@ -18448,7 +18448,7 @@ const char* TimeSyncMsg::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 Timestamp = 2;
+      // uint64 Timestamp = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
           timestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -18506,12 +18506,12 @@ bool TimeSyncMsg::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 Timestamp = 2;
+      // uint64 Timestamp = 2;
       case 2: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
                  input, &timestamp_)));
         } else {
           goto handle_unusual;
@@ -18565,9 +18565,9 @@ void TimeSyncMsg::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(1, this->peer_id(), output);
   }
 
-  // int64 Timestamp = 2;
+  // uint64 Timestamp = 2;
   if (this->timestamp() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->timestamp(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(2, this->timestamp(), output);
   }
 
   // .milvus.grpc.SyncType sync_type = 3;
@@ -18594,9 +18594,9 @@ void TimeSyncMsg::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(1, this->peer_id(), target);
   }
 
-  // int64 Timestamp = 2;
+  // uint64 Timestamp = 2;
   if (this->timestamp() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->timestamp(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(2, this->timestamp(), target);
   }
 
   // .milvus.grpc.SyncType sync_type = 3;
@@ -18633,10 +18633,10 @@ size_t TimeSyncMsg::ByteSizeLong() const {
         this->peer_id());
   }
 
-  // int64 Timestamp = 2;
+  // uint64 Timestamp = 2;
   if (this->timestamp() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
         this->timestamp());
   }
 
