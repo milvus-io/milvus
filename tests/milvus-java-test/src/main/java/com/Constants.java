@@ -1,9 +1,5 @@
 package com;
 
-import com.alibaba.fastjson.JSONObject;
-
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -47,7 +43,7 @@ public final class Constants {
 
     public static final List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
 
-    public static final List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
+    public static final List<List<Byte>> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
 
     public static final List<Map<String,Object>> defaultFields = Utils.genDefaultFields(dimension,false);
 
