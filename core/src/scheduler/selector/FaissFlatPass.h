@@ -42,6 +42,7 @@ class FaissFlatPass : public Pass, public server::GpuResourceConfigHandler {
 
  private:
     int64_t idx_ = 0;
+    std::string passtype = "FaissFlatPass";
 };
 
 using FaissFlatPassPtr = std::shared_ptr<FaissFlatPass>;
