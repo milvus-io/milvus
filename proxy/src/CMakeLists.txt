@@ -15,7 +15,7 @@ include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${MILVUS_THIRDPARTY_SRC})
 
-include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
+#include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 add_subdirectory( tracing )
@@ -26,7 +26,6 @@ add_subdirectory( db ) # target milvus_engine
 add_subdirectory( log )
 add_subdirectory( server )
 add_subdirectory( message_client )
-add_subdirectory( test )
 
 set(link_lib
 	milvus_engine

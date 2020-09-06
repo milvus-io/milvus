@@ -3,7 +3,6 @@
 #include "pulsar/Consumer.h"
 #include "Client.h"
 #include "grpc/gen-milvus/suvlim.pb.h"
-#include "grpc/gen-status/status.pb.h"
 
 namespace milvus {
 namespace message_client {

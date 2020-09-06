@@ -1,7 +1,6 @@
 #include "thread"
 #include "pulsar/Client.h"
 #include <src/grpc/gen-milvus/hello.grpc.pb.h>
-#include <src/grpc/gen-status/status.pb.h>
 
 using namespace pulsar;
 using MyData = milvus::grpc::PMessage;

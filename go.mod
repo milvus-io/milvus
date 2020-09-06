@@ -15,7 +15,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.5
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
-	github.com/pingcap/errors v0.11.4
+	github.com/pingcap/errors v0.11.4 // indirect
 	github.com/pingcap/log v0.0.0-20200828042413-fce0951f1463
 	github.com/pivotal-golang/bytefmt v0.0.0-20200131002437-cf55d5288a48
 	github.com/sirupsen/logrus v1.6.0
@@ -27,6 +27,7 @@ require (
 	golang.org/x/net v0.0.0-20200822124328-c89045814202
 	google.golang.org/grpc v1.31.1
 	google.golang.org/grpc/examples v0.0.0-20200828165940-d8ef479ab79a // indirect
+	google.golang.org/protobuf v1.25.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )

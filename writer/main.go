@@ -22,8 +22,8 @@ func main() {
 
 	go mc.ReceiveMessage()
 	wg := sync.WaitGroup{}
-
-	kv, err := storage.NewStore(context.Background(), types.MinIODriver)
+	ctx := context.Background()
+	kv, err := storage.NewStore(ctx, types.MinIODriver)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -34,7 +34,6 @@ func main() {
 		TimeSync:      100,
 	}
 
-	ctx := context.Background()
 	for {
 		time.Sleep(200 * time.Millisecond)
 		msgLength := wn.MessageClient.PrepareBatchMsg()

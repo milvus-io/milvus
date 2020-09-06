@@ -14,7 +14,7 @@ import (
 type SegmentIdInfo struct {
 	CollectionName string
 	EntityId       int64
-	SegmentIds     [][]string
+	SegmentIds     []string
 }
 
 type WriteNode struct {
@@ -64,27 +64,41 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*pb.InsertOrDel
 }
 
 func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*pb.InsertOrDeleteMsg, wg *sync.WaitGroup) error {
-	var segmentInfos []*SegmentIdInfo
+	//var segmentInfos []*SegmentIdInfo
 	var prefixKey string
 	var prefixKeys [][]byte
 	var timeStamps []uint64
-	var segmentIds [][]string
+	//var segmentIds []string
 
 	for i := 0; i < len(data); i++ {
 		prefixKey = data[i].CollectionName + "-" + strconv.FormatUint(uint64(data[i].Uid), 10)
 		prefixKeys = append(prefixKeys, []byte(prefixKey))
 		timeStamps = append(timeStamps, uint64(data[i].Timestamp))
-		segmentId, _ := (*wn.KvStore).GetSegments(ctx, []byte(prefixKey), uint64(data[i].Timestamp))
-		segmentIds = append(segmentIds, segmentId)
+		segmentString, _ := (*wn.KvStore).GetSegments(ctx, []byte(prefixKey), uint64(data[i].Timestamp))
+		var segmentIds []int64
+		for _, str := range segmentString {
+			id, err := strconv.ParseInt(str, 10, 64)
+			if err != nil {
+				fmt.Println(str, " is not an integer.")
+			}
+			segmentIds = append(segmentIds, id)
+		}
+
+		segmentInfo := pb.Key2SegMsg{
+			Uid: data[i].Uid,
+			SegmentId: segmentIds,
+		}
+		wn.MessageClient.Send(ctx, segmentInfo)
+		//segmentIds = append(segmentIds, segmentId)
 	}
 
-	for i := 0; i < len(prefixKeys); i++ {
-		segmentInfos = append(segmentInfos, &SegmentIdInfo{
-			CollectionName: data[i].CollectionName,
-			EntityId:       data[i].Uid,
-			SegmentIds:     segmentIds,
-		})
-	}
+	//for i := 0; i < len(prefixKeys); i++ {
+	//	segmentInfos = append(segmentInfos, &SegmentIdInfo{
+	//		CollectionName: data[i].CollectionName,
+	//		EntityId:       data[i].Uid,
+	//		SegmentIds:     segmentIds,
+	//	})
+	//}
 	err := (*wn.KvStore).DeleteRows(ctx, prefixKeys, timeStamps)
 	if err != nil {
 		fmt.Println("Can't delete data")

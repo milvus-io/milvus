@@ -18,7 +18,6 @@ type MessageClient struct {
 	// pulsar
 	client                 pulsar.Client
 	key2segProducer        pulsar.Producer
-	writeSyncProducer      pulsar.Producer
 	insertOrDeleteConsumer pulsar.Consumer
 	searchByIdConsumer     pulsar.Consumer
 	timeSyncConsumer       pulsar.Consumer
@@ -27,7 +26,15 @@ type MessageClient struct {
 	InsertMsg     []*pb.InsertOrDeleteMsg
 	DeleteMsg     []*pb.InsertOrDeleteMsg
 	SearchByIdMsg []*pb.EntityIdentity
-	timeSyncMsg   []*pb.TimeSyncMsg
+	TimeSyncMsg   []*pb.TimeSyncMsg
+}
+
+func (mc *MessageClient) Send(ctx context.Context, msg pb.Key2SegMsg) {
+	if err := mc.key2segProducer.Send(ctx, pulsar.ProducerMessage{
+		Payload: []byte(msg.String()),
+	}); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func (mc *MessageClient) ReceiveInsertOrDeleteMsg() {
@@ -116,7 +123,6 @@ func (mc *MessageClient) InitClient(url string) {
 
 	//create producer
 	mc.key2segProducer = mc.CreatProducer("Key2Seg")
-	mc.writeSyncProducer = mc.CreatProducer("TimeSync")
 
 	//create consumer
 	mc.insertOrDeleteConsumer = mc.CreateConsumer("InsertOrDelete")
@@ -131,13 +137,12 @@ func (mc *MessageClient) InitClient(url string) {
 	mc.InsertMsg = make([]*pb.InsertOrDeleteMsg, 1000)
 	mc.DeleteMsg = make([]*pb.InsertOrDeleteMsg, 1000)
 	mc.SearchByIdMsg = make([]*pb.EntityIdentity, 1000)
-	mc.timeSyncMsg = make([]*pb.TimeSyncMsg, 1000)
+	mc.TimeSyncMsg = make([]*pb.TimeSyncMsg, 1000)
 }
 
 func (mc *MessageClient) Close() {
 	defer mc.client.Close()
 	defer mc.key2segProducer.Close()
-	defer mc.writeSyncProducer.Close()
 	defer mc.insertOrDeleteConsumer.Close()
 	defer mc.searchByIdConsumer.Close()
 	defer mc.timeSyncConsumer.Close()
@@ -180,7 +185,7 @@ func (mc *MessageClient) PrepareMsg(messageType MessageType, msgLen int) {
 	case TimeSync:
 		for i := 0; i < msgLen; i++ {
 			msg := <-mc.timeSyncChan
-			mc.timeSyncMsg = append(mc.timeSyncMsg, msg)
+			mc.TimeSyncMsg = append(mc.TimeSyncMsg, msg)
 		}
 	}
 }
@@ -190,7 +195,7 @@ func (mc *MessageClient) PrepareBatchMsg() []int {
 	mc.InsertMsg = mc.InsertMsg[:0]
 	mc.DeleteMsg = mc.DeleteMsg[:0]
 	mc.SearchByIdMsg = mc.SearchByIdMsg[:0]
-	mc.timeSyncMsg = mc.timeSyncMsg[:0]
+	mc.TimeSyncMsg = mc.TimeSyncMsg[:0]
 
 	// get the length of every channel
 	insertOrDeleteLen := len(mc.insertOrDeleteChan)

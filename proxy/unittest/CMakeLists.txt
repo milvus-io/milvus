@@ -11,21 +11,28 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-# library
-set( CONFIG_SRCS    ConfigMgr.h
-                    ConfigMgr.cpp
-                    ConfigType.h
-                    ConfigType.cpp
-                    ServerConfig.h
-                    ServerConfig.cpp
+
+include_directories(${MILVUS_SOURCE_DIR})
+include_directories(${MILVUS_ENGINE_SRC})
+include_directories(${MILVUS_THIRDPARTY_SRC})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
+include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
+
+
+set( ENTRY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp )
+
+set( UNITTEST_LIBS  libboost_system.a
+                    libboost_filesystem.a
+                    yaml-cpp
+                    gtest
+                    gtest_main
+                    libstdc++fs.a
+                    pthread
+                    opentracing::opentracing
+                    opentracing::mocktracer
+                    z
                     )
 
-set( CONFIG_LIBS    yaml-cpp
-                    )
-
-create_library(
-        TARGET      config
-        SRCS        ${CONFIG_SRCS}
-        LIBS        ${CONFIG_LIBS}
-)
-
+add_subdirectory(message_client)
+add_subdirectory(config)

@@ -3,9 +3,8 @@ set(src-cpp
         ClientV2.cpp
         Consumer.cpp
         Producer.cpp
-        ../grpc/gen-milvus/suvlim.pb.cc
-        ../grpc/gen-status/status.pb.cc
-        )
+        M3_hash.cpp
+        PartitionPolicy.cpp)
 
 add_library(message_client_cpp
         ${src-cpp}
