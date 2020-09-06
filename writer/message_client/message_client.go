@@ -3,7 +3,7 @@ package message_client
 import (
 	"context"
 	"github.com/apache/pulsar/pulsar-client-go/pulsar"
-	"github.com/czs007/suvlim/writer/pb"
+	msgpb "github.com/czs007/suvlim/pkg/message"
 	"github.com/golang/protobuf/proto"
 	"log"
 )
@@ -11,9 +11,9 @@ import (
 type MessageClient struct {
 
 	//message channel
-	insertOrDeleteChan chan *pb.InsertOrDeleteMsg
-	searchByIdChan     chan *pb.EntityIdentity
-	timeSyncChan       chan *pb.TimeSyncMsg
+	insertOrDeleteChan chan *msgpb.InsertOrDeleteMsg
+	searchByIdChan     chan *msgpb.EntityIdentity
+	timeSyncChan       chan *msgpb.TimeSyncMsg
 
 	// pulsar
 	client                 pulsar.Client
@@ -23,13 +23,13 @@ type MessageClient struct {
 	timeSyncConsumer       pulsar.Consumer
 
 	// batch messages
-	InsertMsg     []*pb.InsertOrDeleteMsg
-	DeleteMsg     []*pb.InsertOrDeleteMsg
-	SearchByIdMsg []*pb.EntityIdentity
-	TimeSyncMsg   []*pb.TimeSyncMsg
+	InsertMsg     []*msgpb.InsertOrDeleteMsg
+	DeleteMsg     []*msgpb.InsertOrDeleteMsg
+	SearchByIdMsg []*msgpb.EntityIdentity
+	TimeSyncMsg   []*msgpb.TimeSyncMsg
 }
 
-func (mc *MessageClient) Send(ctx context.Context, msg pb.Key2SegMsg) {
+func (mc *MessageClient) Send(ctx context.Context, msg msgpb.Key2SegMsg) {
 	if err := mc.key2segProducer.Send(ctx, pulsar.ProducerMessage{
 		Payload: []byte(msg.String()),
 	}); err != nil {
@@ -39,7 +39,7 @@ func (mc *MessageClient) Send(ctx context.Context, msg pb.Key2SegMsg) {
 
 func (mc *MessageClient) ReceiveInsertOrDeleteMsg() {
 	for {
-		insetOrDeleteMsg := pb.InsertOrDeleteMsg{}
+		insetOrDeleteMsg := msgpb.InsertOrDeleteMsg{}
 		msg, err := mc.insertOrDeleteConsumer.Receive(context.Background())
 		err = proto.Unmarshal(msg.Payload(), &insetOrDeleteMsg)
 		if err != nil {
@@ -52,7 +52,7 @@ func (mc *MessageClient) ReceiveInsertOrDeleteMsg() {
 
 func (mc *MessageClient) ReceiveSearchByIdMsg() {
 	for {
-		searchByIdMsg := pb.EntityIdentity{}
+		searchByIdMsg := msgpb.EntityIdentity{}
 		msg, err := mc.searchByIdConsumer.Receive(context.Background())
 		err = proto.Unmarshal(msg.Payload(), &searchByIdMsg)
 		if err != nil {
@@ -65,7 +65,7 @@ func (mc *MessageClient) ReceiveSearchByIdMsg() {
 
 func (mc *MessageClient) ReceiveTimeSyncMsg() {
 	for {
-		timeSyncMsg := pb.TimeSyncMsg{}
+		timeSyncMsg := msgpb.TimeSyncMsg{}
 		msg, err := mc.timeSyncConsumer.Receive(context.Background())
 		err = proto.Unmarshal(msg.Payload(), &timeSyncMsg)
 		if err != nil {
@@ -130,14 +130,14 @@ func (mc *MessageClient) InitClient(url string) {
 	mc.timeSyncConsumer = mc.CreateConsumer("TimeSync")
 
 	// init channel
-	mc.insertOrDeleteChan = make(chan *pb.InsertOrDeleteMsg, 1000)
-	mc.searchByIdChan = make(chan *pb.EntityIdentity, 1000)
-	mc.timeSyncChan = make(chan *pb.TimeSyncMsg, 1000)
+	mc.insertOrDeleteChan = make(chan *msgpb.InsertOrDeleteMsg, 1000)
+	mc.searchByIdChan = make(chan *msgpb.EntityIdentity, 1000)
+	mc.timeSyncChan = make(chan *msgpb.TimeSyncMsg, 1000)
 
-	mc.InsertMsg = make([]*pb.InsertOrDeleteMsg, 1000)
-	mc.DeleteMsg = make([]*pb.InsertOrDeleteMsg, 1000)
-	mc.SearchByIdMsg = make([]*pb.EntityIdentity, 1000)
-	mc.TimeSyncMsg = make([]*pb.TimeSyncMsg, 1000)
+	mc.InsertMsg = make([]*msgpb.InsertOrDeleteMsg, 1000)
+	mc.DeleteMsg = make([]*msgpb.InsertOrDeleteMsg, 1000)
+	mc.SearchByIdMsg = make([]*msgpb.EntityIdentity, 1000)
+	mc.TimeSyncMsg = make([]*msgpb.TimeSyncMsg, 1000)
 }
 
 func (mc *MessageClient) Close() {
@@ -171,7 +171,7 @@ func (mc *MessageClient) PrepareMsg(messageType MessageType, msgLen int) {
 	case InsertOrDelete:
 		for i := 0; i < msgLen; i++ {
 			msg := <-mc.insertOrDeleteChan
-			if msg.Op == pb.OpType_INSERT {
+			if msg.Op == msgpb.OpType_INSERT {
 				mc.InsertMsg = append(mc.InsertMsg, msg)
 			} else {
 				mc.DeleteMsg = append(mc.DeleteMsg, msg)

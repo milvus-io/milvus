@@ -2,7 +2,7 @@
 #define MILVUS_HELLOSERVICE_H
 
 #include "grpc++/grpc++.h"
-#include <src/grpc/gen-milvus/hello.grpc.pb.h>
+#include <src/grpc/hello.grpc.pb.h>
 
 class HelloService final : public ::milvus::grpc::HelloService::Service{
     ::grpc::Status SayHello

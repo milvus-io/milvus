@@ -12,7 +12,7 @@
 #pragma once
 
 #include "db/Types.h"
-#include "grpc/gen-milvus/suvlim.grpc.pb.h"
+#include "grpc/message.grpc.pb.h"
 #include "query/GeneralQuery.h"
 #include "utils/Json.h"
 #include "utils/Status.h"

@@ -20,7 +20,7 @@
 #include <string>
 #include <unordered_map>
 #include "query/BinaryQuery.h"
-#include "grpc/gen-milvus/suvlim.grpc.pb.h"
+#include "grpc/message.grpc.pb.h"
 #include "opentracing/tracer.h"
 #include "server/context/Context.h"
 #include "server/delivery/ReqHandler.h"
