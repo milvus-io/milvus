@@ -38,7 +38,7 @@
 // #include "server/DBWrapper.h"
 #include "server/grpc_impl/interceptor/SpanInterceptor.h"
 #include "utils/Log.h"
-#include "pulsar/message_client/ClientV2.h"
+#include "message_client/ClientV2.h"
 
 namespace milvus {
 namespace server {

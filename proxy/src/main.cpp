@@ -21,7 +21,7 @@
 #include "src/version.h"
 #include "utils/SignalHandler.h"
 #include "utils/Status.h"
-#include "pulsar/message_client/Client.h"
+#include "message_client/Client.h"
 
 INITIALIZE_EASYLOGGINGPP
 

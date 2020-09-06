@@ -15,7 +15,7 @@ type minioDriver struct {
 
 func NewMinioDriver(ctx context.Context) (*minioDriver, error) {
 	// to-do read conf
-	var endPoint = "127.0.0.1:9000"
+	var endPoint = "192.168.2.28:9000"
 	var accessKeyID = "testminio"
 	var secretAccessKey = "testminio"
 	var useSSL = false
