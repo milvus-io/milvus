@@ -147,7 +147,7 @@ SegmentWriter::WriteBloomFilter() {
 
         auto& ss_codec = codec::Codec::instance();
         segment::IdBloomFilterPtr bloom_filter_ptr;
-        STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr));
+        STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, bloom_filter_ptr));
 
         auto uids = reinterpret_cast<int64_t*>(uid_data->data_.data());
         int64_t row_count = segment_ptr_->GetRowCount();

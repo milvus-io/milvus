@@ -19,6 +19,7 @@
 
 #include <memory>
 #include <mutex>
+#include <string>
 
 #include "cache/DataObj.h"
 #include "dablooms/dablooms.h"
