@@ -8,10 +8,6 @@
 - [ ] Test and CI
 - [ ] Code Refactoring
 
-**Which branch you want to cherry-pick to?**
-
-Not Available
-
 **Which issue(s) this PR fixes:**
 
 Fixes #

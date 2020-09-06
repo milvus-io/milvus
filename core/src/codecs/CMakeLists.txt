@@ -10,7 +10,40 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
-aux_source_directory( ${MILVUS_ENGINE_SRC}/codecs           CODECS_FILES )
+set(CODECS_FILES
+	BlockFormat.cpp
+	Codec.cpp
+	DeletedDocsFormat.cpp
+	ExtraFileInfo.cpp
+	IdBloomFilterFormat.cpp
+	StructuredIndexFormat.cpp
+	VectorCompressFormat.cpp
+	VectorIndexFormat.cpp
+	)
 add_library( codecs STATIC )
 target_sources( codecs PRIVATE ${CODECS_FILES} )
-target_link_libraries( codecs PRIVATE fiu )
+set(LINK_LIBRARY
+				 log
+				 storage
+				 crc32c
+				 libstdc++fs.a
+				 fiu )
+target_link_libraries( codecs PUBLIC ${LINK_LIBRARY} )
+
+
+if ( BUILD_UNIT_TEST )
+     add_executable( ExtraFileInfoTest )
+     target_sources( ExtraFileInfoTest PRIVATE ExtraFileInfoTest.cpp)
+     target_link_libraries( ExtraFileInfoTest
+		 PRIVATE
+			 codecs
+             gtest
+             gtest_main
+             gmock
+             gmock_main
+			 )
+
+     add_test ( NAME     ExtraFileInfoTest
+                COMMAND  $<TARGET_FILE:ExtraFileInfoTest>
+              )
+endif()     

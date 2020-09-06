@@ -178,6 +178,7 @@ TaskTable::PickToLoad(uint64_t limit) {
                 return std::vector<uint64_t>();
             }
         } else if (table_[index]->state == TaskTableItemState::START) {
+            cross = true;
             auto task = table_[index]->task;
 
             // if task is a build index task, limit it
@@ -187,7 +188,6 @@ TaskTable::PickToLoad(uint64_t limit) {
                     continue;
                 }
             }
-            cross = true;
             indexes.push_back(index);
             ++pick_count;
         } else {

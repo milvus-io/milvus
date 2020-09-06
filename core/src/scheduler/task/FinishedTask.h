@@ -20,10 +20,10 @@ namespace milvus::scheduler {
 class FinishedTask : public Task {
  public:
     static std::shared_ptr<FinishedTask>
-    Create();
+    Create(const TaskPtr& task);
 
  public:
-    FinishedTask();
+    explicit FinishedTask(const TaskPtr& task);
 
     Status
     OnLoad(LoadType type, uint8_t device_id) override;
