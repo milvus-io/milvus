@@ -172,7 +172,7 @@ SegmentWriter::WriteBloomFilter() {
 Status
 SegmentWriter::CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr) {
     auto& ss_codec = codec::Codec::instance();
-    STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr));
+    STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, bloom_filter_ptr));
 
     return Status::OK();
 }

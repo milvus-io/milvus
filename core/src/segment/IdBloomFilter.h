@@ -49,6 +49,12 @@ class IdBloomFilter : public cache::DataObj {
     int64_t
     Size() override;
 
+    Status
+    Write(const std::string& path);
+
+    Status
+    Read(const std::string& path);
+
     //    const std::string&
     //    GetName() const;
 

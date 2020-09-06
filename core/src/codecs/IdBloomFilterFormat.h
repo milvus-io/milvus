@@ -43,8 +43,7 @@ class IdBloomFilterFormat {
           const segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     Status
-    Create(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
-           segment::IdBloomFilterPtr& id_bloom_filter_ptr);
+    Create(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr);
 
     // No copy and move
     IdBloomFilterFormat(const IdBloomFilterFormat&) = delete;
