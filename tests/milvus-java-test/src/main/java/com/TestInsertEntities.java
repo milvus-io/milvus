@@ -7,7 +7,6 @@ import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
@@ -188,7 +187,7 @@ public class TestInsertEntities {
     // case-14
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testInsertBinaryEntityWithInvalidDimension(MilvusClient client, String collectionName) {
-        List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension-1);
+        List<List<Byte>> vectorsBinary = Utils.genBinaryVectors(nb, dimension-1);
         List<Map<String,Object>> binaryEntities = Utils.genDefaultBinaryEntities(dimension-1,nb,vectorsBinary);
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(binaryEntities).build();
         InsertResponse res = client.insert(insertParam);

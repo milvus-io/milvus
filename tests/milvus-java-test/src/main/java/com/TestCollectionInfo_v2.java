@@ -6,14 +6,13 @@ import org.testng.annotations.Test;
 
 import java.util.Collections;
 import java.util.List;
-import java.nio.ByteBuffer;
 
 public class TestCollectionInfo_v2 {
     int nb = Constants.nb;
     int dimension = Constants.dimension;
     int n_list = Constants.n_list;
     List<List<Float>> vectors = Constants.vectors;
-    List<ByteBuffer> vectorsBinary = Constants.vectorsBinary;
+    List<List<Byte>> vectorsBinary = Constants.vectorsBinary;
     String indexType = Constants.indexType;
     String metricType = Constants.defaultMetricType;
     String floatFieldName = Constants.floatFieldName;

@@ -6,7 +6,6 @@ import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import java.nio.ByteBuffer;
 import java.util.*;
 
 public class TestSearchEntities {
@@ -16,21 +15,22 @@ public class TestSearchEntities {
     int nq = Constants.nq;
 
     List<List<Float>> queryVectors = Constants.vectors.subList(0, nq);
-    List<ByteBuffer> queryVectorsBinary = Constants.vectorsBinary.subList(0, nq);
+    List<List<Byte>> queryVectorsBinary = Constants.vectorsBinary.subList(0, nq);
 
-    public String dsl = Constants.searchParam;
+    public String floatDsl = Constants.searchParam;
+    public String binaryDsl = Constants.binarySearchParam;
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testSearchCollectionNotExisted(MilvusClient client, String collectionName)  {
         String collectionNameNew = Utils.genUniqueStr(collectionName);
-        SearchParam searchParam = new SearchParam.Builder(collectionNameNew).withDSL(dsl).build();
+        SearchParam searchParam = new SearchParam.Builder(collectionNameNew).withDSL(floatDsl).build();
         SearchResponse res_search = client.search(searchParam);
         assert (!res_search.getResponse().ok());
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testSearchCollectionEmpty(MilvusClient client, String collectionName)  {
-        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(floatDsl).build();
         SearchResponse res_search = client.search(searchParam);
         assert (res_search.getResponse().ok());
         Assert.assertEquals(res_search.getResultIdsList().size(), 0);
@@ -44,7 +44,7 @@ public class TestSearchEntities {
         assert(res.getResponse().ok());
         List<Long> ids = res.getEntityIds();
         client.flush(collectionName);
-        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(floatDsl).build();
         SearchResponse res_search = client.search(searchParam);
         Assert.assertEquals(res_search.getResultIdsList().size(), Constants.nq);
         Assert.assertEquals(res_search.getResultDistancesList().size(), Constants.nq);
@@ -60,7 +60,7 @@ public class TestSearchEntities {
         assert(res.getResponse().ok());
         List<Long> ids = res.getEntityIds();
         client.flush(collectionName);
-        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(floatDsl).build();
         SearchResponse res_search = client.search(searchParam);
         for (int i = 0; i < Constants.nq; i++) {
             double distance = res_search.getResultDistancesList().get(i).get(0);
@@ -94,7 +94,7 @@ public class TestSearchEntities {
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
         client.flush(collectionName);
-        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).withPartitionTags(queryTags).build();
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(floatDsl).withPartitionTags(queryTags).build();
         SearchResponse res_search = client.search(searchParam);
         Assert.assertEquals(res_search.getResultDistancesList().size(), 0);
     }
@@ -109,7 +109,7 @@ public class TestSearchEntities {
         InsertResponse res = client.insert(insertParam);
         assert (res.getResponse().ok());
         client.flush(collectionName);
-        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).withPartitionTags(queryTags).build();
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(floatDsl).withPartitionTags(queryTags).build();
         SearchResponse res_search = client.search(searchParam);
         Assert.assertEquals(res_search.getResultDistancesList().size(), 0);
     }
@@ -289,18 +289,7 @@ public class TestSearchEntities {
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testSearchCollectionNotExistedBinary(MilvusClient client, String collectionName)  {
         String collectionNameNew = Utils.genUniqueStr(collectionName);
-        String queryKey = "placeholder";
-        Map<String, List<ByteBuffer>> binaryQueryEntities = new HashMap<>();
-        binaryQueryEntities.put(queryKey, queryVectorsBinary);
-        JSONObject binaryVectorParam = Utils.genBinaryVectorParam(Constants.defaultBinaryMetricType, queryKey, top_k, n_probe);
-        List<JSONObject> leafParams = new ArrayList<>();
-        leafParams.add(binaryVectorParam);
-        String dsl = Utils.genDefaultSearchParam(leafParams);
-        System.out.println(dsl);
-        SearchParam searchParam = new SearchParam.Builder(collectionNameNew)
-                .withBinaryEntities(binaryQueryEntities)
-                .withDSL(dsl)
-                .build();
+        SearchParam searchParam = new SearchParam.Builder(collectionNameNew).withDSL(binaryDsl).build();
         SearchResponse resSearch = client.search(searchParam);
         Assert.assertFalse(resSearch.getResponse().ok());
     }
@@ -311,18 +300,7 @@ public class TestSearchEntities {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
-        String queryKey = "placeholder";
-        Map<String, List<ByteBuffer>> binaryQueryEntities = new HashMap<>();
-        binaryQueryEntities.put(queryKey, queryVectorsBinary);
-        JSONObject binaryVectorParam = Utils.genBinaryVectorParam(Constants.defaultBinaryMetricType, queryKey, top_k, n_probe);
-        List<JSONObject> leafParams = new ArrayList<>();
-        leafParams.add(binaryVectorParam);
-        String dsl = Utils.genDefaultSearchParam(leafParams);
-        System.out.println(dsl);
-        SearchParam searchParam = new SearchParam.Builder(collectionName)
-                .withDSL(dsl)
-                .withBinaryEntities(binaryQueryEntities)
-                .build();
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(binaryDsl).build();
         SearchResponse resSearch = client.search(searchParam);
         Assert.assertTrue(resSearch.getResponse().ok());
         Assert.assertEquals(resSearch.getResultIdsList().size(), nq);

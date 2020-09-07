@@ -6,7 +6,6 @@ import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.*;
 
-import java.nio.ByteBuffer;
 import java.util.List;
 
 public class TestIndex_v2 {
@@ -19,7 +18,7 @@ public class TestIndex_v2 {
     String defaultBinaryIndexType = Constants.defaultBinaryIndexType;
     String defaultMetricType = Constants.defaultMetricType;
     List<List<Float>> vectors = Constants.vectors;
-    List<ByteBuffer> vectorsBinary = Constants.vectorsBinary;
+    List<List<Byte>> vectorsBinary = Constants.vectorsBinary;
 
 
     // case-01
