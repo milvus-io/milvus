@@ -57,7 +57,7 @@ FaissFlatPass::Run(const TaskPtr& task) {
         LOG_SERVER_DEBUG_ << LogOut("FaissFlatPass: nq < gpu_search_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_task->topk() > faiss::gpu::getMaxKSelection()) {
-        LOG_SERVER_DEBUG_ << LogOut("FaissIVFFlatPass: topk > gpu_max_topk_threshold, specify cpu to search!");
+        LOG_SERVER_DEBUG_ << LogOut("FaissFlatPass: topk > gpu_max_topk_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
         LOG_SERVER_DEBUG_ << LogOut("FaissFlatPass: nq >= gpu_search_threshold, specify gpu %d to search!",

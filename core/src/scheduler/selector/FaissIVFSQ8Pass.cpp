@@ -59,11 +59,11 @@ FaissIVFSQ8Pass::Run(const TaskPtr& task) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFSQ8Pass: nq < gpu_search_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_task->topk() > faiss::gpu::getMaxKSelection()) {
-        LOG_SERVER_DEBUG_ << LogOut("FaissIVFFlatPass: topk > gpu_max_topk_threshold, specify cpu to search!");
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFSQ8Pass: topk > gpu_max_topk_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_task->ExtraParam()[knowhere::IndexParams::nprobe].get<int64_t>() >
                faiss::gpu::getMaxKSelection()) {
-        LOG_SERVER_DEBUG_ << LogOut("FaissIVFFlatPass: nprobe > gpu_max_nprobe_threshold, specify cpu to search!");
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFSQ8Pass: nprobe > gpu_max_nprobe_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFSQ8Pass: nq >= gpu_search_threshold, specify gpu %d to search!",

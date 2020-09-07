@@ -287,15 +287,14 @@ SearchTask::IndexType() {
 
 int64_t
 SearchTask::topk() {
-    printf("topk function\n");
-  /*  if(query_ptr_) {
+    if (query_ptr_) {
         auto vector_query = query_ptr_->vectors.begin();
         if (vector_query != query_ptr_->vectors.end()) {
             if (vector_query->second) {
                 return vector_query->second->topk;
             }
         }
-    }*/
+    }
     return 0;
 }
 
