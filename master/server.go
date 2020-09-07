@@ -20,9 +20,11 @@ import (
 
 	//"fmt"
 	"math/rand"
+	"path"
 
 	"github.com/czs007/suvlim/master/member"
 
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,14 +40,13 @@ import (
 	"github.com/czs007/suvlim/master/config"
 	"github.com/czs007/suvlim/master/id"
 	"github.com/czs007/suvlim/master/meta"
-	"github.com/czs007/suvlim/util/logutil"
 	"github.com/czs007/suvlim/util/typeutil"
+	"github.com/czs007/suvlim/util/logutil"
 
 	//"github.com/czs007/suvlim/master/kv"
 	"github.com/czs007/suvlim/master/tso"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
-
 	//"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -124,6 +125,7 @@ type Server struct {
 func CreateServer(ctx context.Context, cfg *config.Config) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
+
 	s := &Server{
 		cfg:            cfg,
 		persistOptions: config.NewPersistOptions(cfg),
@@ -139,6 +141,7 @@ func CreateServer(ctx context.Context, cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, s)
 		//diagnosticspb.RegisterDiagnosticsServer(gs, s)
@@ -147,6 +150,7 @@ func CreateServer(ctx context.Context, cfg *config.Config) (*Server, error) {
 
 	s.lg = cfg.GetZapLogger()
 	s.logProps = cfg.GetZapLogProperties()
+
 	s.lg = cfg.GetZapLogger()
 	s.logProps = cfg.GetZapLogProperties()
 	return s, nil
@@ -174,6 +178,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	//if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlMap, tlsConfig); err != nil {
 	//	return err
 	//}
+
 	select {
 	// Wait etcd until it is ready to use
 	case <-etcd.Server.ReadyNotify():
@@ -228,6 +233,17 @@ func (s *Server) startServer(ctx context.Context) error {
 	// It may lose accuracy if use float64 to store uint64. So we store the
 	// cluster id in label.
 	//metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
+
+	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
+
+	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
+
+	s.tsoAllocator = tso.NewGlobalTSOAllocator(
+		s.member.GetLeadership(),
+		s.rootPath,
+		s.cfg.TsoSaveInterval.Duration,
+		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
+	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	// path := filepath.Join(s.cfg.DataDir, "region-meta")
 
@@ -319,6 +335,7 @@ func (s *Server) Run() error {
 	if err := s.startEtcd(s.ctx); err != nil {
 		return err
 	}
+
 	if err := s.startServer(s.ctx); err != nil {
 		return err
 	}

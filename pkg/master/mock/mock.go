@@ -1,5 +1,0 @@
-package mock
-
-func MockServer() {
-
-}
