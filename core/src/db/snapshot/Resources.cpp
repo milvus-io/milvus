@@ -67,7 +67,8 @@ FlushableMappingsField::FlushIds(const std::string& base_path, const std::string
         return Status(SS_ERROR, "FlushIds ids_ should not be empty");
     }
     if (!std::experimental::filesystem::exists(base_path)) {
-        return Status(SS_NOT_FOUND_ERROR, "FlushIds base_path: " + base_path + " not found");
+        std::experimental::filesystem::create_directories(base_path);
+        /* return Status(SS_NOT_FOUND_ERROR, "FlushIds base_path: " + base_path + " not found"); */
     }
     auto path = base_path + "/" + prefix + std::to_string(*(ids_.begin())) + ".map";
     char* buf = nullptr;

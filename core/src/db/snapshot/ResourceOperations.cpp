@@ -64,7 +64,7 @@ CollectionCommitOperation::DoExecute(StorePtr store) {
 
     if (flush_ids_changed) {
         resource_->UpdateFlushIds();
-        resource_->FlushIds("/tmp");
+        resource_->FlushIds(std::string("/tmp/") + std::to_string(resource_->GetCollectionId()));
     }
 
     resource_->SetID(0);

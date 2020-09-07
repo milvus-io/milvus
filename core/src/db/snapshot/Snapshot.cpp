@@ -51,7 +51,7 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
     auto collection = collections_holder.GetResource(store, collection_commit->GetCollectionId(), false);
     AddResource<Collection>(collection);
 
-    collection_commit->LoadIds("/tmp");
+    collection_commit->LoadIds(std::string("/tmp/") + std::to_string(collection_commit->GetCollectionId()));
     auto& collection_commit_mappings = collection_commit->GetMappings();
     for (auto p_c_id : collection_commit_mappings) {
         auto partition_commit = partition_commits_holder.GetResource(store, p_c_id, false);

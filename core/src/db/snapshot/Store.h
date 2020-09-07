@@ -359,7 +359,11 @@ class Store : public std::enable_shared_from_this<Store> {
                 c_c_m.insert(p_c->GetID());
             }
             CollectionCommitPtr c_c;
-            CollectionCommit temp_cc(c->GetID(), schema->GetID(), c_c_m);
+            /* CollectionCommit temp_cc(c->GetID(), schema->GetID(), c_c_m); */
+            CollectionCommit temp_cc(c->GetID(), schema->GetID());
+            temp_cc.UpdateFlushIds();
+            temp_cc.GetMappings() = c_c_m;
+            temp_cc.FlushIds(std::string("/tmp/") + std::to_string(c->GetID()));
             temp_cc.Activate();
             CreateResource<CollectionCommit>(std::move(temp_cc), c_c);
             all_records.push_back(c_c);
