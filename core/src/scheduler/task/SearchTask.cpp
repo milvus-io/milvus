@@ -314,7 +314,6 @@ XSearchTask::Execute() {
                     }
                 }
                 search_job->SearchDone(index_id_);
-                index_engine_ = nullptr;
                 return;
             }
             if (!vectors.float_data_.empty()) {
@@ -366,9 +365,6 @@ XSearchTask::Execute() {
     }
 
     rc.ElapseFromBegin("totally cost");
-
-    // release index in resource
-    index_engine_ = nullptr;
 }
 
 void
