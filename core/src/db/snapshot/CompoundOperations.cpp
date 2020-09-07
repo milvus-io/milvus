@@ -1019,8 +1019,13 @@ CreateCollectionOperation::DoExecute(StorePtr store) {
     AddStepWithLsn(*partition_commit, c_context_.lsn, pc_ctx_p);
     context_.new_partition_commit = partition_commit;
     CollectionCommitPtr collection_commit;
-    STATUS_CHECK(store->CreateResource<CollectionCommit>(
-        CollectionCommit(collection->GetID(), schema_commit->GetID(), {partition_commit->GetID()}), collection_commit));
+
+    CollectionCommit temp_cc(collection->GetID(), schema_commit->GetID());
+    temp_cc.UpdateFlushIds();
+    temp_cc.GetMappings().insert(partition_commit->GetID());
+    temp_cc.FlushIds("/tmp");
+
+    STATUS_CHECK(store->CreateResource<CollectionCommit>(std::move(temp_cc), collection_commit));
     auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(meta::oUpdate).CreatePtr();
     AddStepWithLsn(*collection_commit, c_context_.lsn, cc_ctx_p);
     context_.new_collection_commit = collection_commit;

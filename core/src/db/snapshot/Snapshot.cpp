@@ -51,6 +51,7 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
     auto collection = collections_holder.GetResource(store, collection_commit->GetCollectionId(), false);
     AddResource<Collection>(collection);
 
+    collection_commit->LoadIds("/tmp");
     auto& collection_commit_mappings = collection_commit->GetMappings();
     for (auto p_c_id : collection_commit_mappings) {
         auto partition_commit = partition_commits_holder.GetResource(store, p_c_id, false);
@@ -232,6 +233,9 @@ Snapshot::ToString() const {
     ss << ",rows=" << GetCollectionCommit()->GetRowCount() << ",mappings=";
     auto& cc_m = GetCollectionCommit()->GetMappings();
     ss << to_matrix_string(cc_m, row_element_size, 2);
+    auto& cc_fids = GetCollectionCommit()->GetFlushIds();
+    ss << ",flushids=";
+    ss << to_matrix_string(cc_fids, row_element_size, 2);
 
     auto& schema_m = GetSchemaCommit()->GetMappings();
     ss << "\nSchemaCommit: id=" << GetSchemaCommit()->GetID() << ",mappings=";

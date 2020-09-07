@@ -149,9 +149,13 @@ AttrValue2Str(typename ResourceContext<ResourceT>::ResPtr src, const std::string
         state_value = state_field->GetState();
         state2str(state_value, value);
     } else if (F_MAPPINGS == attr) {
-        auto mappings_field = std::dynamic_pointer_cast<snapshot::MappingsField>(src);
-        mapping_value = mappings_field->GetMappings();
-        mappings2str(mapping_value, value);
+        if (auto mappings_field = std::dynamic_pointer_cast<snapshot::FlushableMappingsField>(src)) {
+            mapping_value = mappings_field->GetFlushIds();
+            mappings2str(mapping_value, value);
+        } else if (auto mappings_field = std::dynamic_pointer_cast<snapshot::MappingsField>(src)) {
+            mapping_value = mappings_field->GetMappings();
+            mappings2str(mapping_value, value);
+        }
     } else if (F_NAME == attr) {
         auto name_field = std::dynamic_pointer_cast<snapshot::NameField>(src);
         str_value = name_field->GetName();

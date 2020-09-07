@@ -21,6 +21,7 @@ CollectionCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
     auto row_cnt = 0;
     auto size = 0;
+    bool flush_ids_changed = false;
     if (!prev_resource) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Cannot find prev collection commit resource";
@@ -35,16 +36,19 @@ CollectionCommitOperation::DoExecute(StorePtr store) {
         auto prev_partition_commit = GetStartedSS()->GetPartitionCommitByPartitionId(pc->GetPartitionId());
         if (prev_partition_commit) {
             resource_->GetMappings().erase(prev_partition_commit->GetID());
+            flush_ids_changed = true;
             row_cnt -= prev_partition_commit->GetRowCount();
             size -= prev_partition_commit->GetSize();
         }
         resource_->GetMappings().insert(pc->GetID());
+        flush_ids_changed = true;
         row_cnt += pc->GetRowCount();
         size += pc->GetSize();
     };
 
     if (context_.stale_partition_commit) {
         resource_->GetMappings().erase(context_.stale_partition_commit->GetID());
+        flush_ids_changed = true;
         row_cnt -= context_.stale_partition_commit->GetRowCount();
         size -= context_.stale_partition_commit->GetSize();
     } else if (context_.new_partition_commit) {
@@ -57,6 +61,12 @@ CollectionCommitOperation::DoExecute(StorePtr store) {
     if (context_.new_schema_commit) {
         resource_->SetSchemaId(context_.new_schema_commit->GetID());
     }
+
+    if (flush_ids_changed) {
+        resource_->UpdateFlushIds();
+        resource_->FlushIds("/tmp");
+    }
+
     resource_->SetID(0);
     resource_->SetRowCount(row_cnt);
     resource_->SetSize(size);

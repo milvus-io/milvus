@@ -10,11 +10,94 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Resources.h"
+#include "db/snapshot/Store.h"
 #include <iostream>
 #include <sstream>
-#include "db/snapshot/Store.h"
+#include <fstream>
+#include <experimental/filesystem>
 
 namespace milvus::engine::snapshot {
+
+Status
+FlushableMappingsField::LoadIds(const std::string& base_path, const std::string& prefix) {
+    if (ids_.size() == 0) {
+        return Status(SS_ERROR, "LoadIds ids_ should not be empty");
+    }
+
+    if (!std::experimental::filesystem::exists(base_path)) {
+        return Status(SS_NOT_FOUND_ERROR, "FlushIds base_path: " + base_path + " not found");
+    }
+
+    auto path = base_path + "/" + prefix + std::to_string(*(ids_.begin())) + ".map";
+    if (!std::experimental::filesystem::exists(path)) {
+        return Status(SS_NOT_FOUND_ERROR, "FlushIds path: " + path + " not found");
+    }
+
+    char* buf = nullptr;
+    try {
+        std::ifstream ifs(path, std::ifstream::binary);
+        ifs.seekg(0, ifs.end);
+        auto size = ifs.tellg();
+        ifs.seekg(0, ifs.beg);
+        if (size > 0) {
+            buf = new char[size];
+            ifs.read(buf, size);
+            for (auto pos = 0; pos < size; pos += sizeof(ID_TYPE)) {
+                mappings_.insert((float)(buf[pos]));
+            }
+        }
+
+        ifs.close();
+    } catch (...) {
+        if (buf) {
+            delete[] buf;
+        }
+        Status(SS_ERROR, "Cannot LoadIds from " + path);
+    }
+
+    if (buf) {
+        delete[] buf;
+    }
+    return Status::OK();
+}
+
+Status
+FlushableMappingsField::FlushIds(const std::string& base_path, const std::string& prefix) {
+    if (ids_.size() == 0) {
+        return Status(SS_ERROR, "FlushIds ids_ should not be empty");
+    }
+    if (!std::experimental::filesystem::exists(base_path)) {
+        return Status(SS_NOT_FOUND_ERROR, "FlushIds base_path: " + base_path + " not found");
+    }
+    auto path = base_path + "/" + prefix + std::to_string(*(ids_.begin())) + ".map";
+    char* buf = nullptr;
+    if (mappings_.size() != 0) {
+        buf = new char[sizeof(ID_TYPE) * mappings_.size()];
+    }
+
+    try {
+        std::ofstream ofs(path, std::ofstream::binary);
+        auto pos = 0;
+        for (auto& id : mappings_) {
+            buf[pos * sizeof(id)] = id;
+            ++pos;
+        }
+        if (buf) {
+            ofs.write(buf, sizeof(ID_TYPE) * mappings_.size());
+        }
+        ofs.close();
+    } catch (...) {
+        if (buf) {
+            delete[] buf;
+        }
+        Status(SS_ERROR, "Cannot FlushIds to " + path);
+    }
+
+    if (buf) {
+        delete[] buf;
+    }
+    return Status::OK();
+}
 
 Collection::Collection(const std::string& name, const json& params, ID_TYPE id, LSN_TYPE lsn, State state,
                        TS_TYPE created_on, TS_TYPE updated_on)
@@ -32,7 +115,7 @@ CollectionCommit::CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, con
                                    TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       SchemaIdField(schema_id),
-      MappingsField(mappings),
+      FlushableMappingsField(mappings),
       RowCountField(row_cnt),
       SizeField(size),
       IdField(id),
