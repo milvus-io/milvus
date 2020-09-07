@@ -359,34 +359,47 @@ SystemInfo::GPUMemoryUsed() {
 std::pair<int64_t, int64_t>
 SystemInfo::Octets() {
     const std::string filename = "/proc/net/netstat";
-    std::ifstream file(filename);
-    std::string lastline = "";
-    std::string line = "";
-    while (true) {
-        getline(file, line);
-        if (file.fail()) {
-            break;
+    try {
+        std::ifstream file(filename);
+        std::string lastline = "";
+        std::string line = "";
+        while (true) {
+            getline(file, line);
+            if (file.fail()) {
+                break;
+            }
+            lastline = line;
         }
-        lastline = line;
-    }
-    std::vector<size_t> space_position;
-    size_t space_pos = lastline.find(' ');
-    while (space_pos != std::string::npos) {
-        space_position.push_back(space_pos);
-        space_pos = lastline.find(' ', space_pos + 1);
-    }
-    // InOctets is between 6th and 7th " " and OutOctets is between 7th and 8th " "
-    size_t inoctets_begin = space_position[6] + 1;
-    size_t inoctets_length = space_position[7] - inoctets_begin;
-    size_t outoctets_begin = space_position[7] + 1;
-    size_t outoctets_length = space_position[8] - outoctets_begin;
-    std::string inoctets = lastline.substr(inoctets_begin, inoctets_length);
-    std::string outoctets = lastline.substr(outoctets_begin, outoctets_length);
+        std::vector<size_t> space_position;
+        size_t space_pos = lastline.find(' ');
+        while (space_pos != std::string::npos) {
+            space_position.push_back(space_pos);
+            space_pos = lastline.find(' ', space_pos + 1);
+        }
+        // InOctets is between 6th and 7th " " and OutOctets is between 7th and 8th " "
+        if (space_position.size() < 9) {
+            std::string err = "space_position size(" + std::to_string(space_position.size()) + ") < 9";
+            throw std::runtime_error(err);
+        }
 
-    int64_t inoctets_bytes = std::stoull(inoctets);
-    int64_t outoctets_bytes = std::stoull(outoctets);
-    std::pair<int64_t, int64_t> res(inoctets_bytes, outoctets_bytes);
-    return res;
+        size_t inoctets_begin = space_position[6] + 1;
+        size_t inoctets_length = space_position[7] - inoctets_begin;
+        size_t outoctets_begin = space_position[7] + 1;
+        size_t outoctets_length = space_position[8] - outoctets_begin;
+        std::string inoctets = lastline.substr(inoctets_begin, inoctets_length);
+        std::string outoctets = lastline.substr(outoctets_begin, outoctets_length);
+
+        int64_t inoctets_bytes = std::stoull(inoctets);
+        int64_t outoctets_bytes = std::stoull(outoctets);
+        std::pair<int64_t, int64_t> res(inoctets_bytes, outoctets_bytes);
+        return res;
+    } catch (std::exception& e) {
+        LOG_SERVER_ERROR_ << "failed to read file " << filename << ": " << e.what();
+        return std::pair<int64_t, int64_t>(0, 0);
+    } catch (...) {
+        LOG_SERVER_ERROR_ << "failed to read file " << filename << ": Unknown exception";
+        return std::pair<int64_t, int64_t>(0, 0);
+    }
 }
 
 void
