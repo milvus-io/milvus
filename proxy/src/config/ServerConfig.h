@@ -44,11 +44,6 @@ enum ClusterRole {
     RO,
 };
 
-const configEnum ClusterRoleMap{
-    {"rw", ClusterRole::RW},
-    {"ro", ClusterRole::RO},
-};
-
 enum SimdType {
     AUTO = 1,
     SSE,
@@ -71,14 +66,8 @@ struct ServerConfig {
 
     String version{"unknown"};
 
-    struct Cluster {
-        Bool enable{false};
-        Integer role{0};
-    } cluster;
-
     struct General {
         String timezone{"unknown"};
-        String meta_uri{"unknown"};
     } general;
 
     struct Network {
@@ -91,6 +80,11 @@ struct ServerConfig {
             Integer port{0};
         } http;
     } network;
+
+    struct Pulsar{
+        String address{"localhost"};
+        Integer port{6650};
+    }pulsar;
 
     struct Storage {
         String path{"unknown"};
@@ -105,12 +99,6 @@ struct ServerConfig {
         String preload_collection{"unknown"};
     } cache;
 
-    struct Metric {
-        Bool enable{false};
-        String address{"unknown"};
-        Integer port{0};
-    } metric;
-
     struct Engine {
         Integer build_index_threshold{4096};
         Integer search_combine_nq{0};
@@ -119,25 +107,10 @@ struct ServerConfig {
         Integer simd_type{0};
     } engine;
 
-    struct GPU {
-        Bool enable{false};
-        Integer cache_size{0};
-        Floating cache_threshold{0.0};
-        Integer gpu_search_threshold{0};
-        String search_devices{"unknown"};
-        String build_index_devices{"unknown"};
-    } gpu;
-
     struct Tracing {
         String json_config_path{"unknown"};
     } tracing;
 
-    struct WAL {
-        Bool enable{false};
-        Bool recovery_error_ignore{false};
-        Integer buffer_size{0};
-        String path{"unknown"};
-    } wal;
 
     struct Logs {
         String level{"unknown"};

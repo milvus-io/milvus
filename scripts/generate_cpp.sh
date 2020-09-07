@@ -1,21 +1,51 @@
 #!/usr/bin/env bash
 
+protoc=`which protoc`
+grpc_cpp_plugin=`which grpc_cpp_plugin`
+
 SCRIPTS_DIR=$(dirname "$0")
+
+while getopts "p:g:h" arg; do
+  case $arg in
+  p)
+    protoc=$(readlink -f "${OPTARG}")
+    ;;
+  g)
+    grpc_cpp_plugin=$(readlink -f "${OPTARG}")
+    ;;
+    h) # help
+    echo "
+
+parameter:
+-p: protoc path default(`which protoc`)
+-g: grpc_cpp_plugin path default(`which grpc_cpp_plugin`)
+-h: help
+
+usage:
+./build.sh  [-h]
+                "
+    exit 0
+    ;;
+  ?)
+    echo "ERROR! unknown argument"
+    exit 1
+    ;;
+  esac
+done
+
+
 ROOT_DIR="$SCRIPTS_DIR/.."
 source $SCRIPTS_DIR/common.sh
 
-#protoc=protoc
-protoc=${ROOT_DIR}/proxy/cmake_build/thirdparty/grpc/grpc-build/third_party/protobuf/protoc
-grpc_cpp_plugin=${ROOT_DIR}/proxy/cmake_build/thirdparty/grpc/grpc-build/grpc_cpp_plugin
+#protoc=${ROOT_DIR}/proxy/cmake_build/thirdparty/grpc/grpc-build/third_party/protobuf/protoc
+#grpc_cpp_plugin=${ROOT_DIR}/proxy/cmake_build/thirdparty/grpc/grpc-build/grpc_cpp_plugin
 
 echo "generate cpp code..."
 
 OUTDIR=${ROOT_DIR}/proxy/src/grpc
 
-GRPC_INCLUDE=.:.
-#GRPC_INCLUDE=.:../include
-
 cd $ROOT_DIR
+GRPC_INCLUDE=.:.
 rm -rf proto-cpp && mkdir -p proto-cpp
 
 PB_FILES=()

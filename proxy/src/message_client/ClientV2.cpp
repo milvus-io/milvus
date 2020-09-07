@@ -1,6 +1,8 @@
 #include "ClientV2.h"
 #include "pulsar/Result.h"
 #include "PartitionPolicy.h"
+#include "utils/CommonUtil.h"
+#include "config/ServerConfig.h"
 
 namespace {
 int64_t gen_channe_id(int64_t uid) {
@@ -13,7 +15,9 @@ namespace milvus::message_client {
 
 MsgClientV2 &MsgClientV2::GetInstance() {
   // TODO: do not hardcode pulsar message configure and init
-  std::string pulsar_server_addr = "pulsar://localhost:6650";
+  std::string pulsar_server_addr(std::string {"pulsar://"} + config.pulsar.address() + ":" + std::to_string(config.pulsar.port()));
+// "pulsar://localhost:6650"
+
   int64_t client_id = 0;
   static MsgClientV2 msg_client(client_id, pulsar_server_addr);
   return msg_client;
@@ -38,7 +42,8 @@ Status MsgClientV2::Init(const std::string &insert_delete,
   search_by_id_producer_ = std::make_shared<MsgProducer>(pulsar_client, search_by_id, producerConfiguration);
   time_sync_producer_ = std::make_shared<MsgProducer>(pulsar_client, time_sync);
   //create pulsar consumer
-  consumer_ = std::make_shared<MsgConsumer>(pulsar_client, search_result);
+  std::string subscribe_name = std::to_string(CommonUtil::RandomUINT64());
+  consumer_ = std::make_shared<MsgConsumer>(pulsar_client, search_result+subscribe_name);
 
   auto result = consumer_->subscribe(search_result);
   if (result != pulsar::Result::ResultOk) {

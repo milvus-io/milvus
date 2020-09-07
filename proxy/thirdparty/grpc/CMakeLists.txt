@@ -57,3 +57,16 @@ message( STATUS "grpc src compile options: ${var}" )
 set( PROTOC_EXCUTABLE           $<TARGET_FILE:protoc> )
 set( GRPC_CPP_PLUGIN_EXCUTABLE  $<TARGET_FILE:grpc_cpp_plugin> )
 set( PROTO_PATH          "${MILVUS_SOURCE_DIR}/src/grpc" )
+set( PROTO_GEN_SCRIPTS_DIR "${PROJECT_SOURCE_DIR}/../scripts")
+
+add_custom_target(generate_suvlim_pb_grpc ALL DEPENDS protoc grpc_cpp_plugin)
+
+add_custom_command(TARGET generate_suvlim_pb_grpc
+	POST_BUILD
+	COMMAND echo "${PROTOC_EXCUTABLE}"
+	COMMAND bash "${PROTO_GEN_SCRIPTS_DIR}/generate_go.sh" -p  "${PROTOC_EXCUTABLE}"
+	COMMAND echo "${PROTO_GEN_SCRIPTS_DIR}/generate_cpp.sh" -p "${PROTOC_EXCUTABLE}" -g "${GRPC_CPP_PLUGIN_EXCUTABLE}"
+	)
+
+set_property( GLOBAL PROPERTY PROTOC_EXCUTABLE ${PROTOC_EXCUTABLE})
+set_property( GLOBAL PROPERTY GRPC_CPP_PLUGIN_EXCUTABLE ${GRPC_CPP_PLUGIN_EXCUTABLE})

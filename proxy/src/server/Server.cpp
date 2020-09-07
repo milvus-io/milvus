@@ -140,13 +140,6 @@ Server::Start() {
     }
 
     try {
-        auto meta_uri = config.general.meta_uri();
-        if (meta_uri.length() > 6 && strcasecmp("sqlite", meta_uri.substr(0, 6).c_str()) == 0) {
-            std::cout << "WARNING: You are using SQLite as the meta data management, "
-                         "which can't be used in production. Please change it to MySQL!"
-                      << std::endl;
-        }
-
         /* Init opentracing tracer from config */
         std::string tracing_config_path = config.tracing.json_config_path();
         tracing_config_path.empty() ? tracing::TracerUtil::InitGlobal()
@@ -176,51 +169,6 @@ Server::Start() {
         STATUS_CHECK(LogMgr::InitLog(config.logs.trace.enable(), config.logs.level(), config.logs.path(),
                                      config.logs.max_log_file_size(), config.logs.log_rotate_num()));
 
-        bool cluster_enable = config.cluster.enable();
-        auto cluster_role = config.cluster.role();
-
-        Status s;
-        if ((not cluster_enable) || cluster_role == ClusterRole::RW) {
-            try {
-                // True if a new directory was created, otherwise false.
-                boost::filesystem::create_directories(config.storage.path());
-            } catch (std::exception& ex) {
-                return Status(SERVER_UNEXPECTED_ERROR, "Cannot create db directory, " + std::string(ex.what()));
-            } catch (...) {
-                return Status(SERVER_UNEXPECTED_ERROR, "Cannot create db directory");
-            }
-
-            s = InstanceLockCheck::Check(config.storage.path());
-            if (!s.ok()) {
-                if (not cluster_enable) {
-                    std::cerr << "single instance lock db path failed." << s.message() << std::endl;
-                } else {
-                    std::cerr << cluster_role << " instance lock db path failed." << s.message() << std::endl;
-                }
-                return s;
-            }
-
-            if (config.wal.enable()) {
-                std::string wal_path = config.wal.path();
-
-                try {
-                    // True if a new directory was created, otherwise false.
-                    boost::filesystem::create_directories(wal_path);
-                } catch (...) {
-                    return Status(SERVER_UNEXPECTED_ERROR, "Cannot create wal directory");
-                }
-                s = InstanceLockCheck::Check(wal_path);
-                if (!s.ok()) {
-                    if (not cluster_enable) {
-                        std::cerr << "single instance lock wal path failed." << s.message() << std::endl;
-                    } else {
-                        std::cerr << cluster_role << " instance lock wal path failed." << s.message() << std::endl;
-                    }
-                    return s;
-                }
-            }
-        }
-
         // print version information
         LOG_SERVER_INFO_ << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME;
 #ifdef MILVUS_GPU_VERSION
@@ -237,9 +185,6 @@ Server::Start() {
         LOG_SERVER_INFO_ << "\n\n"
                          << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
                          << ConfigMgr::GetInstance().Dump();
-
-        // server::Metrics::GetInstance().Init();
-        // server::SystemInfo::GetInstance().Init();
 
         return StartService();
     } catch (std::exception& ex) {

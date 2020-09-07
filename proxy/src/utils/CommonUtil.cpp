@@ -12,6 +12,9 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
+#include <random>
+#include <limits>
+
 #include <dirent.h>
 #include <pwd.h>
 #include <sys/stat.h>
@@ -19,6 +22,7 @@
 #include <boost/filesystem.hpp>
 #include <iostream>
 #include <vector>
+
 
 namespace milvus {
 
@@ -179,6 +183,18 @@ CommonUtil::ConvertTime(time_t time_integer, tm& time_struct) {
 void
 CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
     time_integer = mktime(&time_struct);
+}
+
+uint64_t
+CommonUtil::RandomUINT64(){
+  std::random_device rd;     //Get a random seed from the OS entropy device, or whatever
+  std::mt19937_64 eng(rd()); //Use the 64-bit Mersenne Twister 19937 generator
+                             //and seed it with entropy.
+  //Define the distribution, by default it goes from 0 to MAX(unsigned long long)
+  //or what have you.
+  std::uniform_int_distribution<uint64_t> distr;
+  return distr(eng);
+
 }
 
 #ifdef ENABLE_CPU_PROFILING

@@ -45,6 +45,9 @@ class CommonUtil {
     static void
     ConvertTime(tm time_struct, time_t& time_integer);
 
+    static uint64_t
+    RandomUINT64();
+
 #ifdef ENABLE_CPU_PROFILING
     static std::string
     GetCurrentTimeStr();
