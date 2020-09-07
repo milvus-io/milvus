@@ -104,8 +104,8 @@ WalManager::DropCollection(const std::string& collection_name) {
     if (!path.empty()) {
         WalFile file;
         file.OpenFile(path, WalFile::OVER_WRITE);
-        bool del = true;
-        file.Write<bool>(&del);
+        idx_t op_id = id_gen_.GetNextIDNumber();
+        file.Write<idx_t>(&op_id);
 
         AddCleanupTask(collection_name);
         StartCleanupThread();
