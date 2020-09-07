@@ -2,6 +2,10 @@ package com;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.MoreExecutors;
 import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
@@ -282,6 +286,34 @@ public class TestSearchEntities {
         SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
         SearchResponse resSearch = client.search(searchParam);
         Assert.assertFalse(resSearch.getResponse().ok());
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testAsyncSearch(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getEntityIds();
+        client.flush(collectionName);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(floatDsl).build();
+        ListenableFuture<SearchResponse> searchResFuture = client.searchAsync(searchParam);
+        Futures.addCallback(
+                searchResFuture, new FutureCallback<SearchResponse>() {
+                    @Override
+                    public void onSuccess(SearchResponse searchResponse) {
+                        Assert.assertNotNull(searchResponse);
+                        Assert.assertTrue(searchResponse.ok());
+                        Assert.assertEquals(searchResponse.getResultIdsList().size(), Constants.nq);
+                        Assert.assertEquals(searchResponse.getResultDistancesList().size(), Constants.nq);
+                        Assert.assertEquals(searchResponse.getResultIdsList().get(0).size(), Constants.topk);
+                        Assert.assertEquals(searchResponse.getFieldsMap().get(0).size(), top_k);
+                    }
+                    @Override
+                    public void onFailure(Throwable t) {
+                        System.out.println(t.getMessage());
+                    }
+                }, MoreExecutors.directExecutor()
+        );
     }
 
     // Binary tests
