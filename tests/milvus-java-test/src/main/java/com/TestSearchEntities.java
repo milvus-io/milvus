@@ -237,14 +237,12 @@ public class TestSearchEntities {
         Assert.assertFalse(resSearch.getResponse().ok());
     }
 
-    // #3599
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void  testSearchVectorNotExisted(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
         client.flush(collectionName);
-        List<List<Float>> query = Utils.genVectors(nq,64, false);
         String dsl = String.format(
                 "{\"bool\": {"
                         + "\"must\": [{"
@@ -255,13 +253,14 @@ public class TestSearchEntities {
                         + "        \"float_vector\": {"
                         + "            \"topk\": %d, \"metric_type\": \"L2\", \"type\": \"float\", \"query\": %s, \"params\": {\"nprobe\": 20}"
                         + "    }}}]}}",
-                top_k, query);
+                top_k, new ArrayList<>());
         SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
         SearchResponse resSearch = client.search(searchParam);
-        Assert.assertFalse(resSearch.getResponse().ok());
+        Assert.assertTrue(resSearch.getResponse().ok());
+        Assert.assertEquals(resSearch.getResultIdsList().size(), 0);
+        Assert.assertEquals(resSearch.getResultDistancesList().size(), 0);
     }
 
-    // #3601
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void  testSearchVectorDifferentDim(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
