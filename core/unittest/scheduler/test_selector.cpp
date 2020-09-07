@@ -44,42 +44,20 @@ TEST(OptimizerTest, TEST_OPTIMIZER) {
     fiu_disable("get_gpu_config_search_resources.disable_gpu_resource_fail");
     fiu_disable("check_config_gpu_search_threshold_fail");
 
-    FaissIVFPass faiss_ivf_flat_pass;
+    FaissIVFPass faiss_ivf_pass;
     fiu_enable("check_config_gpu_search_threshold_fail", 1, NULL, 0);
     fiu_enable("get_gpu_config_search_resources.disable_gpu_resource_fail", 1, NULL, 0);
-    ASSERT_ANY_THROW(faiss_ivf_flat_pass.Init(););
-    fiu_disable("get_gpu_config_search_resources.disable_gpu_resource_fail");
-    fiu_disable("check_config_gpu_search_threshold_fail");
-
-    FaissIVFPass faiss_ivf_pq_pass;
-    fiu_enable("check_config_gpu_search_threshold_fail", 1, NULL, 0);
-    fiu_enable("get_gpu_config_search_resources.disable_gpu_resource_fail", 1, NULL, 0);
-    ASSERT_ANY_THROW(faiss_ivf_pq_pass.Init(););
+    ASSERT_ANY_THROW(faiss_ivf_pass.Init(););
     fiu_disable("get_gpu_config_search_resources.disable_gpu_resource_fail");
     fiu_disable("check_config_gpu_search_threshold_fail");
 
     auto file = std::make_shared<SegmentSchema>();
-    file->engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
-    file->index_params_ = "{ \"nlist\": 100 }";
+    file->engine_type_ = (int)engine::EngineType::FAISS_FLAT;
+    file->index_params_ = "";
     file->dimension_ = 64;
     auto search_task = std::make_shared<XSearchTask>(nullptr, file, nullptr);
-    ASSERT_FALSE(faiss_ivf_pq_pass.Run(search_task));
-
-    FaissIVFPass faiss_ivf_q8h_pass;
-    fiu_enable("check_config_gpu_search_threshold_fail", 1, NULL, 0);
-    faiss_ivf_q8h_pass.Init();
-    fiu_disable("check_config_gpu_search_threshold_fail");
-
-    auto search_task2 = std::make_shared<XSearchTask>(nullptr, file, nullptr);
-    ASSERT_FALSE(faiss_ivf_q8h_pass.Run(build_index_task));
-    ASSERT_TRUE(faiss_ivf_q8h_pass.Run(search_task2));
-
-    FaissIVFPass faiss_ivf_q8_pass;
-    fiu_enable("check_config_gpu_search_threshold_fail", 1, NULL, 0);
-    fiu_enable("get_gpu_config_search_resources.disable_gpu_resource_fail", 1, NULL, 0);
-    ASSERT_ANY_THROW(faiss_ivf_q8_pass.Init(););
-    fiu_disable("get_gpu_config_search_resources.disable_gpu_resource_fail");
-    fiu_disable("check_config_gpu_search_threshold_fail");
+    ASSERT_FALSE(faiss_ivf_pass.Run(search_task));
+    ASSERT_FALSE(faiss_ivf_pass.Run(build_index_task));
 
     FallbackPass fall_back_pass;
     fall_back_pass.Init();
