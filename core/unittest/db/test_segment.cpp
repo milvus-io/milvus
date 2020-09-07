@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <experimental/filesystem>
 
 #include "db/utils.h"
 #include "db/SnapshotVisitor.h"
@@ -23,9 +24,11 @@
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
+#include "segment/IdBloomFilter.h"
 #include "utils/Json.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
+using IdBloomFilter = milvus::segment::IdBloomFilter;
 
 namespace {
 milvus::Status
@@ -155,4 +158,58 @@ TEST_F(SegmentTest, SegmentTest) {
 
     status = db_->DropCollection(c1);
     ASSERT_TRUE(status.ok());
+}
+
+TEST(BloomFilterTest, BloomFilterTest) {
+    std::string file_path = "/tmp/milvus_bloom.blf";
+    {
+        IdBloomFilter filter(1000);
+        for (int64_t i = 100000; i < 101000; ++i) {
+            filter.Add(i);
+        }
+
+        for (int64_t i = 100000; i < 100100; ++i) {
+            bool res = filter.Check(i);
+            ASSERT_TRUE(res);
+        }
+
+        for (int64_t i = 1; i < 100; ++i) {
+            bool res = filter.Check(i);
+            ASSERT_FALSE(res);
+        }
+
+        for (int64_t i = 100000; i < 100100; ++i) {
+            filter.Remove(i);
+        }
+
+        for (int64_t i = 100000; i < 100100; ++i) {
+            bool res = filter.Check(i);
+            ASSERT_FALSE(res);
+        }
+
+        auto status = filter.Write(nullptr, file_path);
+        ASSERT_TRUE(status.ok());
+    }
+
+    {
+        IdBloomFilter filter(0);
+        auto status = filter.Read(nullptr, file_path);
+        ASSERT_TRUE(status.ok());
+
+        for (int64_t i = 100000; i < 100100; ++i) {
+            bool res = filter.Check(i);
+            ASSERT_FALSE(res);
+        }
+
+        for (int64_t i = 100900; i < 101000; ++i) {
+            bool res = filter.Check(i);
+            ASSERT_TRUE(res);
+        }
+
+        for (int64_t i = 100000; i < 100100; ++i) {
+            bool res = filter.Check(i);
+            ASSERT_FALSE(res);
+        }
+    }
+    std::experimental::filesystem::remove(file_path);
 }
