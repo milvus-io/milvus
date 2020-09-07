@@ -69,8 +69,6 @@ SearchReq::OnExecute() {
             }
         }
 
-        int64_t dimension = 0;
-
         // step 4: Get field info
         std::unordered_map<std::string, engine::DataType> field_types;
         for (auto& schema : fields_schema) {
@@ -78,7 +76,21 @@ SearchReq::OnExecute() {
             field_types.insert(std::make_pair(field->GetName(), field->GetFtype()));
             if (field->GetFtype() == engine::DataType::VECTOR_FLOAT ||
                 field->GetFtype() == engine::DataType::VECTOR_BINARY) {
-                dimension = field->GetParams()[engine::PARAM_DIMENSION];
+                // check dim
+                int64_t dimension = field->GetParams()[engine::PARAM_DIMENSION];
+                auto vector_query = query_ptr_->vectors.begin()->second;
+                if (!vector_query->query_vector.binary_data.empty()) {
+                    if (vector_query->query_vector.binary_data.size() !=
+                        vector_query->query_vector.vector_count * dimension / 8) {
+                        return Status(SERVER_INVALID_ARGUMENT, "query vector dim not match");
+                    }
+                } else if (!vector_query->query_vector.float_data.empty()) {
+                    if (vector_query->query_vector.float_data.size() !=
+                        vector_query->query_vector.vector_count * dimension) {
+                        return Status(SERVER_INVALID_ARGUMENT, "query vector dim not match");
+                    }
+                }
+
                 // validate search metric type and DataType match
                 bool is_binary = (field->GetFtype() == engine::DataType::VECTOR_FLOAT) ? false : true;
                 if (query_ptr_->metric_types.find(field->GetName()) != query_ptr_->metric_types.end()) {
@@ -126,11 +138,7 @@ SearchReq::OnExecute() {
         fiu_do_on("SearchReq.OnExecute.empty_result_ids", result_->result_ids_.clear());
         if (result_->result_ids_.empty()) {
             auto vector_query = query_ptr_->vectors.begin()->second;
-            if (!vector_query->query_vector.binary_data.empty()) {
-                result_->row_num_ = vector_query->query_vector.binary_data.size() * 8 / dimension;
-            } else if (!vector_query->query_vector.float_data.empty()) {
-                result_->row_num_ = vector_query->query_vector.float_data.size() / dimension;
-            }
+            result_->row_num_ = vector_query->query_vector.vector_count;
             return Status::OK();  // empty table
         }
 

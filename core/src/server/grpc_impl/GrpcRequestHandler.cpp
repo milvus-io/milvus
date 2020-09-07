@@ -217,8 +217,9 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
                     CopyRowRecords(query.vector_query().records(),
                                    google::protobuf::RepeatedField<google::protobuf::int64>(), vectors);
 
-                    vector_query->query_vector.float_data = vectors.float_data_;
-                    vector_query->query_vector.binary_data = vectors.binary_data_;
+                    vector_query->query_vector.vector_count = vectors.vector_count_;
+                    vector_query->query_vector.float_data.swap(vectors.float_data_);
+                    vector_query->query_vector.binary_data.swap(vectors.binary_data_);
 
                     vector_query->boost = query.vector_query().query_boost();
                     vector_query->field_name = query.vector_query().field_name();
@@ -1733,8 +1734,9 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             engine::VectorsData vector_data;
             CopyRowRecords(vector_param.row_record().records(),
                            google::protobuf::RepeatedField<google::protobuf::int64>(), vector_data);
-            vector_query->query_vector.binary_data = vector_data.binary_data_;
-            vector_query->query_vector.float_data = vector_data.float_data_;
+            vector_query->query_vector.vector_count = vector_data.vector_count_;
+            vector_query->query_vector.binary_data.swap(vector_data.binary_data_);
+            vector_query->query_vector.float_data.swap(vector_data.float_data_);
 
             query_ptr->vectors.insert(std::make_pair(placeholder, vector_query));
         }
