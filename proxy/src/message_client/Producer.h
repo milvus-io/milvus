@@ -18,10 +18,11 @@ class MsgProducer {
   Result createProducer(const std::string &topic);
   Result send(const Message &msg);
   Result send(const std::string &msg);
-  Result send(const milvus::grpc::InsertOrDeleteMsg &msg);
-  Result send(const milvus::grpc::SearchMsg &msg);
-  Result send(const milvus::grpc::GetEntityIDsParam &msg);
-  Result send(const milvus::grpc::TimeSyncMsg & msg);
+  Result send(const std::string &msg, const int64_t partitioned_key);
+  Result send(milvus::grpc::InsertOrDeleteMsg &msg);
+  Result send(milvus::grpc::SearchMsg &msg);
+//  Result send(milvus::grpc::EntityIdentity &msg);
+  Result send(milvus::grpc::TimeSyncMsg & msg);
   Result close();
 
   const Producer &
