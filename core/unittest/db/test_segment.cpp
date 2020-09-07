@@ -14,7 +14,10 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <experimental/filesystem>
 
+#include "codecs/Codec.h"
+#include "db/IDGenerator.h"
 #include "db/utils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
@@ -23,9 +26,13 @@
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
+#include "segment/IdBloomFilter.h"
+#include "storage/disk/DiskIOReader.h"
+#include "storage/disk/DiskIOWriter.h"
 #include "utils/Json.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
+using IdBloomFilter = milvus::segment::IdBloomFilter;
 
 namespace {
 milvus::Status
@@ -155,4 +162,109 @@ TEST_F(SegmentTest, SegmentTest) {
 
     status = db_->DropCollection(c1);
     ASSERT_TRUE(status.ok());
+}
+
+TEST(BloomFilterTest, BloomFilterTest) {
+    std::string file_path = "/tmp/milvus_bloom.blf";
+
+    milvus::storage::IOReaderPtr reader_ptr = std::make_shared<milvus::storage::DiskIOReader>();
+    milvus::storage::IOWriterPtr writer_ptr = std::make_shared<milvus::storage::DiskIOWriter>();
+    milvus::storage::OperationPtr operation_ptr = nullptr;
+    auto fs_ptr = std::make_shared<milvus::storage::FSHandler>(reader_ptr, writer_ptr, operation_ptr);
+
+    const int64_t id_count = 100000;
+    milvus::engine::SafeIDGenerator id_gen;
+    std::vector<int64_t> id_array;
+    std::vector<int64_t> removed_id_array;
+
+    auto error_rate_check_1 = [&](IdBloomFilter& filter, int64_t repeat) -> void {
+        int64_t wrong_check = 0;
+        for (int64_t i = 0; i < repeat; ++i) {
+            auto id = id_gen.GetNextIDNumber();
+            bool res = filter.Check(id);
+            if (res) {
+                wrong_check++;
+            }
+        }
+
+        double error_rate = filter.ErrorRate();
+        double wrong_rate = (double)wrong_check/id_count;
+        ASSERT_LT(wrong_rate, error_rate);
+    };
+
+    auto error_rate_check_2 = [&](IdBloomFilter& filter, const std::vector<int64_t>& id_array) -> void {
+        int64_t wrong_check = 0;
+        for (auto id : id_array) {
+            bool res = filter.Check(id);
+            if (res) {
+                wrong_check++;
+            }
+        }
+
+        double error_rate = filter.ErrorRate();
+        double wrong_rate = (double)wrong_check/id_count;
+        ASSERT_LT(wrong_rate, error_rate);
+    };
+
+    {
+        IdBloomFilter filter(id_count);
+
+        // insert some ids
+        for (int64_t i = 0; i < id_count; ++i) {
+            auto id = id_gen.GetNextIDNumber();
+            filter.Add(id);
+            id_array.push_back(id);
+        }
+
+        // check inserted ids
+        for (auto id : id_array) {
+            bool res = filter.Check(id);
+            ASSERT_TRUE(res);
+        }
+
+        // check non-exist ids
+        error_rate_check_1(filter, id_count);
+
+        // remove some ids
+        std::vector<int64_t> temp_array;
+        for (auto id : id_array) {
+            if (id % 7 == 0) {
+                filter.Remove(id);
+                removed_id_array.push_back(id);
+            } else {
+                temp_array.push_back(id);
+            }
+        }
+        id_array.swap(temp_array);
+
+        // check removed ids
+        error_rate_check_2(filter, removed_id_array);
+
+        fs_ptr->writer_ptr_->Open(file_path);
+        auto status = filter.Write(fs_ptr);
+        ASSERT_TRUE(status.ok());
+        fs_ptr->writer_ptr_->Close();
+    }
+
+    {
+        IdBloomFilter filter(0);
+        fs_ptr->reader_ptr_->Open(file_path);
+        auto status = filter.Read(fs_ptr);
+        ASSERT_TRUE(status.ok());
+        fs_ptr->reader_ptr_->Close();
+
+        // check inserted ids
+        for (auto id : id_array) {
+            bool res = filter.Check(id);
+            ASSERT_TRUE(res);
+        }
+
+        // check non-exist ids
+        error_rate_check_1(filter, id_count);
+
+        // check removed ids
+        error_rate_check_2(filter, removed_id_array);
+    }
+
+    std::experimental::filesystem::remove(file_path);
 }

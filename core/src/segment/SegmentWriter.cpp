@@ -145,12 +145,9 @@ SegmentWriter::WriteBloomFilter() {
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
 
-        auto& ss_codec = codec::Codec::instance();
-        segment::IdBloomFilterPtr bloom_filter_ptr;
-        STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr));
-
         auto uids = reinterpret_cast<int64_t*>(uid_data->data_.data());
         int64_t row_count = segment_ptr_->GetRowCount();
+        segment::IdBloomFilterPtr bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(row_count);
         for (int64_t i = 0; i < row_count; i++) {
             bloom_filter_ptr->Add(uids[i]);
         }
@@ -165,14 +162,6 @@ SegmentWriter::WriteBloomFilter() {
     } else {
         return Status(DB_ERROR, "Bloom filter element missed in snapshot");
     }
-
-    return Status::OK();
-}
-
-Status
-SegmentWriter::CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr) {
-    auto& ss_codec = codec::Codec::instance();
-    STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr));
 
     return Status::OK();
 }
