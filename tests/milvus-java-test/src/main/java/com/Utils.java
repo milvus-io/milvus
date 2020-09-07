@@ -2,6 +2,7 @@ package com;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
+import com.google.gson.JsonArray;
 import io.milvus.client.*;
 import com.alibaba.fastjson.JSONObject;
 import org.apache.commons.lang3.RandomStringUtils;
@@ -203,22 +204,14 @@ public class Utils {
     }
 
     public static String setBinarySearchParam(String metricType, List<List<Byte>> queryVectors, int topk, int nprobe) {
-        JSONObject searchParam = new JSONObject();
-        JSONObject fieldParam = new JSONObject();
-        fieldParam.put("topk", topk);
-        fieldParam.put("metricType", metricType);
-        fieldParam.put("queryVectors", queryVectors);
-        JSONObject tmpSearchParam = new JSONObject();
-        tmpSearchParam.put("nprobe", nprobe);
-        fieldParam.put("params", tmpSearchParam);
-        JSONObject vectorParams = new JSONObject();
-        vectorParams.put(Constants.floatFieldName, fieldParam);
-        searchParam.put("vector", vectorParams);
+        JSONObject searchParam = genBinaryVectorParam(metricType, queryVectors, topk, nprobe);
         JSONObject boolParam = new JSONObject();
         JSONObject mustParam = new JSONObject();
-        mustParam.put("must", new JSONArray().add(searchParam));
+        JSONArray tmp = new JSONArray();
+        tmp.add(searchParam);
+        mustParam.put("must", tmp);
         boolParam.put("bool", mustParam);
-        return JSONObject.toJSONString(searchParam);
+        return JSONObject.toJSONString(boolParam);
     }
 
     public static int getIndexParamValue(String indexParam, String key) {

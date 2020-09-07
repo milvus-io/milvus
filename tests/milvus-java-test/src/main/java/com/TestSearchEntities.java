@@ -325,7 +325,7 @@ public class TestSearchEntities {
         Assert.assertFalse(resSearch.getResponse().ok());
     }
 
-    // TODO
+    // #3636
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testSearchCollectionBinary(MilvusClient client, String collectionName)  {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
