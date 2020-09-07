@@ -20,6 +20,10 @@ namespace milvus::engine::snapshot {
 
 Status
 FlushableMappingsField::LoadIds(const std::string& base_path, const std::string& prefix) {
+    if (loaded_) {
+        return Status::OK();
+    }
+    loaded_ = true;
     if (ids_.size() == 0) {
         return Status(SS_ERROR, "LoadIds ids_ should not be empty");
     }
@@ -33,31 +37,47 @@ FlushableMappingsField::LoadIds(const std::string& base_path, const std::string&
         return Status(SS_NOT_FOUND_ERROR, "FlushIds path: " + path + " not found");
     }
 
-    char* buf = nullptr;
+    /* unsigned short* buf = nullptr; */
     try {
         std::ifstream ifs(path, std::ifstream::binary);
         ifs.seekg(0, ifs.end);
         auto size = ifs.tellg();
+        std::cout << "READ " << path << " SIZE=" << size << std::endl;
         ifs.seekg(0, ifs.beg);
         if (size > 0) {
-            buf = new char[size];
-            ifs.read(buf, size);
-            for (auto pos = 0; pos < size; pos += sizeof(ID_TYPE)) {
-                mappings_.insert((float)(buf[pos]));
+            /* buf = new unsigned short[size]; */
+            /* ifs.read((char*)buf, size); */
+            /* for (auto pos = 0; pos < size; pos += sizeof(ID_TYPE)) { */
+            /*     ID_TYPE id = (ID_TYPE)(buf[pos]); */
+            /*     std::cout << "READ " << id << std::endl; */
+            /*     mappings_.insert(id); */
+            /* } */
+            std::string str((std::istreambuf_iterator<char>(ifs)),
+                 std::istreambuf_iterator<char>());
+            std::cout << "READ " << str << std::endl;
+
+            std::stringstream ss(str);
+
+            for (ID_TYPE i; ss >> i;) {
+                std::string::size_type sz;
+                /* mappings_.insert(std::stoll(i, &sz, 0)); */
+                mappings_.insert(i);
+                if (ss.peek() == ',')
+                    ss.ignore();
             }
         }
 
         ifs.close();
     } catch (...) {
-        if (buf) {
-            delete[] buf;
-        }
+        /* if (buf) { */
+        /*     delete[] buf; */
+        /* } */
         Status(SS_ERROR, "Cannot LoadIds from " + path);
     }
 
-    if (buf) {
-        delete[] buf;
-    }
+    /* if (buf) { */
+    /*     delete[] buf; */
+    /* } */
     return Status::OK();
 }
 
@@ -68,35 +88,47 @@ FlushableMappingsField::FlushIds(const std::string& base_path, const std::string
     }
     if (!std::experimental::filesystem::exists(base_path)) {
         std::experimental::filesystem::create_directories(base_path);
-        /* return Status(SS_NOT_FOUND_ERROR, "FlushIds base_path: " + base_path + " not found"); */
     }
     auto path = base_path + "/" + prefix + std::to_string(*(ids_.begin())) + ".map";
-    char* buf = nullptr;
-    if (mappings_.size() != 0) {
-        buf = new char[sizeof(ID_TYPE) * mappings_.size()];
-    }
+    /* unsigned short* buf = nullptr; */
+    auto size = sizeof(ID_TYPE) * mappings_.size();
+    /* if (size != 0) { */
+    /*     buf = new unsigned short[size]; */
+    /* } */
+    std::cout << "FLUSH " << path << " SIZE=" << size << std::endl;
 
     try {
         std::ofstream ofs(path, std::ofstream::binary);
-        auto pos = 0;
+        bool first = true;
         for (auto& id : mappings_) {
-            buf[pos * sizeof(id)] = id;
-            ++pos;
-        }
-        if (buf) {
-            ofs.write(buf, sizeof(ID_TYPE) * mappings_.size());
+            if (!first) {
+                ofs << ",";
+            }
+            ofs << id;
+            first = false;
         }
         ofs.close();
+        /* std::ofstream ofs(path, std::ofstream::binary); */
+        /* auto pos = 0; */
+        /* for (auto& id : mappings_) { */
+        /*     buf[pos * sizeof(id)] = id; */
+        /*     std::cout << "FLUSH " << (ID_TYPE)buf[pos*sizeof(id)] << std::endl; */
+        /*     ++pos; */
+        /* } */
+        /* if (buf) { */
+        /*     ofs.write((char const*)buf, size); */
+        /* } */
+        /* ofs.close(); */
     } catch (...) {
-        if (buf) {
-            delete[] buf;
-        }
+        /* if (buf) { */
+        /*     delete[] buf; */
+        /* } */
         Status(SS_ERROR, "Cannot FlushIds to " + path);
     }
 
-    if (buf) {
-        delete[] buf;
-    }
+    /* if (buf) { */
+    /*     delete[] buf; */
+    /* } */
     return Status::OK();
 }
 

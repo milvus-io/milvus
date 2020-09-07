@@ -83,6 +83,7 @@ class FlushableMappingsField : public MappingsField {
 
  protected:
     MappingT ids_;
+    bool loaded_ = false;
 };
 
 class StateField {
