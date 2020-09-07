@@ -5,6 +5,7 @@
 #include "dog_segment/SegmentDefs.h"
 // #include "knowhere/index/Index.h"
 #include "query/GeneralQuery.h"
+using idx_t = int64_t;
 
 namespace milvus {
 namespace dog_segment {
@@ -24,15 +25,17 @@ class SegmentBase {
  public:
     virtual ~SegmentBase() = default;
     // SegmentBase(std::shared_ptr<FieldsInfo> collection);
-
+    // single threaded
     virtual Status
-    Insert(int64_t size, const uint64_t* primary_keys, const Timestamp* timestamps, const DogDataChunk& values) = 0;
+    Insert(int64_t size, const idx_t* primary_keys, const Timestamp* timestamps, const DogDataChunk& values, std::pair<Timestamp, Timestamp> timestamp_range) = 0;
 
     // TODO: add id into delete log, possibly bitmap
+    // single threaded
     virtual Status
-    Delete(int64_t size, const uint64_t* primary_keys, const Timestamp* timestamps) = 0;
+    Delete(int64_t size, const idx_t* primary_keys, const Timestamp* timestamps, std::pair<Timestamp, Timestamp> timestamp_range) = 0;
 
     // query contains metadata of
+    // multi-threaded
     virtual Status
     Query(const query::QueryPtr& query, Timestamp timestamp, QueryResult& results) = 0;
 
@@ -41,6 +44,7 @@ class SegmentBase {
     // GetEntityByIds(Timestamp timestamp, const std::vector<Id>& ids, DataChunkPtr& results) = 0;
 
     // stop receive insert requests
+    // single threaded
     virtual Status
     Close() = 0;
 
@@ -75,31 +79,6 @@ class SegmentBase {
     virtual ssize_t
     get_deleted_count() const = 0;
 
- public:
-    // getter and setter
-    Timestamp get_time_begin() {
-        return time_begin_;
-    }
-    void set_time_begin(Timestamp time_begin) {
-        this->time_begin_ = time_begin;
-    }
-    Timestamp get_time_end() {
-        return time_end_; 
-    }
-    void set_time_end(Timestamp time_end) {
-        this->time_end_ = time_end;
-    }
-    uint64_t get_segment_id() {
-        return segment_id_;
-    }
-    void set_segment_id(uint64_t segment_id) {
-        this->segment_id_ = segment_id;
-    }
-
- private:
-    Timestamp time_begin_;
-    Timestamp time_end_;
-    uint64_t segment_id_;
 };
 
 using SegmentBasePtr = std::unique_ptr<SegmentBase>;

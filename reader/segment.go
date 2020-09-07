@@ -14,7 +14,7 @@ package reader
 import "C"
 import (
 	"github.com/czs007/suvlim/errors"
-	"github.com/czs007/suvlim/pulsar/client-go/schema"
+	schema "github.com/czs007/suvlim/pkg/message"
 	"strconv"
 	"unsafe"
 )
@@ -28,7 +28,7 @@ const (
 
 type Segment struct {
 	SegmentPtr C.CSegmentBase
-	SegmentId	uint64
+	SegmentId	int64
 	SegmentCloseTime uint64
 }
 
@@ -45,21 +45,21 @@ func (s *Segment) GetStatus() int {
 	}
 }
 
-func (s *Segment) GetSegmentID() uint64 {
+func (s *Segment) GetSegmentID() int64 {
 	/*C.GetSegmentId
 	unsigned long
 	GetSegmentId(CSegmentBase c_segment);
 	*/
 	var segmentID = C.GetSegmentId(s.SegmentPtr)
-	return uint64(segmentID)
+	return int64(segmentID)
 }
 
-func (s *Segment) SetSegmentID(segmentID uint64) {
+func (s *Segment) SetSegmentID(segmentID int64) {
 	/*C.SetSegmentId
 	void
 	SetSegmentId(CSegmentBase c_segment, unsigned long segment_id);
 	*/
-	C.SetSegmentId(s.SegmentPtr, C.ulong(segmentID))
+	C.SetSegmentId(s.SegmentPtr, C.long(segmentID))
 }
 
 func (s *Segment) GetMaxTimestamp() uint64 {
@@ -127,7 +127,7 @@ func (s *Segment) Close() error {
 }
 
 ////////////////////////////////////////////////////////////////////////////
-func SegmentInsert(segment *Segment, entityIds *[]uint64, timestamps *[]uint64, dataChunk [][]*schema.FieldValue) (ResultEntityIds, error) {
+func (s *Segment) SegmentInsert(entityIds *[]int64, timestamps *[]uint64, records *[][]byte, timestampMin uint64, timestampMax uint64) error {
 	/*C.Insert
 	int
 	Insert(CSegmentBase c_segment,
@@ -156,16 +156,16 @@ func SegmentInsert(segment *Segment, entityIds *[]uint64, timestamps *[]uint64, 
 	}
 	const sizeofPerRow = 4 + DIM * 4
 
-	var status = C.Insert(segment.SegmentPtr, C.long(N), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]), unsafe.Pointer(&rawData[0]), C.int(sizeofPerRow), C.long(N))
+	var status = C.Insert(s.SegmentPtr, C.long(N), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]), unsafe.Pointer(&rawData[0]), C.int(sizeofPerRow), C.long(N))
 
 	if status != 0 {
-		return nil, errors.New("Insert failed, error code = " + strconv.Itoa(int(status)))
+		return errors.New("Insert failed, error code = " + strconv.Itoa(int(status)))
 	}
 
-	return ResultEntityIds{}, nil
+	return nil
 }
 
-func SegmentDelete(segment *Segment, entityIds *[]uint64, timestamps *[]uint64) (ResultEntityIds, error) {
+func (s *Segment) SegmentDelete(entityIds *[]int64, timestamps *[]uint64) error {
 	/*C.Delete
 	int
 	Delete(CSegmentBase c_segment,
@@ -175,16 +175,16 @@ func SegmentDelete(segment *Segment, entityIds *[]uint64, timestamps *[]uint64) 
 	*/
 	size := len(*entityIds)
 
-	var status = C.Delete(segment.SegmentPtr, C.long(size), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]))
+	var status = C.Delete(s.SegmentPtr, C.long(size), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]))
 
 	if status != 0 {
-		return nil, errors.New("Delete failed, error code = " + strconv.Itoa(int(status)))
+		return errors.New("Delete failed, error code = " + strconv.Itoa(int(status)))
 	}
 
-	return ResultEntityIds{}, nil
+	return nil
 }
 
-func SegmentSearch(segment *Segment, queryString string, timestamps *[]uint64, vectorRecord *[]schema.VectorRecord) (*[]SearchResult, error) {
+func (s *Segment) SegmentSearch(queryString string, timestamp uint64, vectorRecord *schema.VectorRowRecord) (*SearchResult, error) {
 	/*C.Search
 	int
 	Search(CSegmentBase c_segment,
@@ -193,22 +193,16 @@ func SegmentSearch(segment *Segment, queryString string, timestamps *[]uint64, v
 	           long int* result_ids,
 	           float* result_distances);
 	*/
-	var results []SearchResult
-
 	// TODO: get top-k's k from queryString
 	const TopK = 1
 
-	for timestamp := range *timestamps {
-		resultIds := make([]int64, TopK)
-		resultDistances  := make([]float32, TopK)
+	resultIds := make([]int64, TopK)
+	resultDistances := make([]float32, TopK)
 
-		var status = C.Search(segment.SegmentPtr, unsafe.Pointer(nil), C.ulong(timestamp), (*C.long)(&resultIds[0]), (*C.float)(&resultDistances[0]))
-		if status != 0 {
-			return nil, errors.New("Search failed, error code = " + strconv.Itoa(int(status)))
-		}
-
-		results = append(results, SearchResult{ResultIds: resultIds, ResultDistances: resultDistances})
+	var status = C.Search(s.SegmentPtr, unsafe.Pointer(nil), C.ulong(timestamp), (*C.long)(&resultIds[0]), (*C.float)(&resultDistances[0]))
+	if status != 0 {
+		return nil, errors.New("Search failed, error code = " + strconv.Itoa(int(status)))
 	}
 
-	return &results, nil
+	return &SearchResult{ResultIds: resultIds, ResultDistances: resultDistances}, nil
 }
