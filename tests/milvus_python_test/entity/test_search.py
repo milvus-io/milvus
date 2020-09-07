@@ -1223,7 +1223,7 @@ class TestSearchParamsInvalid(object):
                 search_param = {"nprobe": nprobe}
                 query_vecs = gen_vectors(nprobe, dim)
                 status, result = connect.search(collection, top_k, query_vecs, params=search_param)
-                assert not status.OK()
+                assert status.OK()
 
     @pytest.fixture(
         scope="function",
