@@ -393,10 +393,10 @@ SystemInfo::Octets() {
         int64_t outoctets_bytes = std::stoull(outoctets);
         std::pair<int64_t, int64_t> res(inoctets_bytes, outoctets_bytes);
         return res;
-    } catch (std::exception & e) {
+    } catch (std::exception& e) {
         LOG_SERVER_ERROR_ << "failed to read file " << filename << ": " << e.what();
         return std::pair<int64_t, int64_t>(0, 0);
-    } catch ( ... ) {
+    } catch (...) {
         LOG_SERVER_ERROR_ << "failed to read file " << filename << ": Unknown exception";
         return std::pair<int64_t, int64_t>(0, 0);
     }
