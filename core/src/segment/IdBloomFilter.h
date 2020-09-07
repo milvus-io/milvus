@@ -51,13 +51,10 @@ class IdBloomFilter : public cache::DataObj {
     Size() override;
 
     Status
-    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& path);
+    Write(const storage::FSHandlerPtr& fs_ptr);
 
     Status
-    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& path);
-
-    //    const std::string&
-    //    GetName() const;
+    Read(const storage::FSHandlerPtr& fs_ptr);
 
     // No copy and move
     IdBloomFilter(const IdBloomFilter&) = delete;

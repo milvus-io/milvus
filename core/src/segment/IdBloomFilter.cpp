@@ -16,6 +16,7 @@
 // under the License.
 
 #include "segment/IdBloomFilter.h"
+#include "db/Utils.h"
 #include "utils/Log.h"
 #include "utils/Status.h"
 
@@ -55,6 +56,10 @@ bool
 IdBloomFilter::Check(engine::idx_t uid) {
     std::string s = std::to_string(uid);
     scaling_bloom_t* bloom_filter = GetBloomFilter();
+    if (bloom_filter == nullptr) {
+        return true;  // bloom filter doesn't work, always return true
+    }
+
     return scaling_bloom_check(bloom_filter, s.c_str(), s.size());
 }
 
@@ -62,6 +67,10 @@ Status
 IdBloomFilter::Add(engine::idx_t uid) {
     std::string s = std::to_string(uid);
     scaling_bloom_t* bloom_filter = GetBloomFilter();
+    if (bloom_filter == nullptr) {
+        return Status(DB_ERROR, "bloom filter is null pointer");  // bloom filter doesn't work
+    }
+
     if (scaling_bloom_add(bloom_filter, s.c_str(), s.size(), uid) == -1) {
         // Counter overflow does not affect bloom filter's normal functionality
         LOG_ENGINE_WARNING_ << "Warning adding id=" << s << " to bloom filter: 4 bit counter Overflow";
@@ -75,6 +84,10 @@ Status
 IdBloomFilter::Remove(engine::idx_t uid) {
     std::string s = std::to_string(uid);
     scaling_bloom_t* bloom_filter = GetBloomFilter();
+    if (bloom_filter == nullptr) {
+        return Status(DB_ERROR, "bloom filter is null pointer");  // bloom filter doesn't work
+    }
+
     if (scaling_bloom_remove(bloom_filter, s.c_str(), s.size(), uid) == -1) {
         // Should never go in here, but just to be safe
         LOG_ENGINE_WARNING_ << "Warning removing id=" << s << " in bloom filter: Decrementing zero in counter";
@@ -94,77 +107,53 @@ IdBloomFilter::Size() {
 }
 
 Status
-IdBloomFilter::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& path) {
-    FILE* file = fopen(path.c_str(), "wb");
-    if (file == nullptr) {
-        return Status(DB_ERROR, "Failed to create bloom filter file");
-    }
-
+IdBloomFilter::Write(const storage::FSHandlerPtr& fs_ptr) {
     scaling_bloom_t* bloom_filter = GetBloomFilter();
-    if (fwrite(&(bloom_filter->capacity), 1, sizeof(bloom_filter->capacity), file) == 0) {
-        fclose(file);
-        return Status(DB_ERROR, "Failed to write bloom filter file");
-    }
 
-    if (fwrite(&(bloom_filter->error_rate), 1, sizeof(bloom_filter->error_rate), file) == 0) {
-        fclose(file);
-        return Status(DB_ERROR, "Failed to write bloom filter file");
-    }
+    try {
+        fs_ptr->writer_ptr_->Write(&(bloom_filter->capacity), sizeof(bloom_filter->capacity));
+        fs_ptr->writer_ptr_->Write(&(bloom_filter->error_rate), sizeof(bloom_filter->error_rate));
+        fs_ptr->writer_ptr_->Write(&(bloom_filter->bitmap->bytes), sizeof(bloom_filter->bitmap->bytes));
+        fs_ptr->writer_ptr_->Write(bloom_filter->bitmap->array, bloom_filter->bitmap->bytes);
+    } catch (std::exception& ex) {
+        std::string err_msg = "Failed to write bloom filter: " + std::string(ex.what());
+        LOG_ENGINE_ERROR_ << err_msg;
 
-    if (fwrite(&(bloom_filter->bitmap->bytes), 1, sizeof(bloom_filter->bitmap->bytes), file) == 0) {
-        fclose(file);
-        return Status(DB_ERROR, "Failed to write bloom filter file");
+        engine::utils::SendExitSignal();
+        return Status(SERVER_WRITE_ERROR, err_msg);
     }
-
-    if (fwrite(bloom_filter->bitmap->array, 1, bloom_filter->bitmap->bytes, file) == 0) {
-        fclose(file);
-        return Status(DB_ERROR, "Failed to write bloom filter file");
-    }
-
-    fclose(file);
 
     return Status::OK();
 }
 
 Status
-IdBloomFilter::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& path) {
+IdBloomFilter::Read(const storage::FSHandlerPtr& fs_ptr) {
     FreeBloomFilter();
 
-    FILE* file = fopen(path.c_str(), "rb");
-    if (file == nullptr) {
-        return Status(DB_ERROR, "Failed to open bloom filter file");
-    }
+    try {
+        unsigned int capacity = 0;
+        fs_ptr->reader_ptr_->Read(&capacity, sizeof(capacity));
+        capacity_ = capacity;
 
-    unsigned int capacity = 0;
-    if (fread(&capacity, 1, sizeof(capacity), file) == 0) {
-        fclose(file);
-        return Status(DB_ERROR, "Failed to read bloom filter file");
-    }
-    capacity_ = capacity;
+        double error_rate = 0.0;
+        fs_ptr->reader_ptr_->Read(&error_rate, sizeof(error_rate));
 
-    double error_rate = 0.0;
-    if (fread(&error_rate, 1, sizeof(error_rate), file) == 0) {
-        fclose(file);
-        return Status(DB_ERROR, "Failed to read bloom filter file");
-    }
+        size_t bitmap_bytes = 0;
+        fs_ptr->reader_ptr_->Read(&bitmap_bytes, sizeof(bitmap_bytes));
 
-    size_t bitmap_bytes = 0;
-    if (fread(&bitmap_bytes, 1, sizeof(bitmap_bytes), file) == 0) {
-        fclose(file);
-        return Status(DB_ERROR, "Failed to read bloom filter file");
-    }
+        bloom_filter_ = new_scaling_bloom(capacity, error_rate);
+        if (bitmap_bytes != bloom_filter_->bitmap->bytes) {
+            FreeBloomFilter();
+            return Status(DB_ERROR, "Invalid bloom filter file");
+        }
 
-    bloom_filter_ = new_scaling_bloom(capacity, error_rate);
-    if (bitmap_bytes != bloom_filter_->bitmap->bytes) {
-        fclose(file);
+        fs_ptr->reader_ptr_->Read(bloom_filter_->bitmap->array, bitmap_bytes);
+    } catch (std::exception& ex) {
+        std::string err_msg = "Failed to read bloom filter: " + std::string(ex.what());
+        LOG_ENGINE_ERROR_ << err_msg;
+
         FreeBloomFilter();
-        return Status(DB_ERROR, "Invalid bloom filter file");
-    }
-
-    if (fread(bloom_filter_->bitmap->array, 1, bitmap_bytes, file) == 0) {
-        fclose(file);
-        FreeBloomFilter();
-        return Status(DB_ERROR, "Failed to read bloom filter file");
+        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
 
     return Status::OK();

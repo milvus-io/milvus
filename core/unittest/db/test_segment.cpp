@@ -16,6 +16,7 @@
 #include <string>
 #include <experimental/filesystem>
 
+#include "codecs/Codec.h"
 #include "db/utils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
@@ -25,6 +26,8 @@
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
 #include "segment/IdBloomFilter.h"
+#include "storage/disk/DiskIOReader.h"
+#include "storage/disk/DiskIOWriter.h"
 #include "utils/Json.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
@@ -162,6 +165,12 @@ TEST_F(SegmentTest, SegmentTest) {
 
 TEST(BloomFilterTest, BloomFilterTest) {
     std::string file_path = "/tmp/milvus_bloom.blf";
+
+    milvus::storage::IOReaderPtr reader_ptr = std::make_shared<milvus::storage::DiskIOReader>();
+    milvus::storage::IOWriterPtr writer_ptr = std::make_shared<milvus::storage::DiskIOWriter>();
+    milvus::storage::OperationPtr operation_ptr = nullptr;
+    auto fs_ptr = std::make_shared<milvus::storage::FSHandler>(reader_ptr, writer_ptr, operation_ptr);
+
     {
         IdBloomFilter filter(1000);
         for (int64_t i = 100000; i < 101000; ++i) {
@@ -187,14 +196,18 @@ TEST(BloomFilterTest, BloomFilterTest) {
             ASSERT_FALSE(res);
         }
 
-        auto status = filter.Write(nullptr, file_path);
+        fs_ptr->writer_ptr_->Open(file_path);
+        auto status = filter.Write(fs_ptr);
         ASSERT_TRUE(status.ok());
+        fs_ptr->writer_ptr_->Close();
     }
 
     {
         IdBloomFilter filter(0);
-        auto status = filter.Read(nullptr, file_path);
+        fs_ptr->reader_ptr_->Open(file_path);
+        auto status = filter.Read(fs_ptr);
         ASSERT_TRUE(status.ok());
+        fs_ptr->reader_ptr_->Close();
 
         for (int64_t i = 100000; i < 100100; ++i) {
             bool res = filter.Check(i);
