@@ -72,7 +72,7 @@ TEST(OptimizerTest, TEST_OPTIMIZER) {
 
     auto search_task2 = std::make_shared<XSearchTask>(nullptr, file, nullptr);
     ASSERT_FALSE(faiss_ivf_q8h_pass.Run(build_index_task));
-    ASSERT_FALSE(faiss_ivf_q8h_pass.Run(search_task2));
+    ASSERT_TRUE(faiss_ivf_q8h_pass.Run(search_task2));
 
     FaissIVFPass faiss_ivf_q8_pass;
     fiu_enable("check_config_gpu_search_threshold_fail", 1, NULL, 0);
