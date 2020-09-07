@@ -50,6 +50,9 @@ class IdBloomFilter : public cache::DataObj {
     int64_t
     Size() override;
 
+    double
+    ErrorRate() const;
+
     Status
     Write(const storage::FSHandlerPtr& fs_ptr);
 

@@ -17,6 +17,7 @@
 #include <experimental/filesystem>
 
 #include "codecs/Codec.h"
+#include "db/IDGenerator.h"
 #include "db/utils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
@@ -171,30 +172,73 @@ TEST(BloomFilterTest, BloomFilterTest) {
     milvus::storage::OperationPtr operation_ptr = nullptr;
     auto fs_ptr = std::make_shared<milvus::storage::FSHandler>(reader_ptr, writer_ptr, operation_ptr);
 
-    {
-        IdBloomFilter filter(1000);
-        for (int64_t i = 100000; i < 101000; ++i) {
-            filter.Add(i);
+    const int64_t id_count = 100000;
+    milvus::engine::SafeIDGenerator id_gen;
+    std::vector<int64_t> id_array;
+    std::vector<int64_t> removed_id_array;
+
+    auto error_rate_check_1 = [&](IdBloomFilter& filter, int64_t repeat) -> void {
+        int64_t wrong_check = 0;
+        for (int64_t i = 0; i < repeat; ++i) {
+            auto id = id_gen.GetNextIDNumber();
+            bool res = filter.Check(id);
+            if (res) {
+                wrong_check++;
+            }
         }
 
-        for (int64_t i = 100000; i < 100100; ++i) {
-            bool res = filter.Check(i);
+        double error_rate = filter.ErrorRate();
+        double wrong_rate = (double)wrong_check/id_count;
+        ASSERT_LT(wrong_rate, error_rate);
+    };
+
+    auto error_rate_check_2 = [&](IdBloomFilter& filter, const std::vector<int64_t>& id_array) -> void {
+        int64_t wrong_check = 0;
+        for (auto id : id_array) {
+            bool res = filter.Check(id);
+            if (res) {
+                wrong_check++;
+            }
+        }
+
+        double error_rate = filter.ErrorRate();
+        double wrong_rate = (double)wrong_check/id_count;
+        ASSERT_LT(wrong_rate, error_rate);
+    };
+
+    {
+        IdBloomFilter filter(id_count);
+
+        // insert some ids
+        for (int64_t i = 0; i < id_count; ++i) {
+            auto id = id_gen.GetNextIDNumber();
+            filter.Add(id);
+            id_array.push_back(id);
+        }
+
+        // check inserted ids
+        for (auto id : id_array) {
+            bool res = filter.Check(id);
             ASSERT_TRUE(res);
         }
 
-        for (int64_t i = 1; i < 100; ++i) {
-            bool res = filter.Check(i);
-            ASSERT_FALSE(res);
-        }
+        // check non-exist ids
+        error_rate_check_1(filter, id_count);
 
-        for (int64_t i = 100000; i < 100100; ++i) {
-            filter.Remove(i);
+        // remove some ids
+        std::vector<int64_t> temp_array;
+        for (auto id : id_array) {
+            if (id % 7 == 0) {
+                filter.Remove(id);
+                removed_id_array.push_back(id);
+            } else {
+                temp_array.push_back(id);
+            }
         }
+        id_array.swap(temp_array);
 
-        for (int64_t i = 100000; i < 100100; ++i) {
-            bool res = filter.Check(i);
-            ASSERT_FALSE(res);
-        }
+        // check removed ids
+        error_rate_check_2(filter, removed_id_array);
 
         fs_ptr->writer_ptr_->Open(file_path);
         auto status = filter.Write(fs_ptr);
@@ -209,20 +253,18 @@ TEST(BloomFilterTest, BloomFilterTest) {
         ASSERT_TRUE(status.ok());
         fs_ptr->reader_ptr_->Close();
 
-        for (int64_t i = 100000; i < 100100; ++i) {
-            bool res = filter.Check(i);
-            ASSERT_FALSE(res);
-        }
-
-        for (int64_t i = 100900; i < 101000; ++i) {
-            bool res = filter.Check(i);
+        // check inserted ids
+        for (auto id : id_array) {
+            bool res = filter.Check(id);
             ASSERT_TRUE(res);
         }
 
-        for (int64_t i = 100000; i < 100100; ++i) {
-            bool res = filter.Check(i);
-            ASSERT_FALSE(res);
-        }
+        // check non-exist ids
+        error_rate_check_1(filter, id_count);
+
+        // check removed ids
+        error_rate_check_2(filter, removed_id_array);
     }
+
     std::experimental::filesystem::remove(file_path);
 }

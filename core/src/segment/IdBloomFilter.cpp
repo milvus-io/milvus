@@ -106,6 +106,11 @@ IdBloomFilter::Size() {
     return bloom_filter_ ? bloom_filter_->num_bytes : 0;
 }
 
+double
+IdBloomFilter::ErrorRate() const {
+    return BLOOM_FILTER_ERROR_RATE;
+}
+
 Status
 IdBloomFilter::Write(const storage::FSHandlerPtr& fs_ptr) {
     scaling_bloom_t* bloom_filter = GetBloomFilter();
