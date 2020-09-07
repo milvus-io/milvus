@@ -65,17 +65,18 @@ class InActiveResourcesGCEvent : public GCEvent, public Operations {
     ClearInActiveResources(StorePtr store) {
         std::vector<typename ResourceT::Ptr> resources;
         STATUS_CHECK(store->GetInActiveResources<ResourceT>(resources));
+        auto res_prefix = store->GetRootPath();
 
         for (auto& res : resources) {
-            std::string res_path = GetResPath<ResourceT>(dir_root_, res);
+            std::string res_path = GetResPath<ResourceT>(res_prefix, res);
             if (res_path.empty()) {
                 /* std::cout << "[GC] No remove action for " << res_->ToString() << std::endl; */
             } else if (std::experimental::filesystem::is_directory(res_path)) {
                 auto ok = std::experimental::filesystem::remove_all(res_path);
-                /* std::cout << "[GC] Remove dir " << res_->ToString() << " " << res_path << " " << ok << std::endl; */
+                /* std::cout << "[GC] Remove dir " << res->ToString() << " " << res_path << " " << ok << std::endl; */
             } else if (std::experimental::filesystem::is_regular_file(res_path)) {
                 auto ok = std::experimental::filesystem::remove(res_path);
-                /* std::cout << "[GC] Remove file " << res_->ToString() << " " << res_path << " " << ok << std::endl; */
+                /* std::cout << "[GC] Remove file " << res->ToString() << " " << res_path << " " << ok << std::endl; */
             } else {
                 RemoveWithSuffix<ResourceT>(res, res_path, store->GetSuffixSet());
                 LOG_ENGINE_DEBUG_ << "[GC] Remove stale " << res_path << " for " << res->ToString();
@@ -88,9 +89,6 @@ class InActiveResourcesGCEvent : public GCEvent, public Operations {
 
         return Status::OK();
     }
-
- private:
-    std::string dir_root_;
 };
 
 }  // namespace snapshot
