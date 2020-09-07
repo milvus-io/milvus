@@ -1,7 +1,7 @@
 pull_request_rules:
     - name: Automatic merge on approval if CI is passed
       conditions:
-        - "label=automerge"
+        - "label=PR | automerge"
         - "#approved-reviews-by>=1"
         - "#review-requested=0"
         - "#changes-requested-reviews-by=0"
@@ -18,7 +18,7 @@ pull_request_rules:
 
     - name: Automatic merge on approval if CI is skipped
       conditions:
-        - "label=automerge"
+        - "label=PR | automerge"
         - "label=skip-ci"
         - "#approved-reviews-by>=1"
         - "#review-requested=0"
