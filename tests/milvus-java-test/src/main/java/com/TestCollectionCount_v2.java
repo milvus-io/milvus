@@ -3,15 +3,15 @@ package com;
 import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
+
 import java.util.List;
-import java.nio.ByteBuffer;
 
 public class TestCollectionCount_v2 {
     int segmentRowCount = 5000;
     int dimension = Constants.dimension;
     int nb = Constants.nb;
     List<List<Float>> vectors = Constants.vectors;
-    List<ByteBuffer> vectorsBinary = Constants.vectorsBinary;
+    List<List<Byte>> vectorsBinary = Constants.vectorsBinary;
 
     // case-04
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)

@@ -7,13 +7,12 @@ import org.testng.annotations.Test;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.nio.ByteBuffer;
 
 public class TestDeleteEntities_v2 {
     int dimension = Constants.dimension;
     int nb = Constants.nb;
     List<List<Float>> vectors = Constants.vectors;
-    List<ByteBuffer> vectorsBinary = Constants.vectorsBinary;
+    List<List<Byte>> vectorsBinary = Constants.vectorsBinary;
 
     // case-01
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)

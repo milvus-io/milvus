@@ -6,7 +6,6 @@ import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.*;
 
-import java.nio.ByteBuffer;
 import java.util.List;
 
 public class TestIndex_v2 {
@@ -19,7 +18,7 @@ public class TestIndex_v2 {
     String defaultBinaryIndexType = Constants.defaultBinaryIndexType;
     String defaultMetricType = Constants.defaultMetricType;
     List<List<Float>> vectors = Constants.vectors;
-    List<ByteBuffer> vectorsBinary = Constants.vectorsBinary;
+    List<List<Byte>> vectorsBinary = Constants.vectorsBinary;
 
 
     // case-01
@@ -93,21 +92,21 @@ public class TestIndex_v2 {
         assert(!res_create.ok());
     }
 
-    // # 3407
+    // #3407
     // case-08
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testCreateIndexInvalidMetricTypeBinary(MilvusClient client, String collectionName) {
         String metric_type = "L2";
         InsertParam insertParam = Utils.genDefaultBinaryInsertParam(collectionName, dimension, nb, vectorsBinary);
         client.insert(insertParam);
-        Index createIndexParam = Utils.genDefaultIndex(collectionName, binaryFieldName, defaultBinaryIndexType, metric_type, n_list);
+        Index createIndexParam = Utils.genDefaultIndex(collectionName, binaryFieldName, "BIN_IVF_FLAT", metric_type, n_list);
         Response res_create = client.createIndex(createIndexParam);
         Response statsResponse = client.getCollectionStats(collectionName);
         System.out.println(statsResponse.getMessage());
         Assert.assertFalse(res_create.ok());
     }
 
-    // #3408 #3590
+    // #3408
     // case-09
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testDropIndex(MilvusClient client, String collectionName) {

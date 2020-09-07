@@ -87,19 +87,16 @@ public class TestIndex {
         assert(!res_create.ok());
     }
 
-    // #3408 #3590
+    // #3407
     // case-08
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testCreateIndexInvalidMetricTypeBinary(MilvusClient client, String collectionName) {
         String metric_type = "L2";
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
         client.insert(insertParam);
-        String indexParamNew = Utils.setIndexParam(Constants.defaultBinaryIndexType, metric_type, Constants.n_list);
+        String indexParamNew = Utils.setIndexParam("BIN_IVF_FLAT", metric_type, Constants.n_list);
         Index createIndexParam = new Index.Builder(collectionName, Constants.binaryFieldName).withParamsInJson(indexParamNew).build();
         Response res_create = client.createIndex(createIndexParam);
-//        JSONArray filesJsonArray = Utils.parseJsonArray(res_create.getMessage(), "files");
-        Response statsResponse = client.getCollectionStats(collectionName);
-        System.out.println(statsResponse.getMessage());
         assert (!res_create.ok());
     }
 
