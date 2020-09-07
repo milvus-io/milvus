@@ -636,12 +636,15 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
             if (param_json.contains("metric_type")) {
                 std::string metric_type = param_json["metric_type"];
                 vector_query->metric_type = metric_type;
-                query_ptr->metric_types.insert({vector_name, param_json["metric_type"]});
+                query_ptr->metric_types.insert({vector_name, metric_type});
             }
             if (!vector_param_it.value()["params"].empty()) {
                 vector_query->extra_params = vector_param_it.value()["params"];
             }
-            for (auto& vector_records : vector_param_it.value()["values"]) {
+
+            auto& values = vector_param_it.value()["values"];
+            vector_query->query_vector.vector_count = values.size();
+            for (auto& vector_records : values) {
                 if (field_type_.find(vector_name) != field_type_.end()) {
                     if (field_type_.at(vector_name) == engine::DataType::VECTOR_FLOAT) {
                         for (auto& data : vector_records) {
