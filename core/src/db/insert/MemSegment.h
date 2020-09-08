@@ -63,7 +63,7 @@ class MemSegment {
  private:
     Status
     CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snapshot::NewSegmentOperation>& operation,
-                     segment::SegmentWriterPtr& writer);
+                     segment::SegmentWriterPtr& writer, idx_t max_op_id);
 
     Status
     ApplyDeleteToMem();
