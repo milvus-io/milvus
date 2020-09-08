@@ -11,6 +11,7 @@
 
 #include "db/snapshot/Snapshot.h"
 #include "db/snapshot/ResourceHolders.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Store.h"
 
 namespace milvus {
@@ -51,7 +52,8 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
     auto collection = collections_holder.GetResource(store, collection_commit->GetCollectionId(), false);
     AddResource<Collection>(collection);
 
-    collection_commit->LoadIds(std::string("/tmp/") + std::to_string(collection_commit->GetCollectionId()));
+    auto base_path = GetResPath<Collection>(store->GetRootPath(), std::make_shared<Collection>(*collection));
+    collection_commit->LoadIds(base_path);
     auto& collection_commit_mappings = collection_commit->GetMappings();
     for (auto p_c_id : collection_commit_mappings) {
         auto partition_commit = partition_commits_holder.GetResource(store, p_c_id, false);
@@ -230,7 +232,8 @@ Snapshot::ToString() const {
     ss << "\nCollection: id=" << GetCollectionId() << ",name=\"" << GetName() << "\"";
     ss << ", CollectionCommit: id=" << GetCollectionCommit()->GetID();
     ss << ",size=" << GetCollectionCommit()->GetSize();
-    ss << ",rows=" << GetCollectionCommit()->GetRowCount() << ",mappings=";
+    ss << ",rows=" << GetCollectionCommit()->GetRowCount();
+    ss << ",lsn=" << GetCollectionCommit()->GetLsn() << ",mappings=";
     auto& cc_m = GetCollectionCommit()->GetMappings();
     ss << to_matrix_string(cc_m, row_element_size, 2);
     auto& cc_fids = GetCollectionCommit()->GetFlushIds();

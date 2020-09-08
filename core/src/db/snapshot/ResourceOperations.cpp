@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/ResourceOperations.h"
+#include "db/snapshot/ResourceHelper.h"
 #include <memory>
 
 namespace milvus {
@@ -64,7 +65,8 @@ CollectionCommitOperation::DoExecute(StorePtr store) {
 
     if (flush_ids_changed) {
         resource_->UpdateFlushIds();
-        resource_->FlushIds(std::string("/tmp/") + std::to_string(resource_->GetCollectionId()));
+        auto path = GetResPath<Collection>(store->GetRootPath(), GetStartedSS()->GetCollection());
+        resource_->FlushIds(path);
     }
 
     resource_->SetID(0);

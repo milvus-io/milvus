@@ -21,6 +21,7 @@
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Snapshots.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -1023,7 +1024,8 @@ CreateCollectionOperation::DoExecute(StorePtr store) {
     CollectionCommit temp_cc(collection->GetID(), schema_commit->GetID());
     temp_cc.UpdateFlushIds();
     temp_cc.GetMappings().insert(partition_commit->GetID());
-    temp_cc.FlushIds(std::string("/tmp/") + std::to_string(collection->GetID()));
+    auto base_path = GetResPath<Collection>(store->GetRootPath(), collection);
+    temp_cc.FlushIds(base_path);
 
     STATUS_CHECK(store->CreateResource<CollectionCommit>(std::move(temp_cc), collection_commit));
     auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(meta::oUpdate).CreatePtr();

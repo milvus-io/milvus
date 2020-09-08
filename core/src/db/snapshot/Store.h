@@ -18,6 +18,7 @@
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Utils.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "segment/Segment.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -363,7 +364,9 @@ class Store : public std::enable_shared_from_this<Store> {
             CollectionCommit temp_cc(c->GetID(), schema->GetID());
             temp_cc.UpdateFlushIds();
             temp_cc.GetMappings() = c_c_m;
-            temp_cc.FlushIds(std::string("/tmp/") + std::to_string(c->GetID()));
+
+            auto base_path = GetResPath<Collection>(GetRootPath(), c);
+            temp_cc.FlushIds(base_path);
             temp_cc.Activate();
             CreateResource<CollectionCommit>(std::move(temp_cc), c_c);
             all_records.push_back(c_c);
