@@ -2,11 +2,17 @@ package com;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.MoreExecutors;
 import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 public class TestSearchEntities {
 
@@ -17,6 +23,7 @@ public class TestSearchEntities {
     List<List<Float>> queryVectors = Constants.vectors.subList(0, nq);
     List<List<Byte>> queryVectorsBinary = Constants.vectorsBinary.subList(0, nq);
 
+    String binaryIndexType = "BIN_IVF_FLAT";
     public String floatDsl = Constants.searchParam;
     public String binaryDsl = Constants.binarySearchParam;
 
@@ -102,10 +109,14 @@ public class TestSearchEntities {
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testSearchPartitionNotExited(MilvusClient client, String collectionName) {
         String tag = Utils.genUniqueStr("tag");
+        String tagNew = Utils.genUniqueStr("tagNew");
         List<String> queryTags = new ArrayList<>();
-        queryTags.add(tag);
+        queryTags.add(tagNew);
         client.createPartition(collectionName, tag);
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertParam insertParam = new InsertParam.Builder(collectionName)
+                .withFields(Constants.defaultEntities)
+                .withPartitionTag(tag)
+                .build();
         InsertResponse res = client.insert(insertParam);
         assert (res.getResponse().ok());
         client.flush(collectionName);
@@ -237,14 +248,12 @@ public class TestSearchEntities {
         Assert.assertFalse(resSearch.getResponse().ok());
     }
 
-    // #3599
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void  testSearchVectorNotExisted(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
         client.flush(collectionName);
-        List<List<Float>> query = Utils.genVectors(nq,64, false);
         String dsl = String.format(
                 "{\"bool\": {"
                         + "\"must\": [{"
@@ -255,13 +264,14 @@ public class TestSearchEntities {
                         + "        \"float_vector\": {"
                         + "            \"topk\": %d, \"metric_type\": \"L2\", \"type\": \"float\", \"query\": %s, \"params\": {\"nprobe\": 20}"
                         + "    }}}]}}",
-                top_k, query);
+                top_k, new ArrayList<>());
         SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
         SearchResponse resSearch = client.search(searchParam);
-        Assert.assertFalse(resSearch.getResponse().ok());
+        Assert.assertTrue(resSearch.getResponse().ok());
+        Assert.assertEquals(resSearch.getResultIdsList().size(), 0);
+        Assert.assertEquals(resSearch.getResultDistancesList().size(), 0);
     }
 
-    // #3601
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void  testSearchVectorDifferentDim(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
@@ -285,6 +295,34 @@ public class TestSearchEntities {
         Assert.assertFalse(resSearch.getResponse().ok());
     }
 
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testAsyncSearch(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        InsertResponse res = client.insert(insertParam);
+        assert(res.getResponse().ok());
+        List<Long> ids = res.getEntityIds();
+        client.flush(collectionName);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(floatDsl).build();
+        ListenableFuture<SearchResponse> searchResFuture = client.searchAsync(searchParam);
+        Futures.addCallback(
+                searchResFuture, new FutureCallback<SearchResponse>() {
+                    @Override
+                    public void onSuccess(SearchResponse searchResponse) {
+                        Assert.assertNotNull(searchResponse);
+                        Assert.assertTrue(searchResponse.ok());
+                        Assert.assertEquals(searchResponse.getResultIdsList().size(), Constants.nq);
+                        Assert.assertEquals(searchResponse.getResultDistancesList().size(), Constants.nq);
+                        Assert.assertEquals(searchResponse.getResultIdsList().get(0).size(), Constants.topk);
+                        Assert.assertEquals(searchResponse.getFieldsMap().get(0).size(), top_k);
+                    }
+                    @Override
+                    public void onFailure(Throwable t) {
+                        System.out.println(t.getMessage());
+                    }
+                }, MoreExecutors.directExecutor()
+        );
+    }
+
     // Binary tests
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testSearchCollectionNotExistedBinary(MilvusClient client, String collectionName)  {
@@ -294,12 +332,12 @@ public class TestSearchEntities {
         Assert.assertFalse(resSearch.getResponse().ok());
     }
 
-    // TODO
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testSearchCollectionBinary(MilvusClient client, String collectionName)  {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
+        client.flush(collectionName);
         SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(binaryDsl).build();
         SearchResponse resSearch = client.search(searchParam);
         Assert.assertTrue(resSearch.getResponse().ok());
@@ -307,88 +345,81 @@ public class TestSearchEntities {
         Assert.assertEquals(resSearch.getResultDistancesList().size(), nq);
         Assert.assertEquals(resSearch.getResultIdsList().get(0).size(), top_k);
     }
-//
-//    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void test_search_index_IVFLAT_binary(MilvusClient client, String collectionName)  {
-//        IndexType indexType = IndexType.IVFLAT;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
-//        InsertResponse res = client.insert(insertParam);
-//        client.flush(collectionName);
-//        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
-//        client.createIndex(index);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withBinaryVectors(queryVectorsBinary)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k).build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
-//        Assert.assertEquals(res_search.size(), nq);
-//        Assert.assertEquals(res_search.get(0).size(), top_k);
-//    }
-//
-//    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void test_search_ids_IVFLAT_binary(MilvusClient client, String collectionName)  {
-//        IndexType indexType = IndexType.IVFLAT;
-//        List<Long> vectorIds;
-//        vectorIds = Stream.iterate(0L, n -> n)
-//                .limit(nb)
-//                .collect(Collectors.toList());
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).withVectorIds(vectorIds).build();
-//        InsertResponse res = client.insert(insertParam);
-//        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
-//        client.createIndex(index);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withBinaryVectors(queryVectorsBinary)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k).build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.search(searchParam).getQueryResultsList();
-//        Assert.assertEquals(res_search.get(0).get(0).getVectorId(), 0L);
-//    }
-//
-//    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void test_search_partition_not_existed_binary(MilvusClient client, String collectionName) {
-//        IndexType indexType = IndexType.IVFLAT;
-//        String tag = RandomStringUtils.randomAlphabetic(10);
-//        Response createpResponse = client.createPartition(collectionName, tag);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
-//        InsertResponse res = client.insert(insertParam);
-//        String tagNew = RandomStringUtils.randomAlphabetic(10);
-//        List<String> queryTags = new ArrayList<>();
-//        queryTags.add(tagNew);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withBinaryVectors(queryVectorsBinary)
-//                .withParamsInJson(searchParamStr)
-//                .withPartitionTags(queryTags)
-//                .withTopK(top_k).build();
-//        SearchResponse res_search = client.search(searchParam);
-//        assert (!res_search.getResponse().ok());
-//        Assert.assertEquals(res_search.getQueryResultsList().size(), 0);
-//    }
-//
-//    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void test_search_invalid_n_probe_binary(MilvusClient client, String collectionName)  {
-//        int n_probe_new = 0;
-//        String searchParamStrNew = Utils.setSearchParam(n_probe_new);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
-//        client.insert(insertParam);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withBinaryVectors(queryVectorsBinary)
-//                .withParamsInJson(searchParamStrNew)
-//                .withTopK(top_k).build();
-//        SearchResponse res_search = client.search(searchParam);
-//        assert (res_search.getResponse().ok());
-//    }
-//
-//    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void test_search_invalid_top_k_binary(MilvusClient client, String collectionName) {
-//        int top_k_new = 0;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
-//        client.insert(insertParam);
-//        SearchParam searchParam = new SearchParam.Builder(collectionName)
-//                .withBinaryVectors(queryVectorsBinary)
-//                .withParamsInJson(searchParamStr)
-//                .withTopK(top_k_new).build();
-//        SearchResponse res_search = client.search(searchParam);
-//        assert (!res_search.getResponse().ok());
-//    }
+
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void testSearchIndexIVFLATBinary(MilvusClient client, String collectionName)  {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
+        InsertResponse resInsert = client.insert(insertParam);
+        client.flush(collectionName);
+        String binaryIndexParam = Utils.setIndexParam(binaryIndexType, Constants.defaultBinaryMetricType, Constants.n_list);
+        Index index = new Index.Builder(collectionName, Constants.binaryFieldName).withParamsInJson(binaryIndexParam).build();
+        Response resBuild = client.createIndex(index);
+        Assert.assertTrue(resBuild.ok());
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(binaryDsl).build();
+        SearchResponse resSearch = client.search(searchParam);
+        Assert.assertTrue(resSearch.getResponse().ok());
+        Assert.assertEquals(resSearch.getResultIdsList().size(), nq);
+        Assert.assertEquals(resSearch.getResultIdsList().get(0).size(), top_k);
+    }
+
+    @Test(dataProvider = "BinaryIdCollection", dataProviderClass = MainClass.class)
+    public void testSearchIdsIVFLATBinary(MilvusClient client, String collectionName)  {
+        List<Long> entityIds = LongStream.range(0, Constants.nb).boxed().collect(Collectors.toList());
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).withEntityIds(entityIds).build();
+        InsertResponse res = client.insert(insertParam);
+        String binaryIndexParam = Utils.setIndexParam(binaryIndexType, Constants.defaultBinaryMetricType, Constants.n_list);
+        Index index = new Index.Builder(collectionName, Constants.binaryFieldName).withParamsInJson(binaryIndexParam).build();
+        Response resBuild = client.createIndex(index);
+        Assert.assertTrue(res.ok());
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(binaryDsl).build();
+        SearchResponse resSearch = client.search(searchParam);
+        Assert.assertTrue(resSearch.getResponse().ok());
+        Assert.assertEquals(resSearch.getResultIdsList().size(), nq);
+        Assert.assertEquals(resSearch.getResultIdsList().get(0).size(), top_k);
+        Assert.assertEquals(resSearch.getResultIdsList().get(0).get(0), entityIds.get(0));
+    }
+
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void testSearchPartitionNotExistedBinary(MilvusClient client, String collectionName) {
+        String tag = Utils.genUniqueStr("tag");
+        Response createpResponse = client.createPartition(collectionName, tag);
+        assert (createpResponse.ok());
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).withPartitionTag(tag).build();
+        InsertResponse res = client.insert(insertParam);
+        client.flush(collectionName);
+        String tagNew = Utils.genUniqueStr("tagNew");
+        List<String> queryTags = new ArrayList<>();
+        queryTags.add(tagNew);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(binaryDsl).withPartitionTags(queryTags).build();
+        SearchResponse res_search = client.search(searchParam);
+        Assert.assertEquals(res_search.getResultDistancesList().size(), 0);
+    }
+
+//    #3656
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void testSearchInvalidNProbeBinary(MilvusClient client, String collectionName)  {
+        int n_probe_new = 0;
+        String dsl = Utils.setBinarySearchParam(Constants.defaultBinaryMetricType, queryVectorsBinary, top_k, n_probe_new);
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
+        client.insert(insertParam);
+        String binaryIndexParam = Utils.setIndexParam(binaryIndexType, Constants.defaultBinaryMetricType, Constants.n_list);
+        Index index = new Index.Builder(collectionName, Constants.binaryFieldName).withParamsInJson(binaryIndexParam).build();
+        Response resBuild = client.createIndex(index);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchResponse res_search = client.search(searchParam);
+        assert (!res_search.getResponse().ok());
+    }
+
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void testSearchInvalidTopKBinary(MilvusClient client, String collectionName) {
+        int top_k_new = 0;
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
+        client.insert(insertParam);
+        client.flush(collectionName);
+        String dsl = Utils.setBinarySearchParam(Constants.defaultBinaryMetricType, queryVectorsBinary, top_k_new, n_probe);
+        SearchParam searchParam = new SearchParam.Builder(collectionName).withDSL(dsl).build();
+        SearchResponse res_search = client.search(searchParam);
+        assert (!res_search.getResponse().ok());
+    }
 
 }
