@@ -23,6 +23,7 @@ namespace milvus {
 namespace server {
 
 constexpr int64_t QUERY_MAX_TOPK = 2048;
+constexpr int64_t GPU_QUERY_MAX_NPROBE = 2048;
 
 class ValidationUtil {
  private:

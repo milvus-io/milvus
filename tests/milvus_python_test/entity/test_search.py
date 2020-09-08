@@ -1223,7 +1223,11 @@ class TestSearchParamsInvalid(object):
                 search_param = {"nprobe": nprobe}
                 query_vecs = gen_vectors(nprobe, dim)
                 status, result = connect.search(collection, top_k, query_vecs, params=search_param)
-                assert not status.OK()
+                # IVFSQ8H supported later
+                if index["index_type"] == IndexType.IVF_SQ8H:
+                    assert not status.OK()
+                else:
+                    assert status.OK()
 
     @pytest.fixture(
         scope="function",
