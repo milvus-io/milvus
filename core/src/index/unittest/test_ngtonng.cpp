@@ -34,6 +34,9 @@ class NGTONNGTest : public DataGen, public TestWithParam<std::string> {
             {milvus::knowhere::meta::DIM, dim},
             {milvus::knowhere::meta::TOPK, 10},
             {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+            {milvus::knowhere::IndexParams::edge_size, 20},
+            {milvus::knowhere::IndexParams::outgoing_edge_size, 5},
+            {milvus::knowhere::IndexParams::incoming_edge_size, 40},
         };
     }
 
