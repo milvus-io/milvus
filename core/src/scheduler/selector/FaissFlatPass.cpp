@@ -17,6 +17,7 @@
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
+#include "utils/ValidationUtil.h"
 
 #include <fiu-local.h>
 namespace milvus {
@@ -58,6 +59,10 @@ FaissFlatPass::Run(const TaskPtr& task) {
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_job->nq() < (uint64_t)threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: nq < gpu_search_threshold, specify cpu to search!",
+                                    "search", 0);
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else if (search_job->topk() > milvus::server::GPU_QUERY_MAX_TOPK) {
+        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissFlatPass: topk > gpu_topk_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
