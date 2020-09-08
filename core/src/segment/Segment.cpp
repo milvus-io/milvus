@@ -31,6 +31,55 @@ namespace engine {
 const char* COLLECTIONS_FOLDER = "/collections";
 
 Status
+Segment::CopyOutRawData(SegmentPtr& target) {
+    if (target == nullptr) {
+        target = std::make_shared<engine::Segment>();
+    }
+
+    target->field_types_ = this->field_types_;
+    target->fixed_fields_width_ = this->fixed_fields_width_;
+    target->row_count_ = this->row_count_;
+    target->fixed_fields_.clear();
+    target->variable_fields_.clear();
+
+    for (auto& pair : fixed_fields_) {
+        engine::BinaryDataPtr& raw_data = pair.second;
+        size_t data_size = raw_data->data_.size();
+        engine::BinaryDataPtr new_raw_data = std::make_shared<engine::BinaryData>();
+        new_raw_data->data_.resize(data_size);
+        memcpy(new_raw_data->data_.data(), raw_data->data_.data(), data_size);
+        target->fixed_fields_.insert(std::make_pair(pair.first, new_raw_data));
+    }
+
+    for (auto& pair : variable_fields_) {
+        engine::VaribleDataPtr& raw_data = pair.second;
+        size_t data_size = raw_data->data_.size();
+        size_t offset_size = raw_data->offset_.size();
+        engine::VaribleDataPtr new_raw_data = std::make_shared<engine::VaribleData>();
+        new_raw_data->data_.resize(data_size);
+        memcpy(new_raw_data->data_.data(), raw_data->data_.data(), data_size);
+        new_raw_data->offset_.resize(offset_size);
+        memcpy(new_raw_data->offset_.data(), raw_data->offset_.data(), offset_size);
+        target->variable_fields_.insert(std::make_pair(pair.first, new_raw_data));
+    }
+
+    return Status::OK();
+}
+
+Status
+Segment::ShareToChunkData(DataChunkPtr& chunk_ptr) {
+    if (chunk_ptr == nullptr) {
+        chunk_ptr = std::make_shared<engine::DataChunk>();
+    }
+
+    chunk_ptr->fixed_fields_ = this->fixed_fields_;
+    chunk_ptr->variable_fields_ = this->variable_fields_;
+    chunk_ptr->count_ = this->row_count_;
+
+    return Status::OK();
+}
+
+Status
 Segment::SetFields(int64_t collection_id) {
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id));

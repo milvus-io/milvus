@@ -36,12 +36,13 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3446 ListIDInSegment get wrong result when delete more than one ids
 -   \#3448 RHNSWFlatTest failed
 -   \#3453 Fix server crashed during stability test
--   \#3490 Fix ut DBTest.DeleteEntitiesTest assert fail
 -   \#3482 Server crashed during adding entities
+-   \#3490 Fix ut DBTest.DeleteEntitiesTest assert fail
 -   \#3511 SearchTask::nq() should not return 0
 -   \#3514 Search failed with regex tag name
 -   \#3533 Scheduler/Selector needs to judge the index type
 -   \#3621 Fix crash where getting octets information
+-   \#3652 Proto of C++ sdk is different from milvus server
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
@@ -68,6 +69,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3220 Enable -Werror to improve code quality
 -   \#3449 Upgrade master version to v0.11.0
 -   \#3465 Optimize gc event executor
+-   \#3631 Add build option `-rdynamic` in CMakeList.txt
 
 ## Task
 
