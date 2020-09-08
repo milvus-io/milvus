@@ -55,6 +55,7 @@ using NewSegmentOperation = milvus::engine::snapshot::NewSegmentOperation;
 using DropPartitionOperation = milvus::engine::snapshot::DropPartitionOperation;
 using CreatePartitionOperation = milvus::engine::snapshot::CreatePartitionOperation;
 using DropCollectionOperation = milvus::engine::snapshot::DropCollectionOperation;
+using GetCollectionIDsOperation = milvus::engine::snapshot::GetCollectionIDsOperation;
 using CollectionCommitsHolder = milvus::engine::snapshot::CollectionCommitsHolder;
 using CollectionsHolder = milvus::engine::snapshot::CollectionsHolder;
 using CollectionScopedT = milvus::engine::snapshot::CollectionScopedT;
