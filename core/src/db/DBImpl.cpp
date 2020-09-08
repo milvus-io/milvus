@@ -201,6 +201,9 @@ DBImpl::DropCollection(const std::string& collection_name) {
     // erase insert buffer of this collection
     mem_mgr_->EraseMem(ss->GetCollectionId());
 
+    // erase cache
+    ClearCollectionCache(ss, options_.meta_.path_);
+
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
 
@@ -289,6 +292,9 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
     if (partition != nullptr) {
         mem_mgr_->EraseMem(ss->GetCollectionId(), partition->GetID());
     }
+
+    // erase cache
+    ClearPartitionCache(ss, options_.meta_.path_, partition->GetID());
 
     snapshot::PartitionContext context;
     context.name = partition_name;

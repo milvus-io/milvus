@@ -17,6 +17,7 @@
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshots.h"
 #include "segment/Segment.h"
+#include "segment/SegmentReader.h"
 
 #include <algorithm>
 #include <memory>
@@ -290,6 +291,37 @@ GetSegmentRowCount(int64_t collection_id, int64_t& segment_row_count) {
     const json params = collection->GetParams();
     if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
         segment_row_count = params[PARAM_SEGMENT_ROW_COUNT];
+    }
+
+    return Status::OK();
+}
+
+Status
+ClearCollectionCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root) {
+    auto& segments = ss->GetResources<snapshot::Segment>();
+    for (auto& kv : segments) {
+        auto& segment = kv.second;
+        auto seg_visitor = SegmentVisitor::Build(ss, segment->GetID());
+        segment::SegmentReaderPtr segment_reader = std::make_shared<segment::SegmentReader>(dir_root, seg_visitor);
+        segment_reader->ClearCache();
+    }
+
+    return Status::OK();
+}
+
+Status
+ClearPartitionCache(engine::snapshot::ScopedSnapshotT& ss, const std::string& dir_root,
+                    engine::snapshot::ID_TYPE partition_id) {
+    auto& segments = ss->GetResources<snapshot::Segment>();
+    for (auto& kv : segments) {
+        auto& segment = kv.second;
+        if (segment->GetPartitionId() != partition_id) {
+            continue;
+        }
+
+        auto seg_visitor = SegmentVisitor::Build(ss, segment->GetID());
+        segment::SegmentReaderPtr segment_reader = std::make_shared<segment::SegmentReader>(dir_root, seg_visitor);
+        segment_reader->ClearCache();
     }
 
     return Status::OK();
