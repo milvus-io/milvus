@@ -35,6 +35,7 @@ namespace storage {
 Status
 S3ClientWrapper::StartService() {
     bool s3_enable = config.storage.s3_enable();
+    std::string path = config.storage.path();
     fiu_do_on("S3ClientWrapper.StartService.s3_disable", s3_enable = false);
     if (!s3_enable) {
         LOG_STORAGE_INFO_ << "S3 not enabled!";

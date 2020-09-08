@@ -16,7 +16,6 @@
 // under the License.
 
 #include <experimental/filesystem>
-#include <boost/filesystem.hpp>
 
 #include <fiu/fiu-local.h>
 
@@ -70,8 +69,8 @@ DiskOperation::DeleteFile(const std::string& file_path) {
 bool
 DiskOperation::Move(const std::string& tar_name, const std::string& src_name) {
     try {
-        boost::filesystem::rename(src_name, tar_name);
-    } catch (boost::filesystem::filesystem_error e) {
+        std::experimental::filesystem::rename(src_name, tar_name);
+    } catch (std::exception& ex) {
         return false;
     }
 

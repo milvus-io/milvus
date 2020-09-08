@@ -62,6 +62,7 @@ set(link_lib
         milvus_engine
         config
         metrics
+        storage
         oatpp
         query
         utils

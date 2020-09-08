@@ -90,31 +90,31 @@ TEST_F(StorageTest, S3_RW_TEST) {
 
     {
         milvus::storage::S3IOWriter writer;
-        writer.open(index_name);
+        writer.Open(index_name);
         size_t len = content.length();
-        writer.write(&len, sizeof(len));
-        writer.write((void*)(content.data()), len);
-        ASSERT_TRUE(len + sizeof(len) == writer.length());
-        writer.close();
+        writer.Write(&len, sizeof(len));
+        writer.Write((void*)(content.data()), len);
+        ASSERT_TRUE(len + sizeof(len) == writer.Length());
+        writer.Close();
     }
 
     {
         milvus::storage::S3IOReader reader;
-        reader.open(index_name);
-        size_t length = reader.length();
+        reader.Open(index_name);
+        size_t length = reader.Length();
         size_t rp = 0;
-        reader.seekg(rp);
+        reader.Seekg(rp);
         std::string content_out;
         while (rp < length) {
             size_t len;
-            reader.read(&len, sizeof(len));
+            reader.Read(&len, sizeof(len));
             rp += sizeof(len);
-            reader.seekg(rp);
+            reader.Seekg(rp);
 
             auto data = new char[len];
-            reader.read(data, len);
+            reader.Read(data, len);
             rp += len;
-            reader.seekg(rp);
+            reader.Seekg(rp);
 
             content_out += std::string(data, len);
 
@@ -122,7 +122,7 @@ TEST_F(StorageTest, S3_RW_TEST) {
         }
 
         ASSERT_TRUE(content == content_out);
-        reader.close();
+        reader.Close();
     }
 
     storage_inst.StopService();
