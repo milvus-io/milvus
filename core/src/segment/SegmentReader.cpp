@@ -121,15 +121,24 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
         auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(file_path);
         if (data_obj == nullptr) {
             auto& ss_codec = codec::Codec::instance();
-            STATUS_CHECK(ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, raw));
+            auto status = ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, raw);
+            if (!status.ok()) {
+                LOG_ENGINE_ERROR_ << "Failed to read " << file_path << ", field "
+                                  << field_visitor->GetField()->GetName() << ": " << status.ToString();
+            } else {
+                LOG_ENGINE_DEBUG_ << "Load field " << field_visitor->GetField()->GetName() << " successfully.";
+            }
 
             if (to_cache) {
+                LOG_ENGINE_DEBUG_ << "caching " << field_visitor->GetField()->GetName();
                 cache::CpuCacheMgr::GetInstance().InsertItem(file_path, raw);  // put into cache
+                LOG_ENGINE_DEBUG_ << "cache " << field_visitor->GetField()->GetName() << "successfully";
             }
         } else {
+            LOG_ENGINE_DEBUG_ << "get data from cache ....  ";
             raw = std::static_pointer_cast<engine::BinaryData>(data_obj);
         }
-
+        LOG_ENGINE_DEBUG_ << "set fixed data";
         segment_ptr_->SetFixedFieldData(field_name, raw);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());

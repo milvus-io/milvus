@@ -246,6 +246,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
         return status;
     }
 
+    LOG_ENGINE_DEBUG_ << "Load delete docs";
     // merge deleted docs (Note: this step must before merge raw data)
     segment::DeletedDocsPtr src_deleted_docs;
     status = segment_reader->LoadDeletedDocs(src_deleted_docs);

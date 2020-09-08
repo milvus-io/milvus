@@ -112,7 +112,8 @@ MergeTask::Execute() {
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
         status = segment_writer->Merge(segment_reader);
         if (!status.ok()) {
-            std::string err_msg = "MergeTask merge failed: " + status.ToString();
+            std::string err_msg =
+                "MergeTask merge failed when merge segment " + std::to_string(id) + ": " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
