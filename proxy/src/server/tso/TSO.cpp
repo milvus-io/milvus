@@ -24,8 +24,8 @@ uint64_t TSOracle::GetTimeStamp() {
 }
 
 uint64_t TSOracle::GetPhysical(const std::chrono::high_resolution_clock::time_point &t) {
-  auto nano_time = std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch());
-  return nano_time / std::chrono::microseconds(1);
+  auto nano_time = std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch());
+  return nano_time.count();
 }
 
 uint64_t TSOracle::ComposeTs(uint64_t physical, uint64_t logical) {

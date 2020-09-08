@@ -47,8 +47,8 @@ class ReqScheduler {
     
     void UpdateLatestDeliveredReqTime(int64_t time);
     
-    int64_t GetLatestReqDeliveredTime();
-    
+    int64_t GetLatestDeliveredReqTime();
+
 
  protected:
     ReqScheduler();
@@ -63,8 +63,11 @@ class ReqScheduler {
 
  private:
     mutable std::mutex queue_mtx_;
-    
-    std::atomic<int64_t > latest_req_time_;
+
+    // for time synchronous
+    std::mutex time_syc_mtx_;
+    int64_t latest_req_time_;
+    bool sending_;
 
     std::map<std::string, ReqQueuePtr> req_groups_;
 
@@ -72,6 +75,8 @@ class ReqScheduler {
 
     bool stopped_;
 };
+
+extern uint64_t GetMessageTimeSyncTime();
 
 }  // namespace server
 }  // namespace milvus

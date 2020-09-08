@@ -51,13 +51,13 @@ func Segment2JSON(s Segment) (string, error) {
 	return string(b), nil
 }
 
-func JSON2Segment(s string) (Segment, error) {
+func JSON2Segment(s string) (*Segment, error) {
 	var c Segment
 	err := json.Unmarshal([]byte(s), &c)
 	if err != nil {
-		return Segment{}, err
+		return &Segment{}, err
 	}
-	return c, nil
+	return &c, nil
 }
 
 func FakeCreateSegment(id uint64, cl Collection, opentime time.Time, closetime time.Time) Segment {

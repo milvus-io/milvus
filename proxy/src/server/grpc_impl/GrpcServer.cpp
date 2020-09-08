@@ -30,6 +30,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <src/server/delivery/ReqScheduler.h>
 
 #include "GrpcRequestHandler.h"
 #include "config/ServerConfig.h"
@@ -39,6 +40,7 @@
 #include "server/grpc_impl/interceptor/SpanInterceptor.h"
 #include "utils/Log.h"
 #include "message_client/ClientV2.h"
+#include "server/timesync/TimeSync.h"
 
 namespace milvus {
 namespace server {
@@ -122,7 +124,6 @@ GrpcServer::StartService() {
 
     server_ptr_ = builder.BuildAndStart();
     server_ptr_->Wait();
-
     return Status::OK();
 }
 

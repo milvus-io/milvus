@@ -43,7 +43,7 @@ Status
 InsertReq::OnExecute() {
   LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute InsertReq.";
   auto &msg_client = message_client::MsgClientV2::GetInstance();
-  Status status = msg_client.SendMutMessage(*insert_param_);
+  Status status = msg_client.SendMutMessage(*insert_param_, timestamp_);
   return status;
 }
 
