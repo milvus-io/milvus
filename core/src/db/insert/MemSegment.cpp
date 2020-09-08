@@ -138,7 +138,7 @@ MemSegment::CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snap
     // create segment
     snapshot::SegmentPtr segment;
     snapshot::OperationContext context;
-    context.lsn = max_op_id;
+//    context.lsn = max_op_id;
     context.prev_partition = ss->GetResource<snapshot::Partition>(partition_id_);
     operation = std::make_shared<snapshot::NewSegmentOperation>(context, ss);
     auto status = operation->CommitNewSegment(segment);
