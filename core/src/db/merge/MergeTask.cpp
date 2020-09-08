@@ -21,18 +21,19 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
-namespace milvus {
-namespace engine {
 
-MergeTask::MergeTask(const DBOptions& options, const snapshot::ScopedSnapshotT& ss, const snapshot::IDS_TYPE& segments)
-    : options_(options), snapshot_(ss), segments_(segments) {
+namespace milvus::engine {
+
+MergeTask::MergeTask(DBOptions options, const snapshot::ScopedSnapshotT &ss, snapshot::IDS_TYPE segments)
+    : options_(std::move(options)), snapshot_(ss), segments_(std::move(segments)) {
 }
 
 Status
 MergeTask::Execute() {
     snapshot::OperationContext context;
-    for (auto& id : segments_) {
+    for (auto &id : segments_) {
         auto seg = snapshot_->GetResource<snapshot::Segment>(id);
         if (!seg) {
             return Status(DB_ERROR, "Snapshot segment is null");
@@ -54,7 +55,7 @@ MergeTask::Execute() {
 
     // create segment raw files (placeholder)
     auto names = snapshot_->GetFieldNames();
-    for (auto& name : names) {
+    for (auto &name : names) {
         snapshot::SegmentFileContext sf_context;
         sf_context.collection_id = new_seg->GetCollectionId();
         sf_context.partition_id = new_seg->GetPartitionId();
@@ -104,7 +105,7 @@ MergeTask::Execute() {
     segment::SegmentWriterPtr segment_writer = std::make_shared<segment::SegmentWriter>(options_.meta_.path_, visitor);
 
     // merge
-    for (auto& id : segments_) {
+    for (auto &id : segments_) {
         auto seg = snapshot_->GetResource<snapshot::Segment>(id);
 
         auto read_visitor = SegmentVisitor::Build(snapshot_, id);
@@ -129,5 +130,4 @@ MergeTask::Execute() {
     return status;
 }
 
-}  // namespace engine
 }  // namespace milvus

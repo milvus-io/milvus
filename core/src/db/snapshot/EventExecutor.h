@@ -85,7 +85,6 @@ class EventExecutor {
             //             executor has been stopped, just return
             return;
         }
-
         timing_.Notify();
 
         if (timing_thread_ptr_ != nullptr) {

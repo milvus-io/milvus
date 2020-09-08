@@ -19,12 +19,12 @@
 #include "db/snapshot/Snapshot.h"
 #include "utils/Status.h"
 
-namespace milvus {
-namespace engine {
+
+namespace milvus::engine {
 
 class MergeTask {
  public:
-    MergeTask(const DBOptions& options, const snapshot::ScopedSnapshotT& ss, const snapshot::IDS_TYPE& segments);
+    MergeTask(DBOptions options, const snapshot::ScopedSnapshotT &ss, snapshot::IDS_TYPE segments);
 
     Status
     Execute();
@@ -35,5 +35,4 @@ class MergeTask {
     snapshot::IDS_TYPE segments_;
 };  // SSMergeTask
 
-}  // namespace engine
 }  // namespace milvus

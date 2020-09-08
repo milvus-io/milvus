@@ -76,15 +76,15 @@ class ResourceGCEvent : public GCEvent {
             LOG_ENGINE_DEBUG_ << "[GC] Retry remove: " << res_path;
         }
 
-        auto hard_delete_meta = [](ID_TYPE id, StorePtr store) -> Status {
-            auto hd_op = std::make_shared<HardDeleteOperation<ResourceT>>(id);
-            return ((*hd_op)(store));
-        };
-
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "[GC] Stale Resource: " << res_path << " need to be cleanup later";
             return status;
         }
+
+        auto hard_delete_meta = [](ID_TYPE id, StorePtr store) -> Status {
+            auto hd_op = std::make_shared<HardDeleteOperation<ResourceT>>(id);
+            return ((*hd_op)(store));
+        };
 
         STATUS_CHECK(hard_delete_meta(res_->GetID(), store));
 

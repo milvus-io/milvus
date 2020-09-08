@@ -186,11 +186,6 @@ SegmentOperation::PreCheck() {
 
 Status
 SegmentOperation::DoExecute(StorePtr store) {
-    if (!context_.prev_partition) {
-        std::stringstream emsg;
-        emsg << GetRepr() << ". prev_partition should be specified in context";
-        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
-    }
     auto prev_num = GetStartedSS()->GetMaxSegmentNumByPartition(context_.prev_partition->GetID());
     resource_ = std::make_shared<Segment>(context_.prev_partition->GetCollectionId(), context_.prev_partition->GetID(),
                                           prev_num + 1);
