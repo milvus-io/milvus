@@ -10,8 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Snapshot.h"
-#include "db/snapshot/ResourceHolders.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "db/snapshot/ResourceHolders.h"
 #include "db/snapshot/Store.h"
 
 namespace milvus {

@@ -20,8 +20,8 @@
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceContext.h"
-#include "db/snapshot/Snapshots.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "db/snapshot/Snapshots.h"
 #include "utils/Status.h"
 
 namespace milvus {

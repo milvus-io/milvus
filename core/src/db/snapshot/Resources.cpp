@@ -10,11 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Resources.h"
-#include "db/snapshot/Store.h"
+#include <experimental/filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
-#include <fstream>
-#include <experimental/filesystem>
+#include "db/snapshot/Store.h"
 
 namespace milvus::engine::snapshot {
 
@@ -43,8 +43,7 @@ FlushableMappingsField::LoadIds(const std::string& base_path, const std::string&
         auto size = ifs.tellg();
         ifs.seekg(0, ifs.beg);
         if (size > 0) {
-            std::string str((std::istreambuf_iterator<char>(ifs)),
-                 std::istreambuf_iterator<char>());
+            std::string str((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
 
             std::stringstream ss(str);
 

@@ -62,7 +62,7 @@ class FlushableMappingsField : public MappingsField {
     UpdateFlushIds() {
         if (ids_.size() == 0) {
             ids_ = {1};
-        } else  {
+        } else {
             ids_ = {*(ids_.begin()) + 1};
         }
     }

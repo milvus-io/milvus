@@ -10,8 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/ResourceOperations.h"
-#include "db/snapshot/ResourceHelper.h"
 #include <memory>
+#include "db/snapshot/ResourceHelper.h"
 
 namespace milvus {
 namespace engine {
