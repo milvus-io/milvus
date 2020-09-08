@@ -1089,6 +1089,8 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_message_2eproto::offsets[] PRO
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::QueryResult, scores_),
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::QueryResult, distances_),
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::QueryResult, extra_params_),
+  PROTOBUF_FIELD_OFFSET(::milvus::grpc::QueryResult, query_id_),
+  PROTOBUF_FIELD_OFFSET(::milvus::grpc::QueryResult, client_id_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::StringReply, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -1326,32 +1328,32 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 132, -1, sizeof(::milvus::grpc::SearchInSegmentParam)},
   { 139, -1, sizeof(::milvus::grpc::Entities)},
   { 148, -1, sizeof(::milvus::grpc::QueryResult)},
-  { 159, -1, sizeof(::milvus::grpc::StringReply)},
-  { 166, -1, sizeof(::milvus::grpc::BoolReply)},
-  { 173, -1, sizeof(::milvus::grpc::CollectionRowCount)},
-  { 180, -1, sizeof(::milvus::grpc::Command)},
-  { 186, -1, sizeof(::milvus::grpc::IndexParam)},
-  { 196, -1, sizeof(::milvus::grpc::FlushParam)},
-  { 202, -1, sizeof(::milvus::grpc::CompactParam)},
-  { 209, -1, sizeof(::milvus::grpc::DeleteByIDParam)},
-  { 216, -1, sizeof(::milvus::grpc::CollectionInfo)},
-  { 223, -1, sizeof(::milvus::grpc::GetEntityIDsParam)},
-  { 230, -1, sizeof(::milvus::grpc::EntityIdentity)},
-  { 238, -1, sizeof(::milvus::grpc::VectorFieldParam)},
-  { 244, -1, sizeof(::milvus::grpc::FieldType)},
-  { 252, -1, sizeof(::milvus::grpc::FieldParam)},
-  { 262, -1, sizeof(::milvus::grpc::VectorFieldRecord)},
-  { 268, -1, sizeof(::milvus::grpc::TermQuery)},
-  { 279, -1, sizeof(::milvus::grpc::CompareExpr)},
-  { 286, -1, sizeof(::milvus::grpc::RangeQuery)},
-  { 295, -1, sizeof(::milvus::grpc::VectorQuery)},
-  { 305, -1, sizeof(::milvus::grpc::BooleanQuery)},
-  { 312, -1, sizeof(::milvus::grpc::GeneralQuery)},
-  { 322, -1, sizeof(::milvus::grpc::SearchParamPB)},
-  { 331, -1, sizeof(::milvus::grpc::InsertOrDeleteMsg)},
-  { 346, -1, sizeof(::milvus::grpc::SearchMsg)},
-  { 358, -1, sizeof(::milvus::grpc::TimeSyncMsg)},
-  { 366, -1, sizeof(::milvus::grpc::Key2SegMsg)},
+  { 161, -1, sizeof(::milvus::grpc::StringReply)},
+  { 168, -1, sizeof(::milvus::grpc::BoolReply)},
+  { 175, -1, sizeof(::milvus::grpc::CollectionRowCount)},
+  { 182, -1, sizeof(::milvus::grpc::Command)},
+  { 188, -1, sizeof(::milvus::grpc::IndexParam)},
+  { 198, -1, sizeof(::milvus::grpc::FlushParam)},
+  { 204, -1, sizeof(::milvus::grpc::CompactParam)},
+  { 211, -1, sizeof(::milvus::grpc::DeleteByIDParam)},
+  { 218, -1, sizeof(::milvus::grpc::CollectionInfo)},
+  { 225, -1, sizeof(::milvus::grpc::GetEntityIDsParam)},
+  { 232, -1, sizeof(::milvus::grpc::EntityIdentity)},
+  { 240, -1, sizeof(::milvus::grpc::VectorFieldParam)},
+  { 246, -1, sizeof(::milvus::grpc::FieldType)},
+  { 254, -1, sizeof(::milvus::grpc::FieldParam)},
+  { 264, -1, sizeof(::milvus::grpc::VectorFieldRecord)},
+  { 270, -1, sizeof(::milvus::grpc::TermQuery)},
+  { 281, -1, sizeof(::milvus::grpc::CompareExpr)},
+  { 288, -1, sizeof(::milvus::grpc::RangeQuery)},
+  { 297, -1, sizeof(::milvus::grpc::VectorQuery)},
+  { 307, -1, sizeof(::milvus::grpc::BooleanQuery)},
+  { 314, -1, sizeof(::milvus::grpc::GeneralQuery)},
+  { 324, -1, sizeof(::milvus::grpc::SearchParamPB)},
+  { 333, -1, sizeof(::milvus::grpc::InsertOrDeleteMsg)},
+  { 348, -1, sizeof(::milvus::grpc::SearchMsg)},
+  { 360, -1, sizeof(::milvus::grpc::TimeSyncMsg)},
+  { 368, -1, sizeof(::milvus::grpc::Key2SegMsg)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -1449,150 +1451,151 @@ const char descriptor_table_protodef_message_2eproto[] PROTOBUF_SECTION_VARIABLE
   "Param\"x\n\010Entities\022#\n\006status\030\001 \001(\0132\023.milv"
   "us.grpc.Status\022\013\n\003ids\030\002 \003(\003\022\021\n\tvalid_row"
   "\030\003 \003(\010\022\'\n\trows_data\030\004 \003(\0132\024.milvus.grpc."
-  "RowData\"\300\001\n\013QueryResult\022#\n\006status\030\001 \001(\0132"
+  "RowData\"\345\001\n\013QueryResult\022#\n\006status\030\001 \001(\0132"
   "\023.milvus.grpc.Status\022\'\n\010entities\030\002 \001(\0132\025"
   ".milvus.grpc.Entities\022\017\n\007row_num\030\003 \001(\003\022\016"
   "\n\006scores\030\004 \003(\002\022\021\n\tdistances\030\005 \003(\002\022/\n\014ext"
   "ra_params\030\006 \003(\0132\031.milvus.grpc.KeyValuePa"
-  "ir\"H\n\013StringReply\022#\n\006status\030\001 \001(\0132\023.milv"
-  "us.grpc.Status\022\024\n\014string_reply\030\002 \001(\t\"D\n\t"
-  "BoolReply\022#\n\006status\030\001 \001(\0132\023.milvus.grpc."
-  "Status\022\022\n\nbool_reply\030\002 \001(\010\"W\n\022Collection"
-  "RowCount\022#\n\006status\030\001 \001(\0132\023.milvus.grpc.S"
-  "tatus\022\034\n\024collection_row_count\030\002 \001(\003\"\026\n\007C"
-  "ommand\022\013\n\003cmd\030\001 \001(\t\"\243\001\n\nIndexParam\022#\n\006st"
-  "atus\030\001 \001(\0132\023.milvus.grpc.Status\022\027\n\017colle"
-  "ction_name\030\002 \001(\t\022\022\n\nfield_name\030\003 \001(\t\022\022\n\n"
-  "index_name\030\004 \001(\t\022/\n\014extra_params\030\005 \003(\0132\031"
-  ".milvus.grpc.KeyValuePair\"+\n\nFlushParam\022"
-  "\035\n\025collection_name_array\030\001 \003(\t\":\n\014Compac"
-  "tParam\022\027\n\017collection_name\030\001 \001(\t\022\021\n\tthres"
-  "hold\030\002 \001(\001\"<\n\017DeleteByIDParam\022\027\n\017collect"
-  "ion_name\030\001 \001(\t\022\020\n\010id_array\030\002 \003(\003\"H\n\016Coll"
-  "ectionInfo\022#\n\006status\030\001 \001(\0132\023.milvus.grpc"
-  ".Status\022\021\n\tjson_info\030\002 \001(\t\"@\n\021GetEntityI"
-  "DsParam\022\027\n\017collection_name\030\001 \001(\t\022\022\n\nsegm"
-  "ent_id\030\002 \001(\003\"P\n\016EntityIdentity\022\027\n\017collec"
-  "tion_name\030\001 \001(\t\022\020\n\010id_array\030\002 \003(\003\022\023\n\013fie"
-  "ld_names\030\003 \003(\t\"%\n\020VectorFieldParam\022\021\n\tdi"
-  "mension\030\001 \001(\003\"w\n\tFieldType\022*\n\tdata_type\030"
-  "\001 \001(\0162\025.milvus.grpc.DataTypeH\000\0225\n\014vector"
-  "_param\030\002 \001(\0132\035.milvus.grpc.VectorFieldPa"
-  "ramH\000B\007\n\005value\"\255\001\n\nFieldParam\022\n\n\002id\030\001 \001("
-  "\004\022\014\n\004name\030\002 \001(\t\022#\n\004type\030\003 \001(\0162\025.milvus.g"
-  "rpc.DataType\022/\n\014index_params\030\004 \003(\0132\031.mil"
-  "vus.grpc.KeyValuePair\022/\n\014extra_params\030\005 "
-  "\003(\0132\031.milvus.grpc.KeyValuePair\"@\n\021Vector"
-  "FieldRecord\022+\n\005value\030\001 \003(\0132\034.milvus.grpc"
-  ".VectorRowRecord\"\233\001\n\tTermQuery\022\022\n\nfield_"
-  "name\030\001 \001(\t\022\021\n\tint_value\030\002 \003(\003\022\024\n\014double_"
-  "value\030\003 \003(\001\022\021\n\tvalue_num\030\004 \001(\003\022\r\n\005boost\030"
-  "\005 \001(\002\022/\n\014extra_params\030\006 \003(\0132\031.milvus.grp"
-  "c.KeyValuePair\"N\n\013CompareExpr\022.\n\010operato"
-  "r\030\001 \001(\0162\034.milvus.grpc.CompareOperator\022\017\n"
-  "\007operand\030\002 \001(\t\"\213\001\n\nRangeQuery\022\022\n\nfield_n"
-  "ame\030\001 \001(\t\022)\n\007operand\030\002 \003(\0132\030.milvus.grpc"
-  ".CompareExpr\022\r\n\005boost\030\003 \001(\002\022/\n\014extra_par"
-  "ams\030\004 \003(\0132\031.milvus.grpc.KeyValuePair\"\244\001\n"
-  "\013VectorQuery\022\022\n\nfield_name\030\001 \001(\t\022\023\n\013quer"
-  "y_boost\030\002 \001(\002\022-\n\007records\030\003 \003(\0132\034.milvus."
-  "grpc.VectorRowRecord\022\014\n\004topk\030\004 \001(\003\022/\n\014ex"
-  "tra_params\030\005 \003(\0132\031.milvus.grpc.KeyValueP"
-  "air\"c\n\014BooleanQuery\022!\n\005occur\030\001 \001(\0162\022.mil"
-  "vus.grpc.Occur\0220\n\rgeneral_query\030\002 \003(\0132\031."
-  "milvus.grpc.GeneralQuery\"\333\001\n\014GeneralQuer"
-  "y\0222\n\rboolean_query\030\001 \001(\0132\031.milvus.grpc.B"
-  "ooleanQueryH\000\022,\n\nterm_query\030\002 \001(\0132\026.milv"
-  "us.grpc.TermQueryH\000\022.\n\013range_query\030\003 \001(\013"
-  "2\027.milvus.grpc.RangeQueryH\000\0220\n\014vector_qu"
-  "ery\030\004 \001(\0132\030.milvus.grpc.VectorQueryH\000B\007\n"
-  "\005query\"\250\001\n\rSearchParamPB\022\027\n\017collection_n"
-  "ame\030\001 \001(\t\022\033\n\023partition_tag_array\030\002 \003(\t\0220"
-  "\n\rgeneral_query\030\003 \001(\0132\031.milvus.grpc.Gene"
-  "ralQuery\022/\n\014extra_params\030\004 \003(\0132\031.milvus."
-  "grpc.KeyValuePair\"\231\002\n\021InsertOrDeleteMsg\022"
-  "\027\n\017collection_name\030\001 \001(\t\022\'\n\trows_data\030\002 "
-  "\001(\0132\024.milvus.grpc.RowData\022\013\n\003uid\030\003 \001(\003\022\025"
-  "\n\rpartition_tag\030\004 \001(\t\022\021\n\ttimestamp\030\005 \001(\003"
-  "\022\022\n\nsegment_id\030\006 \001(\003\022\022\n\nchannel_id\030\007 \001(\003"
-  "\022\037\n\002op\030\010 \001(\0162\023.milvus.grpc.OpType\022\021\n\tcli"
-  "ent_id\030\t \001(\003\022/\n\014extra_params\030\n \003(\0132\031.mil"
-  "vus.grpc.KeyValuePair\"\316\001\n\tSearchMsg\022\027\n\017c"
-  "ollection_name\030\001 \001(\t\022-\n\007records\030\002 \001(\0132\034."
-  "milvus.grpc.VectorRowRecord\022\025\n\rpartition"
-  "_tag\030\003 \001(\t\022\013\n\003uid\030\004 \001(\003\022\021\n\ttimestamp\030\005 \001"
-  "(\003\022\021\n\tclient_id\030\006 \001(\003\022/\n\014extra_params\030\007 "
-  "\003(\0132\031.milvus.grpc.KeyValuePair\"[\n\013TimeSy"
-  "ncMsg\022\017\n\007peer_Id\030\001 \001(\003\022\021\n\tTimestamp\030\002 \001("
-  "\003\022(\n\tsync_type\030\003 \001(\0162\025.milvus.grpc.SyncT"
-  "ype\"-\n\nKey2SegMsg\022\013\n\003uid\030\001 \001(\003\022\022\n\nsegmen"
-  "t_id\030\002 \003(\003*\242\004\n\tErrorCode\022\013\n\007SUCCESS\020\000\022\024\n"
-  "\020UNEXPECTED_ERROR\020\001\022\022\n\016CONNECT_FAILED\020\002\022"
-  "\025\n\021PERMISSION_DENIED\020\003\022\031\n\025COLLECTION_NOT"
-  "_EXISTS\020\004\022\024\n\020ILLEGAL_ARGUMENT\020\005\022\025\n\021ILLEG"
-  "AL_DIMENSION\020\007\022\026\n\022ILLEGAL_INDEX_TYPE\020\010\022\033"
-  "\n\027ILLEGAL_COLLECTION_NAME\020\t\022\020\n\014ILLEGAL_T"
-  "OPK\020\n\022\025\n\021ILLEGAL_ROWRECORD\020\013\022\025\n\021ILLEGAL_"
-  "VECTOR_ID\020\014\022\031\n\025ILLEGAL_SEARCH_RESULT\020\r\022\022"
-  "\n\016FILE_NOT_FOUND\020\016\022\017\n\013META_FAILED\020\017\022\020\n\014C"
-  "ACHE_FAILED\020\020\022\030\n\024CANNOT_CREATE_FOLDER\020\021\022"
-  "\026\n\022CANNOT_CREATE_FILE\020\022\022\030\n\024CANNOT_DELETE"
-  "_FOLDER\020\023\022\026\n\022CANNOT_DELETE_FILE\020\024\022\025\n\021BUI"
-  "LD_INDEX_ERROR\020\025\022\021\n\rILLEGAL_NLIST\020\026\022\027\n\023I"
-  "LLEGAL_METRIC_TYPE\020\027\022\021\n\rOUT_OF_MEMORY\020\030*"
-  "\221\001\n\010DataType\022\010\n\004NONE\020\000\022\010\n\004BOOL\020\001\022\010\n\004INT8"
-  "\020\002\022\t\n\005INT16\020\003\022\t\n\005INT32\020\004\022\t\n\005INT64\020\005\022\t\n\005F"
-  "LOAT\020\n\022\n\n\006DOUBLE\020\013\022\n\n\006STRING\020\024\022\021\n\rVECTOR"
-  "_BINARY\020d\022\020\n\014VECTOR_FLOAT\020e*C\n\017CompareOp"
-  "erator\022\006\n\002LT\020\000\022\007\n\003LTE\020\001\022\006\n\002EQ\020\002\022\006\n\002GT\020\003\022"
-  "\007\n\003GTE\020\004\022\006\n\002NE\020\005*8\n\005Occur\022\013\n\007INVALID\020\000\022\010"
-  "\n\004MUST\020\001\022\n\n\006SHOULD\020\002\022\014\n\010MUST_NOT\020\003* \n\006Op"
-  "Type\022\n\n\006INSERT\020\000\022\n\n\006DELETE\020\001*\037\n\010SyncType"
-  "\022\010\n\004READ\020\000\022\t\n\005WRITE\020\0012\333\r\n\rMilvusService\022"
-  "\?\n\020CreateCollection\022\024.milvus.grpc.Mappin"
-  "g\032\023.milvus.grpc.Status\"\000\022F\n\rHasCollectio"
-  "n\022\033.milvus.grpc.CollectionName\032\026.milvus."
-  "grpc.BoolReply\"\000\022I\n\022DescribeCollection\022\033"
-  ".milvus.grpc.CollectionName\032\024.milvus.grp"
-  "c.Mapping\"\000\022Q\n\017CountCollection\022\033.milvus."
-  "grpc.CollectionName\032\037.milvus.grpc.Collec"
-  "tionRowCount\"\000\022J\n\017ShowCollections\022\024.milv"
-  "us.grpc.Command\032\037.milvus.grpc.Collection"
-  "NameList\"\000\022P\n\022ShowCollectionInfo\022\033.milvu"
-  "s.grpc.CollectionName\032\033.milvus.grpc.Coll"
-  "ectionInfo\"\000\022D\n\016DropCollection\022\033.milvus."
-  "grpc.CollectionName\032\023.milvus.grpc.Status"
-  "\"\000\022=\n\013CreateIndex\022\027.milvus.grpc.IndexPar"
-  "am\032\023.milvus.grpc.Status\"\000\022C\n\rDescribeInd"
-  "ex\022\027.milvus.grpc.IndexParam\032\027.milvus.grp"
-  "c.IndexParam\"\000\022;\n\tDropIndex\022\027.milvus.grp"
-  "c.IndexParam\032\023.milvus.grpc.Status\"\000\022E\n\017C"
-  "reatePartition\022\033.milvus.grpc.PartitionPa"
-  "ram\032\023.milvus.grpc.Status\"\000\022E\n\014HasPartiti"
-  "on\022\033.milvus.grpc.PartitionParam\032\026.milvus"
-  ".grpc.BoolReply\"\000\022K\n\016ShowPartitions\022\033.mi"
-  "lvus.grpc.CollectionName\032\032.milvus.grpc.P"
-  "artitionList\"\000\022C\n\rDropPartition\022\033.milvus"
-  ".grpc.PartitionParam\032\023.milvus.grpc.Statu"
-  "s\"\000\022<\n\006Insert\022\030.milvus.grpc.InsertParam\032"
-  "\026.milvus.grpc.EntityIds\"\000\022E\n\rGetEntityBy"
-  "ID\022\033.milvus.grpc.EntityIdentity\032\025.milvus"
-  ".grpc.Entities\"\000\022H\n\014GetEntityIDs\022\036.milvu"
-  "s.grpc.GetEntityIDsParam\032\026.milvus.grpc.E"
-  "ntityIds\"\000\022>\n\006Search\022\030.milvus.grpc.Searc"
-  "hParam\032\030.milvus.grpc.QueryResult\"\000\022P\n\017Se"
-  "archInSegment\022!.milvus.grpc.SearchInSegm"
-  "entParam\032\030.milvus.grpc.QueryResult\"\000\0227\n\003"
-  "Cmd\022\024.milvus.grpc.Command\032\030.milvus.grpc."
-  "StringReply\"\000\022A\n\nDeleteByID\022\034.milvus.grp"
-  "c.DeleteByIDParam\032\023.milvus.grpc.Status\"\000"
-  "\022G\n\021PreloadCollection\022\033.milvus.grpc.Coll"
-  "ectionName\032\023.milvus.grpc.Status\"\000\0227\n\005Flu"
-  "sh\022\027.milvus.grpc.FlushParam\032\023.milvus.grp"
-  "c.Status\"\000\022;\n\007Compact\022\031.milvus.grpc.Comp"
-  "actParam\032\023.milvus.grpc.Status\"\000\022B\n\010Searc"
-  "hPB\022\032.milvus.grpc.SearchParamPB\032\030.milvus"
-  ".grpc.QueryResult\"\000B\007Z\005msgpbb\006proto3"
+  "ir\022\020\n\010query_id\030\007 \001(\003\022\021\n\tclient_id\030\010 \001(\003\""
+  "H\n\013StringReply\022#\n\006status\030\001 \001(\0132\023.milvus."
+  "grpc.Status\022\024\n\014string_reply\030\002 \001(\t\"D\n\tBoo"
+  "lReply\022#\n\006status\030\001 \001(\0132\023.milvus.grpc.Sta"
+  "tus\022\022\n\nbool_reply\030\002 \001(\010\"W\n\022CollectionRow"
+  "Count\022#\n\006status\030\001 \001(\0132\023.milvus.grpc.Stat"
+  "us\022\034\n\024collection_row_count\030\002 \001(\003\"\026\n\007Comm"
+  "and\022\013\n\003cmd\030\001 \001(\t\"\243\001\n\nIndexParam\022#\n\006statu"
+  "s\030\001 \001(\0132\023.milvus.grpc.Status\022\027\n\017collecti"
+  "on_name\030\002 \001(\t\022\022\n\nfield_name\030\003 \001(\t\022\022\n\nind"
+  "ex_name\030\004 \001(\t\022/\n\014extra_params\030\005 \003(\0132\031.mi"
+  "lvus.grpc.KeyValuePair\"+\n\nFlushParam\022\035\n\025"
+  "collection_name_array\030\001 \003(\t\":\n\014CompactPa"
+  "ram\022\027\n\017collection_name\030\001 \001(\t\022\021\n\tthreshol"
+  "d\030\002 \001(\001\"<\n\017DeleteByIDParam\022\027\n\017collection"
+  "_name\030\001 \001(\t\022\020\n\010id_array\030\002 \003(\003\"H\n\016Collect"
+  "ionInfo\022#\n\006status\030\001 \001(\0132\023.milvus.grpc.St"
+  "atus\022\021\n\tjson_info\030\002 \001(\t\"@\n\021GetEntityIDsP"
+  "aram\022\027\n\017collection_name\030\001 \001(\t\022\022\n\nsegment"
+  "_id\030\002 \001(\003\"P\n\016EntityIdentity\022\027\n\017collectio"
+  "n_name\030\001 \001(\t\022\020\n\010id_array\030\002 \003(\003\022\023\n\013field_"
+  "names\030\003 \003(\t\"%\n\020VectorFieldParam\022\021\n\tdimen"
+  "sion\030\001 \001(\003\"w\n\tFieldType\022*\n\tdata_type\030\001 \001"
+  "(\0162\025.milvus.grpc.DataTypeH\000\0225\n\014vector_pa"
+  "ram\030\002 \001(\0132\035.milvus.grpc.VectorFieldParam"
+  "H\000B\007\n\005value\"\255\001\n\nFieldParam\022\n\n\002id\030\001 \001(\004\022\014"
+  "\n\004name\030\002 \001(\t\022#\n\004type\030\003 \001(\0162\025.milvus.grpc"
+  ".DataType\022/\n\014index_params\030\004 \003(\0132\031.milvus"
+  ".grpc.KeyValuePair\022/\n\014extra_params\030\005 \003(\013"
+  "2\031.milvus.grpc.KeyValuePair\"@\n\021VectorFie"
+  "ldRecord\022+\n\005value\030\001 \003(\0132\034.milvus.grpc.Ve"
+  "ctorRowRecord\"\233\001\n\tTermQuery\022\022\n\nfield_nam"
+  "e\030\001 \001(\t\022\021\n\tint_value\030\002 \003(\003\022\024\n\014double_val"
+  "ue\030\003 \003(\001\022\021\n\tvalue_num\030\004 \001(\003\022\r\n\005boost\030\005 \001"
+  "(\002\022/\n\014extra_params\030\006 \003(\0132\031.milvus.grpc.K"
+  "eyValuePair\"N\n\013CompareExpr\022.\n\010operator\030\001"
+  " \001(\0162\034.milvus.grpc.CompareOperator\022\017\n\007op"
+  "erand\030\002 \001(\t\"\213\001\n\nRangeQuery\022\022\n\nfield_name"
+  "\030\001 \001(\t\022)\n\007operand\030\002 \003(\0132\030.milvus.grpc.Co"
+  "mpareExpr\022\r\n\005boost\030\003 \001(\002\022/\n\014extra_params"
+  "\030\004 \003(\0132\031.milvus.grpc.KeyValuePair\"\244\001\n\013Ve"
+  "ctorQuery\022\022\n\nfield_name\030\001 \001(\t\022\023\n\013query_b"
+  "oost\030\002 \001(\002\022-\n\007records\030\003 \003(\0132\034.milvus.grp"
+  "c.VectorRowRecord\022\014\n\004topk\030\004 \001(\003\022/\n\014extra"
+  "_params\030\005 \003(\0132\031.milvus.grpc.KeyValuePair"
+  "\"c\n\014BooleanQuery\022!\n\005occur\030\001 \001(\0162\022.milvus"
+  ".grpc.Occur\0220\n\rgeneral_query\030\002 \003(\0132\031.mil"
+  "vus.grpc.GeneralQuery\"\333\001\n\014GeneralQuery\0222"
+  "\n\rboolean_query\030\001 \001(\0132\031.milvus.grpc.Bool"
+  "eanQueryH\000\022,\n\nterm_query\030\002 \001(\0132\026.milvus."
+  "grpc.TermQueryH\000\022.\n\013range_query\030\003 \001(\0132\027."
+  "milvus.grpc.RangeQueryH\000\0220\n\014vector_query"
+  "\030\004 \001(\0132\030.milvus.grpc.VectorQueryH\000B\007\n\005qu"
+  "ery\"\250\001\n\rSearchParamPB\022\027\n\017collection_name"
+  "\030\001 \001(\t\022\033\n\023partition_tag_array\030\002 \003(\t\0220\n\rg"
+  "eneral_query\030\003 \001(\0132\031.milvus.grpc.General"
+  "Query\022/\n\014extra_params\030\004 \003(\0132\031.milvus.grp"
+  "c.KeyValuePair\"\231\002\n\021InsertOrDeleteMsg\022\027\n\017"
+  "collection_name\030\001 \001(\t\022\'\n\trows_data\030\002 \001(\013"
+  "2\024.milvus.grpc.RowData\022\013\n\003uid\030\003 \001(\003\022\025\n\rp"
+  "artition_tag\030\004 \001(\t\022\021\n\ttimestamp\030\005 \001(\004\022\022\n"
+  "\nsegment_id\030\006 \001(\003\022\022\n\nchannel_id\030\007 \001(\003\022\037\n"
+  "\002op\030\010 \001(\0162\023.milvus.grpc.OpType\022\021\n\tclient"
+  "_id\030\t \001(\003\022/\n\014extra_params\030\n \003(\0132\031.milvus"
+  ".grpc.KeyValuePair\"\316\001\n\tSearchMsg\022\027\n\017coll"
+  "ection_name\030\001 \001(\t\022-\n\007records\030\002 \001(\0132\034.mil"
+  "vus.grpc.VectorRowRecord\022\025\n\rpartition_ta"
+  "g\030\003 \001(\t\022\013\n\003uid\030\004 \001(\003\022\021\n\ttimestamp\030\005 \001(\004\022"
+  "\021\n\tclient_id\030\006 \001(\003\022/\n\014extra_params\030\007 \003(\013"
+  "2\031.milvus.grpc.KeyValuePair\"[\n\013TimeSyncM"
+  "sg\022\017\n\007peer_Id\030\001 \001(\003\022\021\n\tTimestamp\030\002 \001(\004\022("
+  "\n\tsync_type\030\003 \001(\0162\025.milvus.grpc.SyncType"
+  "\"-\n\nKey2SegMsg\022\013\n\003uid\030\001 \001(\003\022\022\n\nsegment_i"
+  "d\030\002 \003(\003*\242\004\n\tErrorCode\022\013\n\007SUCCESS\020\000\022\024\n\020UN"
+  "EXPECTED_ERROR\020\001\022\022\n\016CONNECT_FAILED\020\002\022\025\n\021"
+  "PERMISSION_DENIED\020\003\022\031\n\025COLLECTION_NOT_EX"
+  "ISTS\020\004\022\024\n\020ILLEGAL_ARGUMENT\020\005\022\025\n\021ILLEGAL_"
+  "DIMENSION\020\007\022\026\n\022ILLEGAL_INDEX_TYPE\020\010\022\033\n\027I"
+  "LLEGAL_COLLECTION_NAME\020\t\022\020\n\014ILLEGAL_TOPK"
+  "\020\n\022\025\n\021ILLEGAL_ROWRECORD\020\013\022\025\n\021ILLEGAL_VEC"
+  "TOR_ID\020\014\022\031\n\025ILLEGAL_SEARCH_RESULT\020\r\022\022\n\016F"
+  "ILE_NOT_FOUND\020\016\022\017\n\013META_FAILED\020\017\022\020\n\014CACH"
+  "E_FAILED\020\020\022\030\n\024CANNOT_CREATE_FOLDER\020\021\022\026\n\022"
+  "CANNOT_CREATE_FILE\020\022\022\030\n\024CANNOT_DELETE_FO"
+  "LDER\020\023\022\026\n\022CANNOT_DELETE_FILE\020\024\022\025\n\021BUILD_"
+  "INDEX_ERROR\020\025\022\021\n\rILLEGAL_NLIST\020\026\022\027\n\023ILLE"
+  "GAL_METRIC_TYPE\020\027\022\021\n\rOUT_OF_MEMORY\020\030*\221\001\n"
+  "\010DataType\022\010\n\004NONE\020\000\022\010\n\004BOOL\020\001\022\010\n\004INT8\020\002\022"
+  "\t\n\005INT16\020\003\022\t\n\005INT32\020\004\022\t\n\005INT64\020\005\022\t\n\005FLOA"
+  "T\020\n\022\n\n\006DOUBLE\020\013\022\n\n\006STRING\020\024\022\021\n\rVECTOR_BI"
+  "NARY\020d\022\020\n\014VECTOR_FLOAT\020e*C\n\017CompareOpera"
+  "tor\022\006\n\002LT\020\000\022\007\n\003LTE\020\001\022\006\n\002EQ\020\002\022\006\n\002GT\020\003\022\007\n\003"
+  "GTE\020\004\022\006\n\002NE\020\005*8\n\005Occur\022\013\n\007INVALID\020\000\022\010\n\004M"
+  "UST\020\001\022\n\n\006SHOULD\020\002\022\014\n\010MUST_NOT\020\003* \n\006OpTyp"
+  "e\022\n\n\006INSERT\020\000\022\n\n\006DELETE\020\001*\037\n\010SyncType\022\010\n"
+  "\004READ\020\000\022\t\n\005WRITE\020\0012\333\r\n\rMilvusService\022\?\n\020"
+  "CreateCollection\022\024.milvus.grpc.Mapping\032\023"
+  ".milvus.grpc.Status\"\000\022F\n\rHasCollection\022\033"
+  ".milvus.grpc.CollectionName\032\026.milvus.grp"
+  "c.BoolReply\"\000\022I\n\022DescribeCollection\022\033.mi"
+  "lvus.grpc.CollectionName\032\024.milvus.grpc.M"
+  "apping\"\000\022Q\n\017CountCollection\022\033.milvus.grp"
+  "c.CollectionName\032\037.milvus.grpc.Collectio"
+  "nRowCount\"\000\022J\n\017ShowCollections\022\024.milvus."
+  "grpc.Command\032\037.milvus.grpc.CollectionNam"
+  "eList\"\000\022P\n\022ShowCollectionInfo\022\033.milvus.g"
+  "rpc.CollectionName\032\033.milvus.grpc.Collect"
+  "ionInfo\"\000\022D\n\016DropCollection\022\033.milvus.grp"
+  "c.CollectionName\032\023.milvus.grpc.Status\"\000\022"
+  "=\n\013CreateIndex\022\027.milvus.grpc.IndexParam\032"
+  "\023.milvus.grpc.Status\"\000\022C\n\rDescribeIndex\022"
+  "\027.milvus.grpc.IndexParam\032\027.milvus.grpc.I"
+  "ndexParam\"\000\022;\n\tDropIndex\022\027.milvus.grpc.I"
+  "ndexParam\032\023.milvus.grpc.Status\"\000\022E\n\017Crea"
+  "tePartition\022\033.milvus.grpc.PartitionParam"
+  "\032\023.milvus.grpc.Status\"\000\022E\n\014HasPartition\022"
+  "\033.milvus.grpc.PartitionParam\032\026.milvus.gr"
+  "pc.BoolReply\"\000\022K\n\016ShowPartitions\022\033.milvu"
+  "s.grpc.CollectionName\032\032.milvus.grpc.Part"
+  "itionList\"\000\022C\n\rDropPartition\022\033.milvus.gr"
+  "pc.PartitionParam\032\023.milvus.grpc.Status\"\000"
+  "\022<\n\006Insert\022\030.milvus.grpc.InsertParam\032\026.m"
+  "ilvus.grpc.EntityIds\"\000\022E\n\rGetEntityByID\022"
+  "\033.milvus.grpc.EntityIdentity\032\025.milvus.gr"
+  "pc.Entities\"\000\022H\n\014GetEntityIDs\022\036.milvus.g"
+  "rpc.GetEntityIDsParam\032\026.milvus.grpc.Enti"
+  "tyIds\"\000\022>\n\006Search\022\030.milvus.grpc.SearchPa"
+  "ram\032\030.milvus.grpc.QueryResult\"\000\022P\n\017Searc"
+  "hInSegment\022!.milvus.grpc.SearchInSegment"
+  "Param\032\030.milvus.grpc.QueryResult\"\000\0227\n\003Cmd"
+  "\022\024.milvus.grpc.Command\032\030.milvus.grpc.Str"
+  "ingReply\"\000\022A\n\nDeleteByID\022\034.milvus.grpc.D"
+  "eleteByIDParam\032\023.milvus.grpc.Status\"\000\022G\n"
+  "\021PreloadCollection\022\033.milvus.grpc.Collect"
+  "ionName\032\023.milvus.grpc.Status\"\000\0227\n\005Flush\022"
+  "\027.milvus.grpc.FlushParam\032\023.milvus.grpc.S"
+  "tatus\"\000\022;\n\007Compact\022\031.milvus.grpc.Compact"
+  "Param\032\023.milvus.grpc.Status\"\000\022B\n\010SearchPB"
+  "\022\032.milvus.grpc.SearchParamPB\032\030.milvus.gr"
+  "pc.QueryResult\"\000B\007Z\005msgpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_message_2eproto_deps[1] = {
 };
@@ -1647,7 +1650,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mes
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_message_2eproto_once;
 static bool descriptor_table_message_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_message_2eproto = {
-  &descriptor_table_message_2eproto_initialized, descriptor_table_protodef_message_2eproto, "message.proto", 7516,
+  &descriptor_table_message_2eproto_initialized, descriptor_table_protodef_message_2eproto, "message.proto", 7553,
   &descriptor_table_message_2eproto_once, descriptor_table_message_2eproto_sccs, descriptor_table_message_2eproto_deps, 46, 0,
   schemas, file_default_instances, TableStruct_message_2eproto::offsets,
   file_level_metadata_message_2eproto, 47, file_level_enum_descriptors_message_2eproto, file_level_service_descriptors_message_2eproto,
@@ -8808,15 +8811,17 @@ QueryResult::QueryResult(const QueryResult& from)
   } else {
     entities_ = nullptr;
   }
-  row_num_ = from.row_num_;
+  ::memcpy(&row_num_, &from.row_num_,
+    static_cast<size_t>(reinterpret_cast<char*>(&client_id_) -
+    reinterpret_cast<char*>(&row_num_)) + sizeof(client_id_));
   // @@protoc_insertion_point(copy_constructor:milvus.grpc.QueryResult)
 }
 
 void QueryResult::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_QueryResult_message_2eproto.base);
   ::memset(&status_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&row_num_) -
-      reinterpret_cast<char*>(&status_)) + sizeof(row_num_));
+      reinterpret_cast<char*>(&client_id_) -
+      reinterpret_cast<char*>(&status_)) + sizeof(client_id_));
 }
 
 QueryResult::~QueryResult() {
@@ -8855,7 +8860,9 @@ void QueryResult::Clear() {
     delete entities_;
   }
   entities_ = nullptr;
-  row_num_ = PROTOBUF_LONGLONG(0);
+  ::memset(&row_num_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&client_id_) -
+      reinterpret_cast<char*>(&row_num_)) + sizeof(client_id_));
   _internal_metadata_.Clear();
 }
 
@@ -8918,6 +8925,20 @@ const char* QueryResult::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
           } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 50);
+        } else goto handle_unusual;
+        continue;
+      // int64 query_id = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 56)) {
+          query_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // int64 client_id = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 64)) {
+          client_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
         } else goto handle_unusual;
         continue;
       default: {
@@ -9028,6 +9049,32 @@ bool QueryResult::MergePartialFromCodedStream(
         break;
       }
 
+      // int64 query_id = 7;
+      case 7: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (56 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 input, &query_id_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // int64 client_id = 8;
+      case 8: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (64 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 input, &client_id_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -9099,6 +9146,16 @@ void QueryResult::SerializeWithCachedSizes(
       output);
   }
 
+  // int64 query_id = 7;
+  if (this->query_id() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(7, this->query_id(), output);
+  }
+
+  // int64 client_id = 8;
+  if (this->client_id() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(8, this->client_id(), output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -9163,6 +9220,16 @@ void QueryResult::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessageToArray(
         6, this->extra_params(static_cast<int>(i)), target);
+  }
+
+  // int64 query_id = 7;
+  if (this->query_id() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(7, this->query_id(), target);
+  }
+
+  // int64 client_id = 8;
+  if (this->client_id() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(8, this->client_id(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -9248,6 +9315,20 @@ size_t QueryResult::ByteSizeLong() const {
         this->row_num());
   }
 
+  // int64 query_id = 7;
+  if (this->query_id() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
+        this->query_id());
+  }
+
+  // int64 client_id = 8;
+  if (this->client_id() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
+        this->client_id());
+  }
+
   int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
   SetCachedSize(cached_size);
   return total_size;
@@ -9287,6 +9368,12 @@ void QueryResult::MergeFrom(const QueryResult& from) {
   if (from.row_num() != 0) {
     set_row_num(from.row_num());
   }
+  if (from.query_id() != 0) {
+    set_query_id(from.query_id());
+  }
+  if (from.client_id() != 0) {
+    set_client_id(from.client_id());
+  }
 }
 
 void QueryResult::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
@@ -9316,6 +9403,8 @@ void QueryResult::InternalSwap(QueryResult* other) {
   swap(status_, other->status_);
   swap(entities_, other->entities_);
   swap(row_num_, other->row_num_);
+  swap(query_id_, other->query_id_);
+  swap(client_id_, other->client_id_);
 }
 
 ::PROTOBUF_NAMESPACE_ID::Metadata QueryResult::GetMetadata() const {
@@ -17511,7 +17600,7 @@ const char* InsertOrDeleteMsg::_InternalParse(const char* ptr, ::PROTOBUF_NAMESP
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 timestamp = 5;
+      // uint64 timestamp = 5;
       case 5:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 40)) {
           timestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -17643,12 +17732,12 @@ bool InsertOrDeleteMsg::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 timestamp = 5;
+      // uint64 timestamp = 5;
       case 5: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (40 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
                  input, &timestamp_)));
         } else {
           goto handle_unusual;
@@ -17778,9 +17867,9 @@ void InsertOrDeleteMsg::SerializeWithCachedSizes(
       4, this->partition_tag(), output);
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(5, this->timestamp(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(5, this->timestamp(), output);
   }
 
   // int64 segment_id = 6;
@@ -17860,9 +17949,9 @@ void InsertOrDeleteMsg::SerializeWithCachedSizes(
         4, this->partition_tag(), target);
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(5, this->timestamp(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(5, this->timestamp(), target);
   }
 
   // int64 segment_id = 6;
@@ -17954,10 +18043,10 @@ size_t InsertOrDeleteMsg::ByteSizeLong() const {
         this->uid());
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
         this->timestamp());
   }
 
@@ -18215,7 +18304,7 @@ const char* SearchMsg::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 timestamp = 5;
+      // uint64 timestamp = 5;
       case 5:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 40)) {
           timestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -18325,12 +18414,12 @@ bool SearchMsg::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 timestamp = 5;
+      // uint64 timestamp = 5;
       case 5: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (40 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
                  input, &timestamp_)));
         } else {
           goto handle_unusual;
@@ -18420,9 +18509,9 @@ void SearchMsg::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(4, this->uid(), output);
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(5, this->timestamp(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(5, this->timestamp(), output);
   }
 
   // int64 client_id = 6;
@@ -18486,9 +18575,9 @@ void SearchMsg::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(4, this->uid(), target);
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(5, this->timestamp(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(5, this->timestamp(), target);
   }
 
   // int64 client_id = 6;
@@ -18564,10 +18653,10 @@ size_t SearchMsg::ByteSizeLong() const {
         this->uid());
   }
 
-  // int64 timestamp = 5;
+  // uint64 timestamp = 5;
   if (this->timestamp() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
         this->timestamp());
   }
 
@@ -18738,7 +18827,7 @@ const char* TimeSyncMsg::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 Timestamp = 2;
+      // uint64 Timestamp = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
           timestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -18796,12 +18885,12 @@ bool TimeSyncMsg::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 Timestamp = 2;
+      // uint64 Timestamp = 2;
       case 2: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
                  input, &timestamp_)));
         } else {
           goto handle_unusual;
@@ -18855,9 +18944,9 @@ void TimeSyncMsg::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(1, this->peer_id(), output);
   }
 
-  // int64 Timestamp = 2;
+  // uint64 Timestamp = 2;
   if (this->timestamp() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->timestamp(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(2, this->timestamp(), output);
   }
 
   // .milvus.grpc.SyncType sync_type = 3;
@@ -18884,9 +18973,9 @@ void TimeSyncMsg::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(1, this->peer_id(), target);
   }
 
-  // int64 Timestamp = 2;
+  // uint64 Timestamp = 2;
   if (this->timestamp() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->timestamp(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(2, this->timestamp(), target);
   }
 
   // .milvus.grpc.SyncType sync_type = 3;
@@ -18923,10 +19012,10 @@ size_t TimeSyncMsg::ByteSizeLong() const {
         this->peer_id());
   }
 
-  // int64 Timestamp = 2;
+  // uint64 Timestamp = 2;
   if (this->timestamp() != 0) {
     total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
         this->timestamp());
   }
 

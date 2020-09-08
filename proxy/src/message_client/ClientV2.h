@@ -26,7 +26,7 @@ class MsgClientV2 {
   //
   Status SendQueryMessage(const milvus::grpc::SearchParam &request);
 
-  void GetQueryResult(int64_t query_id);
+  static milvus::grpc::QueryResult GetQueryResult(int64_t query_id);
 
  private:
 

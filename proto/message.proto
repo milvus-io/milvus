@@ -208,6 +208,8 @@ message QueryResult {
     repeated float scores = 4;
     repeated float distances = 5;
     repeated KeyValuePair extra_params = 6;
+    int64 query_id = 7;
+    int64 client_id = 8;
 }
 
 /**
