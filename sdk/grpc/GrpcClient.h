@@ -81,9 +81,6 @@ class GrpcClient {
     LoadCollection(grpc::CollectionName& collection_name);
 
     Status
-    GetIndexInfo(grpc::CollectionName& collection_name, grpc::IndexParam& index_param);
-
-    Status
     DropIndex(grpc::IndexParam& index_param);
 
     Status
@@ -102,7 +99,7 @@ class GrpcClient {
     Flush(const std::string& collection_name);
 
     Status
-    Compact(milvus::grpc::CollectionName& collection_name);
+    Compact(milvus::grpc::CompactParam& compact_param);
 
     Status
     Disconnect();

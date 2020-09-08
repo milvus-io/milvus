@@ -474,7 +474,7 @@ class Connection {
      * @return Indicate if the operation is succeed.
      */
     virtual Status
-    ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
+    ListIDInSegment(const std::string& collection_name, const int64_t& segment_id,
                     std::vector<int64_t>& id_array) = 0;
 
     /**
@@ -507,11 +507,12 @@ class Connection {
      * This method is used to compact collection
      *
      * @param collection_name, target collection's name.
+     * @param threshold
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    Compact(const std::string& collection_name) = 0;
+    Compact(const std::string& collection_name, const double& threshold) = 0;
 };
 
 }  // namespace milvus

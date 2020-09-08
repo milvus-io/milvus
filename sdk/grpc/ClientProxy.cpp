@@ -757,12 +757,12 @@ ClientProxy::Search(const std::string& collection_name, const std::vector<std::s
 }
 
 Status
-ClientProxy::ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
+ClientProxy::ListIDInSegment(const std::string& collection_name, const int64_t& segment_id,
                              std::vector<int64_t>& id_array) {
     try {
         ::milvus::grpc::GetEntityIDsParam param;
         param.set_collection_name(collection_name);
-        param.set_segment_name(segment_name);
+        param.set_segment_id(segment_id);
 
         ::milvus::grpc::EntityIds entity_ids;
         Status status = client_ptr_->ListIDInSegment(param, entity_ids);
@@ -805,11 +805,12 @@ ClientProxy::Flush(const std::vector<std::string>& collection_name_array) {
 }
 
 Status
-ClientProxy::Compact(const std::string& collection_name) {
+ClientProxy::Compact(const std::string& collection_name, const double& threshold) {
     try {
-        ::milvus::grpc::CollectionName grpc_collection_name;
-        grpc_collection_name.set_collection_name(collection_name);
-        Status status = client_ptr_->Compact(grpc_collection_name);
+        ::milvus::grpc::CompactParam grpc_compact_param;
+        grpc_compact_param.set_collection_name(collection_name);
+        grpc_compact_param.set_threshold(threshold);
+        Status status = client_ptr_->Compact(grpc_compact_param);
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to compact collection: " + std::string(ex.what()));
