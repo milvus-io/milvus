@@ -43,6 +43,7 @@ SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss,
                                                    snapshot::IDS_TYPE& segment_ids)
     : BaseT(ss), field_name_(field_name), segment_ids_(segment_ids) {
     build_index_threshold_ = config.engine.build_index_threshold();
+    LOG_ENGINE_DEBUG_ << "FIO - Snapshot get build_index_threshold " << build_index_threshold_;
 }
 
 Status

@@ -774,8 +774,10 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
     }
 
     LOG_ENGINE_DEBUG_ << "Before compacting, wait for build index thread to finish...";
+    LOG_ENGINE_DEBUG_ << "CYD-777 wait flush_merge_compact_mutex_\n";
     const std::lock_guard<std::mutex> index_lock(build_index_mutex_);
     const std::lock_guard<std::mutex> merge_lock(flush_merge_compact_mutex_);
+    LOG_ENGINE_DEBUG_ << "CYD-777 lock flush_merge_compact_mutex_\n";
 
     Status status;
     bool has_collection = false;
@@ -843,6 +845,7 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
         }
     }
 
+    LOG_ENGINE_DEBUG_ << "CYD-777 unlock flush_merge_compact_mutex_\n";
     return status;
 }
 
@@ -863,22 +866,28 @@ DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
         }
 
         {
+            LOG_ENGINE_DEBUG_ << "CYD-868 wait flush_merge_compact_mutex_\n";
             const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            LOG_ENGINE_DEBUG_ << "CYD-868 lock flush_merge_compact_mutex_\n";
             int64_t collection_id = ss->GetCollectionId();
             status = mem_mgr_->Flush(collection_id);
             if (!status.ok()) {
                 return;
             }
             flushed_collection_ids.insert(collection_id);
+            LOG_ENGINE_DEBUG_ << "CYD-868 unlock flush_merge_compact_mutex_\n";
         }
     } else {
         // flush all collections
         {
+            LOG_ENGINE_DEBUG_ << "CYD-881 wait flush_merge_compact_mutex_\n";
             const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+            LOG_ENGINE_DEBUG_ << "CYD-881 lock flush_merge_compact_mutex_\n";
             status = mem_mgr_->Flush(flushed_collection_ids);
             if (!status.ok()) {
                 return;
             }
+            LOG_ENGINE_DEBUG_ << "CYD-881 unlock flush_merge_compact_mutex_\n";
         }
     }
 
@@ -1098,7 +1107,9 @@ DBImpl::BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all) 
     SetThreadName("merge");
 
     for (auto& collection_id : collection_ids) {
+        LOG_ENGINE_DEBUG_ << "CYD-1107 wait flush_merge_compact_mutex_\n";
         const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
+        LOG_ENGINE_DEBUG_ << "CYD-1107 lock flush_merge_compact_mutex_\n";
 
         MergeStrategyType type = force_merge_all ? MergeStrategyType::SIMPLE : MergeStrategyType::LAYERED;
         auto status = merge_mgr_ptr_->MergeSegments(collection_id, type);
@@ -1111,6 +1122,7 @@ DBImpl::BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all) 
             LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection id: " << collection_id;
             break;
         }
+        LOG_ENGINE_DEBUG_ << "CYD-1107 unlock flush_merge_compact_mutex_\n";
     }
 }
 

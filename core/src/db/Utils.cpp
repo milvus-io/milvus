@@ -180,6 +180,7 @@ SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<Dat
     // if user specify a tiny segment_row_count(such as 1) , also no need to split,
     // use build_index_threshold(default is 4096) to avoid tiny segment_row_count
     if (chunk->count_ <= segment_row_count || chunk->count_ <= config.engine.build_index_threshold.value) {
+        LOG_ENGINE_DEBUG_ << "FIO - DB get build_index_threshold " << config.engine.build_index_threshold.value;
         chunks.push_back(chunk);
         return Status::OK();
     }
