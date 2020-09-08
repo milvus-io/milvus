@@ -363,7 +363,7 @@ func (s *TikvStore) GetSegments(ctx context.Context, key Key, timestamp Timestam
 		if err != nil {
 			panic("must no error")
 		}
-		if ts <= timestamp {
+		if ts <= timestamp && segment != string(DeleteMark){
 			segmentsSet[segment] = true
 		}
 	}

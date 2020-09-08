@@ -225,7 +225,9 @@ func (s *minioDriver) GetSegments(ctx context.Context, key Key, timestamp Timest
 		if err != nil {
 			panic("must no error")
 		}
-		segmentsSet[segment] = true
+		if segment != "delete" {
+			segmentsSet[segment] = true
+		}
 	}
 
 	var segments []string
