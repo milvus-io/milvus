@@ -7,7 +7,6 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import io.milvus.client.*;
-import org.checkerframework.checker.nullness.compatqual.NullableDecl;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -183,7 +182,6 @@ public class TestIndex {
                     }
                 }, MoreExecutors.directExecutor()
         );
-
     }
 
 }
