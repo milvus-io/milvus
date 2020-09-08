@@ -177,7 +177,7 @@ WalManager::OperationDone(const std::string& collection_name, idx_t op_id) {
 }
 
 Status
-WalManager::Recovery(const DBPtr& db) {
+WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
     WaitCleanupFinish();
 
     try {
@@ -203,6 +203,12 @@ WalManager::Recovery(const DBPtr& db) {
                 if (max_op_id_map_.find(collection_name) != max_op_id_map_.end()) {
                     max_op_id = max_op_id_map_[collection_name];
                 }
+            }
+
+            auto iter = max_op_ids.find(collection_name);
+            if (iter != max_op_ids.end()) {
+                idx_t outer_max_id = iter->second;
+                max_op_id = outer_max_id > max_op_id ? outer_max_id : max_op_id;
             }
 
             // id_files arrange id in assendent, we know which file should be read
