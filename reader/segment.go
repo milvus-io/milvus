@@ -45,57 +45,6 @@ func (s *Segment) GetStatus() int {
 	}
 }
 
-func (s *Segment) GetSegmentID() int64 {
-	/*C.GetSegmentId
-	unsigned long
-	GetSegmentId(CSegmentBase c_segment);
-	*/
-	var segmentID = C.GetSegmentId(s.SegmentPtr)
-	return int64(segmentID)
-}
-
-func (s *Segment) SetSegmentID(segmentID int64) {
-	/*C.SetSegmentId
-	void
-	SetSegmentId(CSegmentBase c_segment, unsigned long segment_id);
-	*/
-	C.SetSegmentId(s.SegmentPtr, C.long(segmentID))
-}
-
-func (s *Segment) GetMaxTimestamp() uint64 {
-	/*C.GetTimeEnd
-	unsigned long
-	GetTimeEnd(CSegmentBase c_segment);
-	*/
-	var maxTimestamp = C.GetTimeEnd(s.SegmentPtr)
-	return uint64(maxTimestamp)
-}
-
-func (s *Segment) SetMaxTimestamp(maxTimestamp uint64) {
-	/*C.SetTimeEnd
-	void
-	SetTimeEnd(CSegmentBase c_segment, unsigned long time_end);
-	*/
-	C.SetTimeEnd(s.SegmentPtr, C.ulong(maxTimestamp))
-}
-
-func (s *Segment) GetMinTimestamp() uint64 {
-	/*C.GetTimeBegin
-	unsigned long
-	GetTimeBegin(CSegmentBase c_segment);
-	*/
-	var minTimestamp = C.GetTimeBegin(s.SegmentPtr)
-	return uint64(minTimestamp)
-}
-
-func (s *Segment) SetMinTimestamp(minTimestamp uint64) {
-	/*C.SetTimeBegin
-	void
-	SetTimeBegin(CSegmentBase c_segment, unsigned long time_begin);
-	*/
-	C.SetTimeBegin(s.SegmentPtr, C.ulong(minTimestamp))
-}
-
 func (s *Segment) GetRowCount() int64 {
 	/*C.GetRowCount
 	long int
@@ -136,8 +85,15 @@ func (s *Segment) SegmentInsert(entityIds *[]int64, timestamps *[]uint64, record
 	           const unsigned long* timestamps,
 	           void* raw_data,
 	           int sizeof_per_row,
-	           signed long int count);
+	           signed long int count,
+			   const unsigned long timestamp_min,
+			   const unsigned long timestamp_max);
 	*/
+	// Blobs to one big blob
+	var rowData []byte
+	for i := 0; i < len(*records); i++ {
+		copy(rowData, (*records)[i])
+	}
 
 	// TODO: remove hard code schema
 	// auto schema_tmp = std::make_shared<Schema>();
@@ -156,7 +112,7 @@ func (s *Segment) SegmentInsert(entityIds *[]int64, timestamps *[]uint64, record
 	}
 	const sizeofPerRow = 4 + DIM * 4
 
-	var status = C.Insert(s.SegmentPtr, C.long(N), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]), unsafe.Pointer(&rawData[0]), C.int(sizeofPerRow), C.long(N))
+	var status = C.Insert(s.SegmentPtr, C.long(N), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]), unsafe.Pointer(&rawData[0]), C.int(sizeofPerRow), C.long(N), C.ulong(timestampMin), C.ulong(timestampMax))
 
 	if status != 0 {
 		return errors.New("Insert failed, error code = " + strconv.Itoa(int(status)))
@@ -165,7 +121,7 @@ func (s *Segment) SegmentInsert(entityIds *[]int64, timestamps *[]uint64, record
 	return nil
 }
 
-func (s *Segment) SegmentDelete(entityIds *[]int64, timestamps *[]uint64) error {
+func (s *Segment) SegmentDelete(entityIds *[]int64, timestamps *[]uint64, timestampMin uint64, timestampMax uint64) error {
 	/*C.Delete
 	int
 	Delete(CSegmentBase c_segment,
@@ -175,7 +131,7 @@ func (s *Segment) SegmentDelete(entityIds *[]int64, timestamps *[]uint64) error 
 	*/
 	size := len(*entityIds)
 
-	var status = C.Delete(s.SegmentPtr, C.long(size), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]))
+	var status = C.Delete(s.SegmentPtr, C.long(size), (*C.ulong)(&(*entityIds)[0]), (*C.ulong)(&(*timestamps)[0]), C.ulong(timestampMin), C.ulong(timestampMax))
 
 	if status != 0 {
 		return errors.New("Delete failed, error code = " + strconv.Itoa(int(status)))
