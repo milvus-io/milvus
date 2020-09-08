@@ -32,8 +32,19 @@ namespace engine {
 
 extern const char* COLLECTIONS_FOLDER;
 
+class Segment;
+using SegmentPtr = std::shared_ptr<Segment>;
+
 class Segment {
  public:
+    // copy raw data to a new segment, ignore the index data, delete docs and bloom filter
+    Status
+    CopyOutRawData(SegmentPtr& target);
+
+    // share raw data to a new DataChunk
+    Status
+    ShareToChunkData(DataChunkPtr& chunk_ptr);
+
     Status
     SetFields(int64_t collection_id);
 
@@ -145,8 +156,6 @@ class Segment {
     segment::DeletedDocsPtr deleted_docs_ptr_ = nullptr;
     segment::IdBloomFilterPtr id_bloom_filter_ptr_ = nullptr;
 };
-
-using SegmentPtr = std::shared_ptr<Segment>;
 
 }  // namespace engine
 }  // namespace milvus
