@@ -19,11 +19,11 @@ public class TestSearchEntities {
     int n_probe = 20;
     int top_k = Constants.topk;
     int nq = Constants.nq;
-    String binaryIndexType = "BIN_IVF_FLAT";
 
     List<List<Float>> queryVectors = Constants.vectors.subList(0, nq);
     List<List<Byte>> queryVectorsBinary = Constants.vectorsBinary.subList(0, nq);
 
+    String binaryIndexType = "BIN_IVF_FLAT";
     public String floatDsl = Constants.searchParam;
     public String binaryDsl = Constants.binarySearchParam;
 
