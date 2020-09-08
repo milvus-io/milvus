@@ -2,12 +2,14 @@ package master
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/czs007/suvlim/pkg/master/common"
 	"github.com/czs007/suvlim/pkg/master/informer"
 	"github.com/czs007/suvlim/pkg/master/kv"
 	"github.com/czs007/suvlim/pkg/master/mock"
+
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -39,13 +41,20 @@ func CollectionController() {
 	defer cli.Close()
 	kvbase := kv.NewEtcdKVBase(cli, common.ETCD_ROOT_PATH)
 	c := mock.FakeCreateCollection(uint64(3333))
-	s := mock.FakeCreateSegment(uint64(11111), c, time.Now(), time.Unix(1<<63-1, 0))
+	s := mock.FakeCreateSegment(uint64(11111), c, time.Now(), time.Unix(1<<36-1, 0))
 	collectionData, _ := mock.Collection2JSON(c)
-	segmentData, _ := mock.Segment2JSON(s)
-	kvbase.Save("test-collection", collectionData)
-	kvbase.Save("test-segment", segmentData)
-	fmt.Println(kvbase.Load("test-collection"))
-	fmt.Println(kvbase.Load("test-segment"))
+	segmentData, err := mock.Segment2JSON(s)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = kvbase.Save("test-collection", collectionData)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = kvbase.Save("test-segment", segmentData)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func Sync() {
