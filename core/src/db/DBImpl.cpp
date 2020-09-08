@@ -287,14 +287,14 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    // erase insert buffer of this partition
     auto partition = ss->GetPartition(partition_name);
     if (partition != nullptr) {
+        // erase insert buffer of this partition
         mem_mgr_->EraseMem(ss->GetCollectionId(), partition->GetID());
-    }
 
-    // erase cache
-    ClearPartitionCache(ss, options_.meta_.path_, partition->GetID());
+        // erase cache
+        ClearPartitionCache(ss, options_.meta_.path_, partition->GetID());
+    }
 
     snapshot::PartitionContext context;
     context.name = partition_name;

@@ -37,15 +37,17 @@
 namespace milvus {
 namespace segment {
 
-SegmentReader::SegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor)
+SegmentReader::SegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor,
+                             bool initialize)
     : dir_root_(dir_root), segment_visitor_(segment_visitor) {
-    Initialize();
+    dir_collections_ = dir_root_ + engine::COLLECTIONS_FOLDER;
+    if (initialize) {
+        Initialize();
+    }
 }
 
 Status
 SegmentReader::Initialize() {
-    dir_collections_ = dir_root_ + engine::COLLECTIONS_FOLDER;
-
     std::string directory =
         engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
 
@@ -602,14 +604,13 @@ SegmentReader::ClearCache() {
     // remove delete docs and bloom filter from cache
     auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
     if (uid_field_visitor) {
-        {
-            auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
+        if (auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER)) {
             std::string file_path =
                 engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
             cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
         }
-        {
-            auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
+
+        if (auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS)) {
             std::string file_path =
                 engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
             cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
@@ -623,10 +624,8 @@ SegmentReader::ClearCache() {
             continue;
         }
 
-        auto field = field_visitor->GetField();
         // erase raw data from cache manager
-        {
-            auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+        if (auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW)) {
             std::string file_path =
                 engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
             cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
@@ -635,6 +634,7 @@ SegmentReader::ClearCache() {
         // erase index data from cache manager
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
+            const engine::snapshot::FieldPtr& field = field_visitor->GetField();
             // temp index
             std::string file_path;
             GetTempIndexPath(field->GetName(), file_path);

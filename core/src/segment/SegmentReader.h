@@ -31,7 +31,8 @@ namespace segment {
 
 class SegmentReader {
  public:
-    explicit SegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor);
+    SegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor,
+                  bool initialize = true);
 
     Status
     Load();
