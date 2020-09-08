@@ -65,5 +65,8 @@ ClearCollectionCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root)
 Status
 ClearPartitionCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root, snapshot::ID_TYPE partition_id);
 
+Status
+ClearIndexCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root, const std::string& field_name);
+
 }  // namespace engine
 }  // namespace milvus

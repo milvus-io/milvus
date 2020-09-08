@@ -99,12 +99,20 @@ class SegmentReader {
     Status
     ClearCache();
 
+    // clear index cache from cache manager, use this method for index drop
+    // if the field_name is empty, will clear all fields index
+    Status
+    ClearIndexCache(const std::string& field_name);
+
  private:
     Status
     Initialize();
 
     Status
     GetTempIndexPath(const std::string& field_name, std::string& path);
+
+    Status
+    ClearFieldIndexCache(const engine::SegmentVisitor::FieldVisitorT& field_visitor);
 
  private:
     engine::SegmentVisitorPtr segment_visitor_;

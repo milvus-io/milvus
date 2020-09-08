@@ -329,5 +329,19 @@ ClearPartitionCache(engine::snapshot::ScopedSnapshotT& ss, const std::string& di
     return Status::OK();
 }
 
+Status
+ClearIndexCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root, const std::string& field_name) {
+    auto& segments = ss->GetResources<snapshot::Segment>();
+    for (auto& kv : segments) {
+        auto& segment = kv.second;
+        auto seg_visitor = SegmentVisitor::Build(ss, segment->GetID());
+        segment::SegmentReaderPtr segment_reader =
+            std::make_shared<segment::SegmentReader>(dir_root, seg_visitor, false);
+        segment_reader->ClearIndexCache(field_name);
+    }
+
+    return Status::OK();
+}
+
 }  // namespace engine
 }  // namespace milvus

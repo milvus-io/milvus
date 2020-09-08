@@ -406,6 +406,9 @@ DBImpl::DropIndex(const std::string& collection_name, const std::string& field_n
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    ClearIndexCache(ss, options_.meta_.path_, field_name);
+
     std::set<int64_t> collection_ids = {ss->GetCollectionId()};
     StartMergeTask(collection_ids, true);
 

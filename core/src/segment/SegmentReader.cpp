@@ -632,21 +632,52 @@ SegmentReader::ClearCache() {
         }
 
         // erase index data from cache manager
-        auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
-            const engine::snapshot::FieldPtr& field = field_visitor->GetField();
-            // temp index
-            std::string file_path;
-            GetTempIndexPath(field->GetName(), file_path);
-            cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
-        } else {
-            std::string file_path =
-                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, index_visitor->GetFile());
-            cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
-        }
+        ClearFieldIndexCache(field_visitor);
     }
 
     cache::CpuCacheMgr::GetInstance().PrintInfo();
+    return Status::OK();
+}
+
+Status
+SegmentReader::ClearIndexCache(const std::string& field_name) {
+    if (segment_visitor_ == nullptr) {
+        return Status::OK();
+    }
+
+    if (field_name.empty()) {
+        const engine::SegmentVisitor::IdMapT& field_visitors = segment_visitor_->GetFieldVisitors();
+        for (auto& pair : field_visitors) {
+            auto& field_visitor = pair.second;
+            ClearFieldIndexCache(field_visitor);
+        }
+    } else {
+        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        ClearFieldIndexCache(field_visitor);
+    }
+
+    return Status::OK();
+}
+
+Status
+SegmentReader::ClearFieldIndexCache(const engine::SegmentVisitor::FieldVisitorT& field_visitor) {
+    if (field_visitor == nullptr || field_visitor->GetField() == nullptr) {
+        return Status(DB_ERROR, "null pointer");
+    }
+
+    auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+    if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
+        const engine::snapshot::FieldPtr& field = field_visitor->GetField();
+        // temp index
+        std::string file_path;
+        GetTempIndexPath(field->GetName(), file_path);
+        cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
+    } else {
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, index_visitor->GetFile());
+        cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
+    }
+
     return Status::OK();
 }
 
