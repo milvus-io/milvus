@@ -37,20 +37,20 @@ class ConnectionImpl : public Connection {
     Status
     Disconnect() override;
 
-//    std::string
-//    ClientVersion() const override;
-//
-//    std::string
-//    ServerVersion() const override;
-//
-//    std::string
-//    ServerStatus() const override;
-//
-//    Status
-//    GetConfig(const std::string& node_name, std::string& value) const override;
-//
-//    Status
-//    SetConfig(const std::string& node_name, const std::string& value) const override;
+    //    std::string
+    //    ClientVersion() const override;
+    //
+    //    std::string
+    //    ServerVersion() const override;
+    //
+    //    std::string
+    //    ServerStatus() const override;
+    //
+    //    Status
+    //    GetConfig(const std::string& node_name, std::string& value) const override;
+    //
+    //    Status
+    //    SetConfig(const std::string& node_name, const std::string& value) const override;
 
     Status
     CreateCollection(const Mapping& mapping, const std::string& extra_params) override;
@@ -112,7 +112,7 @@ class ConnectionImpl : public Connection {
              BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) override;
 
     Status
-    ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
+    ListIDInSegment(const std::string& collection_name, const int64_t& segment_id,
                     std::vector<int64_t>& id_array) override;
 
     Status
@@ -122,7 +122,7 @@ class ConnectionImpl : public Connection {
     Flush(const std::vector<std::string>& collection_name_array) override;
 
     Status
-    Compact(const std::string& collection_name) override;
+    Compact(const std::string& collection_name, const double& threshold) override;
 
  private:
     std::shared_ptr<ClientProxy> client_proxy_;

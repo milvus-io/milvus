@@ -293,6 +293,7 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
     if (schema.extra_params_.contains(engine::PARAM_UID_AUTOGEN)) {
         json_out[engine::PARAM_UID_AUTOGEN] = schema.extra_params_[engine::PARAM_UID_AUTOGEN];
     }
+    json_out["count"] = count;
     return Status::OK();
 }
 
