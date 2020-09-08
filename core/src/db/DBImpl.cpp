@@ -1157,7 +1157,7 @@ DBImpl::DecreaseLiveBuildTaskNum() {
 bool
 DBImpl::IsBuildingIndex() {
     std::lock_guard<std::mutex> lock(live_build_count_mutex_);
-    return live_build_num_ < 0;
+    return live_build_num_ > 0;
 }
 
 void
