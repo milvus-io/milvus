@@ -277,6 +277,9 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
         return status;
     }
 
+    // clear cache of merged segment
+    segment_reader->ClearCache();
+
     // Note: no need to merge bloom filter, the bloom filter will be created during serialize
 
     return Status::OK();

@@ -94,9 +94,16 @@ class SegmentReader {
         return segment_visitor_;
     }
 
+    // clear cache from cache manager, use this method for segment merge/compact and collection/partition drop
+    Status
+    ClearCache();
+
  private:
     Status
     Initialize();
+
+    Status
+    GetTempIndexPath(const std::string& field_name, std::string& path);
 
  private:
     engine::SegmentVisitorPtr segment_visitor_;
