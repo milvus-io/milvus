@@ -87,7 +87,7 @@ MergeManagerImpl::MergeSegments(int64_t collection_id, MergeStrategyType type) {
 
         // distribute segments to groups by some strategy
         SegmentGroups segment_groups;
-        auto status = strategy->RegroupSegments(part2seg, row_count_per_segment, segment_groups);
+        status = strategy->RegroupSegments(part2seg, row_count_per_segment, segment_groups);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to regroup segments for collection: " << latest_ss->GetName()
                               << ", continue to merge all files into one";
@@ -100,8 +100,8 @@ MergeManagerImpl::MergeSegments(int64_t collection_id, MergeStrategyType type) {
         }
 
         // do merge
-        for (auto& segments : segment_groups) {
-            MergeTask task(options_, latest_ss, segments);
+        for (auto& segment_group : segment_groups) {
+            MergeTask task(options_, latest_ss, segment_group);
             task.Execute();
         }
     }
