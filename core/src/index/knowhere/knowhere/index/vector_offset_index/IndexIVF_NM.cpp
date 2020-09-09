@@ -82,9 +82,10 @@ IVF_NM::Load(const BinarySet& binary_set) {
         prefix_sum[i] = curr_index;
         curr_index += list_size;
     }
+    data_ = std::shared_ptr<uint8_t[]>(reinterpret_cast<uint8_t*>(arranged_data));
 #else
     auto rol = dynamic_cast<faiss::ReadOnlyArrayInvertedLists*>(invlists);
-    auto arranged_data = reinterpret_cast<float*>(rol->pin_readonly_codes->data);
+    auto arranged_data = reinterpret_cast<float *>(rol->pin_readonly_codes->data);
     auto lengths = rol->readonly_length;
     auto rol_ids = reinterpret_cast<const int64_t*>(rol->pin_readonly_ids->data);
     for (size_t i = 0; i < invlists->nlist; i++) {
@@ -96,8 +97,11 @@ IVF_NM::Load(const BinarySet& binary_set) {
         prefix_sum[i] = curr_index;
         curr_index += list_size;
     }
+
+    /* hold codes shared pointer */
+    ro_codes = rol->pin_readonly_codes;
+    data_ = nullptr;
 #endif
-    data_ = std::shared_ptr<uint8_t[]>(reinterpret_cast<uint8_t*>(arranged_data));
 }
 
 void
@@ -241,7 +245,7 @@ IVF_NM::CopyCpuToGpu(const int64_t device_id, const Config& config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
         auto gpu_index =
-            faiss::gpu::index_cpu_to_gpu_without_codes(res->faiss_res.get(), device_id, index_.get(), data_.get());
+            faiss::gpu::index_cpu_to_gpu_without_codes(res->faiss_res.get(), device_id, index_.get(), static_cast<const uint8_t*>(ro_codes->data));
 
         std::shared_ptr<faiss::Index> device_index;
         device_index.reset(gpu_index);
@@ -301,7 +305,7 @@ IVF_NM::GenParams(const Config& config) {
 }
 
 void
-IVF_NM::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, int64_t* labels, const Config& config) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->nprobe = params->nprobe;
@@ -312,7 +316,15 @@ IVF_NM::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
         ivf_index->parallel_mode = 0;
     }
     bool is_sq8 = (index_type_ == IndexEnum::INDEX_FAISS_IVFSQ8) ? true : false;
-    ivf_index->search_without_codes(n, reinterpret_cast<const float*>(data), data_.get(), prefix_sum, is_sq8, k,
+
+
+#ifndef MILVUS_GPU_VERSION
+    auto data = static_cast<const uint8_t *>(data_.get());
+#else
+    auto data = static_cast<const uint8_t *>(ro_codes->data);
+#endif
+
+    ivf_index->search_without_codes(n, reinterpret_cast<const float*>(query), data, prefix_sum, is_sq8, k,
                                     distances, labels, bitset_);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
