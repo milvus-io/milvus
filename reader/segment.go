@@ -76,7 +76,19 @@ func (s *Segment) Close() error {
 }
 
 ////////////////////////////////////////////////////////////////////////////
-func (s *Segment) SegmentInsert(entityIds *[]int64, timestamps *[]uint64, records *[][]byte, timestampMin uint64, timestampMax uint64) error {
+func (s *Segment) SegmentPreInsert(numOfRecords int) int64 {
+	var offset = C.PreInsert(numOfRecords)
+
+	return offset
+}
+
+func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
+	var offset = C.PreDelete(numOfRecords)
+
+	return offset
+}
+
+func (s *Segment) SegmentInsert(entityIds *[]int64, timestamps *[]uint64, records *[][]byte) error {
 	/*C.Insert
 	int
 	Insert(CSegmentBase c_segment,
@@ -121,7 +133,7 @@ func (s *Segment) SegmentInsert(entityIds *[]int64, timestamps *[]uint64, record
 	return nil
 }
 
-func (s *Segment) SegmentDelete(entityIds *[]int64, timestamps *[]uint64, timestampMin uint64, timestampMax uint64) error {
+func (s *Segment) SegmentDelete(entityIds *[]int64, timestamps *[]uint64) error {
 	/*C.Delete
 	int
 	Delete(CSegmentBase c_segment,

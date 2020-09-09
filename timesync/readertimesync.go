@@ -17,6 +17,7 @@ type ReaderTimeSync interface {
 	Close()
 	TimeSync() <-chan TimeSyncMsg
 	InsertOrDelete() <-chan *pb.InsertOrDeleteMsg
+	IsInsertDeleteChanFull() bool
 }
 
 type TimeSyncMsg struct {
@@ -45,9 +46,9 @@ type readerTimeSyncCfg struct {
 	cancel context.CancelFunc
 }
 
-func toTimeStamp(ts *pb.TimeSyncMsg) int {
+func toMillisecond(ts *pb.TimeSyncMsg) int {
 	// get Millisecond in second
-	return int(ts.GetTimestamp()>>18) % 1000
+	return int(ts.GetTimestamp() >> 18)
 }
 
 func NewReaderTimeSync(
@@ -86,7 +87,7 @@ func NewReaderTimeSync(
 	}
 	//set default value
 	if r.readerQueueSize == 0 {
-		r.readerQueueSize = 128
+		r.readerQueueSize = 1024
 	}
 
 	r.timesyncMsgChan = make(chan TimeSyncMsg, len(readTopics)*r.readerQueueSize)
@@ -158,13 +159,17 @@ func (r *readerTimeSyncCfg) TimeSync() <-chan TimeSyncMsg {
 	return r.timesyncMsgChan
 }
 
+func (r *readerTimeSyncCfg) IsInsertDeleteChanFull() bool {
+	return len(r.insertOrDeleteChan) == len(r.readerProducer)*r.readerQueueSize
+}
+
 func (r *readerTimeSyncCfg) alignTimeSync(ts []*pb.TimeSyncMsg) []*pb.TimeSyncMsg {
 	if len(r.proxyIdList) > 1 {
 		if len(ts) > 1 {
 			for i := 1; i < len(r.proxyIdList); i++ {
 				curIdx := len(ts) - 1 - i
 				preIdx := len(ts) - i
-				timeGap := toTimeStamp(ts[curIdx]) - toTimeStamp(ts[preIdx])
+				timeGap := toMillisecond(ts[curIdx]) - toMillisecond(ts[preIdx])
 				if timeGap >= (r.interval/2) || timeGap <= (-r.interval/2) {
 					ts = ts[preIdx:]
 					return ts
@@ -274,6 +279,9 @@ func (r *readerTimeSyncCfg) startReadTopics() {
 					r.revTimesyncFromReader[imsg.Timestamp] = gval
 				}
 			} else {
+				if r.IsInsertDeleteChanFull() {
+					log.Printf("WARN :  Insert or delete chan is full ...")
+				}
 				tsm.NumRecorders++
 				r.insertOrDeleteChan <- &imsg
 			}
