@@ -2,7 +2,6 @@ enable_testing()
 set( GRPC_SERVICE_FILES 
 	 ${MILVUS_ENGINE_SRC}/grpc/message.grpc.pb.cc
 		${MILVUS_ENGINE_SRC}/grpc/message.pb.cc
-		${MILVUS_ENGINE_SRC}/utils/Status.cpp
         )
 
 
@@ -22,16 +21,17 @@ target_include_directories(test_pulsar PUBLIC ${PROJECT_BINARY_DIR}/thirdparty/a
 #add_executable(test_pulsar ${unittest_srcs})
 
 target_link_libraries(test_pulsar
-        message_client_cpp
-        pulsarStatic
+		message_client_cpp
+		libboost_filesystem.a
+		libboost_system.a
+		libboost_serialization.a
         gtest
         gtest_main
         libprotobuf
         grpc++_reflection
         grpc++
-        libboost_system.a
-        libboost_filesystem.a
-        libboost_serialization.a
+		pthread
+		stdc++
         )
 
 install(TARGETS test_pulsar DESTINATION unittest)

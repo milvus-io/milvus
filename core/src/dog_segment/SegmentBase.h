@@ -34,13 +34,13 @@ class SegmentBase {
     virtual int64_t PreInsert(int64_t size) = 0;
 
     virtual Status
-    Insert(int64_t reserved_offset, int64_t size, const uint64_t* primary_keys, const Timestamp* timestamps, const DogDataChunk& values) = 0;
+    Insert(int64_t reserved_offset, int64_t size, const int64_t* primary_keys, const Timestamp* timestamps, const DogDataChunk& values) = 0;
 
     virtual int64_t PreDelete(int64_t size) = 0;
     // TODO: add id into delete log, possibly bitmap
 
     virtual Status
-    Delete(int64_t reserved_offset, int64_t size, const uint64_t* primary_keys, const Timestamp* timestamps) = 0;
+    Delete(int64_t reserved_offset, int64_t size, const int64_t* primary_keys, const Timestamp* timestamps) = 0;
 
     // query contains metadata of
     virtual Status

@@ -28,7 +28,7 @@ Insert(CSegmentBase c_segment,
        unsigned long timestamp_max);
 
 long int
-PreInsert(long int size);
+PreInsert(CSegmentBase c_segment, long int size);
 
 int
 Delete(CSegmentBase c_segment,
@@ -40,7 +40,7 @@ Delete(CSegmentBase c_segment,
        unsigned long timestamp_max);
 
 long int
-PreDelete(long int size);
+PreDelete(CSegmentBase c_segment, long int size);
 
 int
 Search(CSegmentBase c_segment,

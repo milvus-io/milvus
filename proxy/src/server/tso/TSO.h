@@ -22,8 +22,8 @@ class TSOracle {
 
  private:
   std::mutex mutex_;
-  uint64_t last_time_stamp_;
-  uint64_t logical_;
+  uint64_t last_time_stamp_ = 0;
+  uint64_t logical_ = 0;
 };
 }
 }
