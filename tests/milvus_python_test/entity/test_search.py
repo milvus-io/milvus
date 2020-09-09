@@ -147,7 +147,7 @@ class TestSearchBase:
         query_vec = [vectors[0]]
         top_k = get_top_k
         status, result = connect.search(collection, top_k, query_vec)
-        if top_k <= 2048:
+        if top_k <= 16384:
             assert status.OK()
             assert len(result[0]) == min(len(vectors), top_k)
             assert result[0][0].distance <= epsilon
