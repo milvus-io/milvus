@@ -242,15 +242,15 @@ ValidateStoragePath(const std::string& path) {
 }
 
 Status
-ValidateCacheSize(int64_t size){
+ValidateCacheSize(int64_t size) {
     int64_t total_mem = 0, free_mem = 0;
     GetSystemMemInfo(total_mem, free_mem);
     int64_t cgroup_limit_mem = std::numeric_limits<int64_t>::max();
     GetSysCgroupMemLimit(cgroup_limit_mem);
     if (cgroup_limit_mem < total_mem && size > cgroup_limit_mem) {
         std::string msg = "Invalid cpu cache size: " + std::to_string(size) +
-            ". Cache.cache_size exceeds system cgroup memory size: " + std::to_string(cgroup_limit_mem) + "." +
-            "Consider increase docker memory limit.";
+                          ". Cache.cache_size exceeds system cgroup memory size: " + std::to_string(cgroup_limit_mem) +
+                          "." + "Consider increase docker memory limit.";
         return Status{SERVER_INVALID_ARGUMENT, msg};
     }
 

@@ -34,7 +34,7 @@ is_timezone_valid(const std::string& val, std::string& err) {
 bool
 is_cachesize_valid(int64_t size, std::string& err) {
     Status status = server::ValidateCacheSize(size);
-    if (!status.ok()){
+    if (!status.ok()) {
         err = status.message();
         return false;
     }
@@ -82,7 +82,7 @@ InitConfig() {
 
         /* cache */
         {"cache.cache_size", CreateSizeConfig_("cache.cache_size", _MODIFIABLE, 0, std::numeric_limits<int64_t>::max(),
-                                              &config.cache.cache_size.value, 4 * GB, is_cachesize_valid, nullptr)},
+                                               &config.cache.cache_size.value, 4 * GB, is_cachesize_valid, nullptr)},
         {"cache.cpu_cache_threshold",
          CreateFloatingConfig("cache.cpu_cache_threshold", 0.0, 1.0, &config.cache.cpu_cache_threshold.value, 0.7)},
         {"cache.insert_buffer_size",
