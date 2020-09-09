@@ -45,7 +45,12 @@ type readerTimeSyncCfg struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 }
-
+/*
+layout of timestamp
+   time  ms                     logic number
+/-------46 bit-----------\/------18bit-----\
++-------------------------+================+
+*/
 func toMillisecond(ts *pb.TimeSyncMsg) int {
 	// get Millisecond in second
 	return int(ts.GetTimestamp() >> 18)
