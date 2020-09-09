@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "config/ServerConfig.h"
+#include "utils/ConfigUtils.h"
 
 /* to find modifiable settings fast */
 #define _MODIFIABLE (true)
@@ -25,6 +26,16 @@ is_timezone_valid(const std::string& val, std::string& err) {
     auto sub_count = std::count(val.begin(), val.end(), '+');
     if (plus_count > 1 or sub_count > 1) {
         err = "Invalid timezone: " + val;
+        return false;
+    }
+    return true;
+}
+
+bool
+is_cachesize_valid(int64_t size, std::string& err) {
+    Status status = server::ValidateCacheSize(size);
+    if (!status.ok()){
+        err = status.message();
         return false;
     }
     return true;
@@ -70,8 +81,8 @@ InitConfig() {
         {"wal.path", CreateStringConfig("wal.path", &config.wal.path.value, "/var/lib/milvus/wal")},
 
         /* cache */
-        {"cache.cache_size", CreateSizeConfig("cache.cache_size", 0, std::numeric_limits<int64_t>::max(),
-                                              &config.cache.cache_size.value, 4 * GB)},
+        {"cache.cache_size", CreateSizeConfig_("cache.cache_size", _MODIFIABLE, 0, std::numeric_limits<int64_t>::max(),
+                                              &config.cache.cache_size.value, 4 * GB, is_cachesize_valid, nullptr)},
         {"cache.cpu_cache_threshold",
          CreateFloatingConfig("cache.cpu_cache_threshold", 0.0, 1.0, &config.cache.cpu_cache_threshold.value, 0.7)},
         {"cache.insert_buffer_size",

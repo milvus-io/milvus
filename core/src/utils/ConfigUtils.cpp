@@ -117,6 +117,20 @@ GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem) {
 }
 
 bool
+GetSysCgroupMemLimit(int64_t& limit_in_bytes) {
+    try {
+        std::ifstream file("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+        file >> limit_in_bytes;
+        return true;
+    } catch (std::exception& ex) {
+        std::string msg =
+            "Failed to read /sys/fs/cgroup/memory/memory.limit_in_bytes, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
+        return false;
+    }
+}
+
+bool
 GetSystemAvailableThreads(int64_t& thread_count) {
     // threadCnt = std::thread::hardware_concurrency();
     thread_count = sysconf(_SC_NPROCESSORS_CONF);
@@ -173,29 +187,6 @@ GetGpuMemory(int32_t gpu_index, int64_t& memory) {
 #endif
 
 Status
-ValidateIpAddress(const std::string& ip_address) {
-    struct in_addr address;
-
-    int result = inet_pton(AF_INET, ip_address.c_str(), &address);
-    fiu_do_on("config.ValidateIpAddress.error_ip_result", result = 2);
-
-    switch (result) {
-        case 1:
-            return Status::OK();
-        case 0: {
-            std::string msg = "Invalid IP address: " + ip_address;
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
-        default: {
-            std::string msg = "IP address conversion error: " + ip_address;
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_UNEXPECTED_ERROR, msg);
-        }
-    }
-}
-
-Status
 ValidateStringIsNumber(const std::string& str) {
     if (str.empty() || !std::all_of(str.begin(), str.end(), ::isdigit)) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
@@ -238,58 +229,6 @@ ValidateStringIsFloat(const std::string& str) {
 }
 
 Status
-ValidateDbURI(const std::string& uri) {
-    std::string dialectRegex = "(.*)";
-    std::string usernameRegex = "(.*)";
-    std::string passwordRegex = "(.*)";
-    std::string hostRegex = "(.*)";
-    std::string portRegex = "(.*)";
-    std::string dbNameRegex = "(.*)";
-    std::string uriRegexStr = dialectRegex + R"(\:\/\/)" + usernameRegex + R"(\:)" + passwordRegex + R"(\@)" +
-                              hostRegex + R"(\:)" + portRegex + R"(\/)" + dbNameRegex;
-    std::regex uriRegex(uriRegexStr);
-    std::smatch pieces_match;
-
-    bool okay = true;
-
-    if (std::regex_match(uri, pieces_match, uriRegex)) {
-        std::string dialect = pieces_match[1].str();
-        std::transform(dialect.begin(), dialect.end(), dialect.begin(), ::tolower);
-        if (dialect.find("mysql") == std::string::npos && dialect.find("sqlite") == std::string::npos &&
-            dialect.find("mock") == std::string::npos) {
-            LOG_SERVER_ERROR_ << "Invalid dialect in URI: dialect = " << dialect;
-            okay = false;
-        }
-
-        /*
-         *      Could be DNS, skip checking
-         *
-                std::string host = pieces_match[4].str();
-                if (!host.empty() && host != "localhost") {
-                    if (ValidateIpAddress(host) != SERVER_SUCCESS) {
-                        LOG_SERVER_ERROR_ << "Invalid host ip address in uri = " << host;
-                        okay = false;
-                    }
-                }
-        */
-
-        std::string port = pieces_match[5].str();
-        if (!port.empty()) {
-            auto status = ValidateStringIsNumber(port);
-            if (!status.ok()) {
-                LOG_SERVER_ERROR_ << "Invalid port in uri = " << port;
-                okay = false;
-            }
-        }
-    } else {
-        LOG_SERVER_ERROR_ << "Wrong URI format: URI = " << uri;
-        okay = false;
-    }
-
-    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid db backend uri"));
-}
-
-Status
 ValidateStoragePath(const std::string& path) {
     // Validate storage path if is valid, only correct absolute path will be validated pass
     // Invalid path only contain character[a-zA-Z], number[0-9], '-', and '_',
@@ -303,12 +242,19 @@ ValidateStoragePath(const std::string& path) {
 }
 
 Status
-ValidateLogLevel(const std::string& level) {
-    std::set<std::string> supported_level{"debug", "info", "warning", "error", "fatal"};
+ValidateCacheSize(int64_t size){
+    int64_t total_mem = 0, free_mem = 0;
+    GetSystemMemInfo(total_mem, free_mem);
+    int64_t cgroup_limit_mem = std::numeric_limits<int64_t>::max();
+    GetSysCgroupMemLimit(cgroup_limit_mem);
+    if (cgroup_limit_mem < total_mem && size > cgroup_limit_mem) {
+        std::string msg = "Invalid cpu cache size: " + std::to_string(size) +
+            ". Cache.cache_size exceeds system cgroup memory size: " + std::to_string(cgroup_limit_mem) + "." +
+            "Consider increase docker memory limit.";
+        return Status{SERVER_INVALID_ARGUMENT, msg};
+    }
 
-    return supported_level.find(level) != supported_level.end()
-               ? Status::OK()
-               : Status(SERVER_INVALID_ARGUMENT, "Log level must be one of debug, info, warning, error and fatal.");
+    return Status::OK();
 }
 
 bool
