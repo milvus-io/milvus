@@ -43,9 +43,6 @@ class SegmentWriter {
     AddChunk(const engine::DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
 
     Status
-    CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr);
-
-    Status
     WriteBloomFilter(const std::string& file_path, const IdBloomFilterPtr& bloom_filter_ptr);
 
     Status

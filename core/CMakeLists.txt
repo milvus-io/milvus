@@ -96,12 +96,14 @@ else ()
     message( FATAL_ERROR "Unknown CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}" )
 endif ()
 
+# option "-rdynamic" is to print out detailed backtrace info for debug-ease
 append_flags( CMAKE_CXX_FLAGS
               FLAGS
                     "-fPIC"
                     "-DELPP_THREAD_SAFE"
                     "-fopenmp"
                     "-Werror"
+                    "-rdynamic"
                     )
 
 # **************************** Coding style check tools ****************************

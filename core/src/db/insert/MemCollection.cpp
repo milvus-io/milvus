@@ -256,8 +256,7 @@ MemCollection::ApplyDeleteToFile() {
                 }
             }
 
-            segment::IdBloomFilterPtr bloom_filter;
-            STATUS_CHECK(segment_writer->CreateBloomFilter(bloom_filter_file_path, bloom_filter));
+            segment::IdBloomFilterPtr bloom_filter = std::make_shared<segment::IdBloomFilter>(uids.size());
             std::vector<engine::offset_t> delete_docs_offset;
             for (size_t i = 0; i < uids.size(); i++) {
                 if (std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i])) {

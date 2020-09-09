@@ -2,6 +2,10 @@ package com;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.MoreExecutors;
 import io.milvus.client.*;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
@@ -192,5 +196,25 @@ public class TestInsertEntities {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(binaryEntities).build();
         InsertResponse res = client.insert(insertParam);
         assert(!res.getResponse().ok());
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testAsyncInsert(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
+        ListenableFuture<InsertResponse> insertResFuture = client.insertAsync(insertParam);
+        Futures.addCallback(
+                insertResFuture, new FutureCallback<InsertResponse>() {
+                    @Override
+                    public void onSuccess(InsertResponse insertResponse) {
+                        Assert.assertNotNull(insertResponse);
+                        Assert.assertTrue(insertResponse.ok());
+                        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
+                    }
+                    @Override
+                    public void onFailure(Throwable t) {
+                        System.out.println(t.getMessage());
+                    }
+                }, MoreExecutors.directExecutor()
+        );
     }
 }

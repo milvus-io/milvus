@@ -514,7 +514,8 @@ TEST_F(WalTest, WalManagerTest) {
     }
 
     DummyDBPtr db_2 = std::make_shared<DummyDB>(options);
-    WalManager::GetInstance().Recovery(db_2);
+    milvus::engine::CollectionMaxOpIDMap max_op_ids;
+    WalManager::GetInstance().Recovery(db_2, max_op_ids);
     ASSERT_EQ(db_2->InsertCount(), insert_count);
     ASSERT_EQ(db_2->DeleteCount(), delete_count);
 }
