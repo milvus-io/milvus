@@ -72,6 +72,8 @@ IVF_NM::Load(const BinarySet& binary_set) {
 
 #ifndef MILVUS_GPU_VERSION
     auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
+    size_t nb = binary->size / invlists->code_size;
+    auto arranged_data = new float[d * nb];
     for (size_t i = 0; i < invlists->nlist; i++) {
         auto list_size = ails->ids[i].size();
         for (size_t j = 0; j < list_size; j++) {
