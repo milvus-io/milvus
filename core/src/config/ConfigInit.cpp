@@ -23,7 +23,7 @@ namespace milvus {
 bool
 is_timezone_valid(const std::string& val, std::string& err) {
     auto plus_count = std::count(val.begin(), val.end(), '+');
-    auto sub_count = std::count(val.begin(), val.end(), '+');
+    auto sub_count = std::count(val.begin(), val.end(), '-');
     if (plus_count > 1 or sub_count > 1) {
         err = "Invalid timezone: " + val;
         return false;

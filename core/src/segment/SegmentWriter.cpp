@@ -145,12 +145,9 @@ SegmentWriter::WriteBloomFilter() {
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, segment_file);
 
-        auto& ss_codec = codec::Codec::instance();
-        segment::IdBloomFilterPtr bloom_filter_ptr;
-        STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr));
-
         auto uids = reinterpret_cast<int64_t*>(uid_data->data_.data());
         int64_t row_count = segment_ptr_->GetRowCount();
+        segment::IdBloomFilterPtr bloom_filter_ptr = std::make_shared<segment::IdBloomFilter>(row_count);
         for (int64_t i = 0; i < row_count; i++) {
             bloom_filter_ptr->Add(uids[i]);
         }
@@ -165,14 +162,6 @@ SegmentWriter::WriteBloomFilter() {
     } else {
         return Status(DB_ERROR, "Bloom filter element missed in snapshot");
     }
-
-    return Status::OK();
-}
-
-Status
-SegmentWriter::CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr) {
-    auto& ss_codec = codec::Codec::instance();
-    STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Create(fs_ptr_, file_path, bloom_filter_ptr));
 
     return Status::OK();
 }
@@ -270,46 +259,26 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
         return status;
     }
 
-    auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
+    // the source segment may be used in search, we can't change its data, so copy a new segment for merging
     engine::SegmentPtr duplicated_segment = std::make_shared<engine::Segment>();
-    std::set<std::string> field_names;
-    for (auto& iter : field_visitors_map) {
-        const engine::snapshot::FieldPtr& field = iter.second->GetField();
-        duplicated_segment->AddField(field);
-
-        std::string name = field->GetName();
-        field_names.insert(name);
-    }
-
-    for (auto& name : field_names) {
-        engine::BinaryDataPtr raw_data;
-        src_segment->GetFixedFieldData(name, raw_data);
-        engine::BinaryDataPtr duplicated_raw_data = std::make_shared<engine::BinaryData>();
-        duplicated_raw_data->data_.resize(raw_data->Size());
-        memcpy(duplicated_raw_data->data_.data(), raw_data->data_.data(), raw_data->Size());
-        duplicated_segment->SetFixedFieldData(name, duplicated_raw_data);
-    }
-
-    // TODO: Do not delete data from src segment
+    src_segment->CopyOutRawData(duplicated_segment);
     if (src_deleted_docs) {
         std::vector<engine::offset_t> delete_ids = src_deleted_docs->GetDeletedDocs();
         duplicated_segment->DeleteEntity(delete_ids);
     }
 
-    // merge field raw data
+    // convert to DataChunk
     engine::DataChunkPtr chunk = std::make_shared<engine::DataChunk>();
-    for (auto& name : field_names) {
-        engine::BinaryDataPtr raw_data;
-        duplicated_segment->GetFixedFieldData(name, raw_data);
-        chunk->fixed_fields_[name] = raw_data;
-    }
+    duplicated_segment->ShareToChunkData(chunk);
 
-    auto& uid_data = chunk->fixed_fields_[engine::FIELD_UID];
-    chunk->count_ = uid_data->data_.size() / sizeof(int64_t);
+    // do merge
     status = AddChunk(chunk);
     if (!status.ok()) {
         return status;
     }
+
+    // clear cache of merged segment
+    segment_reader->ClearCache();
 
     // Note: no need to merge bloom filter, the bloom filter will be created during serialize
 

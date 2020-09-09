@@ -459,6 +459,23 @@ class TestGetBase:
         for i in range(get_pos):
             assert_equal_vector(res[i].get(default_float_vec_field_name), entity[-1]["values"][0])
 
+    def test_get_entities_with_deleted_ids(self, connect, id_collection):
+        '''
+        target: test.get_entity_by_id
+        method: add entities ids, and delete part, get entity include the deleted id
+        expected:
+        '''
+        ids = [i for i in range(nb)]
+        res_ids = connect.insert(id_collection, entities, ids)
+        connect.flush([id_collection])
+        status = connect.delete_entity_by_id(id_collection, [res_ids[1]])
+        connect.flush([id_collection])
+        get_ids = res_ids[:2]
+        res = connect.get_entity_by_id(id_collection, get_ids)
+        assert len(res) == len(get_ids)
+        assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
+        assert res[1] is None
+
     # TODO: unable to set config
     def _test_get_entities_after_delete_disable_autoflush(self, connect, collection, get_pos):
         '''

@@ -32,6 +32,8 @@ namespace engine {
 extern const char* WAL_MAX_OP_FILE_NAME;
 extern const char* WAL_DEL_FILE_NAME;
 
+using CollectionMaxOpIDMap = std::unordered_map<std::string, idx_t>;
+
 class WalManager {
  public:
     static WalManager&
@@ -52,8 +54,10 @@ class WalManager {
     Status
     OperationDone(const std::string& collection_name, idx_t op_id);
 
+    // max_op_ids is from meta system, wal also record a max id for each collection
+    // compare the two max id, use the max one as recovery base
     Status
-    Recovery(const DBPtr& db);
+    Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids);
 
  private:
     WalManager();

@@ -281,7 +281,7 @@ ClientTest::LoadCollection(const std::string& collection_name) {
 void
 ClientTest::CompactCollection(const std::string& collection_name) {
     milvus_sdk::TimeRecorder rc("Compact");
-    milvus::Status stat = conn_->Compact(collection_name);
+    milvus::Status stat = conn_->Compact(collection_name, 0.1);
     std::cout << "CompactCollection function call status: " << stat.message() << std::endl;
 }
 
