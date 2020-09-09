@@ -27,6 +27,9 @@ using FType = milvus::engine::DataType;
 using FEType = milvus::engine::FieldElementType;
 
 using InActiveResourcesGCEvent = milvus::engine::snapshot::InActiveResourcesGCEvent;
+template<typename T>
+using ResourceGCEvent = milvus::engine::snapshot::ResourceGCEvent<T>;
+using EventExecutor = milvus::engine::snapshot::EventExecutor;
 
 TEST_F(EventTest, TestInActiveResGcEvent) {
     CollectionPtr collection;
@@ -104,8 +107,6 @@ TEST_F(EventTest, TestInActiveResGcEvent) {
 
     auto event = std::make_shared<InActiveResourcesGCEvent>();
     status = event->Process(store_);
-//    milvus::engine::snapshot::EventExecutor::GetInstance().Submit(event);
-//    status = event->WaitToFinish();
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     std::vector<FieldElementPtr> field_elements;
@@ -151,4 +152,48 @@ TEST_F(EventTest, TestInActiveResGcEvent) {
     std::vector<CollectionCommitPtr> collection_commits;
     ASSERT_TRUE(store_->GetInActiveResources<CollectionCommit>(collection_commits).ok());
     ASSERT_TRUE(collection_commits.empty());
+}
+
+TEST_F(EventTest, GcTest) {
+    std::string collection_name = "event_test_gc_test";
+
+    CollectionPtr collection;
+    auto cc = Collection(collection_name);
+    cc.Activate();
+    auto status = store_->CreateResource(std::move(cc), collection);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    CollectionPtr collection2;
+    status = store_->GetResource<Collection>(collection->GetID(), collection2);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    auto event = std::make_shared<ResourceGCEvent<Collection>>(collection);
+    status = event->Process(store_);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    CollectionPtr rcollection;
+    status = store_->GetResource<Collection>(collection->GetID(),rcollection);
+    ASSERT_FALSE(status.ok());
+}
+
+TEST_F(EventTest, GcBlockingTest) {
+    size_t max_count = 1000;
+
+    std::vector<CollectionPtr> collections;
+    for (size_t i = 0; i < max_count; i++) {
+        CollectionPtr collection;
+        std::string name = "test_gc_c_" + std::to_string(i);
+        auto status = store_->CreateResource(Collection(name), collection);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        collections.push_back(collection);
+    }
+
+    auto start = std::chrono::system_clock::now();
+    for (auto& collection : collections) {
+        auto gc_event = std::make_shared<ResourceGCEvent<Collection>>(collection);
+        EventExecutor::GetInstance().Submit(gc_event);
+    }
+    auto end = std::chrono::system_clock::now();
+    auto count = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    ASSERT_LT(count, 1000);
 }

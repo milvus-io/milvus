@@ -137,7 +137,7 @@ void
 SnapshotTest::SetUp() {
     BaseTest::SetUp();
     DBOptions options;
-    options.meta_.path_ = "/tmp/milvus_ss";
+    options.meta_.path_ = "/tmp/milvus_ss/db";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(true, options);
@@ -155,7 +155,7 @@ DBTest::GetOptions() {
     milvus::cache::CpuCacheMgr::GetInstance().SetCapacity(256 * milvus::engine::MB);
 
     auto options = DBOptions();
-    options.meta_.path_ = "/tmp/milvus_ss";
+    options.meta_.path_ = "/tmp/milvus_ss/db";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     options.auto_flush_interval_ = 1;
@@ -165,7 +165,9 @@ DBTest::GetOptions() {
 void
 DBTest::SetUp() {
     BaseTest::SetUp();
-    BaseTest::SnapshotStart(false, GetOptions());
+    auto options = GetOptions();
+    std::experimental::filesystem::create_directories(options.meta_.path_);
+    BaseTest::SnapshotStart(false, options);
 
     dummy_context_ = std::make_shared<milvus::server::Context>("dummy_request_id");
     opentracing::mocktracer::MockTracerOptions tracer_options;
@@ -174,9 +176,6 @@ DBTest::SetUp() {
     auto mock_span = mock_tracer->StartSpan("mock_span");
     auto trace_context = std::make_shared<milvus::tracing::TraceContext>(mock_span);
     dummy_context_->SetTraceContext(trace_context);
-
-    db_ = milvus::engine::DBFactory::BuildDB(GetOptions());
-    db_->Start();
 
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
     res_mgr->Clear();
@@ -194,6 +193,9 @@ DBTest::SetUp() {
     milvus::scheduler::SchedInst::GetInstance()->Start();
     milvus::scheduler::JobMgrInst::GetInstance()->Start();
     milvus::scheduler::CPUBuilderInst::GetInstance()->Start();
+
+    db_ = milvus::engine::DBFactory::BuildDB(GetOptions());
+    db_->Start();
 }
 
 void
@@ -220,7 +222,7 @@ void
 SegmentTest::SetUp() {
     BaseTest::SetUp();
     DBOptions options;
-    options.meta_.path_ = "/tmp/milvus_ss";
+    options.meta_.path_ = "/tmp/milvus_ss/db";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(false, options);
@@ -231,9 +233,9 @@ SegmentTest::SetUp() {
 
 void
 SegmentTest::TearDown() {
-    BaseTest::SnapshotStop();
     db_->Stop();
     db_ = nullptr;
+    BaseTest::SnapshotStop();
     BaseTest::TearDown();
 }
 
@@ -257,7 +259,7 @@ void
 SchedulerTest::SetUp() {
     BaseTest::SetUp();
     DBOptions options;
-    options.meta_.path_ = "/tmp/milvus_ss";
+    options.meta_.path_ = "/tmp/milvus_ss/db";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(true, options);
@@ -303,10 +305,17 @@ EventTest::SetUp() {
     auto uri = "mock://:@:/";
     store_ = Store::Build(uri, "/tmp/milvus_ss/db");
     store_->DoReset();
+
+    milvus::engine::snapshot::OperationExecutor::Init(store_);
+    milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
+    milvus::engine::snapshot::EventExecutor::Init(store_);
+    milvus::engine::snapshot::EventExecutor::GetInstance().Start();
 }
 
 void
 EventTest::TearDown() {
+    milvus::engine::snapshot::EventExecutor::GetInstance().Stop();
+    milvus::engine::snapshot::OperationExecutor::GetInstance().Stop();
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -958,7 +958,7 @@ CreateCollectionOperation::DoExecute(StorePtr store) {
     auto status = store->CreateResource<Collection>(
         Collection(c_context_.collection->GetName(), c_context_.collection->GetParams()), collection);
     if (!status.ok()) {
-        std::cerr << status.ToString() << std::endl;
+        LOG_ENGINE_ERROR_ << status.ToString();
         return status;
     }
     auto c_ctx_p = ResourceContextBuilder<Collection>().SetOp(meta::oUpdate).CreatePtr();
