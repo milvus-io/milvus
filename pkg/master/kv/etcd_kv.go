@@ -79,6 +79,12 @@ func (kv *etcdKVBase) Remove(key string) error {
 	return nil
 }
 
+func (kv *etcdKVBase) Watch(key string) clientv3.WatchChan {
+	key = path.Join(kv.rootPath, key)
+	rch := kv.client.Watch(context.Background(), key)
+	return rch
+}
+
 // SlowLogTxn wraps etcd transaction and log slow one.
 type SlowLogTxn struct {
 	clientv3.Txn

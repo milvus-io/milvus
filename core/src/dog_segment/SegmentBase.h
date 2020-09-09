@@ -1,18 +1,24 @@
 #pragma once
 #include <vector>
 
-// #include "db/Types.h"
+#include "IndexMeta.h"
+#include "utils/Types.h"
 #include "dog_segment/SegmentDefs.h"
 // #include "knowhere/index/Index.h"
+// #include "knowhere/index/IndexType.h"
 #include "query/GeneralQuery.h"
-using idx_t = int64_t;
 
 namespace milvus {
 namespace dog_segment {
+// using engine::DataChunk;
+// using engine::DataChunkPtr;
 using engine::QueryResult;
+
+// using DogDataChunkPtr = std::shared_ptr<DataChunk>;
 
 int
 TestABI();
+
 class SegmentBase {
  public:
     // definitions
@@ -25,17 +31,19 @@ class SegmentBase {
  public:
     virtual ~SegmentBase() = default;
     // SegmentBase(std::shared_ptr<FieldsInfo> collection);
-    // single threaded
-    virtual Status
-    Insert(int64_t size, const idx_t* primary_keys, const Timestamp* timestamps, const DogDataChunk& values, std::pair<Timestamp, Timestamp> timestamp_range) = 0;
 
-    // TODO: add id into delete log, possibly bitmap
-    // single threaded
+    virtual int64_t PreInsert(int64_t size) = 0;
+
     virtual Status
-    Delete(int64_t size, const idx_t* primary_keys, const Timestamp* timestamps, std::pair<Timestamp, Timestamp> timestamp_range) = 0;
+    Insert(int64_t reserved_offset, int64_t size, const int64_t* primary_keys, const Timestamp* timestamps, const DogDataChunk& values) = 0;
+
+    virtual int64_t PreDelete(int64_t size) = 0;
+    // TODO: add id into delete log, possibly bitmap
+
+    virtual Status
+    Delete(int64_t reserved_offset, int64_t size, const int64_t* primary_keys, const Timestamp* timestamps) = 0;
 
     // query contains metadata of
-    // multi-threaded
     virtual Status
     Query(const query::QueryPtr& query, Timestamp timestamp, QueryResult& results) = 0;
 
@@ -44,7 +52,6 @@ class SegmentBase {
     // GetEntityByIds(Timestamp timestamp, const std::vector<Id>& ids, DataChunkPtr& results) = 0;
 
     // stop receive insert requests
-    // single threaded
     virtual Status
     Close() = 0;
 
@@ -53,21 +60,17 @@ class SegmentBase {
     //    virtual Status
     //    Flush(Timestamp timestamp) = 0;
 
-    // BuildIndex With Paramaters, must with Frozen State
-    // This function is atomic
-    // NOTE: index_params contains serveral policies for several index
-    virtual Status
-    BuildIndex(std::shared_ptr<IndexConfig> index_params) = 0;
-
-    // Remove Index
-    virtual Status
-    DropIndex(std::string_view field_name) = 0;
+    // watch changes
+    // NOTE: Segment will use this ptr as correct
 
     virtual Status
     DropRawData(std::string_view field_name) = 0;
 
     virtual Status
     LoadRawData(std::string_view field_name, const char* blob, int64_t blob_size) = 0;
+
+    virtual Status
+    BuildIndex() = 0;
 
  public:
     virtual ssize_t
@@ -78,12 +81,12 @@ class SegmentBase {
 
     virtual ssize_t
     get_deleted_count() const = 0;
-
 };
 
 using SegmentBasePtr = std::unique_ptr<SegmentBase>;
 
-SegmentBasePtr CreateSegment(SchemaPtr& ptr);
+SegmentBasePtr
+CreateSegment(SchemaPtr schema, IndexMetaPtr index_meta);
 
-}  // namespace engine
+}  // namespace dog_segment
 }  // namespace milvus

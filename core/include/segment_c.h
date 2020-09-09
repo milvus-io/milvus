@@ -17,18 +17,26 @@ DeleteSegment(CSegmentBase segment);
 
 int
 Insert(CSegmentBase c_segment,
+           long int reserved_offset,
            signed long int size,
-           const unsigned long* primary_keys,
+           const long* primary_keys,
            const unsigned long* timestamps,
            void* raw_data,
            int sizeof_per_row,
            signed long int count);
 
+long int
+PreInsert(CSegmentBase c_segment, long int size);
+
 int
 Delete(CSegmentBase c_segment,
+           long int reserved_offset,
            long size,
-           const unsigned long* primary_keys,
+           const long* primary_keys,
            const unsigned long* timestamps);
+
+long int
+PreDelete(CSegmentBase c_segment, long int size);
 
 int
 Search(CSegmentBase c_segment,
@@ -52,24 +60,6 @@ GetRowCount(CSegmentBase c_segment);
 
 long int
 GetDeletedCount(CSegmentBase c_segment);
-
-unsigned long
-GetTimeBegin(CSegmentBase c_segment);
-
-void
-SetTimeBegin(CSegmentBase c_segment, unsigned long time_begin);
-
-unsigned long
-GetTimeEnd(CSegmentBase c_segment);
-
-void
-SetTimeEnd(CSegmentBase c_segment, unsigned long time_end);
-
-unsigned long
-GetSegmentId(CSegmentBase c_segment);
-
-void
-SetSegmentId(CSegmentBase c_segment, unsigned long segment_id);
 
 #ifdef __cplusplus
 }

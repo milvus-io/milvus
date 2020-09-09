@@ -2,9 +2,9 @@ package message_client
 
 import (
 	"context"
-	"github.com/apache/pulsar/pulsar-client-go/pulsar"
 	msgpb "github.com/czs007/suvlim/pkg/message"
 	"github.com/golang/protobuf/proto"
+	"github.com/pulsar-client-go/pulsar"
 	"log"
 )
 

@@ -1,8 +1,6 @@
 package main
 
-import (
-	"github.com/czs007/suvlim/pkg/master"
-)
+import "github.com/czs007/suvlim/pkg/master"
 
 // func main() {
 //	ctx, cancel := context.WithCancel(context.Background())
@@ -22,6 +20,7 @@ func init() {
 	//	go mock.FakePulsarProducer()
 }
 func main() {
+	master.Run()
 	//master.SegmentStatsController()
-	master.CollectionController()
+	//master.CollectionController()
 }
