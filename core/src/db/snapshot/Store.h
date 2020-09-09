@@ -110,6 +110,8 @@ class Store : public std::enable_shared_from_this<Store> {
             /*                 &meta::MetaSession::Commit), session, std::placeholders::_1)); */
         } else if (context.on_error_cb) {
             return context.on_error_cb(status);
+        } else {
+            status = Status(SS_ERROR, "Apply operation meets unexpected Error");
         }
 
         return status;
