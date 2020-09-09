@@ -21,6 +21,7 @@ top_k = 10
 segment_row_count = 1000
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
+namespace = "milvus"
 
 # TODO:
 all_index_types = [
@@ -472,8 +473,6 @@ def add_vector_field(nb, dimension=dim):
 
 def gen_segment_row_counts():
     sizes = [
-        1,
-        2,
         1024,
         4096
     ]
@@ -784,7 +783,6 @@ def restart_server(helm_release_name):
     from kubernetes import client, config
     client.rest.logger.setLevel(logging.WARNING)
 
-    namespace = "milvus"
     # service_name = "%s.%s.svc.cluster.local" % (helm_release_name, namespace)
     config.load_kube_config()
     v1 = client.CoreV1Api()
@@ -798,7 +796,7 @@ def restart_server(helm_release_name):
             break
             # v1.patch_namespaced_config_map(config_map_name, namespace, body, pretty='true')
     # status_res = v1.read_namespaced_service_status(helm_release_name, namespace, pretty='true')
-    # print(status_res)
+    logging.getLogger().debug("Pod name: %s" % pod_name)
     if pod_name is not None:
         try:
             v1.delete_namespaced_pod(pod_name, namespace)
@@ -807,24 +805,61 @@ def restart_server(helm_release_name):
             logging.error("Exception when calling CoreV1Api->delete_namespaced_pod")
             res = False
             return res
-        time.sleep(5)
+        logging.error("Sleep 10s after pod deleted")
+        time.sleep(10)
         # check if restart successfully
         pods = v1.list_namespaced_pod(namespace)
         for i in pods.items:
             pod_name_tmp = i.metadata.name
-            if pod_name_tmp.find(helm_release_name) != -1:
-                logging.debug(pod_name_tmp)
+            logging.error(pod_name_tmp)
+            if pod_name_tmp == pod_name:
+                continue
+            elif pod_name_tmp.find(helm_release_name) == -1 or pod_name_tmp.find("mysql") != -1:
+                continue
+            else:
+                status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
+                logging.error(status_res.status.phase)
                 start_time = time.time()
-                while time.time() - start_time > timeout:
+                ready_break = False
+                while time.time() - start_time <= timeout:
+                    logging.error(time.time())
                     status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
                     if status_res.status.phase == "Running":
+                        logging.error("Already running")
+                        ready_break = True
+                        time.sleep(10)
                         break
-                    time.sleep(1)
+                    else:
+                        time.sleep(1)
                 if time.time() - start_time > timeout:
                     logging.error("Restart pod: %s timeout" % pod_name_tmp)
                     res = False
                     return res
+                if ready_break:
+                    break
     else:
-        logging.error("Pod: %s not found" % helm_release_name)
-        res = False
+        raise Exception("Pod: %s not found" % pod_name)
+    follow = True
+    pretty = True
+    previous = True  # bool | Return previous terminated container logs. Defaults to false. (optional)
+    since_seconds = 56  # int | A relative time in seconds before the current time from which to show logs. If this value precedes the time a pod was started, only logs since the pod start will be returned. If this value is in the future, no logs will be returned. Only one of sinceSeconds or sinceTime may be specified. (optional)
+    timestamps = True  # bool | If true, add an RFC3339 or RFC3339Nano timestamp at the beginning of every line of log output. Defaults to false. (optional)
+    container = "milvus"
+    # start_time = time.time()
+    # while time.time() - start_time <= timeout:
+    #     try:
+    #         api_response = v1.read_namespaced_pod_log(pod_name_tmp, namespace, container=container, follow=follow,
+    #                                                 pretty=pretty, previous=previous, since_seconds=since_seconds,
+    #                                                 timestamps=timestamps)
+    #         logging.error(api_response)
+    #         return res
+    #     except Exception as e:
+    #         logging.error("Exception when calling CoreV1Api->read_namespaced_pod_log: %s\n" % e)
+    #         # waiting for server start
+    #         time.sleep(5)
+    #         # res = False
+    #         # return res
+    # if time.time() - start_time > timeout:
+    #     logging.error("Restart pod: %s timeout" % pod_name_tmp)
+    #     res = False
     return res
