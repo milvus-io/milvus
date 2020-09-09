@@ -31,16 +31,16 @@ class DiskOperation : public Operation {
     explicit DiskOperation(const std::string& dir_path);
 
     void
-    CreateDirectory();
+    CreateDirectory() override ;
 
     const std::string&
-    GetDirectory() const;
+    GetDirectory() const override ;
 
     void
-    ListDirectory(std::vector<std::string>& file_paths);
+    ListDirectory(std::vector<std::string>& file_paths) override ;
 
     bool
-    DeleteFile(const std::string& file_path);
+    DeleteFile(const std::string& file_path) override ;
 
     // TODO(zhiru):
     //  open(), sync(), close()
