@@ -238,6 +238,58 @@ ValidateStringIsFloat(const std::string& str) {
 }
 
 Status
+ValidateDbURI(const std::string& uri) {
+    std::string dialectRegex = "(.*)";
+    std::string usernameRegex = "(.*)";
+    std::string passwordRegex = "(.*)";
+    std::string hostRegex = "(.*)";
+    std::string portRegex = "(.*)";
+    std::string dbNameRegex = "(.*)";
+    std::string uriRegexStr = dialectRegex + R"(\:\/\/)" + usernameRegex + R"(\:)" + passwordRegex + R"(\@)" +
+                              hostRegex + R"(\:)" + portRegex + R"(\/)" + dbNameRegex;
+    std::regex uriRegex(uriRegexStr);
+    std::smatch pieces_match;
+
+    bool okay = true;
+
+    if (std::regex_match(uri, pieces_match, uriRegex)) {
+        std::string dialect = pieces_match[1].str();
+        std::transform(dialect.begin(), dialect.end(), dialect.begin(), ::tolower);
+        if (dialect.find("mysql") == std::string::npos && dialect.find("sqlite") == std::string::npos &&
+            dialect.find("mock") == std::string::npos) {
+            LOG_SERVER_ERROR_ << "Invalid dialect in URI: dialect = " << dialect;
+            okay = false;
+        }
+
+        /*
+         *      Could be DNS, skip checking
+         *
+                std::string host = pieces_match[4].str();
+                if (!host.empty() && host != "localhost") {
+                    if (ValidateIpAddress(host) != SERVER_SUCCESS) {
+                        LOG_SERVER_ERROR_ << "Invalid host ip address in uri = " << host;
+                        okay = false;
+                    }
+                }
+        */
+
+        std::string port = pieces_match[5].str();
+        if (!port.empty()) {
+            auto status = ValidateStringIsNumber(port);
+            if (!status.ok()) {
+                LOG_SERVER_ERROR_ << "Invalid port in uri = " << port;
+                okay = false;
+            }
+        }
+    } else {
+        LOG_SERVER_ERROR_ << "Wrong URI format: URI = " << uri;
+        okay = false;
+    }
+
+    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid db backend uri"));
+}
+
+Status
 ValidateStoragePath(const std::string& path) {
     // Validate storage path if is valid, only correct absolute path will be validated pass
     // Invalid path only contain character[a-zA-Z], number[0-9], '-', and '_',
