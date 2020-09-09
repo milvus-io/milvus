@@ -1,13 +1,16 @@
 #pragma once
 
 #include <vector>
+#include <unordered_map>
 
-#include "utils/Types.h"
+// #include "db/Types.h"
 // #include "knowhere/index/Index.h"
 #include "utils/Status.h"
+#include "utils/Types.h"
+#include <cassert>
 
-namespace milvus::dog_segment {
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
+namespace milvus::dog_segment {
 using engine::DataType;
 using engine::FieldElementType;
 
@@ -15,6 +18,11 @@ struct DogDataChunk {
     void* raw_data;      // schema
     int sizeof_per_row;  // alignment
     int64_t count;
+};
+
+struct IndexConfig {
+    // TODO
+    // std::unordered_map<std::string, knowhere::Config> configs;
 };
 
 inline int
@@ -41,15 +49,10 @@ field_sizeof(DataType data_type, int dim = 1) {
             return dim / 8;
         }
         default: {
-            throw std::invalid_argument("unsupported data type");
+            assert(false);
             return 0;
         }
     }
-}
-
-inline bool
-field_is_vector(DataType datatype) {
-    return datatype == DataType::VECTOR_BINARY || datatype == DataType::VECTOR_FLOAT;
 }
 
 struct FieldMeta {
@@ -104,12 +107,10 @@ class Schema {
 
     void
     AddField(FieldMeta field_meta) {
-        auto offset = fields_.size();
+        auto index = fields_.size();
         fields_.emplace_back(field_meta);
-        offsets_.emplace(field_meta.get_name(), offset);
-        auto field_sizeof = field_meta.get_sizeof();
-        sizeof_infos_.push_back(field_sizeof);
-        total_sizeof_ += field_sizeof;
+        indexes_.emplace(field_meta.get_name(), index);
+        total_sizeof_ = field_meta.get_sizeof();
     }
 
     auto
@@ -131,8 +132,7 @@ class Schema {
         return fields_.end();
     }
 
-    int
-    size() const {
+    int size() const {
         return fields_.size();
     }
 
@@ -141,22 +141,12 @@ class Schema {
         return fields_[field_index];
     }
 
-    auto
-    get_total_sizeof() const {
-        return total_sizeof_;
-    }
-
-    const std::vector<int>& get_sizeof_infos() {
-        return sizeof_infos_;
-    }
-
-
     const FieldMeta&
     operator[](const std::string& field_name) const {
-        auto offset_iter = offsets_.find(field_name);
-        assert(offset_iter != offsets_.end());
-        auto offset = offset_iter->second;
-        return (*this)[offset];
+        auto index_iter = indexes_.find(field_name);
+        assert(index_iter != indexes_.end());
+        auto index = index_iter->second;
+        return (*this)[index];
     }
 
  private:
@@ -165,11 +155,19 @@ class Schema {
 
  private:
     // a mapping for random access
-    std::unordered_map<std::string, int> offsets_;
-    std::vector<int> sizeof_infos_;
-    int total_sizeof_ = 0;
+    std::unordered_map<std::string, int> indexes_;
+    int total_sizeof_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;
+
+class IndexData {
+ public:
+    virtual std::vector<char>
+    serilize() = 0;
+
+    static std::shared_ptr<IndexData>
+    deserialize(int64_t size, const char* blob);
+};
 
 }  // namespace milvus::dog_segment

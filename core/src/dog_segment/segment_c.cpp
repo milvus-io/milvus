@@ -30,7 +30,6 @@ DeleteSegment(CSegmentBase segment) {
 
 int
 Insert(CSegmentBase c_segment,
-       long int reserved_offset,
        signed long int size,
        const long* primary_keys,
        const unsigned long* timestamps,
@@ -46,24 +45,13 @@ Insert(CSegmentBase c_segment,
   dataChunk.sizeof_per_row = sizeof_per_row;
   dataChunk.count = count;
 
-  auto res = segment->Insert(reserved_offset, size, primary_keys, timestamps, dataChunk);
+  auto res = segment->Insert(size, primary_keys, timestamps, dataChunk, std::make_pair(timestamp_min, timestamp_max));
   return res.code();
-}
-
-
-long int
-PreInsert(CSegmentBase c_segment, long int size) {
-  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
-
-  // TODO: delete print
-  std::cout << "PreInsert segment " << std::endl;
-  return segment->PreInsert(size);
 }
 
 
 int
 Delete(CSegmentBase c_segment,
-       long int reserved_offset,
        long size,
        const long* primary_keys,
        const unsigned long* timestamps,
@@ -71,18 +59,8 @@ Delete(CSegmentBase c_segment,
        unsigned long timestamp_max) {
   auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
 
-  auto res = segment->Delete(reserved_offset, size, primary_keys, timestamps);
+  auto res = segment->Delete(size, primary_keys, timestamps, std::make_pair(timestamp_min, timestamp_max));
   return res.code();
-}
-
-
-long int
-PreDelete(CSegmentBase c_segment, long int size) {
-  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
-
-  // TODO: delete print
-  std::cout << "PreDelete segment " << std::endl;
-  return segment->PreDelete(size);
 }
 
 
