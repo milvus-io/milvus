@@ -23,7 +23,7 @@ SegmentNaive::Record::Record(const Schema& schema) : uids_(1), timestamps_(1) {
             entity_vec_.emplace_back(std::make_shared<ConcurrentVector<float>>(field.get_dim()));
         } else {
             assert(field.get_data_type() == DataType::INT32);
-            entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int32_t, false>>());
+            entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int32_t, true>>());
         }
     }
 }
