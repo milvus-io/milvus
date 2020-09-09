@@ -49,7 +49,7 @@ public class TestDeleteEntities_v2 {
         // Assert getEntityByID
         GetEntityByIDResponse res_get = client.getEntityByID(collectionName, del_ids);
         assert(res_get.getResponse().ok());
-        Assert.assertEquals(res_get.getValidIds().size(), 0);
+        Assert.assertEquals(res_get.getFieldsMap().size(), 1);
     }
 
     // case-03

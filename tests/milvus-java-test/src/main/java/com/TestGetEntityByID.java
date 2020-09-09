@@ -5,6 +5,7 @@ import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -41,7 +42,8 @@ public class TestGetEntityByID {
         List<Map<String, Object>> fieldsMap = res.getFieldsMap();
         Assert.assertEquals(fieldsMap.size(), getIds.size());
         Assert.assertEquals(fieldsMap.get(0).get("float_vector"), Constants.vectors.get(0));
-        Assert.assertNull(res.getFieldsMap().get(1));
+        Assert.assertEquals(res.getFieldsMap().get(1).size(), 0);
+        Assert.assertEquals(res.getFieldsMap().get(1), new HashMap<>());
     }
 
     @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
@@ -57,7 +59,8 @@ public class TestGetEntityByID {
         client.insert(insertParam);
         client.flush(collectionName);
         GetEntityByIDResponse res = client.getEntityByID(collectionName, get_ids);
-        assert (res.getFieldsMap().size() == 0);
+        Assert.assertEquals(res.getFieldsMap().size(), get_ids.size());
+        Assert.assertEquals(res.getFieldsMap().get(0), new HashMap<>());
     }
 
     // Binary tests
@@ -84,7 +87,7 @@ public class TestGetEntityByID {
         assert(res_delete.ok());
         client.flush(collectionName);
         GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, 1));
-        assert (res.getFieldsMap().size() == 0);
+        Assert.assertEquals(res.getFieldsMap().size(), 1);
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
@@ -93,6 +96,7 @@ public class TestGetEntityByID {
         client.insert(insertParam);
         client.flush(collectionName);
         GetEntityByIDResponse res = client.getEntityByID(collectionName, get_ids);
-        assert (res.getFieldsMap().size() == 0);
+        Assert.assertEquals(res.getFieldsMap().size(), get_ids.size());
+        Assert.assertEquals(res.getFieldsMap().get(0), new HashMap<>());
     }
 }
