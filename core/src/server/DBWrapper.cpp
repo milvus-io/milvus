@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "config/ServerConfig.h"
+#include "db/Constants.h"
 #include "db/DBFactory.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "utils/CommonUtil.h"
@@ -35,7 +36,7 @@ DBWrapper::StartService() {
     opt.meta_.backend_uri_ = config.general.meta_uri();
 
     std::string path = config.storage.path();
-    opt.meta_.path_ = path + "/db";
+    opt.meta_.path_ = path + engine::DB_FOLDER;
 
     opt.auto_flush_interval_ = config.storage.auto_flush_interval();
     opt.metric_enable_ = config.metric.enable();

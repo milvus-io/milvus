@@ -40,11 +40,11 @@ class GCEvent : virtual public MetaEvent {
             auto adjusted = path + suffix;
             if (std::experimental::filesystem::is_regular_file(adjusted)) {
                 auto ok = std::experimental::filesystem::remove(adjusted);
-                std::cout << "[GC] Remove FILE " << res->ToString() << " " << adjusted << " " << ok << std::endl;
+                LOG_ENGINE_DEBUG_ << "[GC] Remove FILE " << res->ToString() << " " << adjusted << " " << ok;
                 return;
             }
         }
-        std::cout << "[GC] Remove STALE OBJECT " << path << " for " << res->ToString() << std::endl;
+        LOG_ENGINE_DEBUG_ << "[GC] Remove STALE OBJECT " << path << " for " << res->ToString();
     }
 };
 

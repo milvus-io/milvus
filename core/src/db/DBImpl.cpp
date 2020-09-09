@@ -90,15 +90,6 @@ DBImpl::Start() {
         return Status::OK();
     }
 
-    // snapshot
-    auto store = snapshot::Store::Build(options_.meta_.backend_uri_, options_.meta_.path_,
-                                        codec::Codec::instance().GetSuffixSet());
-    snapshot::OperationExecutor::Init(store);
-    snapshot::OperationExecutor::GetInstance().Start();
-    snapshot::EventExecutor::Init(store);
-    snapshot::EventExecutor::GetInstance().Start();
-    snapshot::Snapshots::GetInstance().Init(store);
-
     knowhere::enable_faiss_logging();
 
     // LOG_ENGINE_TRACE_ << "DB service start";
@@ -154,9 +145,6 @@ DBImpl::Stop() {
         swn_metric_.Notify();
         bg_metric_thread_.join();
     }
-
-    snapshot::EventExecutor::GetInstance().Stop();
-    snapshot::OperationExecutor::GetInstance().Stop();
 
     // LOG_ENGINE_TRACE_ << "DB service stop";
     return Status::OK();

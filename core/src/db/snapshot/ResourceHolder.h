@@ -105,12 +105,12 @@ class ResourceHolder {
     virtual void
     Dump(const std::string& tag = "") {
         std::unique_lock<std::mutex> lock(mutex_);
-        std::cout << typeid(*this).name() << " Dump Start [" << tag << "]:" << id_map_.size() << std::endl;
+        LOG_ENGINE_DEBUG_ << typeid(*this).name() << " Dump Start [" << tag << "]:" << id_map_.size();
         for (auto& kv : id_map_) {
             /* std::cout << "\t" << kv.second->ToString() << std::endl; */
-            std::cout << "\t" << kv.first << " RefCnt " << kv.second->ref_count() << std::endl;
+            LOG_ENGINE_DEBUG_ << "\t" << kv.first << " RefCnt " << kv.second->ref_count();
         }
-        std::cout << typeid(*this).name() << " Dump   End [" << tag << "]" << std::endl;
+        LOG_ENGINE_DEBUG_ << typeid(*this).name() << " Dump   End [" << tag << "]";
     }
 
  private:

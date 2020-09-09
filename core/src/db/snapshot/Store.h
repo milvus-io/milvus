@@ -244,7 +244,7 @@ class Store : public std::enable_shared_from_this<Store> {
     DoReset() {
         auto status = adapter_->TruncateAll();
         if (!status.ok()) {
-            std::cout << "TruncateAll failed: " << status.ToString() << std::endl;
+            LOG_ENGINE_ERROR_ << "TruncateAll failed: " << status.ToString();
         }
     }
 

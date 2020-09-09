@@ -42,7 +42,7 @@ class InActiveResourcesGCEvent : public GCEvent, public Operations {
 
     Status
     OnExecute(StorePtr store) override {
-        std::cout << "Executing InActiveResourcesGCEvent" << std::endl;
+        LOG_ENGINE_INFO_ << "Executing InActiveResourcesGCEvent";
 
         STATUS_CHECK(ClearInActiveResources<Collection>(store));
         STATUS_CHECK(ClearInActiveResources<CollectionCommit>(store));
@@ -78,7 +78,7 @@ class InActiveResourcesGCEvent : public GCEvent, public Operations {
                 /* std::cout << "[GC] Remove file " << res_->ToString() << " " << res_path << " " << ok << std::endl; */
             } else {
                 RemoveWithSuffix<ResourceT>(res, res_path, store->GetSuffixSet());
-                std::cout << "[GC] Remove stale " << res_path << " for " << res->ToString() << std::endl;
+                LOG_ENGINE_DEBUG_ << "[GC] Remove stale " << res_path << " for " << res->ToString();
             }
 
             /* remove resource from meta */
