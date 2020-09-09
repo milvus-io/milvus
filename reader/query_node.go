@@ -236,6 +236,7 @@ func (node *QueryNode) PreInsertAndDelete() msgPb.Status {
 			fmt.Println(err.Error())
 			return msgPb.Status{ErrorCode: 1}
 		}
+
 		var numOfRecords = len(node.insertData.insertRecords[segmentID])
 		var offset = targetSegment.SegmentPreInsert(numOfRecords)
 		node.insertData.insertOffset[segmentID] = offset
@@ -254,6 +255,7 @@ func (node *QueryNode) PreInsertAndDelete() msgPb.Status {
 			fmt.Println(err.Error())
 			return msgPb.Status{ErrorCode: 1}
 		}
+
 		var numOfRecords = len(node.deleteData.deleteIDs[segmentID])
 		var offset = targetSegment.SegmentPreDelete(numOfRecords)
 		node.deleteData.deleteOffset[segmentID] = offset
@@ -287,9 +289,12 @@ func (node *QueryNode) DoInsert(segmentID int64, records *[][]byte, wg *sync.Wai
 		fmt.Println(err.Error())
 		return msgPb.Status{ErrorCode: 1}
 	}
+
 	ids := node.insertData.insertIDs[segmentID]
 	timestamps := node.insertData.insertTimestamps[segmentID]
-	err = targetSegment.SegmentInsert(&ids, &timestamps, records)
+	offsets := node.insertData.insertOffset[segmentID]
+
+	err = targetSegment.SegmentInsert(offsets, &ids, &timestamps, records)
 	if err != nil {
 		fmt.Println(err.Error())
 		return msgPb.Status{ErrorCode: 1}
@@ -305,7 +310,10 @@ func (node *QueryNode) DoDelete(segmentID int64, deleteIDs *[]int64, deleteTimes
 		fmt.Println(err.Error())
 		return msgPb.Status{ErrorCode: 1}
 	}
-	err = segment.SegmentDelete(deleteIDs, deleteTimestamps)
+
+	offset := node.deleteData.deleteOffset[segmentID]
+
+	err = segment.SegmentDelete(offset, deleteIDs, deleteTimestamps)
 	if err != nil {
 		fmt.Println(err.Error())
 		return msgPb.Status{ErrorCode: 1}
