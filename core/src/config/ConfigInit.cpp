@@ -9,8 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <sys/sysinfo.h>
+#include <fstream>
+
 #include "config/ServerConfig.h"
-#include "utils/ConfigUtils.h"
 
 /* to find modifiable settings fast */
 #define _MODIFIABLE (true)
@@ -33,12 +35,39 @@ is_timezone_valid(const std::string& val, std::string& err) {
 
 bool
 is_cachesize_valid(int64_t size, std::string& err) {
-    Status status = server::ValidateCacheSize(size);
-    if (!status.ok()) {
-        err = status.message();
+    try {
+        // Get max docker memory size
+        int64_t limit_in_bytes;
+        std::ifstream file("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+        if (file.fail()) {
+            throw std::runtime_error("Failed to read /sys/fs/cgroup/memory/memory.limit_in_bytes.");
+        }
+        file >> limit_in_bytes;
+
+        // Get System info
+        int64_t total_mem = 0;
+        struct sysinfo info;
+        int ret = sysinfo(&info);
+        if (ret != 0) {
+            throw std::runtime_error("Get sysinfo failed.");
+        }
+        total_mem = info.totalram;
+
+        if (limit_in_bytes < total_mem && size > limit_in_bytes) {
+            std::string msg =
+                "Invalid cpu cache size: " + std::to_string(size) +
+                ". cache.cache_size exceeds system cgroup memory size: " + std::to_string(limit_in_bytes) + "." +
+                "Consider increase docker memory limit.";
+            throw std::runtime_error(msg);
+        }
+        return true;
+    } catch (std::exception& ex) {
+        err = "Check cache.cache_size valid failed, reason: " + std::string(ex.what());
+        return false;
+    } catch (...) {
+        err = "Check cache.cache_size valid failed, unknown reason.";
         return false;
     }
-    return true;
 }
 
 std::unordered_map<std::string, BaseConfigPtr>
