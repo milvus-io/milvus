@@ -1,19 +1,20 @@
 #pragma once
 #include <vector>
 
-// #include "db/Types.h"
+#include "IndexMeta.h"
+#include "utils/Types.h"
 #include "dog_segment/SegmentDefs.h"
 // #include "knowhere/index/Index.h"
+// #include "knowhere/index/IndexType.h"
 #include "query/GeneralQuery.h"
-using idx_t = int64_t;
 
 namespace milvus {
 namespace dog_segment {
-using engine::DataChunk;
-using engine::DataChunkPtr;
+// using engine::DataChunk;
+// using engine::DataChunkPtr;
 using engine::QueryResult;
 
-using DogDataChunkPtr = std::shared_ptr<DataChunk>;
+// using DogDataChunkPtr = std::shared_ptr<DataChunk>;
 
 int
 TestABI();
@@ -87,5 +88,5 @@ using SegmentBasePtr = std::unique_ptr<SegmentBase>;
 SegmentBasePtr
 CreateSegment(SchemaPtr schema, IndexMetaPtr index_meta);
 
-}  // namespace engine
+}  // namespace dog_segment
 }  // namespace milvus
