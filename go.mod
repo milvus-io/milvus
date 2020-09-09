@@ -41,7 +41,6 @@ require (
 	golang.org/x/sys v0.0.0-20200905004654-be1d3432aa8f // indirect
 	google.golang.org/grpc v1.31.0
 	google.golang.org/grpc/examples v0.0.0-20200828165940-d8ef479ab79a // indirect
-	google.golang.org/protobuf v1.25.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gopkg.in/yaml.v2 v2.3.0
 	sigs.k8s.io/yaml v1.2.0 // indirect

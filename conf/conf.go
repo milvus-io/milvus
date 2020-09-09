@@ -1,9 +1,9 @@
 package conf
 
 import (
-	"io/ioutil"
 	"github.com/czs007/suvlim/storage/pkg/types"
 	yaml "gopkg.in/yaml.v2"
+	"io/ioutil"
 )
 
 // yaml.MapSlice
@@ -60,7 +60,7 @@ func init() {
 
 func load_config() {
 	//var config ServerConfig
-	filename := "github.com/czs007/suvlim/conf/config.yaml"
+	filename := "conf/config.yaml"
 	source, err := ioutil.ReadFile(filename)
 	if err != nil {
 		panic(err)
