@@ -5,6 +5,7 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 0.10.3 (TBD)
 ## Bug
 -   \#3536 Release search task in time to avoid excessive memory usage
+-   \#3656 Fix to check search params 'nprobe' of BIN_IVF_FLAT
 
 ## Feature
 -   \#3213 Allow users to specify a distance type at runtime for Flat index
