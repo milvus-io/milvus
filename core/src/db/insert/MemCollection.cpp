@@ -173,24 +173,49 @@ MemCollection::ApplyDeleteToFile() {
         segment::SegmentReaderPtr segment_reader =
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
 
-        // Step 1: Check delete_id in mem
+        // Step 1: Check to-delete id possibly in this segment
         std::set<idx_t> ids_to_check;
-        {
-            segment::IdBloomFilterPtr pre_bloom_filter;
-            STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
-            for (auto& id : ids_to_delete_) {
-                if (pre_bloom_filter->Check(id)) {
-                    ids_to_check.insert(id);
-                }
+        segment::IdBloomFilterPtr pre_bloom_filter;
+        STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
+        for (auto& id : ids_to_delete_) {
+            if (pre_bloom_filter->Check(id)) {
+                ids_to_check.insert(id);
             }
         }
 
         if (ids_to_check.empty()) {
-            return Status::OK();
+            return Status::OK();  // nothing change for this segment
         }
 
+        // load entity ids
         std::vector<engine::idx_t> uids;
         STATUS_CHECK(segment_reader->LoadUids(uids));
+
+        // Load previous deleted offsets
+        segment::DeletedDocsPtr prev_del_docs;
+        STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
+        std::vector<engine::offset_t> del_offsets;
+        if (prev_del_docs) {
+            del_offsets = prev_del_docs->GetDeletedDocs();
+        }
+
+        // if the to-delete id is actually in this segment, remove it from bloom filter, and record its offset
+        segment::IdBloomFilterPtr bloom_filter;
+        pre_bloom_filter->Clone(bloom_filter);
+
+        int64_t new_deleted = 0;
+        for (auto id : ids_to_check) {
+            auto iter = std::find(uids.begin(), uids.end(), id);
+            if (iter != uids.end()) {
+                del_offsets.push_back(std::distance(uids.begin(), iter));
+                bloom_filter->Remove(id);
+                new_deleted++;
+            }
+        }
+
+        if (new_deleted == 0) {
+            return Status::OK();  // nothing change for this segment
+        }
 
         // Step 2: Mark previous deleted docs file and bloom filter file stale
         auto& field_visitors_map = seg_visitor->GetFieldVisitors();
@@ -244,35 +269,11 @@ MemCollection::ApplyDeleteToFile() {
             snapshot::GetResPath<snapshot::SegmentFile>(collection_root_path, bloom_filter_file);
 
         // Step 4: update delete docs and bloom filter
-        {
-            // Load previous delete_id and merge into 'delete_ids'
-            segment::DeletedDocsPtr prev_del_docs;
-            STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
-            std::vector<engine::offset_t> pre_del_offsets;
-            if (prev_del_docs) {
-                pre_del_offsets = prev_del_docs->GetDeletedDocs();
-                for (auto& offset : pre_del_offsets) {
-                    ids_to_check.insert(uids[offset]);
-                }
-            }
+        STATUS_CHECK(segments_op->CommitRowCountDelta(segment->GetID(), new_deleted, true));
 
-            segment::IdBloomFilterPtr bloom_filter = std::make_shared<segment::IdBloomFilter>(uids.size());
-            std::vector<engine::offset_t> delete_docs_offset;
-            for (size_t i = 0; i < uids.size(); i++) {
-                if (std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i])) {
-                    delete_docs_offset.emplace_back(i);
-                } else {
-                    bloom_filter->Add(uids[i]);
-                }
-            }
-
-            STATUS_CHECK(segments_op->CommitRowCountDelta(segment->GetID(),
-                                                          delete_docs_offset.size() - pre_del_offsets.size(), true));
-
-            auto delete_docs = std::make_shared<segment::DeletedDocs>(delete_docs_offset);
-            STATUS_CHECK(segment_writer->WriteDeletedDocs(del_docs_path, delete_docs));
-            STATUS_CHECK(segment_writer->WriteBloomFilter(bloom_filter_file_path, bloom_filter));
-        }
+        auto delete_docs = std::make_shared<segment::DeletedDocs>(del_offsets);
+        STATUS_CHECK(segment_writer->WriteDeletedDocs(del_docs_path, delete_docs));
+        STATUS_CHECK(segment_writer->WriteBloomFilter(bloom_filter_file_path, bloom_filter));
 
         delete_file->SetSize(CommonUtil::GetFileSize(del_docs_path + codec::DeletedDocsFormat::FilePostfix()));
         bloom_filter_file->SetSize(

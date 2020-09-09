@@ -33,6 +33,7 @@
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
 using IdBloomFilter = milvus::segment::IdBloomFilter;
+using IdBloomFilterPtr = milvus::segment::IdBloomFilterPtr;
 
 namespace {
 milvus::Status
@@ -164,7 +165,7 @@ TEST_F(SegmentTest, SegmentTest) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST(BloomFilterTest, BloomFilterTest) {
+TEST(BloomFilterTest, ReadWriteTest) {
     std::string file_path = "/tmp/milvus_bloom.blf";
 
     milvus::storage::IOReaderPtr reader_ptr = std::make_shared<milvus::storage::DiskIOReader>();
@@ -267,4 +268,57 @@ TEST(BloomFilterTest, BloomFilterTest) {
     }
 
     std::experimental::filesystem::remove(file_path);
+}
+
+TEST(BloomFilterTest, CloneTest) {
+    const int64_t id_count = 100000;
+    milvus::engine::SafeIDGenerator id_gen;
+
+    std::vector<int64_t> id_array;
+    std::vector<int64_t> removed_id_array;
+
+    IdBloomFilterPtr filter = std::make_shared<IdBloomFilter>(id_count);
+
+    // insert some ids
+    std::set<int64_t> ids;
+    for (int64_t i = 0; i < id_count; ++i) {
+        auto id = id_gen.GetNextIDNumber();
+        filter->Add(id);
+        ids.insert(id);
+        id_array.push_back(id);
+    }
+
+    // remove some ids
+    std::vector<int64_t> temp_array;
+    for (auto id : id_array) {
+        if (id % 7 == 0) {
+            filter->Remove(id);
+            removed_id_array.push_back(id);
+        } else {
+            temp_array.push_back(id);
+        }
+    }
+    id_array.swap(temp_array);
+
+    auto error_rate_check = [&](IdBloomFilterPtr& filter, const std::vector<int64_t>& id_array) -> void {
+        int64_t wrong_check = 0;
+        for (auto id : id_array) {
+            bool res = filter->Check(id);
+            if (res) {
+                wrong_check++;
+            }
+        }
+
+        double error_rate = filter->ErrorRate();
+        double wrong_rate = (double)wrong_check/id_count;
+        ASSERT_LT(wrong_rate, error_rate);
+    };
+
+    error_rate_check(filter, removed_id_array);
+
+    IdBloomFilterPtr clone_filter;
+    filter->Clone(clone_filter);
+    ASSERT_NE(clone_filter, nullptr);
+
+    error_rate_check(clone_filter, removed_id_array);
 }
