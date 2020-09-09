@@ -174,11 +174,12 @@ Status
 SegmentNaive::Query(const query::QueryPtr& query, Timestamp timestamp, QueryResult& result) {
     // TODO: enable delete
     // TODO: enable index
-    auto& field = schema_->operator[](0);
-    assert(field.get_name() == "fakevec");
+    auto& field = schema_->operator[](query->field_name);
     assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+
     auto dim = field.get_dim();
-    assert(query == nullptr);
+    auto topK = query->topK;
+
     int64_t barrier = [&]
     {
         auto& vec = record_.timestamps_;
@@ -187,19 +188,20 @@ SegmentNaive::Query(const query::QueryPtr& query, Timestamp timestamp, QueryResu
         while (beg < end) {
             auto mid = (beg + end) / 2;
             if (vec[mid] < timestamp) {
-                end = mid + 1;
+                end = mid;
             } else {
-                beg = mid;
+                beg = mid + 1;
             }
 
         }
         return beg;
     }();
-    // search until barriers
+
     // TODO: optimize
     auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_[0]);
     for(int64_t i = 0; i < barrier; ++i) {
-//        auto element =
+        auto element = vec_ptr->get_element(i);
+
         throw std::runtime_error("unimplemented");
     }
 

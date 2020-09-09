@@ -2,9 +2,9 @@ package message_client
 
 import (
 	"context"
+	"github.com/apache/pulsar-client-go/pulsar"
 	msgpb "github.com/czs007/suvlim/pkg/message"
 	"github.com/golang/protobuf/proto"
-	"github.com/pulsar-client-go/pulsar"
 	"log"
 )
 
@@ -32,7 +32,7 @@ type MessageClient struct {
 }
 
 func (mc *MessageClient) Send(ctx context.Context, msg msgpb.QueryResult) {
-	if err := mc.searchResultProducer.Send(ctx, pulsar.ProducerMessage{
+	if _, err := mc.searchResultProducer.Send(ctx, &pulsar.ProducerMessage{
 		Payload: []byte(msg.String()),
 	}); err != nil {
 		log.Fatal(err)
