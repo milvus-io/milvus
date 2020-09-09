@@ -23,6 +23,9 @@ extern int64_t
 parse_bytes(const std::string& str, std::string& err);
 
 extern bool
+GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem);
+
+extern bool
 GetSystemAvailableThreads(int64_t& thread_count);
 
 extern Status
@@ -34,6 +37,9 @@ GetGpuMemory(int32_t gpu_index, int64_t& memory);
 #endif
 
 extern Status
+ValidateIpAddress(const std::string& ip_address);
+
+extern Status
 ValidateStringIsNumber(const std::string& str);
 
 extern Status
@@ -43,10 +49,13 @@ extern Status
 ValidateStringIsFloat(const std::string& str);
 
 extern Status
+ValidateDbURI(const std::string& uri);
+
+extern Status
 ValidateStoragePath(const std::string& path);
 
 extern Status
-ValidateCacheSize(int64_t size);
+ValidateLogLevel(const std::string& level);
 
 extern bool
 IsNumber(const std::string& s);
