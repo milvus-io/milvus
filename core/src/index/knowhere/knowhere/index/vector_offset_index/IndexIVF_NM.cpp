@@ -67,7 +67,6 @@ IVF_NM::Load(const BinarySet& binary_set) {
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     auto invlists = ivf_index->invlists;
     auto d = ivf_index->d;
-    size_t nb = binary->size / invlists->code_size;
     prefix_sum.resize(invlists->nlist);
     size_t curr_index = 0;
 
@@ -83,7 +82,7 @@ IVF_NM::Load(const BinarySet& binary_set) {
     }
 #else
     auto rol = dynamic_cast<faiss::ReadOnlyArrayInvertedLists*>(invlists);
-    float* arranged_data = static_cast<float*>(rol->pin_readonly_codes->data);
+    auto arranged_data = reinterpret_cast<float*>(rol->pin_readonly_codes->data);
     auto lengths = rol->readonly_length;
     auto rol_ids = reinterpret_cast<const int64_t*>(rol->pin_readonly_ids->data);
     for (size_t i = 0; i < invlists->nlist; i++) {
