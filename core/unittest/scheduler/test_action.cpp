@@ -17,6 +17,7 @@
 #include "scheduler/optimizer/BuildIndexPass.h"
 #include "scheduler/optimizer/FaissFlatPass.h"
 #include "scheduler/optimizer/FaissIVFPass.h"
+#include "scheduler/optimizer/FaissIVFSQ8HPass.h"
 
 namespace milvus {
 namespace scheduler {
