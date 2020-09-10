@@ -73,6 +73,7 @@ auto SegmentNaive::get_deleted_bitmap(int64_t del_barrier, Timestamp query_times
         }
         return current;
     } else {
+        vec.resize(insert_barrier);
         for(auto del_index = old->del_barrier; del_index < del_barrier; ++del_index) {
             // get uid in delete logs
             auto uid = deleted_record_.uids_[del_index];
@@ -83,6 +84,9 @@ auto SegmentNaive::get_deleted_bitmap(int64_t del_barrier, Timestamp query_times
             for(auto iter = iter_b; iter != iter_e; ++iter) {
                 auto offset = iter->second;
                 if(offset >= insert_barrier){
+                    continue;
+                }
+                if(offset >= vec.size()) {
                     continue;
                 }
                 if(record_.timestamps_[offset] < query_timestamp) {
@@ -99,8 +103,8 @@ auto SegmentNaive::get_deleted_bitmap(int64_t del_barrier, Timestamp query_times
             // otherwise, set the flag
             vec[the_offset] = true;
         }
+        this->deleted_record_.insert_lru_entry(current);
     }
-
     return current;
 }
 
@@ -267,9 +271,9 @@ int64_t get_barrier(const RecordType& record, Timestamp timestamp) {
     while (beg < end) {
         auto mid = (beg + end) / 2;
         if (vec[mid] < timestamp) {
-            end = mid;
-        } else {
             beg = mid + 1;
+        } else {
+            end = mid;
         }
     }
     return beg;
@@ -303,6 +307,14 @@ SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult
     auto num_queries = query_info->num_queries;
 
     auto barrier = get_barrier(record_, timestamp);
+    auto del_barrier = get_barrier(deleted_record_, timestamp);
+    auto bitmap_holder =  get_deleted_bitmap(del_barrier, timestamp, barrier);
+
+    if (!bitmap_holder) {
+        throw std::runtime_error("fuck");
+    }
+
+    auto bitmap = &bitmap_holder->bitmap;
 
     if(topK > barrier) {
         topK = barrier;
@@ -321,6 +333,9 @@ SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult
     // TODO: optimize
     auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_[0]);
     for(int64_t i = 0; i < barrier; ++i) {
+        if(i < bitmap->size() && bitmap->at(i)) {
+            continue;
+        }
         auto element = vec_ptr->get_element(i);
         for(auto query_id = 0; query_id < num_queries; ++query_id) {
             auto query_blob = query_info->query_raw_data.data() + query_id * dim;

@@ -6,20 +6,33 @@ import (
 	pb "github.com/czs007/suvlim/pkg/message"
 	"github.com/golang/protobuf/proto"
 	"log"
+	"sync"
 	"testing"
 	"time"
 )
 
 const (
-	pulsarAddr      = "pulsar://localhost:6650"
-	timeSyncTopic   = "timesync"
-	timeSyncSubName = "timesync-g"
-	readerTopic1    = "reader1"
-	readerTopic2    = "reader2"
-	readerTopic3    = "reader3"
-	readerTopic4    = "reader4"
-	readerSubName   = "reader-g"
-	interval        = 200
+	pulsarAddr             = "pulsar://localhost:6650"
+	timeSyncTopic          = "timesync"
+	timeSyncTopic2         = "timesync2"
+	timeSyncSubName        = "timesync-g"
+	timeSyncSubName1       = "timesync-g1"
+	timeSyncSubName2       = "timesync-g2"
+	readerTopic1           = "reader1"
+	readerTopic12          = "reader12"
+	readerTopic2           = "reader2"
+	readerTopic22          = "reader22"
+	readerTopic3           = "reader3"
+	readerTopic32          = "reader32"
+	readerTopic4           = "reader4"
+	readerTopic42          = "reader42"
+	readerSubName          = "reader-g"
+	readerSubName1         = "reader-g1"
+	readerSubName2         = "reader-g2"
+	interval               = 200
+	readStopFlag     int64 = -1
+	readStopFlag1    int64 = -1
+	readStopFlag2    int64 = -2
 )
 
 func TestAlignTimeSync(t *testing.T) {
@@ -192,6 +205,7 @@ func TestNewReaderTimeSync(t *testing.T) {
 		readerSubName,
 		[]int64{2, 1},
 		interval,
+		readStopFlag,
 		WithReaderQueueSize(8),
 	)
 	if err != nil {
@@ -212,6 +226,9 @@ func TestNewReaderTimeSync(t *testing.T) {
 	}
 	if rr.interval != interval {
 		t.Fatalf("interval shoudl be %d", interval)
+	}
+	if rr.readStopFlagClientId != readStopFlag {
+		t.Fatalf("raed stop flag client id should be %d", rr.readStopFlagClientId)
 	}
 	if rr.readerQueueSize != 8 {
 		t.Fatalf("set read queue size failed")
@@ -272,6 +289,7 @@ func TestReaderTimesync(t *testing.T) {
 		readerSubName,
 		[]int64{2, 1},
 		interval,
+		readStopFlag,
 		WithReaderQueueSize(1024),
 	)
 	if err != nil {
@@ -346,6 +364,100 @@ func TestReaderTimesync(t *testing.T) {
 		t.Fatalf("total records should be 800")
 	}
 	r.Close()
+	pt1.Close()
+	pt2.Close()
+	pr1.Close()
+	pr2.Close()
+	pr3.Close()
+	pr4.Close()
+}
+
+func TestReaderTimesync2(t *testing.T) {
+	client, _ := pulsar.NewClient(pulsar.ClientOptions{URL: pulsarAddr})
+	pt1, _ := client.CreateProducer(pulsar.ProducerOptions{Topic: timeSyncTopic2})
+	pt2, _ := client.CreateProducer(pulsar.ProducerOptions{Topic: timeSyncTopic2})
+	pr1, _ := client.CreateProducer(pulsar.ProducerOptions{Topic: readerTopic12})
+	pr2, _ := client.CreateProducer(pulsar.ProducerOptions{Topic: readerTopic22})
+	pr3, _ := client.CreateProducer(pulsar.ProducerOptions{Topic: readerTopic32})
+	pr4, _ := client.CreateProducer(pulsar.ProducerOptions{Topic: readerTopic42})
+
+	go startProxy(pt1, 1, pr1, 1, pr2, 2, 2*time.Second, t)
+	go startProxy(pt2, 2, pr3, 3, pr4, 4, 2*time.Second, t)
+
+	r1, _ := NewReaderTimeSync(pulsarAddr,
+		timeSyncTopic2,
+		timeSyncSubName1,
+		[]string{readerTopic12, readerTopic22, readerTopic32, readerTopic42},
+		readerSubName1,
+		[]int64{2, 1},
+		interval,
+		readStopFlag1,
+		WithReaderQueueSize(1024),
+	)
+
+	r2, _ := NewReaderTimeSync(pulsarAddr,
+		timeSyncTopic2,
+		timeSyncSubName2,
+		[]string{readerTopic12, readerTopic22, readerTopic32, readerTopic42},
+		readerSubName2,
+		[]int64{2, 1},
+		interval,
+		readStopFlag2,
+		WithReaderQueueSize(1024),
+	)
+
+	ctx, _ := context.WithTimeout(context.Background(), 3*time.Second)
+	rt := []ReaderTimeSync{r1, r2}
+	var wg sync.WaitGroup
+	for _, r := range rt {
+		r := r
+		_ = r.Start()
+		wg.Add(1)
+		go func() {
+			var tsm1, tsm2 TimeSyncMsg
+			var totalRecordes int64 = 0
+			work := false
+			defer wg.Done()
+			for {
+				if ctx.Err() != nil {
+					break
+				}
+				select {
+				case tsm1 = <-r.TimeSync():
+					work = true
+				default:
+					work = false
+				}
+				if work {
+					if tsm1.NumRecorders > 0 {
+						//log.Printf("timestamp %d, num records = %d", getMillisecond(tsm1.Timestamp), tsm1.NumRecorders)
+						totalRecordes += tsm1.NumRecorders
+						for i := int64(0); i < tsm1.NumRecorders; i++ {
+							im := <-r.InsertOrDelete()
+							//log.Printf("%d - %d", getMillisecond(im.Timestamp), getMillisecond(tsm2.Timestamp))
+							if im.Timestamp < tsm2.Timestamp {
+								t.Fatalf("time sync error , im.Timestamp = %d, tsm2.Timestamp = %d", getMillisecond(im.Timestamp), getMillisecond(tsm2.Timestamp))
+							}
+						}
+						tsm2 = tsm1
+					}
+				}
+			}
+			log.Printf("total recordes = %d", totalRecordes)
+			if totalRecordes != 800 {
+				t.Fatalf("total records should be 800")
+			}
+		}()
+	}
+	wg.Wait()
+	r1.Close()
+	r2.Close()
+	pt1.Close()
+	pt2.Close()
+	pr1.Close()
+	pr2.Close()
+	pr3.Close()
+	pr4.Close()
 }
 
 func getMillisecond(ts uint64) uint64 {
