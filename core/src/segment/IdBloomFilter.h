@@ -32,6 +32,9 @@ namespace segment {
 
 constexpr int64_t DEFAULT_BLOOM_FILTER_CAPACITY = 500000;
 
+class IdBloomFilter;
+using IdBloomFilterPtr = std::shared_ptr<IdBloomFilter>;
+
 class IdBloomFilter : public cache::DataObj {
  public:
     explicit IdBloomFilter(int64_t capacity = DEFAULT_BLOOM_FILTER_CAPACITY);
@@ -59,6 +62,9 @@ class IdBloomFilter : public cache::DataObj {
     Status
     Read(const storage::FSHandlerPtr& fs_ptr);
 
+    Status
+    Clone(IdBloomFilterPtr& target);
+
     // No copy and move
     IdBloomFilter(const IdBloomFilter&) = delete;
     IdBloomFilter(IdBloomFilter&&) = delete;
@@ -79,8 +85,6 @@ class IdBloomFilter : public cache::DataObj {
     scaling_bloom_t* bloom_filter_ = nullptr;
     int64_t capacity_ = 0;
 };
-
-using IdBloomFilterPtr = std::shared_ptr<IdBloomFilter>;
 
 }  // namespace segment
 }  // namespace milvus

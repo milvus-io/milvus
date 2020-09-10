@@ -17,6 +17,7 @@
 
 #include "segment/IdBloomFilter.h"
 #include "db/Utils.h"
+#include "utils/Exception.h"
 #include "utils/Log.h"
 #include "utils/Status.h"
 
@@ -37,7 +38,7 @@ IdBloomFilter::~IdBloomFilter() {
 
 scaling_bloom_t*
 IdBloomFilter::GetBloomFilter() {
-    if (bloom_filter_ == nullptr) {
+    if (bloom_filter_ == nullptr && capacity_ > 0) {
         bloom_filter_ = new_scaling_bloom(capacity_, BLOOM_FILTER_ERROR_RATE);
     }
 
@@ -160,6 +161,26 @@ IdBloomFilter::Read(const storage::FSHandlerPtr& fs_ptr) {
         FreeBloomFilter();
         return Status(SERVER_UNEXPECTED_ERROR, err_msg);
     }
+
+    return Status::OK();
+}
+
+Status
+IdBloomFilter::Clone(IdBloomFilterPtr& target) {
+    scaling_bloom_t* this_bloom = GetBloomFilter();
+    if (this_bloom == nullptr) {
+        return Status(DB_ERROR, "Source bloom filter is null");
+    }
+
+    target = std::make_shared<IdBloomFilter>(this_bloom->capacity - CAPACITY_EXPAND);
+    auto target_bloom = target->GetBloomFilter();
+    if (target_bloom->bitmap->bytes != this_bloom->bitmap->bytes) {
+        free(target_bloom->bitmap->array);
+        target_bloom->bitmap->bytes = this_bloom->bitmap->bytes;
+        target_bloom->bitmap->array = new char[this_bloom->bitmap->bytes];
+    }
+
+    memcpy(target_bloom->bitmap->array, this_bloom->bitmap->array, this_bloom->bitmap->bytes);
 
     return Status::OK();
 }
