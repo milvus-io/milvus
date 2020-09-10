@@ -19,6 +19,7 @@
 #include "db/meta/SqliteMetaImpl.h"
 #include "db/DBFactory.h"
 #include "scheduler/tasklabel/BroadcastLabel.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 #include "scheduler/task/BuildIndexTask.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/task/TestTask.h"
@@ -54,7 +55,8 @@ TEST(TaskTest, TEST_TASK) {
     auto file = std::make_shared<SegmentSchema>();
     file->index_params_ = "{ \"nlist\": 16384 }";
     file->dimension_ = 64;
-    auto label = std::make_shared<BroadcastLabel>();
+    scheduler::ResourcePtr resource = nullptr;
+    auto label = std::make_shared<SpecResLabel>(resource, false);
 
     TestTask task(dummy_context, file, label);
     task.Load(LoadType::CPU2GPU, 0);
