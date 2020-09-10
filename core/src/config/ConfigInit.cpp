@@ -9,6 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <sys/sysinfo.h>
+#include <fstream>
+
 #include "config/ServerConfig.h"
 
 /* to find modifiable settings fast */
@@ -28,6 +31,43 @@ is_timezone_valid(const std::string& val, std::string& err) {
         return false;
     }
     return true;
+}
+
+bool
+is_cachesize_valid(int64_t size, std::string& err) {
+    try {
+        // Get max docker memory size
+        int64_t limit_in_bytes;
+        std::ifstream file("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+        if (file.fail()) {
+            throw std::runtime_error("Failed to read /sys/fs/cgroup/memory/memory.limit_in_bytes.");
+        }
+        file >> limit_in_bytes;
+
+        // Get System info
+        int64_t total_mem = 0;
+        struct sysinfo info;
+        int ret = sysinfo(&info);
+        if (ret != 0) {
+            throw std::runtime_error("Get sysinfo failed.");
+        }
+        total_mem = info.totalram;
+
+        if (limit_in_bytes < total_mem && size > limit_in_bytes) {
+            std::string msg =
+                "Invalid cpu cache size: " + std::to_string(size) +
+                ". cache.cache_size exceeds system cgroup memory size: " + std::to_string(limit_in_bytes) + "." +
+                "Consider increase docker memory limit.";
+            throw std::runtime_error(msg);
+        }
+        return true;
+    } catch (std::exception& ex) {
+        err = "Check cache.cache_size valid failed, reason: " + std::string(ex.what());
+        return false;
+    } catch (...) {
+        err = "Check cache.cache_size valid failed, unknown reason.";
+        return false;
+    }
 }
 
 std::unordered_map<std::string, BaseConfigPtr>
@@ -70,8 +110,8 @@ InitConfig() {
         {"wal.path", CreateStringConfig("wal.path", &config.wal.path.value, "/var/lib/milvus/wal")},
 
         /* cache */
-        {"cache.cache_size", CreateSizeConfig("cache.cache_size", 0, std::numeric_limits<int64_t>::max(),
-                                              &config.cache.cache_size.value, 4 * GB)},
+        {"cache.cache_size", CreateSizeConfig_("cache.cache_size", _MODIFIABLE, 0, std::numeric_limits<int64_t>::max(),
+                                               &config.cache.cache_size.value, 4 * GB, is_cachesize_valid, nullptr)},
         {"cache.cpu_cache_threshold",
          CreateFloatingConfig("cache.cpu_cache_threshold", 0.0, 1.0, &config.cache.cpu_cache_threshold.value, 0.7)},
         {"cache.insert_buffer_size",

@@ -38,8 +38,12 @@ bitmap_t *bitmap_resize(bitmap_t *bitmap, size_t old_size, size_t new_size)
 {
     if (bitmap->array != NULL) {
         bitmap->array = (char*)realloc(bitmap->array, new_size);
+        if (new_size > old_size) {
+            memset(bitmap->array + old_size, 0, new_size - old_size);
+        }
     } else {
         bitmap->array = (char*)malloc(new_size);
+        memset(bitmap->array, 0, new_size);
     }
 
     if (bitmap->array != NULL) {
@@ -61,6 +65,7 @@ bitmap_t *new_bitmap(size_t bytes)
         return NULL;
     }
 
+    memset(bitmap->array, 0, bytes);
     bitmap->bytes = bytes;
     return bitmap;
 }
