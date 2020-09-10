@@ -42,6 +42,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3533 Scheduler/Selector needs to judge the index type
 -   \#3621 Fix crash where getting octets information
 -   \#3652 Proto of C++ sdk is different from milvus server
+-   \#3668 Docker exit without any logs
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
