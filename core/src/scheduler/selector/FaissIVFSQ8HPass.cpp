@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 #ifdef MILVUS_GPU_VERSION
-#include "scheduler/selector/FaissIVFPass.h"
+#include "scheduler/selector/FaissIVFSQ8HPass.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -24,7 +24,7 @@ namespace milvus {
 namespace scheduler {
 
 void
-FaissIVFPass::Init() {
+FaissIVFSQ8HPass::Init() {
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetGpuResourceConfigGpuSearchThreshold(threshold_);
     if (!s.ok()) {
@@ -35,53 +35,50 @@ FaissIVFPass::Init() {
         throw std::exception();
     }
 
-    SetIdentity("FaissIVFPass");
+    SetIdentity("FaissIVFSQ8HPass");
     AddGpuEnableListener();
     AddGpuSearchThresholdListener();
     AddGpuSearchResourcesListener();
 }
 
 bool
-FaissIVFPass::Run(const TaskPtr& task) {
+FaissIVFSQ8HPass::Run(const TaskPtr& task) {
     if (task->Type() != TaskType::SearchTask) {
         return false;
     }
 
     auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    switch (static_cast<engine::EngineType>(search_task->file_->engine_type_)) {
-        case engine::EngineType::FAISS_IVFFLAT:
-        case engine::EngineType::FAISS_PQ:
-        case engine::EngineType::FAISS_IVFSQ8:
-            break;
-        default:
-            return false;
+    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8H) {
+        return false;
     }
 
     auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
+    bool hybrid = false;
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPass: gpu disable, specify cpu to search!", "search", 0);
-        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_job->nq() < (uint64_t)threshold_) {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPass: nq < gpu_search_threshold, specify cpu to search!",
-                                    "search", 0);
+        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: gpu disable, specify cpu to search!", "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_job->topk() > milvus::server::GPU_QUERY_MAX_TOPK) {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPass: topk > gpu_topk_threshold, specify cpu to search!",
+        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: topk > gpu_topk_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_job->extra_params()[knowhere::IndexParams::nprobe].get<int64_t>() >
                milvus::server::GPU_QUERY_MAX_NPROBE) {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPass: nprobe > gpu_nprobe_threshold, specify cpu to search!",
+        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: nprobe > gpu_nprobe_threshold, specify cpu to search!",
                                     "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else if (search_job->nq() < (uint64_t)threshold_) {
+        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: nq < gpu_search_threshold, specify cpu to search!",
+                                    "search", 0);
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+        hybrid = true;
     } else {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPass: nq >= gpu_search_threshold, specify gpu %d to search!",
+        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFSQ8HPass: nq >= gpu_search_threshold, specify gpu %d to search!",
                                     "search", 0, search_gpus_[idx_]);
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[idx_]);
         idx_ = (idx_ + 1) % search_gpus_.size();
     }
-    auto label = std::make_shared<SpecResLabel>(res_ptr);
+    auto label = std::make_shared<SpecResLabel>(res_ptr, hybrid);
     task->label() = label;
     return true;
 }

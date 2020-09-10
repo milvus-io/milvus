@@ -8,49 +8,45 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-
+#ifdef MILVUS_GPU_VERSION
 #pragma once
 
-#include "TaskLabel.h"
-#include "scheduler/ResourceMgr.h"
-
+#include <condition_variable>
+#include <deque>
+#include <limits>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
-// class Resource;
-//
-// using ResourceWPtr = std::weak_ptr<Resource>;
+#include "config/handler/GpuResourceConfigHandler.h"
+#include "scheduler/selector/Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class SpecResLabel : public TaskLabel {
+class FaissIVFSQ8HPass : public Pass, public server::GpuResourceConfigHandler {
  public:
-    explicit SpecResLabel(const ResourceWPtr& resource, bool hybrid = false)
-        : TaskLabel(TaskLabelType::SPECIFIED_RESOURCE), resource_(resource), hybrid_(hybrid) {
-    }
+    FaissIVFSQ8HPass() = default;
 
-    ResourceWPtr&
-    resource() {
-        return resource_;
-    }
+ public:
+    void
+    Init() override;
 
-    std::string
-    name() const override {
-        return resource_.lock()->name();
-    }
-
+ public:
     bool
-    IsHybrid() {
-        return hybrid_;
-    }
+    Run(const TaskPtr& task) override;
 
  private:
-    bool hybrid_;
-    ResourceWPtr resource_;
+    int64_t idx_ = 0;
 };
 
-using SpecResLabelPtr = std::shared_ptr<SpecResLabel>();
+using FaissIVFSQ8HPassPtr = std::shared_ptr<FaissIVFSQ8HPass>;
 
 }  // namespace scheduler
 }  // namespace milvus
+#endif

@@ -38,12 +38,14 @@ class IVFSQHybrid : public GPUIVFSQ {
     explicit IVFSQHybrid(const int& device_id) : GPUIVFSQ(device_id) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8H;
         gpu_mode_ = 0;
+        index_mode_ = IndexMode::MODE_CPU;
     }
 
     explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index) : GPUIVFSQ(-1) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8H;
         index_ = index;
         gpu_mode_ = 0;
+        index_mode_ = IndexMode::MODE_CPU;
     }
 
     explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index, const int64_t device_id, ResPtr& resource)
@@ -91,7 +93,7 @@ class IVFSQHybrid : public GPUIVFSQ {
     QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&) override;
 
  protected:
-    int64_t gpu_mode_ = 0;  // 0,1,2
+    int64_t gpu_mode_ = 0;  // 0: CPU, 1: Hybrid, 2: GPU
     int64_t quantizer_gpu_id_ = -1;
 };
 

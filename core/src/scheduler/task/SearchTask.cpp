@@ -26,6 +26,7 @@
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 #include "segment/SegmentReader.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -278,11 +279,7 @@ XSearchTask::Execute() {
         try {
             fiu_do_on("XSearchTask.Execute.throw_std_exception", throw std::exception());
             // step 2: search
-            bool hybrid = false;
-            if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H &&
-                ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
-                hybrid = true;
-            }
+            bool hybrid = std::dynamic_pointer_cast<SpecResLabel>(label_)->IsHybrid();
             Status s;
             if (general_query != nullptr) {
                 std::unordered_map<std::string, engine::DataType> types;
