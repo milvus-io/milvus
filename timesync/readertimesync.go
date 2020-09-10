@@ -197,8 +197,9 @@ func (r *readerTimeSyncCfg) alignTimeSync(ts []*pb.TimeSyncMsg) []*pb.TimeSyncMs
 			}
 		}
 	} else {
-		ts = ts[len(ts)-1:]
-		return ts
+		if len(ts) > 1 {
+			ts = ts[len(ts)-1:]
+		}
 	}
 	return ts
 }

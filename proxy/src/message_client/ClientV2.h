@@ -9,7 +9,7 @@ namespace milvus::message_client {
 class MsgClientV2 {
  public:
   MsgClientV2(int64_t client_id,
-              std::string &service_url,
+              const std::string &service_url,
               const pulsar::ClientConfiguration &config = pulsar::ClientConfiguration());
   ~MsgClientV2();
 
@@ -26,9 +26,9 @@ class MsgClientV2 {
   Status SendMutMessage(const milvus::grpc::DeleteByIDParam &request, uint64_t timestamp);
 
   //
-  Status SendQueryMessage(const milvus::grpc::SearchParam &request);
+  Status SendQueryMessage(const milvus::grpc::SearchParam &request, uint64_t timestamp, int64_t &query_id);
 
-  static milvus::grpc::QueryResult GetQueryResult(int64_t query_id);
+  Status GetQueryResult(int64_t query_id, milvus::grpc::QueryResult &result);
 
  private:
   int64_t GetUniqueQId() {
