@@ -197,14 +197,14 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
         case (int32_t)engine::EngineType::FAISS_IVFSQ8:
         case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
         case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
             if (!status.ok()) {
                 return status;
             }
             break;
         }
         case (int32_t)engine::EngineType::FAISS_PQ: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
             if (!status.ok()) {
                 return status;
             }
@@ -292,7 +292,7 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
         case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
         case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT:
         case (int32_t)engine::EngineType::FAISS_PQ: {
-            auto status = CheckParameterRange(search_params, knowhere::IndexParams::nprobe, 1, 999999);
+            auto status = CheckParameterRange(search_params, knowhere::IndexParams::nprobe, 1, 65536);
             if (!status.ok()) {
                 return status;
             }

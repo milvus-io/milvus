@@ -152,6 +152,9 @@ static void knn_inner_product_sse (const float * x,
         size_t block_x = std::min(
                 get_L3_Size() / (d * sizeof(float) + thread_max_num * k * (sizeof(float) + sizeof(int64_t))),
                 nx);
+        if (block_x == 0) {
+            block_x = 1;
+        }
 
         size_t all_heap_size = block_x * k * thread_max_num;
         float *value = new float[all_heap_size];
@@ -261,6 +264,9 @@ static void knn_L2sqr_sse (
         size_t block_x = std::min(
                 get_L3_Size() / (d * sizeof(float) + thread_max_num * k * (sizeof(float) + sizeof(int64_t))),
                 nx);
+        if (block_x == 0) {
+            block_x = 1;
+        }
 
         size_t all_heap_size = block_x * k * thread_max_num;
         float *value = new float[all_heap_size];
