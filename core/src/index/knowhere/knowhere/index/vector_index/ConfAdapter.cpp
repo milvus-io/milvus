@@ -84,7 +84,7 @@ MatchNlist(int64_t size, int64_t nlist) {
 
 bool
 IVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t MAX_NLIST = 999999;
+    static int64_t MAX_NLIST = 65536;
     static int64_t MIN_NLIST = 1;
 
     CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
@@ -109,7 +109,7 @@ IVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 bool
 IVFConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
     static int64_t MIN_NPROBE = 1;
-    static int64_t MAX_NPROBE = 999999;  // todo(linxj): [1, nlist]
+    static int64_t MAX_NPROBE = 65536;  // todo(linxj): [1, nlist]
 
     if (mode == IndexMode::MODE_GPU) {
 #ifdef MILVUS_GPU_VERSION
@@ -133,7 +133,7 @@ IVFSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 bool
 IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     static int64_t DEFAULT_NBITS = 8;
-    static int64_t MAX_NLIST = 999999;
+    static int64_t MAX_NLIST = 65536;
     static int64_t MIN_NLIST = 1;
     static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
 
