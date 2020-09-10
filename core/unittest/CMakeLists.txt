@@ -222,8 +222,6 @@ if (MILVUS_GPU_VERSION)
     link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
     set(unittest_libs ${unittest_libs}
             ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-            cudart
-            cublas
             )
 endif ()
 
