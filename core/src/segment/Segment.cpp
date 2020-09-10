@@ -19,6 +19,7 @@
 #include "db/SnapshotUtils.h"
 #include "db/snapshot/Snapshots.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "segment/Utils.h"
 #include "utils/Log.h"
 
 #include <algorithm>
@@ -300,8 +301,11 @@ Segment::DeleteEntity(std::vector<offset_t>& offsets) {
     if (offsets.size() == 0) {
         return Status::OK();
     }
-    // sort offset in descendant
-    std::sort(offsets.begin(), offsets.end(), std::greater<>());
+
+    // calculate copy ranges
+    int64_t delete_count = 0;
+    segment::CopyRanges copy_ranges;
+    segment::CalcCopyRangesWithOffset(offsets, row_count_, copy_ranges, delete_count);
 
     // delete entity data from max offset to min offset
     for (auto& pair : fixed_fields_) {
@@ -311,20 +315,14 @@ Segment::DeleteEntity(std::vector<offset_t>& offsets) {
         }
 
         auto& data = pair.second;
-        for (auto offset : offsets) {
-            if (offset >= 0 && offset < row_count_) {
-                auto step = offset * width;
-                data->data_.erase(data->data_.begin() + step, data->data_.begin() + step + width);
-            }
-        }
+
+        std::vector<uint8_t> new_data;
+        segment::CopyDataWithRanges(data->data_, width, copy_ranges, new_data);
+        data->data_.swap(new_data);
     }
 
     // reset row count
-    for (auto offset : offsets) {
-        if (offset >= 0 && offset < row_count_) {
-            row_count_--;
-        }
-    }
+    row_count_ -= delete_count;
 
     return Status::OK();
 }

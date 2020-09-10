@@ -19,6 +19,7 @@
 #include <ctime>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 #include <fiu/fiu-local.h>
@@ -137,6 +138,7 @@ MemCollection::Serialize() {
             break;
         }
     }
+    recorder.RecordSection("ApplyDeleteToFile");
 
     // serialize mem to new segment files
     // delete ids will be applied in MemSegment::Serialize() method
@@ -173,13 +175,15 @@ MemCollection::ApplyDeleteToFile() {
 
     int64_t segment_iterated = 0;
     auto segment_executor = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* iterator) -> Status {
+        TimeRecorder recorder("MemCollection::ApplyDeleteToFile collection " + std::to_string(collection_id_) +
+                              " segment " + std::to_string(segment->GetID()));
         segment_iterated++;
         auto seg_visitor = engine::SegmentVisitor::Build(ss, segment->GetID());
         segment::SegmentReaderPtr segment_reader =
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
 
         // Step 1: Check to-delete id possibly in this segment
-        std::set<idx_t> ids_to_check;
+        std::unordered_set<idx_t> ids_to_check;
         segment::IdBloomFilterPtr pre_bloom_filter;
         STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
         for (auto& id : ids_to_delete_) {
@@ -211,8 +215,7 @@ MemCollection::ApplyDeleteToFile() {
         int64_t new_deleted = 0;
         for (size_t i = 0; i < uids.size(); i++) {
             auto id = uids[i];
-            auto iter = std::find(ids_to_check.begin(), ids_to_check.end(), id);
-            if (iter != ids_to_check.end()) {
+            if (ids_to_check.find(id) != ids_to_check.end()) {
                 del_offsets.push_back(i);
                 bloom_filter->Remove(id);
                 new_deleted++;
@@ -223,8 +226,7 @@ MemCollection::ApplyDeleteToFile() {
             return Status::OK();  // nothing change for this segment
         }
 
-        LOG_ENGINE_DEBUG_ << "Delete " << new_deleted << " entities from collection " << collection_id_ << " segment "
-                          << segment->GetID();
+        recorder.RecordSection("delete " + std::to_string(new_deleted) + " entities");
 
         // Step 2: Mark previous deleted docs file and bloom filter file stale
         auto& field_visitors_map = seg_visitor->GetFieldVisitors();
@@ -288,6 +290,7 @@ MemCollection::ApplyDeleteToFile() {
         bloom_filter_file->SetSize(
             CommonUtil::GetFileSize(bloom_filter_file_path + codec::IdBloomFilterFormat::FilePostfix()));
 
+        recorder.RecordSection("write deleted docs and bloom filter");
         return Status::OK();
     };
 

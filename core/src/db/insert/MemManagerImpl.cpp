@@ -22,8 +22,6 @@
 namespace milvus {
 namespace engine {
 
-constexpr size_t REQUIRE_FLUSH_DELETE_COUNT = 1024;
-
 MemCollectionPtr
 MemManagerImpl::GetMemByCollection(int64_t collection_id) {
     auto mem_collection = mem_map_.find(collection_id);
@@ -289,20 +287,6 @@ MemManagerImpl::RequireFlush(std::set<int64_t>& collection_ids) {
             collection_ids.insert(kv.first);
         }
         require_flush = true;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(mem_mutex_);
-        for (auto& kv : mem_map_) {
-            if (kv.second == nullptr) {
-                continue;
-            }
-
-            if (kv.second->DeleteCount() >= REQUIRE_FLUSH_DELETE_COUNT) {
-                collection_ids.insert(kv.first);
-                require_flush = true;
-            }
-        }
     }
 
     return require_flush;
