@@ -26,12 +26,12 @@
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 #include "segment/SegmentReader.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
