@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/czs007/suvlim/pkg/master/common"
-	pb "github.com/czs007/suvlim/pkg/master/grpc"
+	pb "github.com/czs007/suvlim/pkg/master/grpc/master"
+	messagepb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/czs007/suvlim/pkg/master/informer"
 	"github.com/czs007/suvlim/pkg/master/kv"
 	"github.com/czs007/suvlim/pkg/master/mock"
@@ -90,11 +91,18 @@ func GRPCServer() error {
 
 type GRPCMasterServer struct{}
 
-func (ms GRPCMasterServer) CreateCollection(ctx context.Context, in *pb.CreateCollectionRequest) (*pb.CreateCollectionResponse, error) {
-	return &pb.CreateCollectionResponse{
-		CollectionName: in.CollectionName,
+func (ms GRPCMasterServer) CreateCollection(ctx context.Context, in *messagepb.Mapping) (*messagepb.Status, error) {
+	return &messagepb.Status{
+		ErrorCode: 0,
+		Reason:    "",
 	}, nil
 }
+
+// func (ms GRPCMasterServer) CreateCollection(ctx context.Context, in *pb.CreateCollectionRequest) (*pb.CreateCollectionResponse, error) {
+//	return &pb.CreateCollectionResponse{
+//		CollectionName: in.CollectionName,
+//	}, nil
+// }
 
 func CollectionController() {
 	cli, _ := clientv3.New(clientv3.Config{
