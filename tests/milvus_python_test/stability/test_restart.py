@@ -3,6 +3,7 @@ import random
 import pdb
 import threading
 import logging
+import json
 from multiprocessing import Pool, Process
 import pytest
 from milvus import IndexType, MetricType
@@ -33,7 +34,8 @@ class TestRestartBase:
     """
     @pytest.fixture(scope="module", autouse=True)
     def skip_check(self, args):
-        if "service_name" not in args or args["service_name"]:
+        logging.getLogger().info(args)
+        if "service_name" not in args or not args["service_name"]:
             reason = "Skip if service name not provided"
             logging.getLogger().info(reason)
             pytest.skip(reason)
@@ -49,14 +51,6 @@ class TestRestartBase:
         method: call function: create collection, then insert/flush, restart server and assert row count
         expected: row count keep the same
         '''
-        if "service_name" not in args or args["service_name"]:
-            reason = "Skip if service name not provided"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
-        if args["service_name"].find("shards") != -1:
-            reason = "Skip restart cases in shards mode"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         ids = connect.insert(collection, entities)
@@ -81,14 +75,6 @@ class TestRestartBase:
         expected: row count equals 0
         '''
         # disable_autoflush()
-        if "service_name" not in args or args["service_name"]:
-            reason = "Skip if service name not provided"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
-        if args["service_name"].find("shards") != -1:
-            reason = "Skip restart cases in shards mode"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
         ids = connect.insert(collection, big_entities)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
@@ -117,14 +103,6 @@ class TestRestartBase:
         expected: row count equals (nb - delete_length)
         '''
         # disable_autoflush()
-        if "service_name" not in args or args["service_name"]:
-            reason = "Skip if service name not provided"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
-        if args["service_name"].find("shards") != -1:
-            reason = "Skip restart cases in shards mode"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
         ids = connect.insert(collection, big_entities)
         connect.flush([collection])
         delete_length = 1000
@@ -151,44 +129,27 @@ class TestRestartBase:
             assert res_count_3 == big_nb - delete_length
 
     @pytest.mark.level(2)
-    def test_during_indexing(self, connect, collection, args):
+    def test_during_indexed(self, connect, collection, args):
         '''
         target: flushing will recover
-        method: call function: create collection, then indexing, restart server and assert row count
-        expected: row count equals nb, server contitue to build index after restart
+        method: call function: create collection, then indexed, restart server and assert row count
+        expected: row count equals nb
         '''
         # disable_autoflush()
-        if "service_name" not in args or args["service_name"]:
-            reason = "Skip if service name not provided"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
-        if args["service_name"].find("shards") != -1:
-            reason = "Skip restart cases in shards mode"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
         ids = connect.insert(collection, big_entities)
         connect.flush([collection])
-        connect.create_index(collection, field_name, default_index, _async=True)
+        connect.create_index(collection, field_name, default_index)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
+        stats = connect.get_collection_stats(collection)
+        # logging.getLogger().info(stats)
+        # pdb.set_trace()
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
         new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
-        res_count_2 = new_connect.count_entities(collection)
-        logging.getLogger().info(res_count_2)
-        timeout = 300
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            time.sleep(5)
-            assert new_connect.count_entities(collection) == big_nb
-            stats = connect.get_collection_stats(collection)
-            assert stats["row_count"] == big_nb
-            for file in stats["partitions"][0]["segments"][0]["files"]:
-                if file["field"] == field_name and file["name"] != "_raw":
-                    assert file["data_size"] > 0
-                    if file["index_type"] != default_index["index_type"]:
-                        continue
+        assert new_connect.count_entities(collection) == big_nb
+        stats = connect.get_collection_stats(collection)
         for file in stats["partitions"][0]["segments"][0]["files"]:
             if file["field"] == field_name and file["name"] != "_raw":
                 assert file["data_size"] > 0
@@ -196,6 +157,53 @@ class TestRestartBase:
                     assert False
                 else:
                     assert True
+
+    @pytest.mark.level(2)
+    def test_during_indexing(self, connect, collection, args):
+        '''
+        target: flushing will recover
+        method: call function: create collection, then indexing, restart server and assert row count
+        expected: row count equals nb, server contitue to build index after restart
+        '''
+        # disable_autoflush()
+        loop = 5
+        for i in range(loop):
+            ids = connect.insert(collection, big_entities)
+        connect.flush([collection])
+        connect.create_index(collection, field_name, default_index, _async=True)
+        res_count = connect.count_entities(collection)
+        logging.getLogger().info(res_count)
+        stats = connect.get_collection_stats(collection)
+        # logging.getLogger().info(stats)
+        # restart server
+        assert restart_server(args["service_name"])
+        # assert row count again
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+        res_count_2 = new_connect.count_entities(collection)
+        logging.getLogger().info(res_count_2)
+        assert res_count_2 == loop * big_nb
+        status = new_connect._cmd("status")
+        assert json.loads(status)["indexing"] == True
+        # timeout = 100
+        # start_time = time.time()
+        # while time.time() - start_time < timeout:
+        #     time.sleep(5)
+        #     assert new_connect.count_entities(collection) == loop * big_nb
+        #     stats = connect.get_collection_stats(collection)
+        #     assert stats["row_count"] == loop * big_nb
+        #     for file in stats["partitions"][0]["segments"][0]["files"]:
+        #         # logging.getLogger().info(file)
+        #         if file["field"] == field_name and file["name"] != "_raw":
+        #             assert file["data_size"] > 0
+        #             if file["index_type"] != default_index["index_type"]:
+        #                 continue
+        # for file in stats["partitions"][0]["segments"][0]["files"]:
+        #     if file["field"] == field_name and file["name"] != "_raw":
+        #         assert file["data_size"] > 0
+        #         if file["index_type"] != default_index["index_type"]:
+        #             assert False
+        #         else:
+        #             assert True
 
     @pytest.mark.level(2)
     def test_delete_flush_during_compacting(self, connect, collection, args):
@@ -206,24 +214,18 @@ class TestRestartBase:
         expected: row count equals (nb - delete_length)
         '''
         # disable_autoflush()
-        if "service_name" not in args or args["service_name"]:
-            reason = "Skip if service name not provided"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
-        if args["service_name"].find("shards") != -1:
-            reason = "Skip restart cases in shards mode"
-            logging.getLogger().info(reason)
-            pytest.skip(reason)
         ids = connect.insert(collection, big_entities)
         connect.flush([collection])
         delete_length = 1000
-        delete_ids = ids[:delete_length]
-        delete_res = connect.delete_entity_by_id(collection, delete_ids)
+        loop = 10
+        for i in range(loop):
+            delete_ids = ids[i*loop:i*loop+delete_length]
+            delete_res = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
         connect.compact(collection, _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
-        assert res_count == big_nb - delete_length
+        assert res_count == big_nb - delete_length*loop
         info = connect.get_collection_stats(collection)
         size_old = info["partitions"][0]["segments"][0]["data_size"]
         logging.getLogger().info(size_old)
@@ -233,7 +235,7 @@ class TestRestartBase:
         new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
         res_count_2 = new_connect.count_entities(collection)
         logging.getLogger().info(res_count_2)
-        assert res_count_2 == big_nb - delete_length
+        assert res_count_2 == big_nb - delete_length*loop
         info = connect.get_collection_stats(collection)
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(collection)
