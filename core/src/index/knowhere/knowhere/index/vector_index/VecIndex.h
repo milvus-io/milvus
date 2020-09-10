@@ -138,6 +138,11 @@ class VecIndex : public Index {
         return BlacklistSize() + UidsSize() + IndexSize();
     }
 
+    void
+    SetIndexMode(IndexMode mode) {
+        index_mode_ = mode;
+    }   
+
  protected:
     IndexType index_type_ = "";
     IndexMode index_mode_ = IndexMode::MODE_CPU;

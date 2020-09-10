@@ -132,7 +132,7 @@ class TestSearchBase:
 
     @pytest.fixture(
         scope="function",
-        params=[1, 99, 1024, 2049]
+        params=[1, 99, 1024, 2049, 16385]
     )
     def get_top_k(self, request):
         yield request.param
@@ -1223,11 +1223,7 @@ class TestSearchParamsInvalid(object):
                 search_param = {"nprobe": nprobe}
                 query_vecs = gen_vectors(nprobe, dim)
                 status, result = connect.search(collection, top_k, query_vecs, params=search_param)
-                # IVFSQ8H supported later
-                if index["index_type"] == IndexType.IVF_SQ8H:
-                    assert not status.OK()
-                else:
-                    assert status.OK()
+                assert status.OK()
 
     @pytest.fixture(
         scope="function",
