@@ -12,7 +12,7 @@ from utils import *
 
 dim = 128
 segment_row_count = 5000
-top_k_limit = 2048
+top_k_limit = 16384
 collection_id = "search"
 tag = "1970_01_01"
 insert_interval_time = 1.5
