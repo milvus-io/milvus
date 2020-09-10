@@ -43,6 +43,9 @@ class MemCollection {
     Status
     Delete(const std::vector<idx_t>& ids, idx_t op_id);
 
+    size_t
+    DeleteCount() const;
+
     Status
     EraseMem(int64_t partition_id);
 

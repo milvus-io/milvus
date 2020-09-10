@@ -538,7 +538,9 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         if (!status.ok()) {
             return status;
         }
-        if (mem_mgr_->GetCurrentMem() > options_.insert_buffer_size_) {
+
+        std::set<int64_t> collection_ids;
+        if (mem_mgr_->RequireFlush(collection_ids)) {
             LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force flush";
             InternalFlush();
         }
@@ -583,7 +585,20 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
     }
 
     status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), entity_ids, op_id);
-    return status;
+    if (!status.ok()) {
+        return status;
+    }
+
+    std::set<int64_t> collection_ids;
+    if (mem_mgr_->RequireFlush(collection_ids)) {
+        if (collection_ids.find(ss->GetCollectionId()) != collection_ids.end()) {
+            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "delete", 0)
+                              << "Delete count in buffer exceeds limit. Force flush";
+            InternalFlush(collection_name);
+        }
+    }
+
+    return Status::OK();
 }
 
 Status

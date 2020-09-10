@@ -56,16 +56,19 @@ class MemManagerImpl : public MemManager {
     Status
     EraseMem(int64_t collection_id, int64_t partition_id) override;
 
-    size_t
-    GetCurrentMutableMem() override;
-
-    size_t
-    GetCurrentImmutableMem() override;
-
-    size_t
-    GetCurrentMem() override;
+    bool
+    RequireFlush(std::set<int64_t>& collection_ids) override;
 
  private:
+    size_t
+    GetCurrentMutableMem();
+
+    size_t
+    GetCurrentImmutableMem();
+
+    size_t
+    GetCurrentMem();
+
     MemCollectionPtr
     GetMemByCollection(int64_t collection_id);
 

@@ -102,6 +102,11 @@ MemCollection::Delete(const std::vector<idx_t>& ids, idx_t op_id) {
     return Status::OK();
 }
 
+size_t
+MemCollection::DeleteCount() const {
+    return ids_to_delete_.size();
+}
+
 Status
 MemCollection::EraseMem(int64_t partition_id) {
     std::lock_guard<std::mutex> lock(mem_mutex_);
@@ -204,10 +209,11 @@ MemCollection::ApplyDeleteToFile() {
         pre_bloom_filter->Clone(bloom_filter);
 
         int64_t new_deleted = 0;
-        for (auto id : ids_to_check) {
-            auto iter = std::find(uids.begin(), uids.end(), id);
-            if (iter != uids.end()) {
-                del_offsets.push_back(std::distance(uids.begin(), iter));
+        for (size_t i = 0; i < uids.size(); i++) {
+            auto id = uids[i];
+            auto iter = std::find(ids_to_check.begin(), ids_to_check.end(), id);
+            if (iter != ids_to_check.end()) {
+                del_offsets.push_back(i);
                 bloom_filter->Remove(id);
                 new_deleted++;
             }
@@ -216,6 +222,9 @@ MemCollection::ApplyDeleteToFile() {
         if (new_deleted == 0) {
             return Status::OK();  // nothing change for this segment
         }
+
+        LOG_ENGINE_DEBUG_ << "Delete " << new_deleted << " entities from collection " << collection_id_ << " segment "
+                          << segment->GetID();
 
         // Step 2: Mark previous deleted docs file and bloom filter file stale
         auto& field_visitors_map = seg_visitor->GetFieldVisitors();
