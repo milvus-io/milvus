@@ -172,10 +172,14 @@ Resource::loader_function() {
             }
             LoadFile(task_item->task);
             task_item->Loaded();
-            if (task_item->from) {
-                task_item->from->Moved();
-                task_item->from->task = FinishedTask::Create(task_item->from->task);
-                task_item->from = nullptr;
+
+            auto& label = task_item->task->label();
+            if (label != nullptr && label->Type() != TaskLabelType::BROADCAST) {
+                if (task_item->from) {
+                    task_item->from->Moved();
+                    task_item->from->task = FinishedTask::Create(task_item->from->task);
+                    task_item->from = nullptr;
+                }
             }
             if (subscriber_) {
                 auto event = std::make_shared<LoadCompletedEvent>(shared_from_this(), task_item);
