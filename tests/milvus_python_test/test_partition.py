@@ -44,7 +44,7 @@ class TestCreateBase:
         method: call function: create_partition for 4097 times
         expected: exception raised
         '''
-        threads_num = 16
+        threads_num = 8
         threads = []
         if args["handler"] == "HTTP":
             pytest.skip("skip in http mode")

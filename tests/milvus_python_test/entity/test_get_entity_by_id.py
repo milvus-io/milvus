@@ -573,7 +573,7 @@ class TestGetBase:
                 future.result()
 
     @pytest.mark.level(2)
-    def test_get_entity_by_id_insert_multi_threads(self, connect, collection):
+    def test_get_entity_by_id_insert_multi_threads_2(self, connect, collection):
         '''
         target: test.get_entity_by_id
         method: thread do insert and get
@@ -600,7 +600,7 @@ class TestGetBase:
                     executor.submit(get, group_ids, group_entities)
 
             step = 100
-            vectors = gen_vectors(nb, dimension, False)
+            vectors = gen_vectors(nb, dim, False)
             group_vectors = [vectors[i:i + step] for i in range(0, len(vectors), step)]
             task = executor.submit(insert, group_vectors)
             task.result()

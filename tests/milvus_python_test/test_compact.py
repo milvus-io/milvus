@@ -291,7 +291,7 @@ class TestCompactBase:
         # get collection info before compact
         info = connect.get_collection_stats(collection)
         size_before = info["partitions"][0]["segments"][0]["data_size"]
-        delete_ids = ids[:1500]
+        delete_ids = ids[:nb//2]
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         connect.flush([collection])

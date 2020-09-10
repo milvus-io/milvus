@@ -138,7 +138,7 @@ class TestSearchBase:
 
     @pytest.fixture(
         scope="function",
-        params=[1, 10, 2049]
+        params=[1, 10]
     )
     def get_top_k(self, request):
         yield request.param
@@ -157,6 +157,25 @@ class TestSearchBase:
         expected: the length of the result is top_k
         '''
         top_k = get_top_k
+        nq = get_nq
+        entities, ids = init_data(connect, collection)
+        query, vecs = gen_query_vectors(field_name, entities, top_k, nq)
+        if top_k <= top_k_limit:
+            res = connect.search(collection, query)
+            assert len(res[0]) == top_k
+            assert res[0]._distances[0] <= epsilon
+            assert check_id_result(res[0], ids[0])
+        else:
+            with pytest.raises(Exception) as e:
+                res = connect.search(collection, query)
+
+    def test_search_flat_top_k(self, connect, collection, get_nq):
+        '''
+        target: test basic search fuction, all the search params is corrent, change top-k value
+        method: search with the given vectors, check the result
+        expected: the length of the result is top_k
+        '''
+        top_k = 2049
         nq = get_nq
         entities, ids = init_data(connect, collection)
         query, vecs = gen_query_vectors(field_name, entities, top_k, nq)
@@ -1569,7 +1588,7 @@ class TestSearchInvalid(object):
         index_type = get_simple_index["index_type"]
         if index_type in ["FLAT"]:
             pytest.skip("skip in FLAT index")
-        if index_type != get_search_params["index_type"]:
+        if index_type != search_params["index_type"]:
             pytest.skip("skip if index_type not matched")
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
