@@ -61,6 +61,8 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
         auto partition = partitions_holder.GetResource(store, partition_id, false);
         auto partition_name = partition->GetName();
         AddResource<PartitionCommit>(partition_commit);
+        base_path = GetResPath<Partition>(store->GetRootPath(), std::make_shared<Partition>(*partition));
+        partition_commit->LoadIds(base_path);
 
         p_pc_map_[partition_id] = partition_commit->GetID();
         AddResource<Partition>(partition);

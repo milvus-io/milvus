@@ -60,6 +60,23 @@ GetResPath<CollectionCommit>(const std::string& root, const CollectionCommit::Pt
 
 template <>
 inline std::string
+GetResPath<PartitionCommit>(const std::string& root, const PartitionCommit::Ptr& res_ptr) {
+    auto& ids = res_ptr->GetFlushIds();
+    if (ids.size() == 0) {
+        return std::string();
+    }
+
+    std::stringstream ss;
+    ss << root << "/";
+    ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
+    ss << PARTITION_PREFIX << res_ptr->GetID() << "/";
+    ss << *(ids.begin()) << MAP_SUFFIX;
+
+    return ss.str();
+}
+
+template <>
+inline std::string
 GetResPath<Partition>(const std::string& root, const Partition::Ptr& res_ptr) {
     std::stringstream ss;
     ss << root << "/";

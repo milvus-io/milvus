@@ -133,7 +133,7 @@ PartitionCommit::PartitionCommit(ID_TYPE collection_id, ID_TYPE partition_id, co
                                  TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       PartitionIdField(partition_id),
-      MappingsField(mappings),
+      FlushableMappingsField(mappings),
       RowCountField(row_cnt),
       SizeField(size),
       IdField(id),

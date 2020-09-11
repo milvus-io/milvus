@@ -1014,8 +1014,12 @@ CreateCollectionOperation::DoExecute(StorePtr store) {
     AddStepWithLsn(*partition, c_context_.lsn, p_ctx_p);
     context_.new_partition = partition;
     PartitionCommitPtr partition_commit;
-    STATUS_CHECK(store->CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()),
-                                                        partition_commit));
+    PartitionCommit temp_pc(collection->GetID(), partition->GetID());
+    temp_pc.UpdateFlushIds();
+    auto base_pc_path = GetResPath<Partition>(store->GetRootPath(), partition);
+    temp_pc.FlushIds(base_pc_path);
+
+    STATUS_CHECK(store->CreateResource<PartitionCommit>(std::move(temp_pc), partition_commit));
     auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(meta::oUpdate).CreatePtr();
     AddStepWithLsn(*partition_commit, c_context_.lsn, pc_ctx_p);
     context_.new_partition_commit = partition_commit;

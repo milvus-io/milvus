@@ -586,7 +586,7 @@ using PartitionPtr = Partition::Ptr;
 class PartitionCommit : public BaseResource<PartitionCommit>,
                         public CollectionIdField,
                         public PartitionIdField,
-                        public MappingsField,
+                        public FlushableMappingsField,
                         public RowCountField,
                         public SizeField,
                         public IdField,
