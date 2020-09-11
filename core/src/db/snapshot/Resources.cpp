@@ -50,8 +50,9 @@ FlushableMappingsField::LoadIds(const std::string& base_path, const std::string&
             for (ID_TYPE i; ss >> i;) {
                 std::string::size_type sz;
                 mappings_.insert(i);
-                if (ss.peek() == ',')
+                if (ss.peek() == ',') {
                     ss.ignore();
+                }
             }
         }
 
