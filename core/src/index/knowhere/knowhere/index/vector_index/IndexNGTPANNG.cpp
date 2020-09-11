@@ -26,6 +26,9 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     prop.setDefaultForCreateIndex();
     prop.dimension = dim;
 
+    auto edge_size = config[IndexParams::edge_size].get<int64_t>();
+    prop.edgeSizeLimitForCreation = edge_size;
+
     MetricType metric_type = config[Metric::TYPE];
 
     if (metric_type == Metric::L2) {
@@ -37,27 +40,37 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     } else {
         KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
     }
+
     index_ =
         std::shared_ptr<NGT::Index>(NGT::Index::createGraphAndTree(reinterpret_cast<const float*>(p_data), prop, rows));
 
-    size_t force_removed_edge_size = 60;
-    size_t selective_removed_edge_size = 30;
+    auto forcedly_pruned_edge_size = config[IndexParams::forcedly_pruned_edge_size].get<int64_t>();
+    auto selectively_pruned_edge_size = config[IndexParams::selectively_pruned_edge_size].get<int64_t>();
+
+    if (!forcedly_pruned_edge_size && !selectively_pruned_edge_size) {
+        return;
+    }
+
+    if (forcedly_pruned_edge_size && selectively_pruned_edge_size &&
+        selectively_pruned_edge_size >= forcedly_pruned_edge_size) {
+        KNOWHERE_THROW_MSG("Selectively pruned edge size should less than remaining edge size");
+    }
 
     // prune
     auto& graph = dynamic_cast<NGT::GraphIndex&>(index_->getIndex());
     for (size_t id = 1; id < graph.repository.size(); id++) {
         try {
             NGT::GraphNode& node = *graph.getNode(id);
-            if (node.size() >= force_removed_edge_size) {
-                node.resize(force_removed_edge_size);
+            if (node.size() >= forcedly_pruned_edge_size) {
+                node.resize(forcedly_pruned_edge_size);
             }
-            if (node.size() >= selective_removed_edge_size) {
+            if (node.size() >= selectively_pruned_edge_size) {
                 size_t rank = 0;
                 for (auto i = node.begin(); i != node.end(); ++rank) {
-                    if (rank >= selective_removed_edge_size) {
+                    if (rank >= selectively_pruned_edge_size) {
                         bool found = false;
                         for (size_t t1 = 0; t1 < node.size() && found == false; ++t1) {
-                            if (t1 >= selective_removed_edge_size) {
+                            if (t1 >= selectively_pruned_edge_size) {
                                 break;
                             }
                             if (rank == t1) {
@@ -65,7 +78,7 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
                             }
                             NGT::GraphNode& node2 = *graph.getNode(node[t1].id);
                             for (size_t t2 = 0; t2 < node2.size(); ++t2) {
-                                if (t2 >= selective_removed_edge_size) {
+                                if (t2 >= selectively_pruned_edge_size) {
                                     break;
                                 }
                                 if (node2[t2].id == (*i).id) {

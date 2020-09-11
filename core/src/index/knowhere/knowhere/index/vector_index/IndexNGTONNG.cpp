@@ -16,6 +16,7 @@
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
+#include <cstddef>
 #include <memory>
 
 namespace milvus {
@@ -28,7 +29,9 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     NGT::Property prop;
     prop.setDefaultForCreateIndex();
     prop.dimension = dim;
-    prop.edgeSizeForCreation = 20;
+
+    auto edge_size = config[IndexParams::edge_size].get<int64_t>();
+    prop.edgeSizeForCreation = edge_size;
     prop.insertionRadiusCoefficient = 1.0;
 
     MetricType metric_type = config[Metric::TYPE];
@@ -42,25 +45,24 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     } else {
         KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
     }
+
     index_ =
         std::shared_ptr<NGT::Index>(NGT::Index::createGraphAndTree(reinterpret_cast<const float*>(p_data), prop, rows));
 
     // reconstruct graph
     NGT::GraphOptimizer graphOptimizer(true);
 
-    size_t number_of_outgoing_edges = 5;
-    size_t number_of_incoming_edges = 30;
-    size_t number_of_queries = 1000;
-    size_t number_of_res = 20;
+    auto number_of_outgoing_edges = config[IndexParams::outgoing_edge_size].get<size_t>();
+    auto number_of_incoming_edges = config[IndexParams::incoming_edge_size].get<size_t>();
 
     graphOptimizer.shortcutReduction = true;
-    graphOptimizer.searchParameterOptimization = true;
+    graphOptimizer.searchParameterOptimization = false;
     graphOptimizer.prefetchParameterOptimization = false;
     graphOptimizer.accuracyTableGeneration = false;
     graphOptimizer.margin = 0.2;
     graphOptimizer.gtEpsilon = 0.1;
 
-    graphOptimizer.set(number_of_outgoing_edges, number_of_incoming_edges, number_of_queries, number_of_res);
+    graphOptimizer.set(number_of_outgoing_edges, number_of_incoming_edges, 1000, 20);
 
     graphOptimizer.execute(*index_);
 }

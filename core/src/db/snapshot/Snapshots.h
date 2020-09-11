@@ -23,9 +23,7 @@
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 class Snapshots {
  public:
@@ -66,6 +64,13 @@ class Snapshots {
 
     Status Init(StorePtr);
 
+ public:
+    Status
+    StartService();
+
+    Status
+    StopService();
+
  private:
     void
     SnapshotGCCallback(Snapshot::Ptr ss_ptr);
@@ -84,6 +89,4 @@ class Snapshots {
     std::vector<Snapshot::Ptr> to_release_;
 };
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot

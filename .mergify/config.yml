@@ -1,7 +1,7 @@
 pull_request_rules:
     - name: Automatic merge on approval if CI is passed
       conditions:
-        - "label=automerge"
+        - "label=PR | automerge"
         - "#approved-reviews-by>=1"
         - "#review-requested=0"
         - "#changes-requested-reviews-by=0"
@@ -10,16 +10,14 @@ pull_request_rules:
         - "status-success=AMD64 Ubuntu 18.04"
         - "status-success=AMD64 CentOS 7"
         - "status-success=Codacy/PR Quality Review"
-        - "status-success=Cpplint / Milvus CppLint"
-        - "status-success=Cpplint / Milvus GPU Version CppLint"
       actions:
         merge:
           method: squash
 
     - name: Automatic merge on approval if CI is skipped
       conditions:
-        - "label=automerge"
-        - "label=skip-ci"
+        - "label=PR | automerge"
+        - "label=PR | skip-ci"
         - "#approved-reviews-by>=1"
         - "#review-requested=0"
         - "#changes-requested-reviews-by=0"
