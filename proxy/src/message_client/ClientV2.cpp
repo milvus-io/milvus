@@ -54,17 +54,17 @@ milvus::grpc::QueryResult Aggregation(std::vector<std::shared_ptr<grpc::QueryRes
   std::vector<float> all_scores;
   std::vector<float> all_distance;
   std::vector<grpc::KeyValuePair> all_kv_pairs;
-  std::vector<int> index(length * results[0]->scores_size());
+  std::vector<int> index(length * results[0]->distances_size());
 
-  for (int n = 0; n < length * results[0]->scores_size(); ++n) {
+  for (int n = 0; n < length * results[0]->distances_size(); ++n) {
     index[n] = n;
   }
 
   for (int i = 0; i < length; i++) {
-    for (int j = 0; j < results[i]->scores_size(); j++) {
-      all_scores.push_back(results[i]->scores()[j]);
+    for (int j = 0; j < results[i]->distances_size(); j++) {
+//      all_scores.push_back(results[i]->scores()[j]);
       all_distance.push_back(results[i]->distances()[j]);
-      all_kv_pairs.push_back(results[i]->extra_params()[j]);
+//      all_kv_pairs.push_back(results[i]->extra_params()[j]);
     }
   }
 
@@ -89,22 +89,20 @@ milvus::grpc::QueryResult Aggregation(std::vector<std::shared_ptr<grpc::QueryRes
     result.mutable_entities()->CopyFrom(results[0]->entities());
     result.set_row_num(results[0]->row_num());
 
-    for (int m = 0; m < results[0]->scores_size(); ++m) {
-        result.add_scores(all_scores[index[m]]);
+    for (int m = 0; m < results[0]->distances_size(); ++m) {
+//        result.add_scores(all_scores[index[m]]);
         result.add_distances(all_distance[m]);
-        result.add_extra_params();
-        result.mutable_extra_params(m)->CopyFrom(all_kv_pairs[index[m]]);
+//        result.add_extra_params();
+//        result.mutable_extra_params(m)->CopyFrom(all_kv_pairs[index[m]]);
     }
 
-  result.set_query_id(results[0]->query_id());
-  result.set_client_id(results[0]->client_id());
+//  result.set_query_id(results[0]->query_id());
+//  result.set_client_id(results[0]->client_id());
 
   return result;
 }
 
-Status MsgClientV2::GetQueryResult(int64_t query_id, milvus::grpc::QueryResult &result) {
-
-    std::vector<std::shared_ptr<grpc::QueryResult>> results;
+Status MsgClientV2::GetQueryResult(int64_t query_id, milvus::grpc::QueryResult* result) {
 
     int64_t query_node_num = GetQueryNodeNum();
 
@@ -126,7 +124,7 @@ Status MsgClientV2::GetQueryResult(int64_t query_id, milvus::grpc::QueryResult &
             return Status(DB_ERROR, "can't parse message which from pulsar!");
         }
     }
-    result = Aggregation(total_results[query_id]);
+    *result = Aggregation(total_results[query_id]);
     return Status::OK();
 }
 
