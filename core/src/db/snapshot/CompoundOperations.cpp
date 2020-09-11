@@ -922,6 +922,7 @@ CreatePartitionOperation::DoExecute(StorePtr store) {
 
 CreateCollectionOperation::CreateCollectionOperation(const CreateCollectionContext& context)
     : BaseT(OperationContext(), ScopedSnapshotT()), c_context_(context) {
+    SetContextLsn(c_context_.lsn);
 }
 
 Status
