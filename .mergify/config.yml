@@ -17,7 +17,7 @@ pull_request_rules:
     - name: Automatic merge on approval if CI is skipped
       conditions:
         - "label=PR | automerge"
-        - "label=skip-ci"
+        - "label=PR | skip-ci"
         - "#approved-reviews-by>=1"
         - "#review-requested=0"
         - "#changes-requested-reviews-by=0"
