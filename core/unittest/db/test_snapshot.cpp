@@ -1348,12 +1348,6 @@ TEST_F(SnapshotTest, CompoundTest1) {
             lock.unlock();
             std::unique_lock<std::mutex> blk(built_mtx);
             std::cout << status.ToString() << std::endl;
-            /* for (auto id : built_segs) { */
-            /*     std::cout << "builted " << id << std::endl; */
-            /* } */
-            /* for (auto id : seg_ids) { */
-            /*     std::cout << "to_merge " << id << std::endl; */
-            /* } */
             bool stale_found = false;
             for (auto& seg_id : seg_ids) {
                 auto it = built_segs.find(seg_id);
