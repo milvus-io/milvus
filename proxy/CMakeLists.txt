@@ -63,7 +63,7 @@ include( FetchContent )
 set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
 set(FETCHCONTENT_QUIET OFF)
 include( ThirdPartyPackages )
-
+find_package(OpenMP REQUIRED)
 # **************************** Compiler arguments ****************************
 message( STATUS "Building Milvus CPU version" )
 

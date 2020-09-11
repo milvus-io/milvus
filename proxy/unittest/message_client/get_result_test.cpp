@@ -78,7 +78,7 @@ TEST(CLIENT_CPP, GetResult) {
 
 //    client_v2.SendQueryMessage();
     milvus::grpc::SearchParam request;
-    auto status_send = client_v2.SendQueryMessage(request, query_id);
+    auto status_send = client_v2.SendQueryMessage(request, 10, query_id);
 
     milvus::grpc::QueryResult result;
     auto status = client_v2.GetQueryResult(query_id, result);
