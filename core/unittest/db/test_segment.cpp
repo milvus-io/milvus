@@ -13,6 +13,7 @@
 #include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 
+#include <random>
 #include <string>
 #include <experimental/filesystem>
 
@@ -27,6 +28,7 @@
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
 #include "segment/IdBloomFilter.h"
+#include "segment/Utils.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
 #include "utils/Json.h"
@@ -46,20 +48,29 @@ CreateCollection(std::shared_ptr<DB> db, const std::string& collection_name, con
     int64_t collection_id = 0;
     int64_t field_id = 0;
     /* field uid */
-    auto uid_field = std::make_shared<Field>(milvus::engine::FIELD_UID, 0,
-            milvus::engine::DataType::INT64, milvus::engine::snapshot::JEmpty, field_id);
-    auto uid_field_element_blt = std::make_shared<FieldElement>(collection_id, field_id,
-            milvus::engine::ELEMENT_BLOOM_FILTER, milvus::engine::FieldElementType::FET_BLOOM_FILTER);
-    auto uid_field_element_del = std::make_shared<FieldElement>(collection_id, field_id,
-            milvus::engine::ELEMENT_DELETED_DOCS, milvus::engine::FieldElementType::FET_DELETED_DOCS);
+    auto uid_field = std::make_shared<Field>(milvus::engine::FIELD_UID,
+                                             0,
+                                             milvus::engine::DataType::INT64,
+                                             milvus::engine::snapshot::JEmpty,
+                                             field_id);
+    auto uid_field_element_blt = std::make_shared<FieldElement>(collection_id,
+                                                                field_id,
+                                                                milvus::engine::ELEMENT_BLOOM_FILTER,
+                                                                milvus::engine::FieldElementType::FET_BLOOM_FILTER);
+    auto uid_field_element_del = std::make_shared<FieldElement>(collection_id,
+                                                                field_id,
+                                                                milvus::engine::ELEMENT_DELETED_DOCS,
+                                                                milvus::engine::FieldElementType::FET_DELETED_DOCS);
 
     field_id++;
     /* field vector */
     milvus::json vector_param = {{milvus::knowhere::meta::DIM, 4}};
     auto vector_field = std::make_shared<Field>("vector", 0, milvus::engine::DataType::VECTOR_FLOAT, vector_param,
-            field_id);
-    auto vector_field_element_index = std::make_shared<FieldElement>(collection_id, field_id,
-            milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::engine::FieldElementType::FET_INDEX);
+                                                field_id);
+    auto vector_field_element_index = std::make_shared<FieldElement>(collection_id,
+                                                                     field_id,
+                                                                     milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
+                                                                     milvus::engine::FieldElementType::FET_INDEX);
 
     context.fields_schema[uid_field] = {uid_field_element_blt, uid_field_element_del};
     context.fields_schema[vector_field] = {vector_field_element_index};
@@ -189,7 +200,7 @@ TEST(BloomFilterTest, ReadWriteTest) {
         }
 
         double error_rate = filter.ErrorRate();
-        double wrong_rate = (double)wrong_check/id_count;
+        double wrong_rate = (double)wrong_check / id_count;
         ASSERT_LT(wrong_rate, error_rate);
     };
 
@@ -203,7 +214,7 @@ TEST(BloomFilterTest, ReadWriteTest) {
         }
 
         double error_rate = filter.ErrorRate();
-        double wrong_rate = (double)wrong_check/id_count;
+        double wrong_rate = (double)wrong_check / id_count;
         ASSERT_LT(wrong_rate, error_rate);
     };
 
@@ -310,7 +321,7 @@ TEST(BloomFilterTest, CloneTest) {
         }
 
         double error_rate = filter->ErrorRate();
-        double wrong_rate = (double)wrong_check/id_count;
+        double wrong_rate = (double)wrong_check / id_count;
         ASSERT_LT(wrong_rate, error_rate);
     };
 
@@ -321,4 +332,133 @@ TEST(BloomFilterTest, CloneTest) {
     ASSERT_NE(clone_filter, nullptr);
 
     error_rate_check(clone_filter, removed_id_array);
+}
+
+TEST(SegmentUtilTest, CalcCopyRangeTest) {
+    // invalid input test
+    std::vector<int32_t> offsets;
+    int64_t row_count = 0, delete_count = 0;
+    milvus::segment::CopyRanges copy_ranges;
+    bool res = milvus::segment::CalcCopyRangesWithOffset(offsets, row_count, copy_ranges, delete_count);
+    ASSERT_FALSE(res);
+
+    row_count = 100;
+
+    auto compare_result =
+        [&](const std::vector<int32_t>& offsets, const milvus::segment::CopyRanges& compare_range) -> void {
+            milvus::segment::CopyRanges copy_ranges;
+            res = milvus::segment::CalcCopyRangesWithOffset(offsets, row_count, copy_ranges, delete_count);
+            ASSERT_TRUE(res);
+
+            int64_t compare_count = 0;
+            for (auto offset : offsets) {
+                if (offset >= 0 && offset < row_count) {
+                    compare_count++;
+                }
+            }
+
+            ASSERT_EQ(delete_count, compare_count);
+            ASSERT_EQ(copy_ranges.size(), compare_range.size());
+            for (size_t i = 0; i < copy_ranges.size(); ++i) {
+                ASSERT_EQ(copy_ranges[i], compare_range[i]);
+            }
+        };
+
+    {
+        offsets = {0, 1, 2, 99, 100};
+        milvus::segment::CopyRanges compare = {
+            {3, 99}
+        };
+        compare_result(offsets, compare);
+    }
+
+    {
+        offsets = {-1, 5, 4, 3, 90, 91};
+        milvus::segment::CopyRanges compare = {
+            {0, 3},
+            {6, 90},
+            {92, 100},
+        };
+        compare_result(offsets, compare);
+    }
+}
+
+TEST(SegmentUtilTest, CopyRangeDataTest) {
+    auto compare_result = [&](std::vector<uint8_t>& src_data,
+                              std::vector<int32_t>& offsets,
+                              int64_t row_count,
+                              int64_t row_width) -> void {
+        int64_t delete_count = 0;
+        milvus::segment::CopyRanges copy_ranges;
+        auto res = milvus::segment::CalcCopyRangesWithOffset(offsets, row_count, copy_ranges, delete_count);
+        ASSERT_TRUE(res);
+
+        if (copy_ranges.empty()) {
+            return;
+        }
+
+        std::vector<uint8_t> target_data;
+        res = milvus::segment::CopyDataWithRanges(src_data, row_width, copy_ranges, target_data);
+        ASSERT_TRUE(res);
+
+        // erase element from the largest offset
+        std::vector<uint8_t> compare_data = src_data;
+        std::set<int32_t> arrange_offsets;
+        for (auto offset : offsets) {
+            if (offset >= 0 && offset < row_count) {
+                arrange_offsets.insert(offset);
+            }
+        }
+
+        for (auto iter = arrange_offsets.rbegin(); iter != arrange_offsets.rend(); ++iter) {
+            auto step = (*iter) * row_width;
+            compare_data.erase(compare_data.begin() + step, compare_data.begin() + step + row_width);
+        }
+        ASSERT_EQ(target_data, compare_data);
+    };
+
+    // invalid input test
+    std::vector<int32_t> offsets;
+    std::vector<uint8_t> src_data;
+    int64_t row_width = 0;
+    milvus::segment::CopyRanges copy_ranges;
+    std::vector<uint8_t> target_data;
+    bool res = milvus::segment::CopyDataWithRanges(src_data, row_width, copy_ranges, target_data);
+    ASSERT_FALSE(res);
+
+    // construct source data
+    row_width = 64;
+    int64_t row_count = 100;
+    src_data.resize(row_count * row_width);
+    for (int64_t i = 0; i < row_count * row_width; ++i) {
+        src_data[i] = i % 255;
+    }
+    {
+        offsets = {0, 1, 2, 99, 100};
+        compare_result(src_data, offsets, row_count, row_width);
+    }
+
+    {
+        offsets = {-1, 5, 4, 3, 90, 91};
+        compare_result(src_data, offsets, row_count, row_width);
+    }
+
+    // random test
+    for (int32_t i = 0; i < 100; ++i) {
+        std::default_random_engine random;
+        row_count = random() % 1000 + 1;
+        row_width = random() % 64 + 8;
+
+        src_data.resize(row_count * row_width);
+        for (int64_t i = 0; i < row_count * row_width; ++i) {
+            src_data[i] = i % 255;
+        }
+
+        int64_t offset_count = (row_count > 1) ? (random() % row_count + 1) : 1;
+        offsets.resize(offset_count);
+        for (int64_t k = 0; k < offset_count; ++k) {
+            offsets[k] = (random() % row_count) + ((k % 2 == 0) ? 2 : -2);
+        }
+        compare_result(src_data, offsets, row_count, row_width);
+    }
 }

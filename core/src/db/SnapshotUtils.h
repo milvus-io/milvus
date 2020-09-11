@@ -68,5 +68,8 @@ ClearPartitionCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root, 
 Status
 ClearIndexCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root, const std::string& field_name);
 
+Status
+DropSegment(snapshot::ScopedSnapshotT& ss, snapshot::ID_TYPE segment_id);
+
 }  // namespace engine
 }  // namespace milvus

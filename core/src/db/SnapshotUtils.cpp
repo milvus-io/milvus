@@ -343,5 +343,18 @@ ClearIndexCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root, cons
     return Status::OK();
 }
 
+Status
+DropSegment(snapshot::ScopedSnapshotT& ss, snapshot::ID_TYPE segment_id) {
+    snapshot::OperationContext drop_seg_context;
+    auto segment = ss->GetResource<snapshot::Segment>(segment_id);
+    if (segment == nullptr) {
+        return Status(DB_ERROR, "Invalid segment id");
+    }
+
+    drop_seg_context.prev_segment = segment;
+    auto drop_op = std::make_shared<snapshot::DropSegmentOperation>(drop_seg_context, ss);
+    return drop_op->Push();
+}
+
 }  // namespace engine
 }  // namespace milvus

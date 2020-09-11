@@ -203,92 +203,43 @@ MemCollection::ApplyDeleteToFile() {
         // Load previous deleted offsets
         segment::DeletedDocsPtr prev_del_docs;
         STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
-        std::vector<engine::offset_t> del_offsets;
+        std::unordered_set<engine::offset_t> del_offsets;
         if (prev_del_docs) {
-            del_offsets = prev_del_docs->GetDeletedDocs();
+            auto prev_del_offsets = prev_del_docs->GetDeletedDocs();
+            for (auto offset : prev_del_offsets) {
+                del_offsets.insert(offset);
+            }
         }
+        uint64_t prev_del_count = del_offsets.size();
 
         // if the to-delete id is actually in this segment, remove it from bloom filter, and record its offset
         segment::IdBloomFilterPtr bloom_filter;
         pre_bloom_filter->Clone(bloom_filter);
 
-        int64_t new_deleted = 0;
         for (size_t i = 0; i < uids.size(); i++) {
             auto id = uids[i];
             if (ids_to_check.find(id) != ids_to_check.end()) {
-                del_offsets.push_back(i);
+                del_offsets.insert(i);
                 bloom_filter->Remove(id);
-                new_deleted++;
             }
         }
 
+        uint64_t new_deleted = del_offsets.size() - prev_del_count;
         if (new_deleted == 0) {
             return Status::OK();  // nothing change for this segment
         }
 
-        recorder.RecordSection("delete " + std::to_string(new_deleted) + " entities");
+        recorder.RecordSection("detect deleted " + std::to_string(new_deleted) + " entities");
 
-        // Step 2: Mark previous deleted docs file and bloom filter file stale
-        auto& field_visitors_map = seg_visitor->GetFieldVisitors();
-        auto uid_field_visitor = seg_visitor->GetFieldVisitor(engine::FIELD_UID);
-        auto del_doc_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_DELETED_DOCS);
-        auto del_docs_element = del_doc_visitor->GetElement();
-        auto blm_filter_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_BLOOM_FILTER);
-        auto blm_filter_element = blm_filter_visitor->GetElement();
+        // Step 3:
+        // all entities have been deleted? drop this segment
+        if (del_offsets.size() == uids.size()) {
+            return DropSegment(ss, segment->GetID());
+        }
 
-        auto segment_file_executor = [&](const snapshot::SegmentFilePtr& segment_file,
-                                         snapshot::SegmentFileIterator* iterator) -> Status {
-            if (segment_file->GetSegmentId() == segment->GetID() &&
-                (segment_file->GetFieldElementId() == del_docs_element->GetID() ||
-                 segment_file->GetFieldElementId() == blm_filter_element->GetID())) {
-                segments_op->AddStaleSegmentFile(segment_file);
-            }
-
-            return Status::OK();
-        };
-
-        auto segment_file_iterator = std::make_shared<snapshot::SegmentFileIterator>(ss, segment_file_executor);
-        segment_file_iterator->Iterate();
-        STATUS_CHECK(segment_file_iterator->GetStatus());
-
-        // Step 3: Create new deleted docs file and bloom filter file
-        snapshot::SegmentFileContext del_file_context;
-        del_file_context.field_name = uid_field_visitor->GetField()->GetName();
-        del_file_context.field_element_name = del_docs_element->GetName();
-        del_file_context.collection_id = segment->GetCollectionId();
-        del_file_context.partition_id = segment->GetPartitionId();
-        del_file_context.segment_id = segment->GetID();
-        snapshot::SegmentFilePtr delete_file;
-        STATUS_CHECK(segments_op->CommitNewSegmentFile(del_file_context, delete_file));
-
-        std::string collection_root_path = options_.meta_.path_ + COLLECTIONS_FOLDER;
-        auto segment_writer = std::make_shared<segment::SegmentWriter>(options_.meta_.path_, seg_visitor);
-
-        std::string del_docs_path = snapshot::GetResPath<snapshot::SegmentFile>(collection_root_path, delete_file);
-
-        snapshot::SegmentFileContext bloom_file_context;
-        bloom_file_context.field_name = uid_field_visitor->GetField()->GetName();
-        bloom_file_context.field_element_name = blm_filter_element->GetName();
-        bloom_file_context.collection_id = segment->GetCollectionId();
-        bloom_file_context.partition_id = segment->GetPartitionId();
-        bloom_file_context.segment_id = segment->GetID();
-
-        engine::snapshot::SegmentFile::Ptr bloom_filter_file;
-        STATUS_CHECK(segments_op->CommitNewSegmentFile(bloom_file_context, bloom_filter_file));
-
-        std::string bloom_filter_file_path =
-            snapshot::GetResPath<snapshot::SegmentFile>(collection_root_path, bloom_filter_file);
-
-        // Step 4: update delete docs and bloom filter
-        STATUS_CHECK(segments_op->CommitRowCountDelta(segment->GetID(), new_deleted, true));
-
-        auto delete_docs = std::make_shared<segment::DeletedDocs>(del_offsets);
-        STATUS_CHECK(segment_writer->WriteDeletedDocs(del_docs_path, delete_docs));
-        STATUS_CHECK(segment_writer->WriteBloomFilter(bloom_filter_file_path, bloom_filter));
-
-        delete_file->SetSize(CommonUtil::GetFileSize(del_docs_path + codec::DeletedDocsFormat::FilePostfix()));
-        bloom_filter_file->SetSize(
-            CommonUtil::GetFileSize(bloom_filter_file_path + codec::IdBloomFilterFormat::FilePostfix()));
+        // create new deleted docs file and bloom filter file
+        STATUS_CHECK(
+            CreateDeletedDocsBloomFilter(segments_op, ss, seg_visitor, del_offsets, new_deleted, bloom_filter));
 
         recorder.RecordSection("write deleted docs and bloom filter");
         return Status::OK();
@@ -304,6 +255,82 @@ MemCollection::ApplyDeleteToFile() {
 
     fiu_do_on("MemCollection.ApplyDeletes.RandomSleep", sleep(1));
     return segments_op->Push();
+}
+
+Status
+MemCollection::CreateDeletedDocsBloomFilter(const std::shared_ptr<snapshot::CompoundSegmentsOperation>& segments_op,
+                                            const snapshot::ScopedSnapshotT& ss, engine::SegmentVisitorPtr& seg_visitor,
+                                            const std::unordered_set<engine::offset_t>& del_offsets,
+                                            uint64_t new_deleted, segment::IdBloomFilterPtr& bloom_filter) {
+    // Step 1: Mark previous deleted docs file and bloom filter file stale
+    const snapshot::SegmentPtr& segment = seg_visitor->GetSegment();
+    auto& field_visitors_map = seg_visitor->GetFieldVisitors();
+    auto uid_field_visitor = seg_visitor->GetFieldVisitor(engine::FIELD_UID);
+    auto del_doc_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_DELETED_DOCS);
+    auto del_docs_element = del_doc_visitor->GetElement();
+    auto blm_filter_visitor = uid_field_visitor->GetElementVisitor(FieldElementType::FET_BLOOM_FILTER);
+    auto blm_filter_element = blm_filter_visitor->GetElement();
+
+    auto segment_file_executor = [&](const snapshot::SegmentFilePtr& segment_file,
+                                     snapshot::SegmentFileIterator* iterator) -> Status {
+        if (segment_file->GetSegmentId() == segment->GetID() &&
+            (segment_file->GetFieldElementId() == del_docs_element->GetID() ||
+             segment_file->GetFieldElementId() == blm_filter_element->GetID())) {
+            segments_op->AddStaleSegmentFile(segment_file);
+        }
+
+        return Status::OK();
+    };
+
+    auto segment_file_iterator = std::make_shared<snapshot::SegmentFileIterator>(ss, segment_file_executor);
+    segment_file_iterator->Iterate();
+    STATUS_CHECK(segment_file_iterator->GetStatus());
+
+    // Step 2: Create new deleted docs file and bloom filter file
+    snapshot::SegmentFileContext del_file_context;
+    del_file_context.field_name = uid_field_visitor->GetField()->GetName();
+    del_file_context.field_element_name = del_docs_element->GetName();
+    del_file_context.collection_id = segment->GetCollectionId();
+    del_file_context.partition_id = segment->GetPartitionId();
+    del_file_context.segment_id = segment->GetID();
+    snapshot::SegmentFilePtr delete_file;
+    STATUS_CHECK(segments_op->CommitNewSegmentFile(del_file_context, delete_file));
+
+    std::string collection_root_path = options_.meta_.path_ + COLLECTIONS_FOLDER;
+    auto segment_writer = std::make_shared<segment::SegmentWriter>(options_.meta_.path_, seg_visitor);
+
+    std::string del_docs_path = snapshot::GetResPath<snapshot::SegmentFile>(collection_root_path, delete_file);
+
+    snapshot::SegmentFileContext bloom_file_context;
+    bloom_file_context.field_name = uid_field_visitor->GetField()->GetName();
+    bloom_file_context.field_element_name = blm_filter_element->GetName();
+    bloom_file_context.collection_id = segment->GetCollectionId();
+    bloom_file_context.partition_id = segment->GetPartitionId();
+    bloom_file_context.segment_id = segment->GetID();
+
+    engine::snapshot::SegmentFile::Ptr bloom_filter_file;
+    STATUS_CHECK(segments_op->CommitNewSegmentFile(bloom_file_context, bloom_filter_file));
+
+    std::string bloom_filter_file_path =
+        snapshot::GetResPath<snapshot::SegmentFile>(collection_root_path, bloom_filter_file);
+
+    // Step 3: update delete docs and bloom filter
+    STATUS_CHECK(segments_op->CommitRowCountDelta(segment->GetID(), new_deleted, true));
+
+    std::vector<int32_t> vec_del_offsets;
+    vec_del_offsets.reserve(del_offsets.size());
+    for (auto offset : del_offsets) {
+        vec_del_offsets.push_back(offset);
+    }
+    auto delete_docs = std::make_shared<segment::DeletedDocs>(vec_del_offsets);
+    STATUS_CHECK(segment_writer->WriteDeletedDocs(del_docs_path, delete_docs));
+    STATUS_CHECK(segment_writer->WriteBloomFilter(bloom_filter_file_path, bloom_filter));
+
+    delete_file->SetSize(CommonUtil::GetFileSize(del_docs_path + codec::DeletedDocsFormat::FilePostfix()));
+    bloom_filter_file->SetSize(
+        CommonUtil::GetFileSize(bloom_filter_file_path + codec::IdBloomFilterFormat::FilePostfix()));
+
+    return Status::OK();
 }
 
 int64_t

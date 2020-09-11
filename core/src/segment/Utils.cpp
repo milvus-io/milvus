@@ -32,12 +32,15 @@ CalcCopyRangesWithOffset(const std::vector<int32_t>& offsets, int64_t row_count,
     // arrange offsets
     std::set<int32_t> new_offsets;
     for (auto offset : offsets) {
-        if (offset >= row_count) {
+        if (offset < 0 || offset >= row_count) {
             continue;
         }
         new_offsets.insert(offset);
     }
     delete_count = new_offsets.size();
+    if (delete_count == 0) {
+        return true;
+    }
 
     // if the first offset is not zero, add a range [0, first]
     int32_t first = *new_offsets.begin();
