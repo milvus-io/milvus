@@ -13,8 +13,9 @@ package reader
 */
 import "C"
 import (
+	"fmt"
 	"github.com/czs007/suvlim/errors"
-	schema "github.com/czs007/suvlim/pkg/message"
+	schema "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"strconv"
 	"unsafe"
 )
@@ -109,16 +110,19 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 	           signed long int count);
 	*/
 	// Blobs to one big blob
-	var rawData []byte
+	var numOfRow = len(*entityIDs)
+	var sizeofPerRow = len((*records)[0])
+
+	var rawData = make([]byte, numOfRow * sizeofPerRow)
 	for i := 0; i < len(*records); i++ {
 		copy(rawData, (*records)[i])
 	}
 
 	var cOffset = C.long(offset)
-	var cNumOfRows = C.long(len(*entityIDs))
+	var cNumOfRows = C.long(numOfRow)
 	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
 	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
-	var cSizeofPerRow = C.int(len((*records)[0]))
+	var cSizeofPerRow = C.int(sizeofPerRow)
 	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
 
 	var status = C.Insert(s.SegmentPtr,
@@ -170,7 +174,7 @@ func (s *Segment) SegmentSearch(queryString string, timestamp uint64, vectorReco
 	           float* result_distances);
 	*/
 	// TODO: get top-k's k from queryString
-	const TopK = 1
+	const TopK = 10
 
 	resultIds := make([]int64, TopK)
 	resultDistances := make([]float32, TopK)
@@ -185,6 +189,8 @@ func (s *Segment) SegmentSearch(queryString string, timestamp uint64, vectorReco
 	if status != 0 {
 		return nil, errors.New("Search failed, error code = " + strconv.Itoa(int(status)))
 	}
+
+	fmt.Println("Search Result---- Ids =", resultIds, ", Distances =", resultDistances)
 
 	return &SearchResult{ResultIds: resultIds, ResultDistances: resultDistances}, nil
 }

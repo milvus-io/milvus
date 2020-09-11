@@ -46,6 +46,9 @@ Insert(CSegmentBase c_segment,
   dataChunk.count = count;
 
   auto res = segment->Insert(reserved_offset, size, primary_keys, timestamps, dataChunk);
+
+  // TODO: delete print
+  std::cout << "do segment insert, sizeof_per_row = " << sizeof_per_row << std::endl;
   return res.code();
 }
 
