@@ -2,8 +2,8 @@ package message_client
 
 import (
 	"context"
-	"github.com/apache/pulsar-client-go/pulsar"
-	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
+	"github.com/apache/pulsar/pulsar-client-go/pulsar"
+	msgpb "github.com/czs007/suvlim/pkg/message"
 	"github.com/golang/protobuf/proto"
 	"log"
 )
@@ -32,16 +32,11 @@ type MessageClient struct {
 }
 
 func (mc *MessageClient) Send(ctx context.Context, msg msgpb.QueryResult) {
-	var msgBuffer, _ = proto.Marshal(&msg)
-	if _, err := mc.searchResultProducer.Send(ctx, &pulsar.ProducerMessage{
-		Payload: msgBuffer,
+	if err := mc.searchResultProducer.Send(ctx, pulsar.ProducerMessage{
+		Payload: []byte(msg.String()),
 	}); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func (mc *MessageClient) GetSearchChan() chan *msgpb.SearchMsg {
-	return mc.searchChan
 }
 
 func (mc *MessageClient) ReceiveInsertOrDeleteMsg() {
@@ -100,7 +95,6 @@ func (mc *MessageClient) ReceiveMessage() {
 	go mc.ReceiveInsertOrDeleteMsg()
 	go mc.ReceiveSearchMsg()
 	go mc.ReceiveTimeSyncMsg()
-	go mc.ReceiveKey2SegMsg()
 }
 
 func (mc *MessageClient) CreatProducer(topicName string) pulsar.Producer {
@@ -203,30 +197,21 @@ func (mc *MessageClient) PrepareMsg(messageType MessageType, msgLen int) {
 	}
 }
 
-func (mc *MessageClient) PrepareKey2SegmentMsg() {
-	mc.Key2SegMsg = mc.Key2SegMsg[:0]
-	msgLen := len(mc.key2SegChan)
-	for i := 0; i < msgLen; i++ {
-		msg := <-mc.key2SegChan
-		mc.Key2SegMsg = append(mc.Key2SegMsg, msg)
-	}
-}
-
 func (mc *MessageClient) PrepareBatchMsg() []int {
 	// assume the channel not full
 	mc.InsertOrDeleteMsg = mc.InsertOrDeleteMsg[:0]
-	//mc.SearchMsg = mc.SearchMsg[:0]
+	mc.SearchMsg = mc.SearchMsg[:0]
 	mc.TimeSyncMsg = mc.TimeSyncMsg[:0]
 
 	// get the length of every channel
 	insertOrDeleteLen := len(mc.insertOrDeleteChan)
-	//searchLen := len(mc.searchChan)
+	searchLen := len(mc.searchChan)
 	timeLen := len(mc.timeSyncChan)
 
 	// get message from channel to slice
 	mc.PrepareMsg(InsertOrDelete, insertOrDeleteLen)
-	//mc.PrepareMsg(Search, searchLen)
+	mc.PrepareMsg(Search, searchLen)
 	mc.PrepareMsg(TimeSync, timeLen)
 
-	return []int{insertOrDeleteLen}
+	return []int{insertOrDeleteLen, searchLen, timeLen}
 }

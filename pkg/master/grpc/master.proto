@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+//option go_package = "github.com/czs007/suvilm/pkg/master/grpc";
+package masterpb;
+
+service Master {
+  rpc CreateCollection (CreateCollectionRequest) returns (CreateCollectionResponse) {}
+}
+
+
+message CreateCollectionRequest {
+  string collection_name = 1;
+}
+
+message CreateCollectionResponse {
+  string collection_name = 1;
+  uint64 collection_id = 2;
+  repeated uint64 segment_ids = 3;
+  repeated string partition_tags = 4;
+}

@@ -9,8 +9,7 @@ CSegmentBase
 NewSegment(CPartition partition, unsigned long segment_id) {
   auto p = (milvus::dog_segment::Partition*)partition;
 
-  // TODO: remove hard code null index ptr
-  auto segment = milvus::dog_segment::CreateSegment(p->get_schema(), nullptr);
+  auto segment = milvus::dog_segment::CreateSegment(p->get_schema());
 
   // TODO: delete print
   std::cout << "create segment " << segment_id << std::endl;
@@ -46,9 +45,6 @@ Insert(CSegmentBase c_segment,
   dataChunk.count = count;
 
   auto res = segment->Insert(reserved_offset, size, primary_keys, timestamps, dataChunk);
-
-  // TODO: delete print
-  std::cout << "do segment insert, sizeof_per_row = " << sizeof_per_row << std::endl;
   return res.code();
 }
 

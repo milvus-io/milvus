@@ -7510,33 +7510,14 @@ class SearchMsg :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kPartitionTagFieldNumber = 3,
     kExtraParamsFieldNumber = 7,
-    kJsonFieldNumber = 8,
     kCollectionNameFieldNumber = 1,
-    kDslFieldNumber = 9,
+    kPartitionTagFieldNumber = 3,
     kRecordsFieldNumber = 2,
     kUidFieldNumber = 4,
     kTimestampFieldNumber = 5,
     kClientIdFieldNumber = 6,
   };
-  // repeated string partition_tag = 3;
-  int partition_tag_size() const;
-  void clear_partition_tag();
-  const std::string& partition_tag(int index) const;
-  std::string* mutable_partition_tag(int index);
-  void set_partition_tag(int index, const std::string& value);
-  void set_partition_tag(int index, std::string&& value);
-  void set_partition_tag(int index, const char* value);
-  void set_partition_tag(int index, const char* value, size_t size);
-  std::string* add_partition_tag();
-  void add_partition_tag(const std::string& value);
-  void add_partition_tag(std::string&& value);
-  void add_partition_tag(const char* value);
-  void add_partition_tag(const char* value, size_t size);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& partition_tag() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_partition_tag();
-
   // repeated .milvus.grpc.KeyValuePair extra_params = 7;
   int extra_params_size() const;
   void clear_extra_params();
@@ -7547,23 +7528,6 @@ class SearchMsg :
   ::milvus::grpc::KeyValuePair* add_extra_params();
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair >&
       extra_params() const;
-
-  // repeated string json = 8;
-  int json_size() const;
-  void clear_json();
-  const std::string& json(int index) const;
-  std::string* mutable_json(int index);
-  void set_json(int index, const std::string& value);
-  void set_json(int index, std::string&& value);
-  void set_json(int index, const char* value);
-  void set_json(int index, const char* value, size_t size);
-  std::string* add_json();
-  void add_json(const std::string& value);
-  void add_json(std::string&& value);
-  void add_json(const char* value);
-  void add_json(const char* value, size_t size);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& json() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_json();
 
   // string collection_name = 1;
   void clear_collection_name();
@@ -7576,16 +7540,16 @@ class SearchMsg :
   std::string* release_collection_name();
   void set_allocated_collection_name(std::string* collection_name);
 
-  // string dsl = 9;
-  void clear_dsl();
-  const std::string& dsl() const;
-  void set_dsl(const std::string& value);
-  void set_dsl(std::string&& value);
-  void set_dsl(const char* value);
-  void set_dsl(const char* value, size_t size);
-  std::string* mutable_dsl();
-  std::string* release_dsl();
-  void set_allocated_dsl(std::string* dsl);
+  // string partition_tag = 3;
+  void clear_partition_tag();
+  const std::string& partition_tag() const;
+  void set_partition_tag(const std::string& value);
+  void set_partition_tag(std::string&& value);
+  void set_partition_tag(const char* value);
+  void set_partition_tag(const char* value, size_t size);
+  std::string* mutable_partition_tag();
+  std::string* release_partition_tag();
+  void set_allocated_partition_tag(std::string* partition_tag);
 
   // .milvus.grpc.VectorRowRecord records = 2;
   bool has_records() const;
@@ -7615,11 +7579,9 @@ class SearchMsg :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_tag_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::KeyValuePair > extra_params_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> json_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr dsl_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_tag_;
   ::milvus::grpc::VectorRowRecord* records_;
   ::PROTOBUF_NAMESPACE_ID::int64 uid_;
   ::PROTOBUF_NAMESPACE_ID::uint64 timestamp_;
@@ -7887,11 +7849,10 @@ class Key2SegMsg :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kSegmentIdFieldNumber = 3,
+    kSegmentIdFieldNumber = 2,
     kUidFieldNumber = 1,
-    kTimestampFieldNumber = 2,
   };
-  // repeated int64 segment_id = 3;
+  // repeated int64 segment_id = 2;
   int segment_id_size() const;
   void clear_segment_id();
   ::PROTOBUF_NAMESPACE_ID::int64 segment_id(int index) const;
@@ -7907,11 +7868,6 @@ class Key2SegMsg :
   ::PROTOBUF_NAMESPACE_ID::int64 uid() const;
   void set_uid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // uint64 timestamp = 2;
-  void clear_timestamp();
-  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp() const;
-  void set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
-
   // @@protoc_insertion_point(class_scope:milvus.grpc.Key2SegMsg)
  private:
   class _Internal;
@@ -7920,7 +7876,6 @@ class Key2SegMsg :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > segment_id_;
   mutable std::atomic<int> _segment_id_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::int64 uid_;
-  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_message_2eproto;
 };
@@ -13028,69 +12983,55 @@ inline void SearchMsg::set_allocated_records(::milvus::grpc::VectorRowRecord* re
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.SearchMsg.records)
 }
 
-// repeated string partition_tag = 3;
-inline int SearchMsg::partition_tag_size() const {
-  return partition_tag_.size();
-}
+// string partition_tag = 3;
 inline void SearchMsg::clear_partition_tag() {
-  partition_tag_.Clear();
+  partition_tag_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
-inline const std::string& SearchMsg::partition_tag(int index) const {
+inline const std::string& SearchMsg::partition_tag() const {
   // @@protoc_insertion_point(field_get:milvus.grpc.SearchMsg.partition_tag)
-  return partition_tag_.Get(index);
+  return partition_tag_.GetNoArena();
 }
-inline std::string* SearchMsg::mutable_partition_tag(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.SearchMsg.partition_tag)
-  return partition_tag_.Mutable(index);
-}
-inline void SearchMsg::set_partition_tag(int index, const std::string& value) {
+inline void SearchMsg::set_partition_tag(const std::string& value) {
+  
+  partition_tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
   // @@protoc_insertion_point(field_set:milvus.grpc.SearchMsg.partition_tag)
-  partition_tag_.Mutable(index)->assign(value);
 }
-inline void SearchMsg::set_partition_tag(int index, std::string&& value) {
-  // @@protoc_insertion_point(field_set:milvus.grpc.SearchMsg.partition_tag)
-  partition_tag_.Mutable(index)->assign(std::move(value));
+inline void SearchMsg::set_partition_tag(std::string&& value) {
+  
+  partition_tag_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.SearchMsg.partition_tag)
 }
-inline void SearchMsg::set_partition_tag(int index, const char* value) {
+inline void SearchMsg::set_partition_tag(const char* value) {
   GOOGLE_DCHECK(value != nullptr);
-  partition_tag_.Mutable(index)->assign(value);
+  
+  partition_tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
   // @@protoc_insertion_point(field_set_char:milvus.grpc.SearchMsg.partition_tag)
 }
-inline void SearchMsg::set_partition_tag(int index, const char* value, size_t size) {
-  partition_tag_.Mutable(index)->assign(
-    reinterpret_cast<const char*>(value), size);
+inline void SearchMsg::set_partition_tag(const char* value, size_t size) {
+  
+  partition_tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
   // @@protoc_insertion_point(field_set_pointer:milvus.grpc.SearchMsg.partition_tag)
 }
-inline std::string* SearchMsg::add_partition_tag() {
-  // @@protoc_insertion_point(field_add_mutable:milvus.grpc.SearchMsg.partition_tag)
-  return partition_tag_.Add();
+inline std::string* SearchMsg::mutable_partition_tag() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.SearchMsg.partition_tag)
+  return partition_tag_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
-inline void SearchMsg::add_partition_tag(const std::string& value) {
-  partition_tag_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add:milvus.grpc.SearchMsg.partition_tag)
+inline std::string* SearchMsg::release_partition_tag() {
+  // @@protoc_insertion_point(field_release:milvus.grpc.SearchMsg.partition_tag)
+  
+  return partition_tag_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
-inline void SearchMsg::add_partition_tag(std::string&& value) {
-  partition_tag_.Add(std::move(value));
-  // @@protoc_insertion_point(field_add:milvus.grpc.SearchMsg.partition_tag)
-}
-inline void SearchMsg::add_partition_tag(const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  partition_tag_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add_char:milvus.grpc.SearchMsg.partition_tag)
-}
-inline void SearchMsg::add_partition_tag(const char* value, size_t size) {
-  partition_tag_.Add()->assign(reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_add_pointer:milvus.grpc.SearchMsg.partition_tag)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
-SearchMsg::partition_tag() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.SearchMsg.partition_tag)
-  return partition_tag_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
-SearchMsg::mutable_partition_tag() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.SearchMsg.partition_tag)
-  return &partition_tag_;
+inline void SearchMsg::set_allocated_partition_tag(std::string* partition_tag) {
+  if (partition_tag != nullptr) {
+    
+  } else {
+    
+  }
+  partition_tag_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), partition_tag);
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.SearchMsg.partition_tag)
 }
 
 // int64 uid = 4;
@@ -13165,122 +13106,6 @@ SearchMsg::extra_params() const {
   return extra_params_;
 }
 
-// repeated string json = 8;
-inline int SearchMsg::json_size() const {
-  return json_.size();
-}
-inline void SearchMsg::clear_json() {
-  json_.Clear();
-}
-inline const std::string& SearchMsg::json(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.SearchMsg.json)
-  return json_.Get(index);
-}
-inline std::string* SearchMsg::mutable_json(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.SearchMsg.json)
-  return json_.Mutable(index);
-}
-inline void SearchMsg::set_json(int index, const std::string& value) {
-  // @@protoc_insertion_point(field_set:milvus.grpc.SearchMsg.json)
-  json_.Mutable(index)->assign(value);
-}
-inline void SearchMsg::set_json(int index, std::string&& value) {
-  // @@protoc_insertion_point(field_set:milvus.grpc.SearchMsg.json)
-  json_.Mutable(index)->assign(std::move(value));
-}
-inline void SearchMsg::set_json(int index, const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  json_.Mutable(index)->assign(value);
-  // @@protoc_insertion_point(field_set_char:milvus.grpc.SearchMsg.json)
-}
-inline void SearchMsg::set_json(int index, const char* value, size_t size) {
-  json_.Mutable(index)->assign(
-    reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.SearchMsg.json)
-}
-inline std::string* SearchMsg::add_json() {
-  // @@protoc_insertion_point(field_add_mutable:milvus.grpc.SearchMsg.json)
-  return json_.Add();
-}
-inline void SearchMsg::add_json(const std::string& value) {
-  json_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add:milvus.grpc.SearchMsg.json)
-}
-inline void SearchMsg::add_json(std::string&& value) {
-  json_.Add(std::move(value));
-  // @@protoc_insertion_point(field_add:milvus.grpc.SearchMsg.json)
-}
-inline void SearchMsg::add_json(const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  json_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add_char:milvus.grpc.SearchMsg.json)
-}
-inline void SearchMsg::add_json(const char* value, size_t size) {
-  json_.Add()->assign(reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_add_pointer:milvus.grpc.SearchMsg.json)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
-SearchMsg::json() const {
-  // @@protoc_insertion_point(field_list:milvus.grpc.SearchMsg.json)
-  return json_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
-SearchMsg::mutable_json() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.SearchMsg.json)
-  return &json_;
-}
-
-// string dsl = 9;
-inline void SearchMsg::clear_dsl() {
-  dsl_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline const std::string& SearchMsg::dsl() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.SearchMsg.dsl)
-  return dsl_.GetNoArena();
-}
-inline void SearchMsg::set_dsl(const std::string& value) {
-  
-  dsl_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
-  // @@protoc_insertion_point(field_set:milvus.grpc.SearchMsg.dsl)
-}
-inline void SearchMsg::set_dsl(std::string&& value) {
-  
-  dsl_.SetNoArena(
-    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
-  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.SearchMsg.dsl)
-}
-inline void SearchMsg::set_dsl(const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  
-  dsl_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
-  // @@protoc_insertion_point(field_set_char:milvus.grpc.SearchMsg.dsl)
-}
-inline void SearchMsg::set_dsl(const char* value, size_t size) {
-  
-  dsl_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
-      ::std::string(reinterpret_cast<const char*>(value), size));
-  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.SearchMsg.dsl)
-}
-inline std::string* SearchMsg::mutable_dsl() {
-  
-  // @@protoc_insertion_point(field_mutable:milvus.grpc.SearchMsg.dsl)
-  return dsl_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline std::string* SearchMsg::release_dsl() {
-  // @@protoc_insertion_point(field_release:milvus.grpc.SearchMsg.dsl)
-  
-  return dsl_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline void SearchMsg::set_allocated_dsl(std::string* dsl) {
-  if (dsl != nullptr) {
-    
-  } else {
-    
-  }
-  dsl_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), dsl);
-  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.SearchMsg.dsl)
-}
-
 // -------------------------------------------------------------------
 
 // TimeSyncMsg
@@ -13345,21 +13170,7 @@ inline void Key2SegMsg::set_uid(::PROTOBUF_NAMESPACE_ID::int64 value) {
   // @@protoc_insertion_point(field_set:milvus.grpc.Key2SegMsg.uid)
 }
 
-// uint64 timestamp = 2;
-inline void Key2SegMsg::clear_timestamp() {
-  timestamp_ = PROTOBUF_ULONGLONG(0);
-}
-inline ::PROTOBUF_NAMESPACE_ID::uint64 Key2SegMsg::timestamp() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.Key2SegMsg.timestamp)
-  return timestamp_;
-}
-inline void Key2SegMsg::set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
-  
-  timestamp_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.Key2SegMsg.timestamp)
-}
-
-// repeated int64 segment_id = 3;
+// repeated int64 segment_id = 2;
 inline int Key2SegMsg::segment_id_size() const {
   return segment_id_.size();
 }

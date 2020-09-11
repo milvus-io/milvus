@@ -1,0 +1,26 @@
+{
+  "host": "127.0.0.1",
+  "port": "5666",
+  "tracer_library": "/path/to/shared_tracing_library",
+  "tracer_configuration": {
+    "service_name": "milvus_server",
+    "sampler": {
+      "type": "const",
+      "param": "1"
+    },
+    "disabled": false,
+    "reporter": {
+      "localAgentHostPort": "127.0.0.1:6831"
+    },
+    "headers": {
+      "jaegerDebugHeader": "jaeger_debug_header",
+      "jaegerBaggageHeader": "jarger_baggage_header",
+      "TraceContextHeaderName": "trace_context_header_name",
+      "traceBaggageHeaderPrefix": "trace_baggage_header_prefix"
+    },
+    "baggage_restrictions": {
+      "denyBaggageOnInitializationFailure": false,
+      "hostPort": ""
+    }
+  }
+}

@@ -1290,8 +1290,6 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_message_2eproto::offsets[] PRO
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::SearchMsg, timestamp_),
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::SearchMsg, client_id_),
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::SearchMsg, extra_params_),
-  PROTOBUF_FIELD_OFFSET(::milvus::grpc::SearchMsg, json_),
-  PROTOBUF_FIELD_OFFSET(::milvus::grpc::SearchMsg, dsl_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::TimeSyncMsg, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -1306,7 +1304,6 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_message_2eproto::offsets[] PRO
   ~0u,  // no _oneof_case_
   ~0u,  // no _weak_field_map_
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::Key2SegMsg, uid_),
-  PROTOBUF_FIELD_OFFSET(::milvus::grpc::Key2SegMsg, timestamp_),
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::Key2SegMsg, segment_id_),
 };
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
@@ -1355,8 +1352,8 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 324, -1, sizeof(::milvus::grpc::SearchParamPB)},
   { 333, -1, sizeof(::milvus::grpc::InsertOrDeleteMsg)},
   { 348, -1, sizeof(::milvus::grpc::SearchMsg)},
-  { 362, -1, sizeof(::milvus::grpc::TimeSyncMsg)},
-  { 370, -1, sizeof(::milvus::grpc::Key2SegMsg)},
+  { 360, -1, sizeof(::milvus::grpc::TimeSyncMsg)},
+  { 368, -1, sizeof(::milvus::grpc::Key2SegMsg)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -1523,83 +1520,82 @@ const char descriptor_table_protodef_message_2eproto[] PROTOBUF_SECTION_VARIABLE
   "\nsegment_id\030\006 \001(\003\022\022\n\nchannel_id\030\007 \001(\003\022\037\n"
   "\002op\030\010 \001(\0162\023.milvus.grpc.OpType\022\021\n\tclient"
   "_id\030\t \001(\003\022/\n\014extra_params\030\n \003(\0132\031.milvus"
-  ".grpc.KeyValuePair\"\351\001\n\tSearchMsg\022\027\n\017coll"
+  ".grpc.KeyValuePair\"\316\001\n\tSearchMsg\022\027\n\017coll"
   "ection_name\030\001 \001(\t\022-\n\007records\030\002 \001(\0132\034.mil"
   "vus.grpc.VectorRowRecord\022\025\n\rpartition_ta"
-  "g\030\003 \003(\t\022\013\n\003uid\030\004 \001(\003\022\021\n\ttimestamp\030\005 \001(\004\022"
+  "g\030\003 \001(\t\022\013\n\003uid\030\004 \001(\003\022\021\n\ttimestamp\030\005 \001(\004\022"
   "\021\n\tclient_id\030\006 \001(\003\022/\n\014extra_params\030\007 \003(\013"
-  "2\031.milvus.grpc.KeyValuePair\022\014\n\004json\030\010 \003("
-  "\t\022\013\n\003dsl\030\t \001(\t\"[\n\013TimeSyncMsg\022\017\n\007peer_Id"
-  "\030\001 \001(\003\022\021\n\tTimestamp\030\002 \001(\004\022(\n\tsync_type\030\003"
-  " \001(\0162\025.milvus.grpc.SyncType\"@\n\nKey2SegMs"
-  "g\022\013\n\003uid\030\001 \001(\003\022\021\n\ttimestamp\030\002 \001(\004\022\022\n\nseg"
-  "ment_id\030\003 \003(\003*\242\004\n\tErrorCode\022\013\n\007SUCCESS\020\000"
-  "\022\024\n\020UNEXPECTED_ERROR\020\001\022\022\n\016CONNECT_FAILED"
-  "\020\002\022\025\n\021PERMISSION_DENIED\020\003\022\031\n\025COLLECTION_"
-  "NOT_EXISTS\020\004\022\024\n\020ILLEGAL_ARGUMENT\020\005\022\025\n\021IL"
-  "LEGAL_DIMENSION\020\007\022\026\n\022ILLEGAL_INDEX_TYPE\020"
-  "\010\022\033\n\027ILLEGAL_COLLECTION_NAME\020\t\022\020\n\014ILLEGA"
-  "L_TOPK\020\n\022\025\n\021ILLEGAL_ROWRECORD\020\013\022\025\n\021ILLEG"
-  "AL_VECTOR_ID\020\014\022\031\n\025ILLEGAL_SEARCH_RESULT\020"
-  "\r\022\022\n\016FILE_NOT_FOUND\020\016\022\017\n\013META_FAILED\020\017\022\020"
-  "\n\014CACHE_FAILED\020\020\022\030\n\024CANNOT_CREATE_FOLDER"
-  "\020\021\022\026\n\022CANNOT_CREATE_FILE\020\022\022\030\n\024CANNOT_DEL"
-  "ETE_FOLDER\020\023\022\026\n\022CANNOT_DELETE_FILE\020\024\022\025\n\021"
-  "BUILD_INDEX_ERROR\020\025\022\021\n\rILLEGAL_NLIST\020\026\022\027"
-  "\n\023ILLEGAL_METRIC_TYPE\020\027\022\021\n\rOUT_OF_MEMORY"
-  "\020\030*\221\001\n\010DataType\022\010\n\004NONE\020\000\022\010\n\004BOOL\020\001\022\010\n\004I"
-  "NT8\020\002\022\t\n\005INT16\020\003\022\t\n\005INT32\020\004\022\t\n\005INT64\020\005\022\t"
-  "\n\005FLOAT\020\n\022\n\n\006DOUBLE\020\013\022\n\n\006STRING\020\024\022\021\n\rVEC"
-  "TOR_BINARY\020d\022\020\n\014VECTOR_FLOAT\020e*C\n\017Compar"
-  "eOperator\022\006\n\002LT\020\000\022\007\n\003LTE\020\001\022\006\n\002EQ\020\002\022\006\n\002GT"
-  "\020\003\022\007\n\003GTE\020\004\022\006\n\002NE\020\005*8\n\005Occur\022\013\n\007INVALID\020"
-  "\000\022\010\n\004MUST\020\001\022\n\n\006SHOULD\020\002\022\014\n\010MUST_NOT\020\003* \n"
-  "\006OpType\022\n\n\006INSERT\020\000\022\n\n\006DELETE\020\001*\037\n\010SyncT"
-  "ype\022\010\n\004READ\020\000\022\t\n\005WRITE\020\0012\333\r\n\rMilvusServi"
-  "ce\022\?\n\020CreateCollection\022\024.milvus.grpc.Map"
-  "ping\032\023.milvus.grpc.Status\"\000\022F\n\rHasCollec"
-  "tion\022\033.milvus.grpc.CollectionName\032\026.milv"
-  "us.grpc.BoolReply\"\000\022I\n\022DescribeCollectio"
-  "n\022\033.milvus.grpc.CollectionName\032\024.milvus."
-  "grpc.Mapping\"\000\022Q\n\017CountCollection\022\033.milv"
-  "us.grpc.CollectionName\032\037.milvus.grpc.Col"
-  "lectionRowCount\"\000\022J\n\017ShowCollections\022\024.m"
-  "ilvus.grpc.Command\032\037.milvus.grpc.Collect"
-  "ionNameList\"\000\022P\n\022ShowCollectionInfo\022\033.mi"
-  "lvus.grpc.CollectionName\032\033.milvus.grpc.C"
-  "ollectionInfo\"\000\022D\n\016DropCollection\022\033.milv"
-  "us.grpc.CollectionName\032\023.milvus.grpc.Sta"
-  "tus\"\000\022=\n\013CreateIndex\022\027.milvus.grpc.Index"
-  "Param\032\023.milvus.grpc.Status\"\000\022C\n\rDescribe"
-  "Index\022\027.milvus.grpc.IndexParam\032\027.milvus."
-  "grpc.IndexParam\"\000\022;\n\tDropIndex\022\027.milvus."
-  "grpc.IndexParam\032\023.milvus.grpc.Status\"\000\022E"
-  "\n\017CreatePartition\022\033.milvus.grpc.Partitio"
-  "nParam\032\023.milvus.grpc.Status\"\000\022E\n\014HasPart"
-  "ition\022\033.milvus.grpc.PartitionParam\032\026.mil"
-  "vus.grpc.BoolReply\"\000\022K\n\016ShowPartitions\022\033"
-  ".milvus.grpc.CollectionName\032\032.milvus.grp"
-  "c.PartitionList\"\000\022C\n\rDropPartition\022\033.mil"
-  "vus.grpc.PartitionParam\032\023.milvus.grpc.St"
-  "atus\"\000\022<\n\006Insert\022\030.milvus.grpc.InsertPar"
-  "am\032\026.milvus.grpc.EntityIds\"\000\022E\n\rGetEntit"
-  "yByID\022\033.milvus.grpc.EntityIdentity\032\025.mil"
-  "vus.grpc.Entities\"\000\022H\n\014GetEntityIDs\022\036.mi"
-  "lvus.grpc.GetEntityIDsParam\032\026.milvus.grp"
-  "c.EntityIds\"\000\022>\n\006Search\022\030.milvus.grpc.Se"
-  "archParam\032\030.milvus.grpc.QueryResult\"\000\022P\n"
-  "\017SearchInSegment\022!.milvus.grpc.SearchInS"
-  "egmentParam\032\030.milvus.grpc.QueryResult\"\000\022"
-  "7\n\003Cmd\022\024.milvus.grpc.Command\032\030.milvus.gr"
-  "pc.StringReply\"\000\022A\n\nDeleteByID\022\034.milvus."
-  "grpc.DeleteByIDParam\032\023.milvus.grpc.Statu"
-  "s\"\000\022G\n\021PreloadCollection\022\033.milvus.grpc.C"
-  "ollectionName\032\023.milvus.grpc.Status\"\000\0227\n\005"
-  "Flush\022\027.milvus.grpc.FlushParam\032\023.milvus."
-  "grpc.Status\"\000\022;\n\007Compact\022\031.milvus.grpc.C"
-  "ompactParam\032\023.milvus.grpc.Status\"\000\022B\n\010Se"
-  "archPB\022\032.milvus.grpc.SearchParamPB\032\030.mil"
-  "vus.grpc.QueryResult\"\000B\007Z\005msgpbb\006proto3"
+  "2\031.milvus.grpc.KeyValuePair\"[\n\013TimeSyncM"
+  "sg\022\017\n\007peer_Id\030\001 \001(\003\022\021\n\tTimestamp\030\002 \001(\004\022("
+  "\n\tsync_type\030\003 \001(\0162\025.milvus.grpc.SyncType"
+  "\"-\n\nKey2SegMsg\022\013\n\003uid\030\001 \001(\003\022\022\n\nsegment_i"
+  "d\030\002 \003(\003*\242\004\n\tErrorCode\022\013\n\007SUCCESS\020\000\022\024\n\020UN"
+  "EXPECTED_ERROR\020\001\022\022\n\016CONNECT_FAILED\020\002\022\025\n\021"
+  "PERMISSION_DENIED\020\003\022\031\n\025COLLECTION_NOT_EX"
+  "ISTS\020\004\022\024\n\020ILLEGAL_ARGUMENT\020\005\022\025\n\021ILLEGAL_"
+  "DIMENSION\020\007\022\026\n\022ILLEGAL_INDEX_TYPE\020\010\022\033\n\027I"
+  "LLEGAL_COLLECTION_NAME\020\t\022\020\n\014ILLEGAL_TOPK"
+  "\020\n\022\025\n\021ILLEGAL_ROWRECORD\020\013\022\025\n\021ILLEGAL_VEC"
+  "TOR_ID\020\014\022\031\n\025ILLEGAL_SEARCH_RESULT\020\r\022\022\n\016F"
+  "ILE_NOT_FOUND\020\016\022\017\n\013META_FAILED\020\017\022\020\n\014CACH"
+  "E_FAILED\020\020\022\030\n\024CANNOT_CREATE_FOLDER\020\021\022\026\n\022"
+  "CANNOT_CREATE_FILE\020\022\022\030\n\024CANNOT_DELETE_FO"
+  "LDER\020\023\022\026\n\022CANNOT_DELETE_FILE\020\024\022\025\n\021BUILD_"
+  "INDEX_ERROR\020\025\022\021\n\rILLEGAL_NLIST\020\026\022\027\n\023ILLE"
+  "GAL_METRIC_TYPE\020\027\022\021\n\rOUT_OF_MEMORY\020\030*\221\001\n"
+  "\010DataType\022\010\n\004NONE\020\000\022\010\n\004BOOL\020\001\022\010\n\004INT8\020\002\022"
+  "\t\n\005INT16\020\003\022\t\n\005INT32\020\004\022\t\n\005INT64\020\005\022\t\n\005FLOA"
+  "T\020\n\022\n\n\006DOUBLE\020\013\022\n\n\006STRING\020\024\022\021\n\rVECTOR_BI"
+  "NARY\020d\022\020\n\014VECTOR_FLOAT\020e*C\n\017CompareOpera"
+  "tor\022\006\n\002LT\020\000\022\007\n\003LTE\020\001\022\006\n\002EQ\020\002\022\006\n\002GT\020\003\022\007\n\003"
+  "GTE\020\004\022\006\n\002NE\020\005*8\n\005Occur\022\013\n\007INVALID\020\000\022\010\n\004M"
+  "UST\020\001\022\n\n\006SHOULD\020\002\022\014\n\010MUST_NOT\020\003* \n\006OpTyp"
+  "e\022\n\n\006INSERT\020\000\022\n\n\006DELETE\020\001*\037\n\010SyncType\022\010\n"
+  "\004READ\020\000\022\t\n\005WRITE\020\0012\333\r\n\rMilvusService\022\?\n\020"
+  "CreateCollection\022\024.milvus.grpc.Mapping\032\023"
+  ".milvus.grpc.Status\"\000\022F\n\rHasCollection\022\033"
+  ".milvus.grpc.CollectionName\032\026.milvus.grp"
+  "c.BoolReply\"\000\022I\n\022DescribeCollection\022\033.mi"
+  "lvus.grpc.CollectionName\032\024.milvus.grpc.M"
+  "apping\"\000\022Q\n\017CountCollection\022\033.milvus.grp"
+  "c.CollectionName\032\037.milvus.grpc.Collectio"
+  "nRowCount\"\000\022J\n\017ShowCollections\022\024.milvus."
+  "grpc.Command\032\037.milvus.grpc.CollectionNam"
+  "eList\"\000\022P\n\022ShowCollectionInfo\022\033.milvus.g"
+  "rpc.CollectionName\032\033.milvus.grpc.Collect"
+  "ionInfo\"\000\022D\n\016DropCollection\022\033.milvus.grp"
+  "c.CollectionName\032\023.milvus.grpc.Status\"\000\022"
+  "=\n\013CreateIndex\022\027.milvus.grpc.IndexParam\032"
+  "\023.milvus.grpc.Status\"\000\022C\n\rDescribeIndex\022"
+  "\027.milvus.grpc.IndexParam\032\027.milvus.grpc.I"
+  "ndexParam\"\000\022;\n\tDropIndex\022\027.milvus.grpc.I"
+  "ndexParam\032\023.milvus.grpc.Status\"\000\022E\n\017Crea"
+  "tePartition\022\033.milvus.grpc.PartitionParam"
+  "\032\023.milvus.grpc.Status\"\000\022E\n\014HasPartition\022"
+  "\033.milvus.grpc.PartitionParam\032\026.milvus.gr"
+  "pc.BoolReply\"\000\022K\n\016ShowPartitions\022\033.milvu"
+  "s.grpc.CollectionName\032\032.milvus.grpc.Part"
+  "itionList\"\000\022C\n\rDropPartition\022\033.milvus.gr"
+  "pc.PartitionParam\032\023.milvus.grpc.Status\"\000"
+  "\022<\n\006Insert\022\030.milvus.grpc.InsertParam\032\026.m"
+  "ilvus.grpc.EntityIds\"\000\022E\n\rGetEntityByID\022"
+  "\033.milvus.grpc.EntityIdentity\032\025.milvus.gr"
+  "pc.Entities\"\000\022H\n\014GetEntityIDs\022\036.milvus.g"
+  "rpc.GetEntityIDsParam\032\026.milvus.grpc.Enti"
+  "tyIds\"\000\022>\n\006Search\022\030.milvus.grpc.SearchPa"
+  "ram\032\030.milvus.grpc.QueryResult\"\000\022P\n\017Searc"
+  "hInSegment\022!.milvus.grpc.SearchInSegment"
+  "Param\032\030.milvus.grpc.QueryResult\"\000\0227\n\003Cmd"
+  "\022\024.milvus.grpc.Command\032\030.milvus.grpc.Str"
+  "ingReply\"\000\022A\n\nDeleteByID\022\034.milvus.grpc.D"
+  "eleteByIDParam\032\023.milvus.grpc.Status\"\000\022G\n"
+  "\021PreloadCollection\022\033.milvus.grpc.Collect"
+  "ionName\032\023.milvus.grpc.Status\"\000\0227\n\005Flush\022"
+  "\027.milvus.grpc.FlushParam\032\023.milvus.grpc.S"
+  "tatus\"\000\022;\n\007Compact\022\031.milvus.grpc.Compact"
+  "Param\032\023.milvus.grpc.Status\"\000\022B\n\010SearchPB"
+  "\022\032.milvus.grpc.SearchParamPB\032\030.milvus.gr"
+  "pc.QueryResult\"\000B\007Z\005msgpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_message_2eproto_deps[1] = {
 };
@@ -1654,7 +1650,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mes
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_message_2eproto_once;
 static bool descriptor_table_message_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_message_2eproto = {
-  &descriptor_table_message_2eproto_initialized, descriptor_table_protodef_message_2eproto, "message.proto", 7599,
+  &descriptor_table_message_2eproto_initialized, descriptor_table_protodef_message_2eproto, "message.proto", 7553,
   &descriptor_table_message_2eproto_once, descriptor_table_message_2eproto_sccs, descriptor_table_message_2eproto_deps, 46, 0,
   schemas, file_default_instances, TableStruct_message_2eproto::offsets,
   file_level_metadata_message_2eproto, 47, file_level_enum_descriptors_message_2eproto, file_level_service_descriptors_message_2eproto,
@@ -18203,17 +18199,15 @@ SearchMsg::SearchMsg()
 SearchMsg::SearchMsg(const SearchMsg& from)
   : ::PROTOBUF_NAMESPACE_ID::Message(),
       _internal_metadata_(nullptr),
-      partition_tag_(from.partition_tag_),
-      extra_params_(from.extra_params_),
-      json_(from.json_) {
+      extra_params_(from.extra_params_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   collection_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   if (!from.collection_name().empty()) {
     collection_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.collection_name_);
   }
-  dsl_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  if (!from.dsl().empty()) {
-    dsl_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.dsl_);
+  partition_tag_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (!from.partition_tag().empty()) {
+    partition_tag_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.partition_tag_);
   }
   if (from.has_records()) {
     records_ = new ::milvus::grpc::VectorRowRecord(*from.records_);
@@ -18229,7 +18223,7 @@ SearchMsg::SearchMsg(const SearchMsg& from)
 void SearchMsg::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_SearchMsg_message_2eproto.base);
   collection_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  dsl_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  partition_tag_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   ::memset(&records_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&client_id_) -
       reinterpret_cast<char*>(&records_)) + sizeof(client_id_));
@@ -18242,7 +18236,7 @@ SearchMsg::~SearchMsg() {
 
 void SearchMsg::SharedDtor() {
   collection_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  dsl_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  partition_tag_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   if (this != internal_default_instance()) delete records_;
 }
 
@@ -18261,11 +18255,9 @@ void SearchMsg::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  partition_tag_.Clear();
   extra_params_.Clear();
-  json_.Clear();
   collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-  dsl_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  partition_tag_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   if (GetArenaNoVirtual() == nullptr && records_ != nullptr) {
     delete records_;
   }
@@ -18298,16 +18290,11 @@ const char* SearchMsg::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // repeated string partition_tag = 3;
+      // string partition_tag = 3;
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(add_partition_tag(), ptr, ctx, "milvus.grpc.SearchMsg.partition_tag");
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 26);
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_partition_tag(), ptr, ctx, "milvus.grpc.SearchMsg.partition_tag");
+          CHK_(ptr);
         } else goto handle_unusual;
         continue;
       // int64 uid = 4;
@@ -18341,25 +18328,6 @@ const char* SearchMsg::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
           } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 58);
-        } else goto handle_unusual;
-        continue;
-      // repeated string json = 8;
-      case 8:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 66)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(add_json(), ptr, ctx, "milvus.grpc.SearchMsg.json");
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 66);
-        } else goto handle_unusual;
-        continue;
-      // string dsl = 9;
-      case 9:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 74)) {
-          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_dsl(), ptr, ctx, "milvus.grpc.SearchMsg.dsl");
-          CHK_(ptr);
         } else goto handle_unusual;
         continue;
       default: {
@@ -18418,14 +18386,13 @@ bool SearchMsg::MergePartialFromCodedStream(
         break;
       }
 
-      // repeated string partition_tag = 3;
+      // string partition_tag = 3;
       case 3: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
-                input, this->add_partition_tag()));
+                input, this->mutable_partition_tag()));
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-            this->partition_tag(this->partition_tag_size() - 1).data(),
-            static_cast<int>(this->partition_tag(this->partition_tag_size() - 1).length()),
+            this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
             ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
             "milvus.grpc.SearchMsg.partition_tag"));
         } else {
@@ -18484,37 +18451,6 @@ bool SearchMsg::MergePartialFromCodedStream(
         break;
       }
 
-      // repeated string json = 8;
-      case 8: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (66 & 0xFF)) {
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
-                input, this->add_json()));
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-            this->json(this->json_size() - 1).data(),
-            static_cast<int>(this->json(this->json_size() - 1).length()),
-            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
-            "milvus.grpc.SearchMsg.json"));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // string dsl = 9;
-      case 9: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (74 & 0xFF)) {
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
-                input, this->mutable_dsl()));
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-            this->dsl().data(), static_cast<int>(this->dsl().length()),
-            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
-            "milvus.grpc.SearchMsg.dsl"));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -18558,14 +18494,14 @@ void SearchMsg::SerializeWithCachedSizes(
       2, _Internal::records(this), output);
   }
 
-  // repeated string partition_tag = 3;
-  for (int i = 0, n = this->partition_tag_size(); i < n; i++) {
+  // string partition_tag = 3;
+  if (this->partition_tag().size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->partition_tag(i).data(), static_cast<int>(this->partition_tag(i).length()),
+      this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
       "milvus.grpc.SearchMsg.partition_tag");
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteString(
-      3, this->partition_tag(i), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      3, this->partition_tag(), output);
   }
 
   // int64 uid = 4;
@@ -18590,26 +18526,6 @@ void SearchMsg::SerializeWithCachedSizes(
       7,
       this->extra_params(static_cast<int>(i)),
       output);
-  }
-
-  // repeated string json = 8;
-  for (int i = 0, n = this->json_size(); i < n; i++) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->json(i).data(), static_cast<int>(this->json(i).length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.grpc.SearchMsg.json");
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteString(
-      8, this->json(i), output);
-  }
-
-  // string dsl = 9;
-  if (this->dsl().size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->dsl().data(), static_cast<int>(this->dsl().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.grpc.SearchMsg.dsl");
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
-      9, this->dsl(), output);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -18643,14 +18559,15 @@ void SearchMsg::SerializeWithCachedSizes(
         2, _Internal::records(this), target);
   }
 
-  // repeated string partition_tag = 3;
-  for (int i = 0, n = this->partition_tag_size(); i < n; i++) {
+  // string partition_tag = 3;
+  if (this->partition_tag().size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->partition_tag(i).data(), static_cast<int>(this->partition_tag(i).length()),
+      this->partition_tag().data(), static_cast<int>(this->partition_tag().length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
       "milvus.grpc.SearchMsg.partition_tag");
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      WriteStringToArray(3, this->partition_tag(i), target);
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        3, this->partition_tag(), target);
   }
 
   // int64 uid = 4;
@@ -18676,27 +18593,6 @@ void SearchMsg::SerializeWithCachedSizes(
         7, this->extra_params(static_cast<int>(i)), target);
   }
 
-  // repeated string json = 8;
-  for (int i = 0, n = this->json_size(); i < n; i++) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->json(i).data(), static_cast<int>(this->json(i).length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.grpc.SearchMsg.json");
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      WriteStringToArray(8, this->json(i), target);
-  }
-
-  // string dsl = 9;
-  if (this->dsl().size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->dsl().data(), static_cast<int>(this->dsl().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.grpc.SearchMsg.dsl");
-    target =
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
-        9, this->dsl(), target);
-  }
-
   if (_internal_metadata_.have_unknown_fields()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields(), target);
@@ -18718,14 +18614,6 @@ size_t SearchMsg::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // repeated string partition_tag = 3;
-  total_size += 1 *
-      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(this->partition_tag_size());
-  for (int i = 0, n = this->partition_tag_size(); i < n; i++) {
-    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-      this->partition_tag(i));
-  }
-
   // repeated .milvus.grpc.KeyValuePair extra_params = 7;
   {
     unsigned int count = static_cast<unsigned int>(this->extra_params_size());
@@ -18737,14 +18625,6 @@ size_t SearchMsg::ByteSizeLong() const {
     }
   }
 
-  // repeated string json = 8;
-  total_size += 1 *
-      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(this->json_size());
-  for (int i = 0, n = this->json_size(); i < n; i++) {
-    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-      this->json(i));
-  }
-
   // string collection_name = 1;
   if (this->collection_name().size() > 0) {
     total_size += 1 +
@@ -18752,11 +18632,11 @@ size_t SearchMsg::ByteSizeLong() const {
         this->collection_name());
   }
 
-  // string dsl = 9;
-  if (this->dsl().size() > 0) {
+  // string partition_tag = 3;
+  if (this->partition_tag().size() > 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-        this->dsl());
+        this->partition_tag());
   }
 
   // .milvus.grpc.VectorRowRecord records = 2;
@@ -18814,16 +18694,14 @@ void SearchMsg::MergeFrom(const SearchMsg& from) {
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  partition_tag_.MergeFrom(from.partition_tag_);
   extra_params_.MergeFrom(from.extra_params_);
-  json_.MergeFrom(from.json_);
   if (from.collection_name().size() > 0) {
 
     collection_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.collection_name_);
   }
-  if (from.dsl().size() > 0) {
+  if (from.partition_tag().size() > 0) {
 
-    dsl_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.dsl_);
+    partition_tag_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.partition_tag_);
   }
   if (from.has_records()) {
     mutable_records()->::milvus::grpc::VectorRowRecord::MergeFrom(from.records());
@@ -18860,12 +18738,10 @@ bool SearchMsg::IsInitialized() const {
 void SearchMsg::InternalSwap(SearchMsg* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
-  partition_tag_.InternalSwap(CastToBase(&other->partition_tag_));
   CastToBase(&extra_params_)->InternalSwap(CastToBase(&other->extra_params_));
-  json_.InternalSwap(CastToBase(&other->json_));
   collection_name_.Swap(&other->collection_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
-  dsl_.Swap(&other->dsl_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+  partition_tag_.Swap(&other->partition_tag_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
     GetArenaNoVirtual());
   swap(records_, other->records_);
   swap(uid_, other->uid_);
@@ -19236,16 +19112,12 @@ Key2SegMsg::Key2SegMsg(const Key2SegMsg& from)
       _internal_metadata_(nullptr),
       segment_id_(from.segment_id_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
-  ::memcpy(&uid_, &from.uid_,
-    static_cast<size_t>(reinterpret_cast<char*>(&timestamp_) -
-    reinterpret_cast<char*>(&uid_)) + sizeof(timestamp_));
+  uid_ = from.uid_;
   // @@protoc_insertion_point(copy_constructor:milvus.grpc.Key2SegMsg)
 }
 
 void Key2SegMsg::SharedCtor() {
-  ::memset(&uid_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&timestamp_) -
-      reinterpret_cast<char*>(&uid_)) + sizeof(timestamp_));
+  uid_ = PROTOBUF_LONGLONG(0);
 }
 
 Key2SegMsg::~Key2SegMsg() {
@@ -19272,9 +19144,7 @@ void Key2SegMsg::Clear() {
   (void) cached_has_bits;
 
   segment_id_.Clear();
-  ::memset(&uid_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&timestamp_) -
-      reinterpret_cast<char*>(&uid_)) + sizeof(timestamp_));
+  uid_ = PROTOBUF_LONGLONG(0);
   _internal_metadata_.Clear();
 }
 
@@ -19293,19 +19163,12 @@ const char* Key2SegMsg::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID:
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // uint64 timestamp = 2;
+      // repeated int64 segment_id = 2;
       case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
-          timestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // repeated int64 segment_id = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
           ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedInt64Parser(mutable_segment_id(), ptr, ctx);
           CHK_(ptr);
-        } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 24) {
+        } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16) {
           add_segment_id(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
           CHK_(ptr);
         } else goto handle_unusual;
@@ -19353,29 +19216,16 @@ bool Key2SegMsg::MergePartialFromCodedStream(
         break;
       }
 
-      // uint64 timestamp = 2;
+      // repeated int64 segment_id = 2;
       case 2: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
-
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
-                 input, &timestamp_)));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // repeated int64 segment_id = 3;
-      case 3: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
                    ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
                  input, this->mutable_segment_id())));
-        } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (24 & 0xFF)) {
+        } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadRepeatedPrimitiveNoInline<
                    ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
-                 1, 26u, input, this->mutable_segment_id())));
+                 1, 18u, input, this->mutable_segment_id())));
         } else {
           goto handle_unusual;
         }
@@ -19414,14 +19264,9 @@ void Key2SegMsg::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(1, this->uid(), output);
   }
 
-  // uint64 timestamp = 2;
-  if (this->timestamp() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(2, this->timestamp(), output);
-  }
-
-  // repeated int64 segment_id = 3;
+  // repeated int64 segment_id = 2;
   if (this->segment_id_size() > 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(3, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(2, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
     output->WriteVarint32(_segment_id_cached_byte_size_.load(
         std::memory_order_relaxed));
   }
@@ -19448,15 +19293,10 @@ void Key2SegMsg::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(1, this->uid(), target);
   }
 
-  // uint64 timestamp = 2;
-  if (this->timestamp() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(2, this->timestamp(), target);
-  }
-
-  // repeated int64 segment_id = 3;
+  // repeated int64 segment_id = 2;
   if (this->segment_id_size() > 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTagToArray(
-      3,
+      2,
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED,
       target);
     target = ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream::WriteVarint32ToArray(
@@ -19487,7 +19327,7 @@ size_t Key2SegMsg::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // repeated int64 segment_id = 3;
+  // repeated int64 segment_id = 2;
   {
     size_t data_size = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       Int64Size(this->segment_id_);
@@ -19507,13 +19347,6 @@ size_t Key2SegMsg::ByteSizeLong() const {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->uid());
-  }
-
-  // uint64 timestamp = 2;
-  if (this->timestamp() != 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
-        this->timestamp());
   }
 
   int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
@@ -19547,9 +19380,6 @@ void Key2SegMsg::MergeFrom(const Key2SegMsg& from) {
   if (from.uid() != 0) {
     set_uid(from.uid());
   }
-  if (from.timestamp() != 0) {
-    set_timestamp(from.timestamp());
-  }
 }
 
 void Key2SegMsg::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
@@ -19575,7 +19405,6 @@ void Key2SegMsg::InternalSwap(Key2SegMsg* other) {
   _internal_metadata_.Swap(&other->_internal_metadata_);
   segment_id_.InternalSwap(&other->segment_id_);
   swap(uid_, other->uid_);
-  swap(timestamp_, other->timestamp_);
 }
 
 ::PROTOBUF_NAMESPACE_ID::Metadata Key2SegMsg::GetMetadata() const {

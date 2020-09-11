@@ -3,7 +3,7 @@ find_package(GTest REQUIRED)
 set(MILVUS_TEST_FILES
     test_naive.cpp
     # test_dog_segment.cpp
-    test_c_api.cpp
+    # test_c_api.cpp
 )
 add_executable(all_tests 
     ${MILVUS_TEST_FILES}

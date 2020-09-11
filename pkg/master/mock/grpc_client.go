@@ -5,8 +5,7 @@ import (
 	"log"
 	"time"
 
-	pb "github.com/czs007/suvlim/pkg/master/grpc/master"
-	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
+	pb "github.com/czs007/suvlim/pkg/master/grpc"
 	"google.golang.org/grpc"
 )
 
@@ -50,14 +49,11 @@ func FakeCreateCollectionByGRPC() (string, uint64) {
 
 	defer cancel()
 
-	r, err := c.CreateCollection(ctx, &msgpb.Mapping{
-		CollectionName: "test-collection",
-	})
+	r, err := c.CreateCollection(ctx, &pb.CreateCollectionRequest{CollectionName: "grpc-client-test"})
 	if err != nil {
 		log.Fatalf("could not greet: %v", err)
 	}
 
-	//	log.Printf("CreateCollection: %s, id: %d", r.GetCollectionName(), r.GetCollectionId())
-	//	return r.GetCollectionName(), r.GetCollectionId()
-	return r.GetReason(), 0
+	log.Printf("CreateCollection: %s, id: %d", r.GetCollectionName(), r.GetCollectionId())
+	return r.GetCollectionName(), r.GetCollectionId()
 }

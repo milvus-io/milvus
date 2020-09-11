@@ -1,8 +1,6 @@
 #pragma once
 
 #include <vector>
-#include <assert.h>
-#include <stdexcept>
 
 #include "utils/Types.h"
 // #include "knowhere/index/Index.h"

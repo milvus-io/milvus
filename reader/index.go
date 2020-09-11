@@ -1,15 +1,15 @@
 package reader
 
 import (
-	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
+	schema2 "github.com/czs007/suvlim/pulsar/client-go/pb"
 )
 
 type IndexConfig struct {}
 
-func buildIndex(config IndexConfig) msgPb.Status {
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+func buildIndex(config IndexConfig) schema2.Status {
+	return schema2.Status{ErrorCode: schema2.ErrorCode_SUCCESS}
 }
 
-func dropIndex(fieldName string) msgPb.Status {
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+func dropIndex(fieldName string) schema2.Status {
+	return schema2.Status{ErrorCode: schema2.ErrorCode_SUCCESS}
 }

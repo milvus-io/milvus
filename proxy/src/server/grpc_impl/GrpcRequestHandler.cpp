@@ -17,8 +17,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <src/server/delivery/request/SearchReq.h>
-#include <src/server/delivery/ReqScheduler.h>
 
 #include "query/BinaryQuery.h"
 #include "server/ValidationUtil.h"
@@ -851,9 +849,6 @@ GrpcRequestHandler::Search(::grpc::ServerContext *context, const ::milvus::grpc:
   CHECK_NULLPTR_RETURN(request);
   LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-  //TODO: check if the request is legal
-  BaseReqPtr req_ptr = SearchReq::Create(GetContext(context), request, response);
-  ReqScheduler::ExecReq(req_ptr);
   return ::grpc::Status::OK;
 }
 

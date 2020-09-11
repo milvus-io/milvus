@@ -68,16 +68,22 @@ ConfigMgr ConfigMgr::instance;
 
 ConfigMgr::ConfigMgr() {
     config_list_ = {
+        /* version */
+        {"version", CreateStringConfig("version", false, &config.version.value, "unknown", nullptr, nullptr)},
 
         /* general */
-        {"timezone",
-         CreateStringConfig("timezone", false, &config.timezone.value, "UTC+8", nullptr, nullptr)},
+        {"general.timezone",
+         CreateStringConfig("general.timezone", false, &config.general.timezone.value, "UTC+8", nullptr, nullptr)},
 
         /* network */
-        {"network.address", CreateStringConfig("network.address", false, &config.network.address.value,
+        {"network.bind.address", CreateStringConfig("network.bind.address", false, &config.network.bind.address.value,
                                                     "0.0.0.0", nullptr, nullptr)},
-        {"network.port", CreateIntegerConfig("network.port", false, 0, 65535, &config.network.port.value,
+        {"network.bind.port", CreateIntegerConfig("network.bind.port", false, 0, 65535, &config.network.bind.port.value,
                                                   19530, nullptr, nullptr)},
+        {"network.http.enable",
+         CreateBoolConfig("network.http.enable", false, &config.network.http.enable.value, true, nullptr, nullptr)},
+        {"network.http.port", CreateIntegerConfig("network.http.port", false, 0, 65535, &config.network.http.port.value,
+                                                  19121, nullptr, nullptr)},
 
         
         /* pulsar */
@@ -86,6 +92,27 @@ ConfigMgr::ConfigMgr() {
         {"pulsar.port", CreateIntegerConfig("pulsar.port", false, 0, 65535, &config.pulsar.port.value,
                                                   6650, nullptr, nullptr)},
 
+        /* storage */
+        {"storage.path",
+         CreateStringConfig("storage.path", false, &config.storage.path.value, "/var/lib/milvus", nullptr, nullptr)},
+        {"storage.auto_flush_interval",
+         CreateIntegerConfig("storage.auto_flush_interval", true, 0, std::numeric_limits<int64_t>::max(),
+                             &config.storage.auto_flush_interval.value, 1, nullptr, nullptr)},
+
+
+        /* cache */
+        {"cache.cache_size", CreateSizeConfig("cache.cache_size", true, 0, std::numeric_limits<int64_t>::max(),
+                                              &config.cache.cache_size.value, 4 * GB, nullptr, nullptr)},
+        {"cache.cpu_cache_threshold",
+         CreateFloatingConfig("cache.cpu_cache_threshold", false, 0.0, 1.0, &config.cache.cpu_cache_threshold.value,
+                              0.7, nullptr, nullptr)},
+        {"cache.insert_buffer_size",
+         CreateSizeConfig("cache.insert_buffer_size", false, 0, std::numeric_limits<int64_t>::max(),
+                          &config.cache.insert_buffer_size.value, 1 * GB, nullptr, nullptr)},
+        {"cache.cache_insert_data", CreateBoolConfig("cache.cache_insert_data", false,
+                                                     &config.cache.cache_insert_data.value, false, nullptr, nullptr)},
+        {"cache.preload_collection", CreateStringConfig("cache.preload_collection", false,
+                                                        &config.cache.preload_collection.value, "", nullptr, nullptr)},
 
         /* log */
         {"logs.level", CreateStringConfig("logs.level", false, &config.logs.level.value, "debug", nullptr, nullptr)},
@@ -135,19 +162,13 @@ ConfigMgr::Load(const std::string& path) {
     auto yaml = YAML::LoadFile(path);
     /* make it flattened */
     std::unordered_map<std::string, std::string> flattened;
-    // auto proxy_yaml = yaml["porxy"];
-    auto other_yaml = YAML::Node{};
-    other_yaml["pulsar"] = yaml["pulsar"];
-    Flatten(yaml["proxy"], flattened, "");
-    Flatten(other_yaml, flattened, "");
-    // Flatten(yaml["proxy"], flattened, "");
+    Flatten(yaml, flattened, "");
     /* update config */
     for (auto& it : flattened) Set(it.first, it.second, false);
 }
 
 void
 ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
-    std::cout<<"InSet Config "<< name <<std::endl;
     if (config_list_.find(name) == config_list_.end()){
         std::cout<<"Config "<< name << " not found!"<<std::endl;
         return;

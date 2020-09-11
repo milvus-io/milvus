@@ -6,13 +6,10 @@
 #include "grpc/message.pb.h"
 
 namespace milvus::message_client {
-constexpr uint32_t ParallelNum = 12 * 20;
-
 class MsgClientV2 {
  public:
   MsgClientV2(int64_t client_id,
-              const std::string &service_url,
-              const uint32_t mut_parallelism = ParallelNum,
+              std::string &service_url,
               const pulsar::ClientConfiguration &config = pulsar::ClientConfiguration());
   ~MsgClientV2();
 
@@ -29,9 +26,9 @@ class MsgClientV2 {
   Status SendMutMessage(const milvus::grpc::DeleteByIDParam &request, uint64_t timestamp);
 
   //
-  Status SendQueryMessage(const milvus::grpc::SearchParam &request, uint64_t timestamp, int64_t &query_id);
+  Status SendQueryMessage(const milvus::grpc::SearchParam &request);
 
-  Status GetQueryResult(int64_t query_id, milvus::grpc::QueryResult* result);
+  static milvus::grpc::QueryResult GetQueryResult(int64_t query_id);
 
  private:
   int64_t GetUniqueQId() {
@@ -43,11 +40,9 @@ class MsgClientV2 {
   int64_t client_id_;
   std::string service_url_;
   std::shared_ptr<MsgConsumer> consumer_;
-  // std::shared_ptr<MsgProducer> insert_delete_producer_;
+  std::shared_ptr<MsgProducer> insert_delete_producer_;
   std::shared_ptr<MsgProducer> search_producer_;
   std::shared_ptr<MsgProducer> time_sync_producer_;
   std::shared_ptr<MsgProducer> search_by_id_producer_;
-  std::vector<std::shared_ptr<MsgProducer>> paralle_mut_producers_;
-  const uint32_t mut_parallelism_;
 };
 }
