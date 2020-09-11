@@ -344,35 +344,32 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
     auto status = Flush();
     WaitMergeFileFinish();  // let merge file thread finish
 
-    // step 2: compare old index and new index
+    // step 2: compare old index and new index, drop old index, set new index
     CollectionIndex new_index = index;
     CollectionIndex old_index;
     STATUS_CHECK(GetSnapshotIndex(collection_name, field_name, old_index));
 
-    if (utils::IsSameIndex(old_index, new_index)) {
-        return Status::OK();  // same index
+    if (!utils::IsSameIndex(old_index, new_index)) {
+        DropIndex(collection_name, field_name);
+        WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
+
+        // create field element for new index
+        status = SetSnapshotIndex(collection_name, field_name, new_index);
+        if (!status.ok()) {
+            return status;
+        }
     }
 
-    // step 3: drop old index
-    DropIndex(collection_name, field_name);
-    WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
-
-    // step 4: create field element for index
-    status = SetSnapshotIndex(collection_name, field_name, new_index);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // step 5: start background build index thread
-    std::vector<std::string> collection_names = {collection_name};
-    WaitBuildIndexFinish();
-    StartBuildIndexTask(collection_names, true);
-
-    // step 6: iterate segments need to be build index, wait until all segments are built
+    // step 3: iterate segments need to be build index, wait until all segments are built
     while (true) {
+        // start background build index thread
+        std::vector<std::string> collection_names = {collection_name};
+        StartBuildIndexTask(collection_names, true);
+
+        // check if all segments are built
         SnapshotVisitor ss_visitor(collection_name);
         snapshot::IDS_TYPE segment_ids;
-        ss_visitor.SegmentsToIndex(field_name, segment_ids);
+        ss_visitor.SegmentsToIndex(field_name, segment_ids, true);
         if (segment_ids.empty()) {
             break;  // all segments build index finished
         }
@@ -522,10 +519,8 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     }
 
     // do insert
-    int64_t segment_row_count = DEFAULT_SEGMENT_ROW_COUNT;
-    if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
-        segment_row_count = params[PARAM_SEGMENT_ROW_COUNT];
-    }
+    int64_t segment_row_count = 0;
+    GetSegmentRowCount(ss->GetCollection(), segment_row_count);
 
     int64_t collection_id = ss->GetCollectionId();
     int64_t partition_id = partition->GetID();
@@ -977,7 +972,7 @@ DBImpl::TimingMetricThread() {
 }
 
 void
-DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names, bool reset_retry_times) {
+DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names, bool force_build) {
     if (collection_names.empty()) {
         return;  // no need to start thread
     }
@@ -997,19 +992,19 @@ DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names, bo
     {
         std::lock_guard<std::mutex> lck(index_result_mutex_);
         if (index_thread_results_.empty()) {
-            if (reset_retry_times) {
+            if (force_build) {
                 std::lock_guard<std::mutex> lock(index_retry_mutex_);
                 index_retry_map_.clear();  // reset index retry times
             }
 
             index_thread_results_.push_back(
-                index_thread_pool_.enqueue(&DBImpl::BackgroundBuildIndexTask, this, collection_names));
+                index_thread_pool_.enqueue(&DBImpl::BackgroundBuildIndexTask, this, collection_names, force_build));
         }
     }
 }
 
 void
-DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
+DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool force_build) {
     SetThreadName("build_index");
 
     std::unique_lock<std::mutex> lock(build_index_mutex_);
@@ -1023,7 +1018,7 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
         SnapshotVisitor ss_visitor(latest_ss);
 
         snapshot::IDS_TYPE segment_ids;
-        ss_visitor.SegmentsToIndex("", segment_ids);
+        ss_visitor.SegmentsToIndex("", segment_ids, force_build);
         if (segment_ids.empty()) {
             continue;
         }

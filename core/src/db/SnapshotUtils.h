@@ -60,6 +60,9 @@ Status
 GetSegmentRowCount(int64_t collection_id, int64_t& segment_row_count);
 
 Status
+GetSegmentRowCount(const snapshot::CollectionPtr& collection, int64_t& segment_row_count);
+
+Status
 ClearCollectionCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root);
 
 Status

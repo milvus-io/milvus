@@ -140,10 +140,10 @@ class DBImpl : public DB, public ConfigObserver {
     TimingMetricThread();
 
     void
-    StartBuildIndexTask(const std::vector<std::string>& collection_names, bool reset_retry_times);
+    StartBuildIndexTask(const std::vector<std::string>& collection_names, bool force_build);
 
     void
-    BackgroundBuildIndexTask(std::vector<std::string> collection_names);
+    BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool force_build);
 
     void
     TimingIndexThread();
