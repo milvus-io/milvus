@@ -444,10 +444,10 @@ TEST(SegmentUtilTest, CopyRangeDataTest) {
     }
 
     // random test
-    for (int32_t i = 0; i < 100; ++i) {
+    for (int32_t i = 0; i < 10; ++i) {
         std::default_random_engine random;
-        row_count = random() % 1000 + 1;
-        row_width = random() % 64 + 8;
+        row_count = random() % 100 + 1;
+        row_width = random() % 8 + 8;
 
         src_data.resize(row_count * row_width);
         for (int64_t i = 0; i < row_count * row_width; ++i) {
