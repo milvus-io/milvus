@@ -87,6 +87,12 @@ class ExecutionEngineImpl : public ExecutionEngine {
     BuildKnowhereIndex(const std::string& field_name, const CollectionIndex& index_info,
                        knowhere::VecIndexPtr& new_index);
 
+    void
+    HybridLoad(knowhere::VecIndexPtr& vec_index) const;
+
+    void
+    HybridUnset(knowhere::VecIndexPtr& vec_index) const;
+
  private:
     segment::SegmentReaderPtr segment_reader_;
     TargetFields target_fields_;

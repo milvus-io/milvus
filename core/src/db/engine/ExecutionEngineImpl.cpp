@@ -40,6 +40,7 @@
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 #ifdef MILVUS_GPU_VERSION
+#include "cache/GpuCacheMgr.h"
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/gpu/Quantizer.h"
@@ -278,7 +279,7 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
     }
 
     if (hybrid) {
-        //        HybridLoad();
+        HybridLoad(vec_index);
     }
 
     rc.RecordSection("query prepare");
@@ -294,7 +295,7 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
                      context.query_result_->result_ids_.data());
 
     if (hybrid) {
-        //        HybridUnset();
+        HybridUnset(vec_index);
     }
 
     return Status::OK();
@@ -351,7 +352,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             vector_param->nq = vector_param->query_vector.binary_data.size() * 8 / vec_index->Dim();
         }
 
-        status = VecSearch(context, context.query_ptr_->vectors.at(vector_placeholder), vec_index);
+        status = VecSearch(context, context.query_ptr_->vectors.at(vector_placeholder), vec_index, context.hybrid);
         if (!status.ok()) {
             return status;
         }
@@ -848,6 +849,82 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
 
     return Status::OK();
+}
+
+void
+ExecutionEngineImpl::HybridLoad(knowhere::VecIndexPtr& vec_index) const {
+#ifdef MILVUS_GPU_VERSION
+    auto hybrid_index = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(vec_index);
+    if (hybrid_index == nullptr) {
+        LOG_ENGINE_WARNING_ << "HybridLoad only support with IVFSQHybrid";
+        return;
+    }
+
+    // const std::string key = location_ + ".quantizer";
+
+    // Config& config = server::Config::GetInstance();
+    // std::vector<int64_t> gpus;
+    std::vector<int64_t> gpus = ParseGPUDevices(config.gpu.search_devices());
+    // if (!s.ok()) {
+    //    LOG_ENGINE_ERROR_ << s.message();
+    //    return;
+    //}
+    /*
+   // cache hit
+   {
+       const int64_t NOT_FOUND = -1;
+       int64_t device_id = NOT_FOUND;
+       knowhere::QuantizerPtr quantizer = nullptr;
+
+       for (auto& gpu : gpus) {
+           auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+           if (auto cached_quantizer = cache->GetIndex(key)) {
+               device_id = gpu;
+               quantizer = std::static_pointer_cast<CachedQuantizer>(cached_quantizer)->Data();
+           }
+       }
+
+       if (device_id != NOT_FOUND) {
+           hybrid_index->SetQuantizer(quantizer);
+           return;
+       }
+   } */
+
+    // cache miss
+    {
+        std::vector<int64_t> all_free_mem;
+        for (auto& gpu : gpus) {
+            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+            auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
+            all_free_mem.push_back(free_mem);
+        }
+
+        auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
+        auto best_index = std::distance(all_free_mem.begin(), max_e);
+        auto best_device_id = gpus[best_index];
+
+        milvus::json quantizer_conf{{knowhere::meta::DEVICEID, best_device_id}, {"mode", 1}};
+        auto quantizer = hybrid_index->LoadQuantizer(quantizer_conf);
+        LOG_ENGINE_DEBUG_ << "Quantizer params: " << quantizer_conf.dump();
+        if (quantizer == nullptr) {
+            LOG_ENGINE_ERROR_ << "quantizer is nullptr";
+        }
+        hybrid_index->SetQuantizer(quantizer);
+        // auto cache_quantizer = std::make_shared<CachedQuantizer>(quantizer);
+        // cache::GpuCacheMgr::GetInstance(best_device_id)->InsertItem(key, cache_quantizer);
+    }
+#endif
+}
+
+void
+ExecutionEngineImpl::HybridUnset(knowhere::VecIndexPtr& vec_index) const {
+#ifdef MILVUS_GPU_VERSION
+    auto hybrid_index = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(vec_index);
+    if (hybrid_index == nullptr) {
+        return;
+    }
+    hybrid_index->UnsetQuantizer();
+#endif
 }
 
 }  // namespace engine

@@ -31,6 +31,7 @@ struct ExecutionEngineContext {
     query::QueryPtr query_ptr_;
     QueryResultPtr query_result_;
     TargetFields target_fields_;  // for build index task, which field should be build
+    bool hybrid = false;
 };
 using ExecutionEngineContextPtr = std::shared_ptr<ExecutionEngineContext>;
 

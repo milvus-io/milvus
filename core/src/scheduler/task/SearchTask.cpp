@@ -24,6 +24,7 @@
 #include "db/Utils.h"
 #include "db/engine/ExecutionEngineImpl.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -115,6 +116,7 @@ SearchTask::OnExecute() {
         engine::ExecutionEngineContext context;
         context.query_ptr_ = query_ptr_;
         context.query_result_ = std::make_shared<engine::QueryResult>();
+        context.hybrid = std::dynamic_pointer_cast<SpecResLabel>(label_)->IsHybrid();
         STATUS_CHECK(execution_engine_->Search(context));
 
         rc.RecordSection("search done");

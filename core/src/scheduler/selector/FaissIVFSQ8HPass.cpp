@@ -49,6 +49,7 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
     }
 
     ResourcePtr res_ptr;
+    bool hybrid = false;
     if (!gpu_enable_) {
         LOG_SERVER_ERROR_ << LogOut("FaissIVFSQ8HPass: SQ8H index only works with gpu enabled!");
         return false;
@@ -56,13 +57,14 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
     if (search_task->nq() < threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFSQ8HPass: nq < gpu_search_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+        hybrid = true;
     } else {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFSQ8HPass: nq >= gpu_search_threshold, specify gpu %d to search!",
                                     search_gpus_[idx_]);
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[idx_]);
         idx_ = (idx_ + 1) % search_gpus_.size();
     }
-    auto label = std::make_shared<SpecResLabel>(res_ptr);
+    auto label = std::make_shared<SpecResLabel>(res_ptr, hybrid);
     task->label() = label;
     return true;
 }
