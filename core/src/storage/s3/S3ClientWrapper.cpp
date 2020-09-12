@@ -35,18 +35,23 @@ namespace storage {
 Status
 S3ClientWrapper::StartService() {
     bool s3_enable = config.storage.s3_enable();
-    std::string path = config.storage.path();
     fiu_do_on("S3ClientWrapper.StartService.s3_disable", s3_enable = false);
+    std::cout << "s3_enable : " << s3_enable << std::endl;
     if (!s3_enable) {
         LOG_STORAGE_INFO_ << "S3 not enabled!";
         return Status::OK();
     }
 
-    std::string s3_address_ = config.storage.s3_address();
-    std::string s3_port_ = config.storage.s3_port();
-    std::string s3_access_key_ = config.storage.s3_access_key();
-    std::string s3_secret_key_ = config.storage.s3_secret_key();
-    std::string s3_bucket_ = config.storage.s3_bucket();
+    s3_address_ = config.storage.s3_address();
+    std::cout << "s3_address_ : " << s3_address_ << std::endl;
+    s3_port_ = config.storage.s3_port();
+    std::cout << "s3_port_ : " << s3_port_ << std::endl;
+    s3_access_key_ = config.storage.s3_access_key();
+    std::cout << "s3_access_key_ : " << s3_access_key_ << std::endl;
+    s3_secret_key_ = config.storage.s3_secret_key();
+    std::cout << "s3_secret_key_ : " << s3_secret_key_ << std::endl;
+    s3_bucket_ = config.storage.s3_bucket();
+    std::cout << "s3_bucket_ : " << s3_bucket_ << std::endl;
 
     Aws::InitAPI(options_);
 
@@ -222,9 +227,10 @@ S3ClientWrapper::ListObjects(std::vector<std::string>& object_list, const std::s
 
     auto outcome = client_ptr_->ListObjects(request);
 
+    fiu_do_on("S3ClientWrapper.ListObjects.outcome.fail", outcome = Aws::S3::Model::ListObjectsOutcome());
     if (!outcome.IsSuccess()) {
         auto err = outcome.GetError();
-        LOG_STORAGE_ERROR_ << "ERROR: ListObjectsByPrefix: " << err.GetExceptionName() << ": " << err.GetMessage();
+        LOG_STORAGE_ERROR_ << "ERROR: ListObjects: " << err.GetExceptionName() << ": " << err.GetMessage();
         return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
     }
 
@@ -262,10 +268,10 @@ S3ClientWrapper::DeleteObject(const std::string& object_name) {
 }
 
 Status
-S3ClientWrapper::DeleteObjects(const std::string& marker) {
+S3ClientWrapper::DeleteObjects(const std::string& prefix) {
     std::vector<std::string> object_list;
 
-    Status stat = ListObjects(object_list, marker);
+    Status stat = ListObjects(object_list, prefix);
     if (!stat.ok()) {
         return stat;
     }

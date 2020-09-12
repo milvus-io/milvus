@@ -12,9 +12,8 @@
 #include <fstream>
 #include <string>
 
-#include "config/ServerConfig.h"
+//#include "config/ServerConfig.h"
 #include "storage/utils.h"
-#include "utils/CommonUtil.h"
 
 void
 StorageTest::SetUp() {

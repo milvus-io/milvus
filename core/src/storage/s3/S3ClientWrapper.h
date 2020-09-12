@@ -52,7 +52,7 @@ class S3ClientWrapper {
     Status
     DeleteObject(const std::string& object_key);
     Status
-    DeleteObjects(const std::string& marker);
+    DeleteObjects(const std::string& prefix);
     bool
     Exist(const std::string& object_key);
     Status

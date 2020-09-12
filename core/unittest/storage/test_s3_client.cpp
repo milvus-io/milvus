@@ -187,10 +187,14 @@ TEST_F(StorageTest, S3_FAIL_TEST) {
     ASSERT_FALSE(storage_inst.DeleteObject(filename).ok());
     fiu_disable("S3ClientWrapper.DeleteObject.outcome.fail");
 
+    std::vector<std::string> file_paths;
     fiu_enable("S3ClientWrapper.ListObjects.outcome.fail", 1, NULL, 0);
-    ASSERT_FALSE(storage_inst.DeleteObjects("/tmp").ok());
+    ASSERT_FALSE(storage_inst.ListObjects(file_paths, "/tmp").ok());
     fiu_disable("S3ClientWrapper.ListObjects.outcome.fail");
-    ASSERT_TRUE(storage_inst.DeleteObjects("/tmp").ok());
+
+    //fiu_enable("S3ClientWrapper.DeleteObjects.outcome.fail", 1, NULL, 0);
+    //ASSERT_FALSE(storage_inst.DeleteObjects("/tmp").ok());
+    //fiu_disable("S3ClientWrapper.DeleteObjects.outcome.fail");
 
     fiu_enable("S3ClientWrapper.DeleteBucket.outcome.fail", 1, NULL, 0);
     ASSERT_FALSE(storage_inst.DeleteBucket().ok());
