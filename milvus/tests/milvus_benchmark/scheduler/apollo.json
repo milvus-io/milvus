@@ -1,0 +1,15 @@
+[
+    {
+        "server": "apollo",
+        "suite_params": [
+            {
+                "suite": "070_insert_10m.yaml",
+                "image_type": "cpu"
+            },
+            {
+                "suite": "070_cpu_build.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

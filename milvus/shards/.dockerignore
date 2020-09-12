@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+.coverage
+.dockerignore
+cov_html/
+
+.pytest_cache
+__pycache__
+*/__pycache__
+*.md
+*.yml
+*.yaml
+*/metadata/

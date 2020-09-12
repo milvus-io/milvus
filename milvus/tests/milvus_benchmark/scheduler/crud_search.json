@@ -1,0 +1,11 @@
+[
+    {
+        "server": "athena",
+        "suite_params": [
+            {
+                "suite": "crud_search.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    }
+]

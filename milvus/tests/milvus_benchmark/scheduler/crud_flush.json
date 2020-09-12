@@ -1,0 +1,11 @@
+[
+    {
+        "server": "apollo",
+        "suite_params": [
+            {
+                "suite": "crud_add_flush.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]
