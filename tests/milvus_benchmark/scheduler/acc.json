@@ -1,0 +1,15 @@
+[
+    {
+        "server": "poseidon",
+        "suite_params": [
+            {
+                "suite": "crud_add.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "gpu_accuracy_sift1m.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    }
+]
