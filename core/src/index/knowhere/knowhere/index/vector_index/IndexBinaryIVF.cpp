@@ -62,9 +62,19 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         QueryImpl(rows, (uint8_t*)p_data, k, p_dist, p_id, config);
 
         auto ret_ds = std::make_shared<Dataset>();
-        ret_ds->Set(meta::IDS, p_id);
-        ret_ds->Set(meta::DISTANCE, p_dist);
-
+        if (index_->metric_type == faiss::METRIC_Hamming) {
+            auto pf_dist = (float*)malloc(p_dist_size);
+            int32_t* pi_dist = (int32_t*)p_dist;
+            for (int i = 0; i < elems; i++) {
+                *(pf_dist + i) = (float)(*(pi_dist + i));
+            }
+            ret_ds->Set(meta::IDS, p_id);
+            ret_ds->Set(meta::DISTANCE, pf_dist);
+            free(p_dist);
+        } else {
+            ret_ds->Set(meta::IDS, p_id);
+            ret_ds->Set(meta::DISTANCE, p_dist);
+        }
         return ret_ds;
     } catch (faiss::FaissException& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -205,10 +215,11 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
     ivf_index->nprobe = params->nprobe;
-
+    int32_t* pdistances = (int32_t*)distances;
     stdclock::time_point before = stdclock::now();
-    int32_t* i_distances = reinterpret_cast<int32_t*>(distances);
-    index_->search(n, (uint8_t*)data, k, i_distances, labels, bitset_);
+
+    // todo: remove static cast (zhiru)
+    static_cast<faiss::IndexBinary*>(index_.get())->search(n, (uint8_t*)data, k, pdistances, labels, bitset_);
 
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
@@ -217,14 +228,6 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
                         << ", data search cost: " << faiss::indexIVF_stats.search_time;
     faiss::indexIVF_stats.quantization_time = 0;
     faiss::indexIVF_stats.search_time = 0;
-
-    // if hamming, it need transform int32 to float
-    if (ivf_index->metric_type == faiss::METRIC_Hamming) {
-        int64_t num = n * k;
-        for (int64_t i = 0; i < num; i++) {
-            distances[i] = static_cast<float>(i_distances[i]);
-        }
-    }
 }
 
 }  // namespace knowhere

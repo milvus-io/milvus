@@ -12,7 +12,6 @@
 #include "scheduler/resource/Resource.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
-#include "scheduler/task/FinishedTask.h"
 
 #include <iostream>
 #include <limits>
@@ -117,9 +116,8 @@ Resource::pick_task_load() {
     auto indexes = task_table_.PickToLoad(10);
     for (auto index : indexes) {
         // try to set one task loading, then return
-        if (task_table_.Load(index)) {
+        if (task_table_.Load(index))
             return task_table_.at(index);
-        }
         // else try next
     }
     return nullptr;
@@ -172,14 +170,9 @@ Resource::loader_function() {
             }
             LoadFile(task_item->task);
             task_item->Loaded();
-
-            auto& label = task_item->task->label();
-            if (label != nullptr && label->Type() != TaskLabelType::BROADCAST) {
-                if (task_item->from) {
-                    task_item->from->Moved();
-                    task_item->from->task = FinishedTask::Create(task_item->from->task);
-                    task_item->from = nullptr;
-                }
+            if (task_item->from) {
+                task_item->from->Moved();
+                task_item->from = nullptr;
             }
             if (subscriber_) {
                 auto event = std::make_shared<LoadCompletedEvent>(shared_from_this(), task_item);
@@ -208,7 +201,6 @@ Resource::executor_function() {
             }
             auto start = get_current_timestamp();
             Process(task_item->task);
-            task_item->task = FinishedTask::Create(task_item->task);
             auto finish = get_current_timestamp();
             ++total_task_;
             total_cost_ += finish - start;

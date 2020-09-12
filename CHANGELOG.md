@@ -2,22 +2,7 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 0.10.3 (TBD)
-## Bug
--   \#3536 Release search task in time to avoid excessive memory usage
--   \#3656 Fix to check search params 'nprobe' of BIN_IVF_FLAT
-
-## Feature
--   \#3213 Allow users to specify a distance type at runtime for Flat index
--   \#3254 Allow more choices for the parameter ‘m’ of CPU IVF_PQ
--   \#3606 Searching auto turn into CPU when the parameter 'nprobe' of IVF is larger than 2048
--   \#3639 Searching auto turn into CPU when the parameter 'topk' of index is larger than 2048 
-
-## Improvement
-
-## Task
-
-# Milvus 0.10.2 (2020-08-15)
+# Milvus 0.10.2 (TBD)
 
 ## Bug
 -   \#2890 Fix the index size caculation in cache

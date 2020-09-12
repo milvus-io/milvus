@@ -22,11 +22,9 @@
 
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
 #include "segment/SegmentReader.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -125,7 +123,21 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, Segmen
         if (!file_->index_params_.empty()) {
             json_params = milvus::json::parse(file_->index_params_);
         }
-
+        //        if (auto job = job_.lock()) {
+        //            auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
+        //            query::GeneralQueryPtr general_query = search_job->general_query();
+        //            if (general_query != nullptr) {
+        //                std::unordered_map<std::string, engine::DataType> types;
+        //                auto attr_type = search_job->attr_type();
+        //                auto type_it = attr_type.begin();
+        //                for (; type_it != attr_type.end(); type_it++) {
+        //                    types.insert(std::make_pair(type_it->first, (engine::DataType)(type_it->second)));
+        //                }
+        //                index_engine_ =
+        //                    EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
+        //                                         (MetricType)file_->metric_type_, types, json_params);
+        //            }
+        //        }
         index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
                                              (MetricType)file_->metric_type_, json_params);
     }
@@ -179,8 +191,8 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 
         if (auto job = job_.lock()) {
             auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
-            search_job->GetStatus() = s;
             search_job->SearchDone(file_->id_);
+            search_job->GetStatus() = s;
         }
 
         return;
@@ -233,44 +245,6 @@ XSearchTask::Execute() {
         const milvus::json& extra_params = search_job->extra_params();
         const engine::VectorsData& vectors = search_job->vectors();
 
-        auto engine_type = index_engine_->IndexEngineType();
-        if (engine_type == EngineType::FAISS_IDMAP || engine_type == EngineType::FAISS_BIN_IDMAP) {
-            // allow to assign a metric type in IDMAP and BIN_IDMAP
-            if (extra_params.contains(knowhere::Metric::TYPE)) {
-                auto metric_type = extra_params[knowhere::Metric::TYPE].get<int64_t>();
-                LOG_ENGINE_DEBUG_ << "User's metric type " << metric_type;
-
-                auto Illegal_Metric_Type = [&]() {
-                    std::string msg = "Illegal metric type" + metric_type;
-                    search_job->GetStatus() = Status(SERVER_INVALID_ARGUMENT, msg);
-                    search_job->SearchDone(index_id_);
-                };
-
-                if (engine_type == EngineType::FAISS_IDMAP) {
-                    if (metric_type == static_cast<int64_t>(MetricType::IP)) {
-                        ascending_reduce = false;
-                    } else if (metric_type == static_cast<int64_t>(MetricType::L2)) {
-                        // do nothing
-                    } else {
-                        Illegal_Metric_Type();
-                        return;
-                    }
-                } else {
-                    // FAISS_BIN_IDMAP
-                    if (metric_type == static_cast<int64_t>(MetricType::HAMMING) ||
-                        metric_type == static_cast<int64_t>(MetricType::JACCARD) ||
-                        metric_type == static_cast<int64_t>(MetricType::TANIMOTO) ||
-                        metric_type == static_cast<int64_t>(MetricType::SUBSTRUCTURE) ||
-                        metric_type == static_cast<int64_t>(MetricType::SUPERSTRUCTURE)) {
-                        // do nothing
-                    } else {
-                        Illegal_Metric_Type();
-                        return;
-                    }
-                }
-            }
-        }
-
         output_ids.resize(topk * nq);
         output_distance.resize(topk * nq);
         std::string hdr =
@@ -279,7 +253,11 @@ XSearchTask::Execute() {
         try {
             fiu_do_on("XSearchTask.Execute.throw_std_exception", throw std::exception());
             // step 2: search
-            bool hybrid = std::dynamic_pointer_cast<SpecResLabel>(label_)->IsHybrid();
+            bool hybrid = false;
+            if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H &&
+                ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
+                hybrid = true;
+            }
             Status s;
             if (general_query != nullptr) {
                 std::unordered_map<std::string, engine::DataType> types;
@@ -311,6 +289,7 @@ XSearchTask::Execute() {
                     }
                 }
                 search_job->SearchDone(index_id_);
+                index_engine_ = nullptr;
                 return;
             }
             if (!vectors.float_data_.empty()) {
@@ -362,6 +341,9 @@ XSearchTask::Execute() {
     }
 
     rc.ElapseFromBegin("totally cost");
+
+    // release index in resource
+    index_engine_ = nullptr;
 }
 
 void

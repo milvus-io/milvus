@@ -13,11 +13,13 @@
 #include <gtest/gtest.h>
 #include <src/scheduler/task/BuildIndexTask.h>
 #include <src/scheduler/task/SearchTask.h>
+#include <src/scheduler/optimizer/FaissIVFFlatPass.h>
 
 #include "scheduler/optimizer/BuildIndexPass.h"
 #include "scheduler/optimizer/FaissFlatPass.h"
-#include "scheduler/optimizer/FaissIVFPass.h"
+#include "scheduler/optimizer/FaissIVFPQPass.h"
 #include "scheduler/optimizer/FaissIVFSQ8HPass.h"
+#include "scheduler/optimizer/FaissIVFSQ8Pass.h"
 
 namespace milvus {
 namespace scheduler {

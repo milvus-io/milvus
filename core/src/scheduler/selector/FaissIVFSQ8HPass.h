@@ -37,7 +37,6 @@ class FaissIVFSQ8HPass : public Pass, public server::GpuResourceConfigHandler {
     void
     Init() override;
 
- public:
     bool
     Run(const TaskPtr& task) override;
 

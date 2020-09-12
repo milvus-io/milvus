@@ -8,43 +8,44 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-
+#ifdef MILVUS_GPU_VERSION
 #pragma once
 
-#include "TaskLabel.h"
-#include "scheduler/ResourceMgr.h"
-
+#include <condition_variable>
+#include <deque>
+#include <limits>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
-// class Resource;
-//
-// using ResourceWPtr = std::weak_ptr<Resource>;
+#include "config/handler/GpuResourceConfigHandler.h"
+#include "scheduler/selector/Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class SpecResLabel : public TaskLabel {
+class FaissIVFFlatPass : public Pass, public server::GpuResourceConfigHandler {
  public:
-    explicit SpecResLabel(const ResourceWPtr& resource)
-        : TaskLabel(TaskLabelType::SPECIFIED_RESOURCE), resource_(resource) {
-    }
+    FaissIVFFlatPass() = default;
 
-    inline ResourceWPtr&
-    resource() {
-        return resource_;
-    }
+ public:
+    void
+    Init() override;
 
-    inline std::string
-    name() const override {
-        return resource_.lock()->name();
-    }
+    bool
+    Run(const TaskPtr& task) override;
 
  private:
-    ResourceWPtr resource_;
+    int64_t idx_ = 0;
 };
 
-using SpecResLabelPtr = std::shared_ptr<SpecResLabel>();
+using FaissIVFFlatPassPtr = std::shared_ptr<FaissIVFFlatPass>;
 
 }  // namespace scheduler
 }  // namespace milvus
+#endif

@@ -180,8 +180,6 @@ TaskTable::PickToLoad(uint64_t limit) {
             cross = true;
             indexes.push_back(index);
             ++pick_count;
-        } else {
-            cross = true;
         }
     }
     // rc.ElapseFromBegin("PickToLoad ");
@@ -254,8 +252,6 @@ TaskTable::PickToExecute(uint64_t limit) {
             cross = true;
             indexes.push_back(index);
             ++pick_count;
-        } else {
-            cross = true;
         }
     }
     // rc.ElapseFromBegin("PickToExecute ");

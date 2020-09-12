@@ -42,7 +42,6 @@ enum class IndexType {
 };
 
 enum class MetricType {
-    INVALID = 0,
     L2 = 1,        // Euclidean Distance
     IP = 2,        // Cosine Similarity
     HAMMING = 3,   // Hamming Distance

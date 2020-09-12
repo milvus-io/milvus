@@ -105,8 +105,8 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
-    //    QueryImpl(rows, (float*)p_data, k, p_dist, p_id, Config());
-    QueryImpl(rows, (float*)p_data, k, p_dist, p_id, config);
+    QueryImpl(rows, (float*)p_data, k, p_dist, p_id, Config());
+
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
@@ -221,12 +221,7 @@ IDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
 
 void
 IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
-    auto flat_index = dynamic_cast<faiss::IndexIDMap*>(index_.get())->index;
-    auto default_type = flat_index->metric_type;
-    if (config.contains(Metric::TYPE))
-        flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     index_->search(n, (float*)data, k, distances, labels, bitset_);
-    flat_index->metric_type = default_type;
 }
 
 }  // namespace knowhere

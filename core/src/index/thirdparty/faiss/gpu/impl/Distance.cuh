@@ -70,11 +70,75 @@ void runL2Distance(GpuResources* resources,
                    Tensor<int, 2, true>& outIndices,
                    bool ignoreOutDistances = false);
 
+void runL2Distance(GpuResources* resources,
+                   Tensor<float, 2, true>& vectors,
+                   bool vectorsRowMajor,
+                   Tensor<float, 1, true>* vectorNorms,
+                   Tensor<float, 2, true>& queries,
+                   bool queriesRowMajor,
+                   int k,
+                   Tensor<float, 2, true>& outDistances,
+                   Tensor<int, 2, true>& outIndices,
+
+                    float* outDis_h,
+                    int* outInd_h,
+                    int i,
+                    int curTile,
+                    int nprobe,
+                    Tensor<uint8_t, 1, true>& bitset);
 //
 // General distance implementation, assumes that all arguments are on the
 // device. This is the top-level internal distance function to call to dispatch
 // based on metric type.
 //
+
+template <typename T>
+void bfKnnOnDevice(GpuResources* resources,
+                   int device,
+                   cudaStream_t stream,
+                   Tensor<T, 2, true>& vectors,
+                   bool vectorsRowMajor,
+                   Tensor<float, 1, true>* vectorNorms,
+                   Tensor<T, 2, true>& queries,
+                   bool queriesRowMajor,
+                   int k,
+                   faiss::MetricType metric,
+                   float metricArg,
+                   Tensor<float, 2, true>& outDistances,
+                   Tensor<int, 2, true>& outIndices,
+
+                   float* outDis_h,
+                    int* outInd_h,
+                    int i,
+                    int curTile,
+                    int nprobe,
+
+                   bool ignoreOutDistances, 
+                   Tensor<uint8_t, 1, true>& bitset) {
+                     //暂时只考虑L2的情况()
+                     if ((metric == faiss::MetricType::METRIC_L2) ||
+                  (metric == faiss::MetricType::METRIC_Lp &&
+                  metricArg == 2))
+                     printf("Call runL2Distance....\n");
+
+                     runL2Distance(resources,
+                      vectors,
+                      vectorsRowMajor,
+                      vectorNorms,
+                      queries,
+                      queriesRowMajor,
+                      k,
+                      outDistances,
+                      outIndices,
+
+                      outDis_h,
+                      outInd_h,
+                      i,
+                      curTile,
+                      nprobe,
+                      bitset);
+                   }
+
 template <typename T>
 void bfKnnOnDevice(GpuResources* resources,
                    int device,

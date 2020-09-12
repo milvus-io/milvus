@@ -197,14 +197,14 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
         case (int32_t)engine::EngineType::FAISS_IVFSQ8:
         case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
         case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
             if (!status.ok()) {
                 return status;
             }
             break;
         }
         case (int32_t)engine::EngineType::FAISS_PQ: {
-            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
+            auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
             if (!status.ok()) {
                 return status;
             }
@@ -215,14 +215,16 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
             }
 
             // special check for 'm' parameter
+            std::vector<int64_t> resset;
+            milvus::knowhere::IVFPQConfAdapter::GetValidMList(collection_schema.dimension_, resset);
             int64_t m_value = index_params[knowhere::IndexParams::m];
-            if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(collection_schema.dimension_, m_value)) {
-                std::string msg = "Invalid collection dimension, dimension can not be divided by m";
+            if (resset.empty()) {
+                std::string msg = "Invalid collection dimension, unable to get reasonable values for 'm'";
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_COLLECTION_DIMENSION, msg);
             }
 
-            /* auto iter = std::find(std::begin(resset), std::end(resset), m_value);
+            auto iter = std::find(std::begin(resset), std::end(resset), m_value);
             if (iter == std::end(resset)) {
                 std::string msg =
                     "Invalid " + std::string(knowhere::IndexParams::m) + ", must be one of the following values: ";
@@ -235,7 +237,8 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
 
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_ARGUMENT, msg);
-            }*/
+            }
+
             break;
         }
         case (int32_t)engine::EngineType::NSG_MIX: {
@@ -292,7 +295,7 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
         case (int32_t)engine::EngineType::FAISS_IVFSQ8H:
         case (int32_t)engine::EngineType::FAISS_BIN_IVFFLAT:
         case (int32_t)engine::EngineType::FAISS_PQ: {
-            auto status = CheckParameterRange(search_params, knowhere::IndexParams::nprobe, 1, 65536);
+            auto status = CheckParameterRange(search_params, knowhere::IndexParams::nprobe, 1, 999999);
             if (!status.ok()) {
                 return status;
             }
@@ -407,7 +410,7 @@ Status
 ValidationUtil::ValidateSearchTopk(int64_t top_k) {
     if (top_k <= 0 || top_k > QUERY_MAX_TOPK) {
         std::string msg =
-            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 16384.";
+            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 2048.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_TOPK, msg);
     }

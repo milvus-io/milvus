@@ -182,13 +182,6 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         case EngineType::FAISS_PQ: {
-            auto m = index_params_[knowhere::IndexParams::m];
-            if (!m.is_null() && !milvus::knowhere::IVFPQConfAdapter::GetValidM(dim_, m.get<int64_t>(), mode)) {
-                std::string err_msg = "dimension " + std::to_string(dim_) + " can't not be divided by m " +
-                                      std::to_string(m.get<int64_t>());
-                LOG_ENGINE_ERROR_ << err_msg;
-                break;
-            }
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFPQ, mode);
             break;
         }
@@ -602,17 +595,12 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
             index_reserve_ = index_;
             if (gpu_cache_enable) {
                 gpu_cache_mgr->Reserve(index_->Size());
-            }
-            index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
-            if (index_ == nullptr) {
-                LOG_ENGINE_DEBUG_ << "copy to GPU faied, search on CPU";
-                index_ = index_reserve_;
+                index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
+                gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
             } else {
-                if (gpu_cache_enable) {
-                    gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
-                }
-                LOG_ENGINE_DEBUG_ << "CPU to GPU" << device_id << " finished";
+                index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
             }
+            LOG_ENGINE_DEBUG_ << "CPU to GPU" << device_id << " finished";
         } catch (std::exception& e) {
             LOG_ENGINE_ERROR_ << e.what();
             return Status(DB_ERROR, e.what());
@@ -1170,10 +1158,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     }
 
     milvus::json conf = extra_params;
-    if (conf.contains(knowhere::Metric::TYPE))
-        MappingMetricType(conf[knowhere::Metric::TYPE], conf);
     conf[knowhere::meta::TOPK] = k;
-
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
     if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
@@ -1212,8 +1197,6 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     }
 
     milvus::json conf = extra_params;
-    if (conf.contains(knowhere::Metric::TYPE))
-        MappingMetricType(conf[knowhere::Metric::TYPE], conf);
     conf[knowhere::meta::TOPK] = k;
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
     if (!adapter->CheckSearch(conf, index_->index_type(), index_->index_mode())) {
