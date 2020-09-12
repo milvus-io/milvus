@@ -11,18 +11,30 @@ public class TestCollectionCount {
     int nb = Constants.nb;
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+<<<<<<< HEAD
     public void testCollectionCountNoVectors(MilvusClient client, String collectionName) {
+=======
+    public void test_collection_count_no_vectors(MilvusClient client, String collectionName) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), 0);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+<<<<<<< HEAD
     public void testCollectionCountCollectionNotExisted(MilvusClient client, String collectionName) {
+=======
+    public void test_collection_count_collection_not_existed(MilvusClient client, String collectionName) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         CountEntitiesResponse res = client.countEntities(collectionName+"_");
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+<<<<<<< HEAD
     public void testCollectionCountWithoutConnect(MilvusClient client, String collectionName) {
+=======
+    public void test_collection_count_without_connect(MilvusClient client, String collectionName) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         CountEntitiesResponse res = client.countEntities(collectionName+"_");
         assert(!res.getResponse().ok());
     }
@@ -38,8 +50,14 @@ public class TestCollectionCount {
         // Insert returns a list of entity ids that you will be using (if you did not supply the yourself) to reference the entities you just inserted
         List<Long> vectorIds = insertResponse.getEntityIds();
         // Add vectors
+<<<<<<< HEAD
         Response flushResponse = client.flush(collectionName);
         Assert.assertTrue(flushResponse.ok());
+=======
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+        client.insert(insertParam);
+        client.flush(collectionName);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 

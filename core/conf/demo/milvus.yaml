@@ -132,7 +132,13 @@ cache:
 #                      | If nq >= gpu_search_threshold, the search computation will |            |                 |
 #                      | be executed on GPUs only;                                  |            |                 |
 #                      | if nq < gpu_search_threshold, the search computation will  |            |                 |
+<<<<<<< HEAD:core/conf/demo/milvus.yaml
 #                      | be executed on both CPUs and GPUs.                         |            |                 |
+=======
+#                      | be executed on CPUs only.                                  |            |                 |
+#                      | The SQ8H index is special, if nq < gpu_search_threshold,   |            |                 |
+#                      | the search will be executed on both CPUs and GPUs.         |            |                 |
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:core/conf/demo/server_config.yaml
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # search_resources     | The list of GPU devices used for search computation.       | DeviceList | gpu0            |
 #                      | Must be in format gpux.                                    |            |                 |

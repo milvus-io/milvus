@@ -139,6 +139,7 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     b_params.out_degree = config[IndexParams::out_degree];
     b_params.search_length = config[IndexParams::search_length];
 
+<<<<<<< HEAD
     GET_TENSOR(dataset_ptr)
 
     impl::NsgIndex::Metric_Type metric;
@@ -151,6 +152,20 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("Metric is not supported");
     }
 
+=======
+    GETTENSORWITHIDS(dataset_ptr)
+
+    impl::NsgIndex::Metric_Type metric;
+    auto metric_str = config[Metric::TYPE].get<std::string>();
+    if (metric_str == knowhere::Metric::IP) {
+        metric = impl::NsgIndex::Metric_Type::Metric_Type_IP;
+    } else if (metric_str == knowhere::Metric::L2) {
+        metric = impl::NsgIndex::Metric_Type::Metric_Type_L2;
+    } else {
+        KNOWHERE_THROW_MSG("Metric is not supported");
+    }
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     index_ = std::make_shared<impl::NsgIndex>(dim, rows, metric);
     index_->SetKnnGraph(knng);
     index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);

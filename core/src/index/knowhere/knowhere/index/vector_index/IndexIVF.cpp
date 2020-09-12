@@ -35,6 +35,7 @@
 #include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
@@ -68,9 +69,15 @@ IVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
+<<<<<<< HEAD
     auto nlist = config[IndexParams::nlist].get<int64_t>();
     index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFFlat(coarse_quantizer, dim, nlist, metric_type));
     index_->train(rows, reinterpret_cast<const float*>(p_data));
+=======
+    int64_t nlist = config[IndexParams::nlist].get<int64_t>();
+    index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFFlat(coarse_quantizer, dim, nlist, metric_type));
+    index_->train(rows, (float*)p_data);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 void

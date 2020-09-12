@@ -56,7 +56,11 @@ Milvus 可以应用于多种 AI 场景。你可以访问 [Milvus 应用场景](h
 
 ## 路线图
 
+<<<<<<< HEAD
 你可以参考我们的[路线图](https://github.com/milvus-io/milvus/milestones)，了解 Milvus 即将实现的新特性。
+=======
+您可以参考我们的[路线图](https://github.com/milvus-io/milvus/projects)，了解 Milvus 即将实现的新特性。
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 路线图尚未完成，并且可能会存在合理改动。我们欢迎各种针对路线图的意见、需求和建议。
 

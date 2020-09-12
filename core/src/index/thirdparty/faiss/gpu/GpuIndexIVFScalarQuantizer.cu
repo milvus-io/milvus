@@ -132,6 +132,7 @@ GpuIndexIVFScalarQuantizer::copyFrom(
                   numVecs);
       }
    }
+<<<<<<< HEAD
 }
 
 void
@@ -175,6 +176,8 @@ GpuIndexIVFScalarQuantizer::copyFromWithoutCodes(
   } else {
       // should not happen
   }
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 void

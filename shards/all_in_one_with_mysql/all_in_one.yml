@@ -18,7 +18,11 @@ services:
     milvus_wr:
         runtime: nvidia
         restart: always
+<<<<<<< HEAD
         image: milvusdb/milvus:0.10.0-gpu-d061320-83cc81
+=======
+        image: milvusdb/milvus:0.10.2-gpu-d081520-8a2393
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         volumes:
             - /tmp/milvus/db:/var/lib/milvus/db
             - ./wr_server.yml:/var/lib/milvus/conf/server_config.yaml
@@ -29,7 +33,11 @@ services:
     milvus_ro:
         runtime: nvidia
         restart: always
+<<<<<<< HEAD
         image: milvusdb/milvus:0.10.0-gpu-d061320-83cc81
+=======
+        image: milvusdb/milvus:0.10.2-gpu-d081520-8a2393
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         volumes:
             - /tmp/milvus/db:/var/lib/milvus/db
             - ./ro_server.yml:/var/lib/milvus/conf/server_config.yaml

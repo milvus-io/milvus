@@ -250,7 +250,10 @@ SystemInfo::GPUMemoryTotal() {
     fiu_do_on("SystemInfo.GPUMemoryTotal.mock", initialized_ = false);
     if (!initialized_) {
         Init();
+<<<<<<< HEAD
     }
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     std::vector<int64_t> result;
 
 #ifdef MILVUS_GPU_VERSION
@@ -271,7 +274,10 @@ SystemInfo::GPUTemperature() {
     fiu_do_on("SystemInfo.GPUTemperature.mock", initialized_ = false);
     if (!initialized_) {
         Init();
+<<<<<<< HEAD
     }
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     std::vector<int64_t> result;
 
 #ifdef MILVUS_GPU_VERSION

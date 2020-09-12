@@ -13,7 +13,11 @@ dim = 128
 index_file_size = 10
 collection_id = "test_partition_restart"
 nprobe = 1
+<<<<<<< HEAD
 tag = "1970_01_01"
+=======
+tag = "1970-01-01"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 
 class TestRestartBase:

@@ -33,6 +33,7 @@ DBWrapper::StartService() {
 
     // db config
     engine::DBOptions opt;
+<<<<<<< HEAD
     opt.meta_.backend_uri_ = config.general.meta_uri();
 
     std::string path = config.storage.path();
@@ -43,20 +44,135 @@ DBWrapper::StartService() {
     opt.insert_buffer_size_ = config.cache.insert_buffer_size();
 
     if (not config.cluster.enable()) {
+=======
+    s = config.GetGeneralConfigMetaURI(opt.meta_.backend_uri_);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
+    std::string path;
+    s = config.GetStorageConfigPath(path);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+    opt.meta_.path_ = path + "/db";
+
+    s = config.GetStorageConfigAutoFlushInterval(opt.auto_flush_interval_);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
+    s = config.GetStorageConfigFileCleanupTimeup(opt.file_cleanup_timeout_);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
+    // metric config
+    s = config.GetMetricConfigEnableMonitor(opt.metric_enable_);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
+    // cache config
+    s = config.GetCacheConfigCacheInsertData(opt.insert_cache_immediately_);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
+    int64_t insert_buffer_size = 1 * engine::GB;
+    s = config.GetCacheConfigInsertBufferSize(insert_buffer_size);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+    opt.insert_buffer_size_ = insert_buffer_size;
+
+#if 1
+    bool cluster_enable = false;
+    std::string cluster_role;
+    STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
+    STATUS_CHECK(config.GetClusterConfigRole(cluster_role));
+    if (not cluster_enable) {
         opt.mode_ = engine::DBOptions::MODE::SINGLE;
-    } else if (config.cluster.role() == ClusterRole::RO) {
+    } else if (cluster_role == "ro") {
         opt.mode_ = engine::DBOptions::MODE::CLUSTER_READONLY;
-    } else if (config.cluster.role() == ClusterRole::RW) {
+    } else if (cluster_role == "rw") {
         opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
     } else {
         std::cerr << "Error: cluster.role is not one of rw and ro." << std::endl;
         kill(0, SIGUSR1);
     }
 
+#else
+    std::string mode;
+    s = config.GetServerConfigDeployMode(mode);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
+    if (mode == "single") {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        opt.mode_ = engine::DBOptions::MODE::SINGLE;
+    } else if (config.cluster.role() == ClusterRole::RO) {
+        opt.mode_ = engine::DBOptions::MODE::CLUSTER_READONLY;
+    } else if (config.cluster.role() == ClusterRole::RW) {
+        opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
+    } else {
+<<<<<<< HEAD
+        std::cerr << "Error: cluster.role is not one of rw and ro." << std::endl;
+=======
+        std::cerr << "Error: server_config.deploy_mode in server_config.yaml is not one of "
+                  << "single, cluster_readonly, and cluster_writable." << std::endl;
+        kill(0, SIGUSR1);
+    }
+#endif
+
+    // get wal configurations
+    s = config.GetWalConfigEnable(opt.wal_enable_);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to get wal_enable configuration." << std::endl;
+        std::cerr << s.ToString() << std::endl;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        kill(0, SIGUSR1);
+    }
+
     // wal
     opt.wal_enable_ = config.wal.enable();
     if (opt.wal_enable_) {
+<<<<<<< HEAD
         opt.wal_path_ = config.wal.path();
+=======
+        s = config.GetWalConfigRecoveryErrorIgnore(opt.recovery_error_ignore_);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get recovery_error_ignore configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
+
+        int64_t wal_buffer_size = 0;
+        s = config.GetWalConfigBufferSize(wal_buffer_size);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get buffer_size configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
+        wal_buffer_size /= (1024 * 1024);
+        opt.buffer_size_ = wal_buffer_size;
+
+        s = config.GetWalConfigWalPath(opt.mxlog_path_);
+        if (!s.ok()) {
+            std::cerr << "ERROR! Failed to get mxlog_path configuration." << std::endl;
+            std::cerr << s.ToString() << std::endl;
+            kill(0, SIGUSR1);
+        }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     // transcript
@@ -82,7 +198,17 @@ DBWrapper::StartService() {
     }
 
     // preload collection
+<<<<<<< HEAD
     std::string preload_collections = config.cache.preload_collection();
+=======
+    std::string preload_collections;
+    s = config.GetCacheConfigPreloadCollection(preload_collections);
+    if (!s.ok()) {
+        std::cerr << s.ToString() << std::endl;
+        return s;
+    }
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     s = PreloadCollections(preload_collections);
     if (!s.ok()) {
         std::cerr << "ERROR! Failed to preload collections: " << preload_collections << std::endl;
@@ -116,9 +242,14 @@ DBWrapper::PreloadCollections(const std::string& preload_collections) {
             return status;
         }
 
+<<<<<<< HEAD
         for (auto& name : names) {
             std::vector<std::string> field_names;  // input empty field names will load all fileds
             auto status = db_->LoadCollection(nullptr, name, field_names);
+=======
+        for (auto& schema : table_schema_array) {
+            auto status = db_->PreloadCollection(nullptr, schema.collection_id_);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             if (!status.ok()) {
                 return status;
             }
@@ -127,8 +258,12 @@ DBWrapper::PreloadCollections(const std::string& preload_collections) {
         std::vector<std::string> collection_names;
         StringHelpFunctions::SplitStringByDelimeter(preload_collections, ",", collection_names);
         for (auto& name : collection_names) {
+<<<<<<< HEAD
             std::vector<std::string> field_names;  // input empty field names will load all fileds
             auto status = db_->LoadCollection(nullptr, name, field_names);
+=======
+            auto status = db_->PreloadCollection(nullptr, name);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             if (!status.ok()) {
                 return status;
             }

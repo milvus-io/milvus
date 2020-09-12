@@ -31,6 +31,11 @@ class MergeManagerImpl : public MergeManager {
  public:
     explicit MergeManagerImpl(const DBOptions& options);
 
+    MergeStrategyType
+    Strategy() const override {
+        return strategy_type_;
+    }
+
     Status
     MergeSegments(int64_t collection_id, MergeStrategyType type) override;
 
@@ -40,6 +45,12 @@ class MergeManagerImpl : public MergeManager {
 
  private:
     DBOptions options_;
+<<<<<<< HEAD
+=======
+
+    MergeStrategyType strategy_type_ = MergeStrategyType::SIMPLE;
+    MergeStrategyPtr strategy_;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 };  // MergeManagerImpl
 
 }  // namespace engine

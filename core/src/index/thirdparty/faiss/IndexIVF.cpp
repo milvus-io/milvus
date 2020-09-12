@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <memory>
 #include <iostream>
+#include <sstream>
 
 #include <faiss/utils/utils.h>
 #include <faiss/utils/hamming.h>
@@ -332,7 +333,11 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
                         distances, labels, false, nullptr, bitset);
     indexIVF_stats.search_time += getmillisecs() - t0;
 
+<<<<<<< HEAD
     // nprobe logging
+=======
+    // string
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     if (LOG_DEBUG_) {
         auto ids = idx.get();
         for (size_t i = 0; i < n; i++) {
@@ -349,6 +354,7 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     }
 }
 
+<<<<<<< HEAD
 void IndexIVF::search_without_codes (idx_t n, const float *x, 
                                      const uint8_t *arranged_codes, std::vector<size_t> prefix_sum, 
                                      bool is_sq8, idx_t k, float *distances, idx_t *labels,
@@ -385,6 +391,8 @@ void IndexIVF::search_without_codes (idx_t n, const float *x,
     }
 }
 
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #if 0
 void IndexIVF::get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset) {
     make_direct_map(true);

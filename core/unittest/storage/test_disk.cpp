@@ -10,7 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <fiu-control.h>
+<<<<<<< HEAD
 #include <fiu/fiu-local.h>
+=======
+#include <fiu-local.h>
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #include <gtest/gtest.h>
 
 #include "easyloggingpp/easylogging++.h"
@@ -61,6 +65,24 @@ TEST_F(StorageTest, DISK_RW_TEST) {
 
         ASSERT_TRUE(content == content_out);
         reader.Close();
+    }
+}
+
+TEST_F(StorageTest, DISK_OPERATION_TEST) {
+    auto disk_operation = milvus::storage::DiskOperation("/tmp/milvus_test/milvus_disk_operation_test");
+
+    fiu_init(0);
+    fiu_enable("DiskOperation.CreateDirectory.is_directory", 1, NULL, 0);
+    fiu_enable("DiskOperation.CreateDirectory.create_directory", 1, NULL, 0);
+    ASSERT_ANY_THROW(disk_operation.CreateDirectory());
+    fiu_disable("DiskOperation.CreateDirectory.create_directory");
+    fiu_disable("DiskOperation.CreateDirectory.is_directory");
+
+    std::vector<std::string> file_paths;
+    ASSERT_NO_THROW(disk_operation.ListDirectory(file_paths));
+
+    for (auto & path : file_paths) {
+        ASSERT_TRUE(disk_operation.DeleteFile(path));
     }
 }
 

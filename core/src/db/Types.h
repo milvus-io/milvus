@@ -136,9 +136,14 @@ using DataChunkPtr = std::shared_ptr<DataChunk>;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 struct CollectionIndex {
+<<<<<<< HEAD
     std::string index_name_;
     std::string index_type_;
     std::string metric_name_;
+=======
+    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
+    int32_t metric_type_ = (int)MetricType::L2;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     milvus::json extra_params_ = {{"nlist", 2048}};
 };
 
@@ -182,6 +187,7 @@ struct DBOptions {
 
     size_t insert_buffer_size_ = 4 * GB;
 
+<<<<<<< HEAD
     int64_t auto_flush_interval_ = 1;
 
     bool metric_enable_ = false;
@@ -195,5 +201,7 @@ struct DBOptions {
     std::string replay_script_path_;  // for replay
 };
 
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }  // namespace engine
 }  // namespace milvus

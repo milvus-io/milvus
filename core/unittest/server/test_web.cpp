@@ -14,7 +14,13 @@
 #include <random>
 #include <thread>
 
+<<<<<<< HEAD
 #include <fiu/fiu-local.h>
+=======
+#include <boost/filesystem.hpp>
+#include <fiu-control.h>
+#include <fiu-local.h>
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #include <gtest/gtest.h>
 #include <src/server/delivery/ReqScheduler.h>
 #include <boost/filesystem.hpp>
@@ -40,6 +46,7 @@
 #include "src/version.h"
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
+<<<<<<< HEAD
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -47,6 +54,10 @@ static const char* COLLECTION_NAME = "test_milvus_web_collection";
 
 static int64_t DIM = 128;
 static int64_t NB = 100;
+=======
+
+static const char* COLLECTION_NAME = "test_milvus_web_collection";
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 using OStatus = oatpp::web::protocol::http::Status;
 using OString = milvus::server::web::OString;
@@ -159,6 +170,7 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "\n"
     "general:\n"
     "  timezone: UTC+8\n"
+<<<<<<< HEAD
     "  meta_uri: mock://:@:/\n"
     "\n"
     "network:\n"
@@ -176,6 +188,25 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "  recovery_error_ignore: false\n"
     "  buffer_size: 256MB\n"
     "  path: /tmp/milvus_web_controller_test/wal\n"
+=======
+    "  meta_uri: sqlite://:@:/\n"
+    "\n"
+    "network:\n"
+    "  bind.address: 0.0.0.0\n"
+    "  bind.port: 19530\n"
+    "  http.enable: true\n"
+    "  http.port: 19121\n"
+    "\n"
+    "storage:\n"
+    "  path: /tmp/milvus\n"
+    "  auto_flush_interval: 1\n"
+    "\n"
+    "wal:\n"
+    "  enable: true\n"
+    "  recovery_error_ignore: false\n"
+    "  buffer_size: 256MB\n"
+    "  path: /tmp/milvus/wal\n"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     "\n"
     "cache:\n"
     "  cache_size: 4GB\n"
@@ -194,7 +225,11 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "logs:\n"
     "  level: debug\n"
     "  trace.enable: true\n"
+<<<<<<< HEAD
     "  path: /tmp/milvus_web_controller_test/logs\n"
+=======
+    "  path: /tmp/milvus/logs\n"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     "  max_log_file_size: 1024MB\n"
     "  log_rotate_num: 0\n"
     "\n"
@@ -288,11 +323,15 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("OPTIONS", "/collections/{collection_name}/entities", optionsEntity,
              PATH(String, collection_name, "collection_name"))
 
+<<<<<<< HEAD
     API_CALL("GET", "/collections/{collection_name}/entities", getEntity,
              PATH(String, collection_name, "collection_name"), QUERY(String, offset), QUERY(String, page_size),
              QUERY(String, partition_tag))
 
     API_CALL("GET", "/collections/{collection_name}/entities", getEntityByID,
+=======
+    API_CALL("GET", "/collections/{collection_name}/vectors", getVectors,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
              PATH(String, collection_name, "collection_name"), QUERY(String, ids))
 
     API_CALL("POST", "/collections/{collection_name}/entities", insert,
@@ -352,9 +391,21 @@ class WebControllerTest : public ::testing::Test {
 
         milvus::engine::DBOptions opt;
 
+<<<<<<< HEAD
         //        boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
 
         milvus::server::DBWrapper::GetInstance().StartService();
+=======
+        milvus::server::Config::GetInstance().SetGeneralConfigMetaURI("sqlite://:@:/");
+        boost::filesystem::remove_all(CONTROLLER_TEST_CONFIG_DIR);
+        milvus::server::Config::GetInstance().SetStorageConfigPath(CONTROLLER_TEST_CONFIG_DIR);
+        milvus::server::Config::GetInstance().SetWalConfigWalPath(CONTROLLER_TEST_CONFIG_WAL_DIR);
+
+        milvus::server::DBWrapper::GetInstance().StartService();
+
+        milvus::server::Config::GetInstance().SetNetworkConfigHTTPPort("29999");
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         milvus::server::web::WebServer::GetInstance().Start();
 
         sleep(3);
@@ -717,6 +768,7 @@ TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
     auto result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
     ASSERT_EQ(nb, result_dto->ids->size());
 
+<<<<<<< HEAD
     auto status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
     ASSERT_TRUE(status.ok());
 
@@ -728,6 +780,62 @@ TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
 
     status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
     ASSERT_TRUE(status.ok());
+=======
+    response = client_ptr->dropPartition(collection_name, "{\"partition_tag\": \"tag01\"}", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_204.code, response->getStatusCode());
+
+    // drop without existing collections
+    response = client_ptr->dropPartition(collection_name + "565755682353464aaasafdsfagagqq1223",
+                                         "{\"partition_tag\": \"tag01\"}", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, SHOW_SEGMENTS) {
+    OString collection_name = OString("test_milvus_web_segments_test_") + RandomName().c_str();
+
+    GenCollection(client_ptr, conncetion_ptr, collection_name, 256, 1, "L2");
+
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 256, 2000);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    auto response = client_ptr->showSegments(collection_name, "0", "10", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    // validate result
+    std::string json_str = response->readBodyToString()->c_str();
+    auto result_json = nlohmann::json::parse(json_str);
+
+    ASSERT_TRUE(result_json.contains("count"));
+    ASSERT_TRUE(result_json.contains("segments"));
+    auto segments_json = result_json["segments"];
+    ASSERT_TRUE(segments_json.is_array());
+    auto seg0_json = segments_json[0];
+    ASSERT_TRUE(seg0_json.contains("partition_tag"));
+//    ASSERT_EQ(10, segments_json.size());
+}
+
+TEST_F(WebControllerTest, GET_SEGMENT_INFO) {
+    OString collection_name = OString("test_milvus_web_get_segment_info_test_") + RandomName().c_str();
+
+    GenCollection(client_ptr, conncetion_ptr, collection_name, 16, 1, "L2");
+
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 16, 2000);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    auto response = client_ptr->showSegments(collection_name, "0", "10", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    // validate result
+    std::string json_str = response->readBodyToString()->c_str();
+    auto result_json = nlohmann::json::parse(json_str);
+
+    auto segment0_json = result_json["segments"][0];
+    std::string segment_name = segment0_json["name"];
+
+    // get segment ids
+    response = client_ptr->getSegmentInfo(collection_name, segment_name.c_str(), "ids", "0", "10");
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     std::string offset = "0";
     std::string page_size = "10";
@@ -821,17 +929,417 @@ TEST_F(WebControllerTest, SEARCH) {
     ASSERT_EQ(1, result_json["num"].get<int64_t>());
 }
 
+<<<<<<< HEAD
 TEST_F(WebControllerTest, INDEX) {
     auto collection_name = "test_index_collection_test" + RandomName();
     nlohmann::json mapping_json;
     CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
+=======
+TEST_F(WebControllerTest, SEARCH_BIN) {
+    const OString collection_name = "test_search_bin_collection_test" + OString(RandomName().c_str());
+    GenCollection(client_ptr, conncetion_ptr, collection_name, 64, 100, "HAMMING");
+
+    // Insert 200 vectors into collection
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200, "", true);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    // Create partition and insert 200 vectors into it
+    auto par_param = milvus::server::web::PartitionRequestDto::createShared();
+    par_param->partition_tag = "tag" + OString(RandomName().c_str());
+    auto response = client_ptr->createPartition(collection_name, par_param);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode())
+                        << "Error: " << response->readBodyToString()->std_str();
+
+    status =
+        InsertData(client_ptr, conncetion_ptr, collection_name, 64, 200, par_param->partition_tag->std_str(), true);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    // Test search
+    nlohmann::json search_json;
+    response = client_ptr->vectorsOp(collection_name, search_json.dump().c_str(), conncetion_ptr);
+    auto result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_NE(milvus::server::web::StatusCode::SUCCESS, result_dto->code);
+
+    search_json["search"]["params"]["nprobe"] = 1;
+    response = client_ptr->vectorsOp(collection_name, search_json.dump().c_str(), conncetion_ptr);
+    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_NE(milvus::server::web::StatusCode::SUCCESS, result_dto->code);
+
+    search_json["search"]["topk"] = 1;
+    response = client_ptr->vectorsOp(collection_name, search_json.dump().c_str(), conncetion_ptr);
+    result_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
+    ASSERT_NE(milvus::server::web::StatusCode::SUCCESS, result_dto->code);
+
+    search_json["search"]["vectors"] = RandomBinRecordsJson(64, 10);
+    response = client_ptr->vectorsOp(collection_name, search_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    // validate search result
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(result_json.contains("result"));
+    ASSERT_TRUE(result_json["result"].is_array());
+    ASSERT_EQ(10, result_json["result"].size());
+
+    auto result0_json = result_json["result"][0];
+    ASSERT_TRUE(result0_json.is_array());
+    ASSERT_EQ(1, result0_json.size());
+
+    // Test search with tags
+    search_json["search"]["partition_tags"] = std::vector<std::string>();
+    search_json["search"]["partition_tags"].push_back(par_param->partition_tag->std_str());
+    response = client_ptr->vectorsOp(collection_name, search_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+}
+/*
+TEST_F(WebControllerTest, SEARCH_BY_IDS) {
+#ifdef MILVUS_GPU_VERSION
+    auto &config  = milvus::server::Config::GetInstance();
+    auto config_status = config.SetGpuResourceConfigEnable("false");
+    ASSERT_TRUE(config_status.ok()) << config_status.message();
+#endif
+
+    const OString collection_name = "test_search_by_ids_collection_test_" + OString(RandomName().c_str());
+    GenCollection(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
+
+    // Insert 100 vectors into collection
+    std::vector<std::string> ids;
+    for (size_t i = 0; i < 100; i++) {
+        ids.emplace_back(std::to_string(i));
+    }
+
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 100, ids);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    nlohmann::json search_json;
+    search_json["search"]["topk"] = 1;
+    search_json["search"]["ids"] = std::vector<std::string>(ids.begin(), ids.begin() + 10);
+    search_json["search"]["params"] = "{\"nprobe\": 1}";
+
+    auto response = client_ptr->vectorsOp(collection_name, search_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    // validate search result
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(result_json.contains("result"));
+    ASSERT_TRUE(result_json["result"].is_array());
+    ASSERT_EQ(10, result_json["result"].size());
+
+//    for (size_t j = 0; j < 10; j++) {
+//        auto result0_json = result_json["result"][0];
+//        ASSERT_TRUE(result0_json.is_array());
+//        ASSERT_EQ(1, result0_json.size());
+//
+//        auto result0_top0_json = result0_json[0];
+//        ASSERT_TRUE(result0_top0_json.contains("id"));
+//
+//        auto id = result0_top0_json["id"];
+//        ASSERT_TRUE(id.is_string());
+//        ASSERT_EQ(std::to_string(ids.at(j)), id.get<std::string>());
+//    }
+}
+*/
+
+TEST_F(WebControllerTest, GET_VECTORS_BY_IDS) {
+    const OString collection_name = "test_milvus_web_get_vector_by_id_test_" + OString(RandomName().c_str());
+    GenCollection(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
+
+    // Insert 100 vectors into collection
+    std::vector<std::string> ids;
+    for (size_t i = 0; i < 100; i++) {
+        ids.emplace_back(std::to_string(i));
+    }
+
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 64, 100, ids);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    /* test task load */
+    std::vector<std::string> vector_ids;
+    for (size_t i = 0; i < 10; i++) {
+        vector_ids.emplace_back(ids.at(i));
+    }
+
+    std::string query_ids;
+    milvus::server::StringHelpFunctions::MergeStringWithDelimeter(vector_ids, ",", query_ids);
+    auto response = client_ptr->getVectors(collection_name, query_ids.c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    // validate result
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(result_json.contains("vectors"));
+
+    auto vectors_json = result_json["vectors"];
+    ASSERT_TRUE(vectors_json.is_array());
+
+    auto vector_json = vectors_json[0];
+    ASSERT_TRUE(vector_json.contains("id"));
+    ASSERT_EQ(ids[0], vector_json["id"].get<std::string>());
+    ASSERT_TRUE(vector_json.contains("vector"));
+
+    auto vec_json = vector_json["vector"];
+    ASSERT_TRUE(vec_json.is_array());
+    std::vector<int64_t> vec;
+    for (auto& v : vec_json) {
+        vec.emplace_back(v.get<int64_t>());
+    }
+
+    ASSERT_EQ(64, vec.size());
+
+    // non-existent collection
+    response = client_ptr->getVectors(collection_name + "_non_existent", query_ids.c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+}
+
+TEST_F(WebControllerTest, DELETE_BY_ID) {
+    const OString collection_name = "test_search_bin_collection_test" + OString(RandomName().c_str());
+    GenCollection(client_ptr, conncetion_ptr, collection_name, 64, 100, "L2");
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     nlohmann::json insert_json;
+<<<<<<< HEAD
     GenEntities(NB, DIM, insert_json);
     auto response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
     auto result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
     ASSERT_EQ(NB, result_dto->ids->size());
+=======
+    insert_json["vectors"] = RandomRecordsJson(64, 2000);
+    auto response = client_ptr->insert(collection_name, insert_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    auto insert_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(insert_result_json.contains("ids"));
+    auto ids_json = insert_result_json["ids"];
+    ASSERT_TRUE(ids_json.is_array());
+
+    std::vector<std::string> ids;
+    for (auto& id : ids_json) {
+        ids.emplace_back(id.get<std::string>());
+    }
+
+    auto delete_ids = std::vector<std::string>(ids.begin(), ids.begin() + 10);
+
+    nlohmann::json delete_json;
+    delete_json["delete"]["ids"] = delete_ids;
+
+    response = client_ptr->vectorsOp(collection_name, delete_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    // non-existent collection
+    response = client_ptr->vectorsOp(collection_name + "_non_existent", delete_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_404.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+}
+
+TEST_F(WebControllerTest, CMD) {
+    auto response = client_ptr->cmd("status", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->cmd("version", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    // test invalid body
+    response = client_ptr->cmd("mode", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->cmd("taskcollection", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    response = client_ptr->cmd("info", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, CONFIG) {
+    std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
+    std::fstream fs(config_path.c_str(), std::ios_base::out);
+    fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+    fs.flush();
+    fs.close();
+
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    auto status = config.LoadConfigFile(config_path);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+#ifdef MILVUS_GPU_VERSION
+    status = config.SetGpuResourceConfigEnable("true");
+    ASSERT_TRUE(status.ok()) << status.message();
+    status = config.SetGpuResourceConfigCacheCapacity("1");
+    ASSERT_TRUE(status.ok()) << status.message();
+    status = config.SetGpuResourceConfigBuildIndexResources("gpu0");
+    ASSERT_TRUE(status.ok()) << status.message();
+    status = config.SetGpuResourceConfigSearchResources("gpu0");
+    ASSERT_TRUE(status.ok()) << status.message();
+#endif
+
+    auto response = client_ptr->cmd("config", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+    auto result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(result_json.contains("restart_required"));
+
+    OString collection_name = "milvus_test_webcontroller_test_preload_collection";
+    GenCollection(client_ptr, conncetion_ptr, collection_name, 16, 10, "L2");
+
+    OString collection_name_s = "milvus_test_webcontroller_test_preload_collection_s";
+    GenCollection(client_ptr, conncetion_ptr, collection_name_s, 16, 10, "L2");
+
+    OString body_str = "{\"cache\": {\"preload_collection\": \"" + collection_name + "\"}}";
+    response = client_ptr->op("config", body_str, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    body_str = "{\"cache\": {\"preload_collection\": \"" + collection_name + "," + collection_name_s + "\"}}";
+    response = client_ptr->op("config", body_str, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+    auto set_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(set_result_json.contains("restart_required"));
+    ASSERT_EQ(true, set_result_json["restart_required"].get<bool>());
+
+    response = client_ptr->cmd("config", "", "", conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+    auto get_result_json = nlohmann::json::parse(response->readBodyToString()->c_str());
+    ASSERT_TRUE(get_result_json.contains("restart_required"));
+    ASSERT_EQ(true, get_result_json["restart_required"].get<bool>());
+
+    fiu_init(0);
+    fiu_enable("WebRequestHandler.SystemOp.raise_parse_error", 1, NULL, 0);
+    response = client_ptr->op("config", body_str, conncetion_ptr);
+    ASSERT_NE(OStatus::CODE_200.code, response->getStatusCode());
+    fiu_disable("WebRequestHandler.SystemOp.raise_parse_error");
+
+    fiu_enable("WebRequestHandler.SystemOp.raise_type_error", 1, NULL, 0);
+    response = client_ptr->op("config", body_str, conncetion_ptr);
+    ASSERT_NE(OStatus::CODE_200.code, response->getStatusCode());
+    fiu_disable("WebRequestHandler.SystemOp.raise_type_error");
+}
+
+TEST_F(WebControllerTest, ADVANCED_CONFIG) {
+    std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
+    std::fstream fs(config_path.c_str(), std::ios_base::out);
+    fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+    fs.flush();
+    fs.close();
+
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    auto status = config.LoadConfigFile(config_path);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    auto response = client_ptr->getAdvanced(conncetion_ptr);
+
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    auto config_dto = milvus::server::web::AdvancedConfigDto::createShared();
+    response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+
+    config_dto->cpu_cache_capacity = 3;
+    response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    config_dto->cache_insert_data = true;
+    response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+#ifdef MILVUS_GPU_VERSION
+    config_dto->gpu_search_threshold = 1000;
+    response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+#endif
+
+    config_dto->use_blas_threshold = 1000;
+    response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    // test fault
+    // cpu cache capacity exceed total memory
+    config_dto->cpu_cache_capacity = 10000L * (1024L * 1024 * 1024); // 10000 GB
+    response = client_ptr->setAdvanced(config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+}
+
+#ifdef MILVUS_GPU_VERSION
+TEST_F(WebControllerTest, GPU_CONFIG) {
+    std::string config_path = std::string(CONTROLLER_TEST_CONFIG_DIR).append(CONTROLLER_TEST_CONFIG_FILE);
+    std::fstream fs(config_path.c_str(), std::ios_base::out);
+    fs << CONTROLLER_TEST_VALID_CONFIG_STR;
+    fs.flush();
+    fs.close();
+
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+    auto status = config.LoadConfigFile(config_path);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    status = config.SetGpuResourceConfigEnable("true");
+    ASSERT_TRUE(status.ok()) << status.message();
+    status = config.SetGpuResourceConfigCacheCapacity("1");
+    ASSERT_TRUE(status.ok()) << status.message();
+    status = config.SetGpuResourceConfigBuildIndexResources("gpu0");
+    ASSERT_TRUE(status.ok()) << status.message();
+    status = config.SetGpuResourceConfigSearchResources("gpu0");
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    auto response = client_ptr->getGPUConfig(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    auto gpu_config_dto = milvus::server::web::GPUConfigDto::createShared();
+
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    gpu_config_dto->enable = true;
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    gpu_config_dto->cache_capacity = 2;
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    gpu_config_dto->build_index_resources = gpu_config_dto->build_index_resources->createShared();
+    gpu_config_dto->build_index_resources->pushBack("GPU0");
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    gpu_config_dto->search_resources = gpu_config_dto->search_resources->createShared();
+    gpu_config_dto->search_resources->pushBack("GPU0");
+
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    //// test fault config
+    // cache capacity exceed GPU mem size (GiB)
+    gpu_config_dto->cache_capacity = 100000L * 1024 * 1024 * 1024; // 100000 GiB
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode()) << response->readBodyToString()->c_str();
+    gpu_config_dto->cache_capacity = 1;
+
+    // duplicate resources
+    gpu_config_dto->search_resources->clear();
+    gpu_config_dto->search_resources->pushBack("GPU0");
+    gpu_config_dto->search_resources->pushBack("GPU1");
+    gpu_config_dto->search_resources->pushBack("GPU0");
+    response = client_ptr->setGPUConfig(gpu_config_dto, conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+}
+#endif
+
+TEST_F(WebControllerTest, DEVICES_CONFIG) {
+    auto response = client_ptr->getDevices(conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+}
+
+TEST_F(WebControllerTest, FLUSH) {
+    auto collection_name = milvus::server::web::OString(COLLECTION_NAME) + RandomName().c_str();
+    GenCollection(client_ptr, conncetion_ptr, collection_name, 16, 10, "L2");
+
+    auto status = InsertData(client_ptr, conncetion_ptr, collection_name, 16, 1000);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    nlohmann::json flush_json;
+    flush_json["flush"]["collection_names"] = {collection_name->std_str()};
+    auto response = client_ptr->op("task", flush_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
+
+    // invalid payload format
+    flush_json["flush"]["collection_names"] = collection_name->std_str();
+    response = client_ptr->op("task", flush_json.dump().c_str(), conncetion_ptr);
+    ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     // test index with imcomplete param
     std::string field_name = "field_vec";
@@ -922,3 +1430,129 @@ TEST_F(WebControllerTest, INDEX) {
     //    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDto>(object_mapper.get());
     //    ASSERT_EQ(milvus::server::web::StatusCode::COLLECTION_NOT_EXISTS, error_dto->code->getValue());
 }
+<<<<<<< HEAD
+=======
+
+
+class WebUtilTest : public ::testing::Test {
+public:
+    std::string key;
+    OString value;
+    int64_t intValue;
+    std::string stringValue;
+    bool boolValue;
+    OQueryParams params;
+
+    void
+    SetUp() override {
+        key = "offset";
+    }
+
+    void
+    TearDown() override {
+    };
+};
+
+
+TEST_F(WebUtilTest, ParseQueryInteger) {
+    value = "5";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryInteger(params, key, intValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(5, intValue);
+
+}
+
+TEST_F(WebUtilTest, ParQueryIntegerIllegalQueryParam) {
+    value = "-5";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryInteger(params, key, intValue);
+    ASSERT_EQ(status.code(), milvus::server::web::ILLEGAL_QUERY_PARAM);
+    ASSERT_STREQ(status.message().c_str(),
+                 "Query param \'offset\' is illegal, only non-negative integer supported");
+
+}
+
+TEST_F(WebUtilTest, ParQueryIntegerQueryParamLoss) {
+    value = "5";
+
+    params.put("offset", value);
+    fiu_enable("WebUtils.ParseQueryInteger.null_query_get", 1, nullptr, 0);
+    milvus::Status status = milvus::server::web::ParseQueryInteger(params, key, intValue, false);
+    ASSERT_EQ(status.code(), milvus::server::web::QUERY_PARAM_LOSS);
+    std::string msg = "Query param \"" + key + "\" is required";
+    ASSERT_STREQ(status.message().c_str(), msg.c_str());
+
+}
+
+
+TEST_F(WebUtilTest, ParseQueryBoolTrue) {
+    value = "True";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(boolValue);
+
+}
+
+TEST_F(WebUtilTest, ParQueryBoolFalse) {
+
+    value = "False";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(!boolValue);
+
+}
+
+TEST_F(WebUtilTest, ParQueryBoolIllegalQuery) {
+
+    value = "Hello";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue);
+    ASSERT_EQ(status.code(), milvus::server::web::ILLEGAL_QUERY_PARAM);
+    ASSERT_STREQ(status.message().c_str(), "Query param \'all_required\' must be a bool");
+
+}
+
+TEST_F(WebUtilTest, ParQueryBoolQueryParamLoss) {
+
+    value = "Hello";
+
+    params.put("offset", value);
+    fiu_enable("WebUtils.ParseQueryBool.null_query_get", 1, nullptr, 0);
+    milvus::Status status = milvus::server::web::ParseQueryBool(params, key, boolValue, false);
+    ASSERT_EQ(status.code(), milvus::server::web::QUERY_PARAM_LOSS);
+    std::string msg = "Query param \"" + key + "\" is required";
+    ASSERT_STREQ(status.message().c_str(), msg.c_str());
+
+}
+
+TEST_F(WebUtilTest, ParseQueryStr) {
+    value = "Are you ok?";
+
+    params.put("offset", value);
+    milvus::Status status = milvus::server::web::ParseQueryStr(params, key, stringValue);
+    ASSERT_TRUE(status.ok());
+    ASSERT_STREQ(value->c_str(), stringValue.c_str());
+
+}
+
+TEST_F(WebUtilTest, ParQueryStrQueryParamLoss) {
+
+    value = "Are you ok?";
+
+    params.put("offset", value);
+    fiu_enable("WebUtils.ParseQueryStr.null_query_get", 1, nullptr, 0);
+    milvus::Status status = milvus::server::web::ParseQueryStr(params, key, stringValue, false);
+    ASSERT_EQ(status.code(), milvus::server::web::QUERY_PARAM_LOSS);
+    std::string msg = "Query param \"" + key + "\" is required";
+    ASSERT_STREQ(status.message().c_str(), msg.c_str());
+
+}
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda

@@ -365,6 +365,7 @@ static void write_HNSW (const HNSW *hnsw, IOWriter *f) {
     WRITE1 (hnsw->upper_beam);
 }
 
+<<<<<<< HEAD
 static void write_RHNSW (const RHNSW *rhnsw, IOWriter *f) {
     WRITE1 (rhnsw->entry_point);
     WRITE1 (rhnsw->max_level);
@@ -383,6 +384,8 @@ static void write_RHNSW (const RHNSW *rhnsw, IOWriter *f) {
     }
 }
 
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 static void write_direct_map (const DirectMap *dm, IOWriter *f) {
     char maintain_direct_map = (char)dm->type; // for backwards compatibility with bool
     WRITE1 (maintain_direct_map);

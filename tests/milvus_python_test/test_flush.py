@@ -178,6 +178,7 @@ class TestFlushBase:
         method: add entities, flush serveral times
         expected: no error raised
         '''
+<<<<<<< HEAD
         # vectors = gen_vectors(nb, dim)
         ids = connect.insert(collection, entities)
         for i in range(10):
@@ -188,6 +189,17 @@ class TestFlushBase:
         res = connect.search(collection, default_single_query)
         logging.getLogger().debug(res)
         assert res
+=======
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.insert(collection, vectors)
+        assert status.OK()
+        for i in range(10):
+            status = connect.flush([collection])
+            assert status.OK()
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status, res = connect.search(collection, top_k, query_records=query_vecs)
+        assert status.OK()
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     def test_add_flush_auto(self, connect, id_collection):
         '''
@@ -196,8 +208,14 @@ class TestFlushBase:
         '''
         # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
+<<<<<<< HEAD
         ids = connect.insert(id_collection, entities, ids)
         timeout = 20
+=======
+        status, ids = connect.insert(collection, vectors, ids)
+        assert status.OK()
+        timeout = 10
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         start_time = time.time()
         while (time.time() - start_time < timeout):
             time.sleep(1)
@@ -227,16 +245,26 @@ class TestFlushBase:
         for i, item in enumerate(ids):
             if item <= same_ids:
                 ids[i] = 0
+<<<<<<< HEAD
         ids = connect.insert(id_collection, entities, ids)
         connect.flush([id_collection])
         res = connect.count_entities(id_collection)
         assert res == nb
+=======
+        status, ids = connect.insert(collection, vectors, ids)
+        status = connect.flush([collection])
+        assert status.OK()
+        status, res = connect.count_entities(collection)
+        assert status.OK()
+        assert res == nb 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     def test_delete_flush_multiable_times(self, connect, collection):
         '''
         method: delete entities, flush serveral times
         expected: no error raised
         '''
+<<<<<<< HEAD
         # vectors = gen_vectors(nb, dim)
         ids = connect.insert(collection, entities)
         status = connect.delete_entity_by_id(collection, [ids[-1]])
@@ -247,6 +275,19 @@ class TestFlushBase:
         res = connect.search(collection, default_single_query)
         logging.getLogger().debug(res)
         assert res
+=======
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.insert(collection, vectors)
+        assert status.OK()
+        status = connect.delete_entity_by_id(collection, [ids[-1]])
+        assert status.OK()
+        for i in range(10):
+            status = connect.flush([collection])
+            assert status.OK()
+        query_vecs = [vectors[0], vectors[1], vectors[-1]]
+        status, res = connect.search(collection, top_k, query_records=query_vecs)
+        assert status.OK()
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     # TODO: CI fail, LOCAL pass
     @pytest.mark.level(2)
@@ -255,6 +296,7 @@ class TestFlushBase:
         method: flush collection at background, call `count_entities`
         expected: no timeout
         '''
+<<<<<<< HEAD
         ids = []
         for i in range(5):
             tmp_ids = connect.insert(collection, entities)
@@ -263,6 +305,18 @@ class TestFlushBase:
         disable_flush(connect)
         status = connect.delete_entity_by_id(collection, ids)
         def flush():
+=======
+        collection = gen_unique_str() 
+        param = {'collection_name': collection,
+                 'dimension': dim,
+                 'index_file_size': index_file_size,
+                 'metric_type': MetricType.L2}
+        milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
+        milvus.create_collection(param)
+        vectors = gen_vector(nb, dim)
+        status, ids = milvus.insert(collection, vectors, ids=[i for i in range(nb)])
+        def flush(collection_name):
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             logging.error("start flush")
             milvus.flush([collection])
@@ -301,16 +355,26 @@ class TestFlushAsync:
         future = connect.flush([collection], _async=True)
         status = future.result()
 
+<<<<<<< HEAD
     def test_flush_async_long(self, connect, collection):
         # vectors = gen_vectors(nb, dim)
         ids = connect.insert(collection, entities)
+=======
+    def test_flush_async(self, connect, collection):
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.insert(collection, vectors)
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         future = connect.flush([collection], _async=True)
         status = future.result()
 
     def test_flush_async(self, connect, collection):
         nb = 100000
         vectors = gen_vectors(nb, dim)
+<<<<<<< HEAD
         connect.insert(collection, entities)
+=======
+        connect.insert(collection, vectors)
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         logging.getLogger().info("before")
         future = connect.flush([collection], _async=True, _callback=self.check_status)
         logging.getLogger().info("after")

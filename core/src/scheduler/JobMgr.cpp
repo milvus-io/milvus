@@ -67,10 +67,58 @@ JobMgr::worker_function() {
             break;
         }
 
+<<<<<<< HEAD
         //        auto search_job = std::dynamic_pointer_cast<SearchJob>(job);
         //        if (search_job != nullptr) {
         //            search_job->GetResultIds().resize(search_job->nq(), -1);
         //            search_job->GetResultDistances().resize(search_job->nq(), std::numeric_limits<float>::max());
+=======
+        auto tasks = build_task(job);
+
+        // TODO(zhiru): if the job is search by ids, pass any task where the ids don't exist
+        auto search_job = std::dynamic_pointer_cast<SearchJob>(job);
+        if (search_job != nullptr) {
+            search_job->GetResultIds().resize(search_job->nq(), -1);
+            search_job->GetResultDistances().resize(search_job->nq(), std::numeric_limits<float>::max());
+
+            if (search_job->vectors().float_data_.empty() && search_job->vectors().binary_data_.empty() &&
+                !search_job->vectors().id_array_.empty()) {
+                for (auto task = tasks.begin(); task != tasks.end();) {
+                    auto search_task = std::static_pointer_cast<XSearchTask>(*task);
+                    auto location = search_task->GetLocation();
+
+                    // Load bloom filter
+                    std::string segment_dir;
+                    engine::utils::GetParentPath(location, segment_dir);
+                    segment::SegmentReader segment_reader(segment_dir);
+                    segment::IdBloomFilterPtr id_bloom_filter_ptr;
+                    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+
+                    // Check if the id is present.
+                    bool pass = true;
+                    for (auto& id : search_job->vectors().id_array_) {
+                        if (id_bloom_filter_ptr->Check(id)) {
+                            pass = false;
+                            break;
+                        }
+                    }
+
+                    if (pass) {
+                        //                        std::cout << search_task->GetIndexId() << std::endl;
+                        search_job->SearchDone(search_task->GetIndexId());
+                        task = tasks.erase(task);
+                    } else {
+                        task++;
+                    }
+                }
+            }
+        }
+
+        //        for (auto &task : tasks) {
+        //            if ...
+        //            search_job->SearchDone(task->id);
+        //            tasks.erase(task);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         //        }
 
         auto tasks = build_task(job);

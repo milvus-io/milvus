@@ -124,10 +124,22 @@ if ( NOT MILVUS_VERBOSE_LINT )
     set( MILVUS_LINT_QUIET "--quiet" )
 endif ()
 
+<<<<<<< HEAD
 if ( NOT LINT_EXCLUSIONS_FILE )
     # source files matching a glob from a line in this file
     # will be excluded from linting (cpplint, clang-tidy, clang-format)
     set( LINT_EXCLUSIONS_FILE ${BUILD_SUPPORT_DIR}/lint_exclusions.txt )
+=======
+set(MILVUS_VERSION_MAJOR "${milvus_VERSION_MAJOR}")
+set(MILVUS_VERSION_MINOR "${milvus_VERSION_MINOR}")
+set(MILVUS_VERSION_PATCH "${milvus_VERSION_PATCH}")
+
+if (MILVUS_VERSION_MAJOR STREQUAL ""
+        OR MILVUS_VERSION_MINOR STREQUAL ""
+        OR MILVUS_VERSION_PATCH STREQUAL "")
+    message(WARNING "Failed to determine Milvus version from git branch name")
+    set(MILVUS_VERSION "0.10.2")
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 endif ()
 
 if ( NOT IGNORE_CHECKS_FILE )

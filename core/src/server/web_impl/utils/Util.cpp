@@ -10,8 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/web_impl/utils/Util.h"
+<<<<<<< HEAD
 #include <fiu/fiu-local.h>
 #include "utils/ConfigUtils.h"
+=======
+#include <fiu-local.h>
+
+#include "utils/ValidationUtil.h"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 namespace milvus {
 namespace server {

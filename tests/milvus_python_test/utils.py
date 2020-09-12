@@ -15,6 +15,7 @@ port = 19530
 epsilon = 0.000001
 default_flush_interval = 1
 big_flush_interval = 1000
+<<<<<<< HEAD
 dimension = 128
 nb = 6000
 top_k = 10
@@ -23,6 +24,9 @@ default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
 
 # TODO:
+=======
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 all_index_types = [
     "FLAT",
     "IVF_FLAT",
@@ -49,10 +53,41 @@ default_index_params = [
     {"nlist": 128}
 ]
 
+<<<<<<< HEAD
+=======
+def get_milvus(host, port, uri=None, handler=None, **kwargs):
+    if handler is None:
+        handler = "GRPC"
+    try_connect = kwargs.get("try_connect", True)
+    if uri is not None:
+        milvus = Milvus(uri=uri, handler=handler, try_connect=try_connect)
+    else:
+        milvus = Milvus(host=host, port=port, handler=handler, try_connect=try_connect)
+    return milvus
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 def index_cpu_not_support():
     return ["IVF_SQ8_HYBRID"]
 
+<<<<<<< HEAD
+=======
+def disable_flush(connect):
+    status, reply = connect.set_config("storage", "auto_flush_interval", big_flush_interval)
+    assert status.OK()
+
+
+def enable_flush(connect):
+    # reset auto_flush_interval=1
+    status, reply = connect.set_config("storage", "auto_flush_interval", default_flush_interval)
+    assert status.OK()
+    status, config_value = connect.get_config("storage", "auto_flush_interval")
+    assert status.OK()
+    assert config_value == str(default_flush_interval)
+
+
+def gen_inaccuracy(num):
+    return num / 255.0
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 def binary_support():
     return ["BIN_FLAT", "BIN_IVF_FLAT"]
@@ -599,6 +634,7 @@ def gen_invalid_params():
         "String",
         "中文"
     ]
+<<<<<<< HEAD
     return params
 
 
@@ -625,6 +661,28 @@ def gen_invalid_vectors():
         "=c",
         "中文",
         "a".join("a" for i in range(256))
+=======
+    return invalid_configs
+
+
+def gen_invalid_gpu_config():
+    invalid_configs = [
+            -1,
+            [1,2,3],
+            (1,2),
+            {"a": 1},
+            " ",
+            "",
+            "String",
+            "12-s",
+            "BB。A",
+            " siede ",
+            "(mn)",
+            "pip+",
+            "=c",
+            "中文",
+            "'123'",
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     ]
     return invalid_vectors
 
@@ -740,6 +798,19 @@ def gen_index():
 
 
 def gen_simple_index():
+<<<<<<< HEAD
+=======
+    params = [
+        {"nlist": 1024},
+        {"nlist": 1024},
+        {"nlist": 1024},
+        {"nlist": 1024},
+        {"nlist": 1024, "m": 16},
+        {"M": 48, "efConstruction": 500},
+        {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
+        {"n_trees": 4}
+    ]
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     index_params = []
     for i in range(len(all_index_types)):
         if all_index_types[i] in binary_support():
@@ -750,6 +821,7 @@ def gen_simple_index():
     return index_params
 
 
+<<<<<<< HEAD
 def gen_binary_index():
     index_params = []
     for i in range(len(all_index_types)):
@@ -758,6 +830,20 @@ def gen_binary_index():
             dic.update({"params": default_index_params[i]})
             index_params.append(dic)
     return index_params
+=======
+def get_search_param(index_type):
+    if index_type in [IndexType.FLAT, IndexType.IVFLAT, IndexType.IVF_SQ8, IndexType.IVF_SQ8H, IndexType.IVF_PQ]:
+        return {"nprobe": 32}
+    elif index_type == IndexType.HNSW:
+        return {"ef": 64}
+    elif index_type == IndexType.RNSG:
+        return {"search_length": 100}
+    elif index_type == IndexType.ANNOY:
+        return {"search_k": 100}
+
+    else:
+        logging.getLogger().info("Invalid index_type.")
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 
 def get_search_param(index_type, metric_type="L2"):

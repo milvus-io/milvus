@@ -16,10 +16,13 @@ Fixes #
 
 Not Available
 
+<<<<<<< HEAD
 **Special notes for your reviewer:**
 
 Not Available
 
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 **Additional documentation (e.g. design docs, usage docs, etc.):**
 
 Not Available

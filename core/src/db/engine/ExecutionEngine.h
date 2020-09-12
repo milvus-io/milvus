@@ -46,7 +46,59 @@ class ExecutionEngine {
     Search(ExecutionEngineContext& context) = 0;
 
     virtual Status
+<<<<<<< HEAD
     BuildIndex() = 0;
+=======
+    CopyToIndexFileToGpu(uint64_t device_id) = 0;
+
+    virtual Status
+    CopyToCpu() = 0;
+
+    //    virtual std::shared_ptr<ExecutionEngine>
+    //    Clone() = 0;
+
+    //    virtual Status
+    //    Merge(const std::string& location) = 0;
+
+#if 0
+    virtual Status
+    GetVectorByID(const int64_t id, float* vector, bool hybrid) = 0;
+
+    virtual Status
+    GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) = 0;
+#endif
+
+    virtual Status
+    ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
+                    std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
+                    std::vector<float>& distances, std::vector<int64_t>& labels) = 0;
+
+    virtual Status
+    Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,
+           bool hybrid) = 0;
+
+    virtual Status
+    Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params, float* distances,
+           int64_t* labels, bool hybrid) = 0;
+
+    virtual std::shared_ptr<ExecutionEngine>
+    BuildIndex(const std::string& location, EngineType engine_type) = 0;
+
+    virtual Status
+    Cache() = 0;
+
+    virtual Status
+    Init() = 0;
+
+    virtual EngineType
+    IndexEngineType() const = 0;
+
+    virtual MetricType
+    IndexMetricType() const = 0;
+
+    virtual std::string
+    GetLocation() const = 0;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 };
 
 using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;

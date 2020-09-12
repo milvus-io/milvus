@@ -61,7 +61,15 @@ class DBImpl : public DB, public ConfigObserver {
     GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) override;
 
     Status
+<<<<<<< HEAD
     CountEntities(const std::string& collection_name, int64_t& row_count) override;
+=======
+    PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                      bool force = false) override;
+
+    Status
+    ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) override;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     Status
     CreatePartition(const std::string& collection_name, const std::string& partition_name) override;
@@ -106,11 +114,26 @@ class DBImpl : public DB, public ConfigObserver {
 
     // Note: if the input field_names is empty, will load all fields of this collection
     Status
+<<<<<<< HEAD
     LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
                    const std::vector<std::string>& field_names, bool force) override;
 
     Status
     Flush(const std::string& collection_name) override;
+=======
+    Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+            double threshold = 0.0) override;
+
+    Status
+    GetVectorsByID(const engine::meta::CollectionSchema& collection, const IDNumbers& id_array,
+                   std::vector<engine::VectorsData>& vectors) override;
+
+    Status
+    GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) override;
+
+    //    Status
+    //    Merge(const std::set<std::string>& collection_ids) override;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     Status
     Flush() override;
@@ -124,8 +147,26 @@ class DBImpl : public DB, public ConfigObserver {
     ConfigUpdate(const std::string& name) override;
 
  private:
+<<<<<<< HEAD
     void
     InternalFlush(const std::string& collection_name = "", bool merge = true);
+=======
+    Status
+    QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesHolder& files_holder, uint64_t k,
+               const milvus::json& extra_params, const VectorsData& vectors, ResultIds& result_ids,
+               ResultDistances& result_distances);
+
+    Status
+    HybridQueryAsync(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                     meta::FilesHolder& files_holder, context::HybridSearchContextPtr hybrid_search_context,
+                     query::GeneralQueryPtr general_query,
+                     std::unordered_map<std::string, engine::meta::hybrid::DataType>& attr_type, uint64_t& nq,
+                     ResultIds& result_ids, ResultDistances& result_distances);
+
+    Status
+    GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::VectorsData>& vectors,
+                         meta::FilesHolder& files_holder);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     void
     TimingFlushThread();
@@ -152,16 +193,60 @@ class DBImpl : public DB, public ConfigObserver {
     StartMergeTask(const std::set<int64_t>& collection_ids, bool force_merge_all = false);
 
     void
+<<<<<<< HEAD
     BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all);
 
     void
     WaitMergeFileFinish();
+=======
+    StartMergeTask(const std::set<std::string>& merge_collection_ids, bool force_merge_all = false);
+
+    void
+    BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all);
+
+    //    Status
+    //    MergeHybridFiles(const std::string& table_id, meta::FilesHolder& files_holder);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     void
     SuspendIfFirst();
 
     void
+<<<<<<< HEAD
     ResumeIfLast();
+=======
+    BackgroundBuildIndex();
+
+    Status
+    CompactFile(const meta::SegmentSchema& file, double threshold, meta::SegmentsSchema& files_to_update);
+
+    Status
+    GetFilesToBuildIndex(const std::string& collection_id, const std::vector<int>& file_types,
+                         meta::FilesHolder& files_holder);
+
+    Status
+    GetPartitionByTag(const std::string& collection_id, const std::string& partition_tag, std::string& partition_name);
+
+    Status
+    GetPartitionsByTags(const std::string& collection_id, const std::vector<std::string>& partition_tags,
+                        std::set<std::string>& partition_name_array);
+
+    Status
+    UpdateCollectionIndexRecursively(const std::string& collection_id, const CollectionIndex& index);
+
+    Status
+    WaitCollectionIndexRecursively(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                                   const CollectionIndex& index);
+
+    Status
+    DropCollectionIndexRecursively(const std::string& collection_id);
+
+    Status
+    GetCollectionRowCountRecursively(const std::string& collection_id, uint64_t& row_count);
+
+    Status
+    ExecWalRecord(const wal::MXLogRecord& record);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     void
     MarkIndexFailedSegments(snapshot::ID_TYPE collection_id, const snapshot::IDS_TYPE& failed_ids);
@@ -180,6 +265,55 @@ class DBImpl : public DB, public ConfigObserver {
     std::thread bg_metric_thread_;
     std::thread bg_index_thread_;
 
+<<<<<<< HEAD
+=======
+    struct SimpleWaitNotify {
+        bool notified_ = false;
+        std::mutex mutex_;
+        std::condition_variable cv_;
+
+        void
+        Wait() {
+            std::unique_lock<std::mutex> lck(mutex_);
+            if (!notified_) {
+                cv_.wait(lck);
+            }
+            notified_ = false;
+        }
+
+        std::cv_status
+        Wait_Until(const std::chrono::system_clock::time_point& tm_pint) {
+            std::unique_lock<std::mutex> lck(mutex_);
+            std::cv_status ret = std::cv_status::timeout;
+            if (!notified_) {
+                ret = cv_.wait_until(lck, tm_pint);
+            }
+            notified_ = false;
+            return ret;
+        }
+
+        std::cv_status
+        Wait_For(const std::chrono::system_clock::duration& tm_dur) {
+            std::unique_lock<std::mutex> lck(mutex_);
+            std::cv_status ret = std::cv_status::timeout;
+            if (!notified_) {
+                ret = cv_.wait_for(lck, tm_dur);
+            }
+            notified_ = false;
+            return ret;
+        }
+
+        void
+        Notify() {
+            std::unique_lock<std::mutex> lck(mutex_);
+            notified_ = true;
+            lck.unlock();
+            cv_.notify_one();
+        }
+    };
+
+    SimpleWaitNotify swn_wal_;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     SimpleWaitNotify swn_flush_;
     SimpleWaitNotify swn_metric_;
     SimpleWaitNotify swn_index_;

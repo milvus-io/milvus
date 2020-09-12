@@ -5,45 +5,36 @@ import threading
 import logging
 from multiprocessing import Pool, Process
 import pytest
+from milvus import IndexType, MetricType
 from utils import *
 
 dim = 128
-segment_row_count = 100000
+index_file_size = 10
+GET_TIMEOUT = 30
+nprobe = 1
+top_k = 1
+epsilon = 0.001
+tag = "1970-01-01"
 nb = 6000
-tag = "1970_01_01"
-field_name = default_float_vec_field_name
-binary_field_name = default_binary_vec_field_name
-collection_id = "list_id_in_segment"
-entity = gen_entities(1)
-raw_vector, binary_entity = gen_binary_entities(1)
-entities = gen_entities(nb)
-raw_vectors, binary_entities = gen_binary_entities(nb)
-default_fields = gen_default_fields() 
 
 
-def get_segment_id(connect, collection, nb=1, vec_type='float', index_params=None):
-    if vec_type != "float":
-        vectors, entities = gen_binary_entities(nb)
-    else:
-        entities = gen_entities(nb)
-    ids = connect.insert(collection, entities)
-    connect.flush([collection])
-    if index_params:
-        if vec_type == 'float':
-            connect.create_index(collection, field_name, index_params)
-        else:
-            connect.create_index(collection, binary_field_name, index_params)
-    stats = connect.get_collection_stats(collection)
-    return ids, stats["partitions"][0]["segments"][0]["id"]
-
-
-class TestListIdInSegmentBase:
+class TestGetVectorIdsBase:
+    def get_valid_name(self, connect, collection):
+        vectors = gen_vector(nb, dim)
+        status, ids = connect.insert(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(collection)
+        assert status.OK()
+        return info["partitions"][0]["segments"][0]["name"]
         
     """
     ******************************************************************
       The following cases are used to test `list_id_in_segment` function
     ******************************************************************
     """
+    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_collection_name_None(self, connect, collection):
         '''
         target: get vector ids where collection name is None
@@ -51,28 +42,30 @@ class TestListIdInSegmentBase:
         expected: exception raised
         '''
         collection_name = None
-        ids, segment_id = get_segment_id(connect, collection)
+        name = self.get_valid_name(connect, collection)
         with pytest.raises(Exception) as e:
-            connect.list_id_in_segment(collection_name, segment_id)
+            status, vector_ids = connect.list_id_in_segment(collection_name, name)
 
+    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_collection_name_not_existed(self, connect, collection):
         '''
         target: get vector ids where collection name does not exist
         method: call list_id_in_segment with a random collection_name, which is not in db
         expected: status not ok
         '''
-        collection_name = gen_unique_str(collection_id)
-        ids, segment_id = get_segment_id(connect, collection)
-        with pytest.raises(Exception) as e:
-            vector_ids = connect.list_id_in_segment(collection_name, segment_id)
+        collection_name = gen_unique_str("not_existed_collection")
+        name = self.get_valid_name(connect, collection)
+        status, vector_ids = connect.list_id_in_segment(collection_name, name)
+        assert not status.OK()
     
     @pytest.fixture(
         scope="function",
-        params=gen_invalid_strs()
+        params=gen_invalid_collection_names()
     )
     def get_collection_name(self, request):
         yield request.param
 
+    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_collection_name_invalid(self, connect, collection, get_collection_name):
         '''
         target: get vector ids where collection name is invalid
@@ -80,64 +73,77 @@ class TestListIdInSegmentBase:
         expected: status not ok
         '''
         collection_name = get_collection_name
-        ids, segment_id = get_segment_id(connect, collection)
-        with pytest.raises(Exception) as e:
-            connect.list_id_in_segment(collection_name, segment_id)
+        name = self.get_valid_name(connect, collection)
+        status, vector_ids = connect.list_id_in_segment(collection_name, name)
+        assert not status.OK()
 
+    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_name_None(self, connect, collection):
         '''
         target: get vector ids where segment name is None
         method: call list_id_in_segment with the name: None
         expected: exception raised
         '''
-        ids, segment_id = get_segment_id(connect, collection)
+        valid_name = self.get_valid_name(connect, collection)
         segment = None
         with pytest.raises(Exception) as e:
-            vector_ids = connect.list_id_in_segment(collection, segment)
+            status, vector_ids = connect.list_id_in_segment(collection, segment)
 
+    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_name_not_existed(self, connect, collection):
         '''
         target: get vector ids where segment name does not exist
         method: call list_id_in_segment with a random segment name
         expected: status not ok
         '''
-        ids, seg_id = get_segment_id(connect, collection)
-        # segment = gen_unique_str(collection_id)
-        with pytest.raises(Exception) as e:
-            vector_ids = connect.list_id_in_segment(collection, seg_id + 10000)
+        valid_name = self.get_valid_name(connect, collection)
+        segment = gen_unique_str("not_existed_segment")
+        status, vector_ids = connect.list_id_in_segment(collection, segment)
+        logging.getLogger().info(vector_ids)
+        assert not status.OK()
 
-    @pytest.mark.level(2)
+    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_without_index_A(self, connect, collection):
         '''
         target: get vector ids when there is no index
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        nb = 1
-        ids, seg_id = get_segment_id(connect, collection, nb=nb)
-        vector_ids = connect.list_id_in_segment(collection, seg_id)
+        vectors = gen_vector(10, dim)
+        status, ids = connect.insert(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(collection)
+        assert status.OK()
+        status, vector_ids = connect.list_id_in_segment(collection, info["partitions"][0]["segments"][0]["name"])
         # vector_ids should match ids
-        assert len(vector_ids) == nb
-        assert vector_ids[0] == ids[0]
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
 
-    @pytest.mark.level(2)
+
+    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_without_index_B(self, connect, collection):
         '''
         target: get vector ids when there is no index but with partition
         method: create partition, add vectors to it and call list_id_in_segment, check if the segment contains vectors
         expected: status ok
         '''
-        nb = 10
-        entities = gen_entities(nb)
-        connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities, partition_tag=tag)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats["partitions"][1]["tag"] == tag
-        vector_ids = connect.list_id_in_segment(collection, stats["partitions"][1]["segments"][0]["id"])
+        status = connect.create_partition(collection, tag)
+        assert status.OK()
+        vectors = gen_vector(10, dim)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(collection)
+        assert status.OK()
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.list_id_in_segment(collection, info["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
-        assert len(vector_ids) == nb
-        for i in range(nb):
+        assert len(vector_ids) == 10
+        for i in range(10):
             assert vector_ids[i] == ids[i]
 
     @pytest.fixture(
@@ -145,167 +151,346 @@ class TestListIdInSegmentBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("CPU not support index_type: ivf_sq8h")
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
+                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
+        else:
+            pytest.skip("Only support CPU mode")
         return request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_with_index_A(self, connect, collection, get_simple_index):
         '''
         target: get vector ids when there is index
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        ids, seg_id = get_segment_id(connect, collection, nb=nb, index_params=get_simple_index)
-        try:
-            connect.list_id_in_segment(collection, seg_id)
-        except Exception as e:
-            assert False, str(e)
-        # TODO: 
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        status = connect.create_index(collection, index_type, index_param)
+        assert status.OK()
+        vectors = gen_vector(10, dim)
+        status, ids = connect.insert(collection, vectors)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(collection)
+        assert status.OK()
+        status, vector_ids = connect.list_id_in_segment(collection, info["partitions"][0]["segments"][0]["name"])
+        # vector_ids should match ids
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
 
-    @pytest.mark.level(2)
+    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_with_index_B(self, connect, collection, get_simple_index):
         '''
         target: get vector ids when there is index and with partition
         method: create partition, add vectors to it and call list_id_in_segment, check if the segment contains vectors
         expected: status ok
         '''
-        connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities, partition_tag=tag)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats["partitions"][1]["tag"] == tag
-        try:
-            connect.list_id_in_segment(collection, stats["partitions"][1]["segments"][0]["id"])
-        except Exception as e:
-            assert False, str(e)
+        status = connect.create_partition(collection, tag)
+        assert status.OK()
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        status = connect.create_index(collection, index_type, index_param)
+        assert status.OK()
+        vectors = gen_vector(10, dim)
+        status, ids = connect.insert(collection, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(collection)
+        assert status.OK()
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.list_id_in_segment(collection, info["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
-        # TODO
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
 
-    @pytest.mark.level(2)
+    @pytest.mark.timeout(GET_TIMEOUT)
     def test_list_id_in_segment_after_delete_vectors(self, connect, collection):
         '''
         target: get vector ids after vectors are deleted
         method: add vectors and delete a few, call list_id_in_segment
         expected: status ok, vector_ids decreased after vectors deleted
         '''
-        nb = 2
-        ids, seg_id = get_segment_id(connect, collection, nb=nb)
+        vectors = gen_vector(2, dim)
+        status, ids = connect.insert(collection, vectors)
+        assert status.OK()
         delete_ids = [ids[0]]
         status = connect.delete_entity_by_id(collection, delete_ids)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        vector_ids = connect.list_id_in_segment(collection, stats["partitions"][0]["segments"][0]["id"])
+        status = connect.flush([collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(collection)
+        assert status.OK()
+        status, vector_ids = connect.list_id_in_segment(collection, info["partitions"][0]["segments"][0]["name"])
         assert len(vector_ids) == 1
         assert vector_ids[0] == ids[1]
 
-    @pytest.mark.level(2)
-    def test_list_id_in_segment_with_index_ip(self, connect, collection, get_simple_index):
-        '''
-        target: get vector ids when there is index
-        method: call list_id_in_segment and check if the segment contains vectors
-        expected: ids returned in ids inserted
-        '''
-        get_simple_index["metric_type"] = "IP"
-        ids, seg_id = get_segment_id(connect, collection, nb=nb, index_params=get_simple_index)
-        vector_ids = connect.list_id_in_segment(collection, seg_id)
-        # TODO: 
-        assert vector_ids == ids
 
-
-class TestListIdInSegmentBinary:
+class TestGetVectorIdsIP:
     """
     ******************************************************************
       The following cases are used to test `list_id_in_segment` function
     ******************************************************************
     """
-    @pytest.mark.level(2)
-    def test_list_id_in_segment_without_index_A(self, connect, binary_collection):
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_list_id_in_segment_without_index_A(self, connect, ip_collection):
         '''
         target: get vector ids when there is no index
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        nb = 10
-        vectors, entities = gen_binary_entities(nb)
-        ids = connect.insert(binary_collection, entities)
-        connect.flush([binary_collection])
-        stats = connect.get_collection_stats(binary_collection)
-        vector_ids = connect.list_id_in_segment(binary_collection, stats["partitions"][0]["segments"][0]["id"])
+        vectors = gen_vector(10, dim)
+        status, ids = connect.insert(ip_collection, vectors)
+        assert status.OK()
+        status = connect.flush([ip_collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(ip_collection)
+        assert status.OK()
+        status, vector_ids = connect.list_id_in_segment(ip_collection, info["partitions"][0]["segments"][0]["name"])
         # vector_ids should match ids
-        assert len(vector_ids) == nb
-        for i in range(nb):
+        assert len(vector_ids) == 10
+        for i in range(10):
             assert vector_ids[i] == ids[i]
 
-    @pytest.mark.level(2)
-    def test_list_id_in_segment_without_index_B(self, connect, binary_collection):
+
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_list_id_in_segment_without_index_B(self, connect, ip_collection):
         '''
         target: get vector ids when there is no index but with partition
         method: create partition, add vectors to it and call list_id_in_segment, check if the segment contains vectors
         expected: status ok
         '''
-        connect.create_partition(binary_collection, tag)
-        nb = 10
-        vectors, entities = gen_binary_entities(nb)
-        ids = connect.insert(binary_collection, entities, partition_tag=tag)
-        connect.flush([binary_collection])
-        stats = connect.get_collection_stats(binary_collection)
-        vector_ids = connect.list_id_in_segment(binary_collection, stats["partitions"][1]["segments"][0]["id"])
+        status = connect.create_partition(ip_collection, tag)
+        assert status.OK()
+        vectors = gen_vector(10, dim)
+        status, ids = connect.insert(ip_collection, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([ip_collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(ip_collection)
+        assert status.OK()
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.list_id_in_segment(ip_collection, info["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
-        assert len(vector_ids) == nb
-        for i in range(nb):
+        assert len(vector_ids) == 10
+        for i in range(10):
             assert vector_ids[i] == ids[i]
 
     @pytest.fixture(
         scope="function",
-        params=gen_binary_index()
+        params=gen_simple_index()
     )
-    def get_jaccard_index(self, request, connect):
-        logging.getLogger().info(request.param)
-        if request.param["index_type"] in binary_support():
-            request.param["metric_type"] = "JACCARD"
-            return request.param
+    def get_simple_index(self, request, connect):
+        if str(connect._cmd("mode")[1]) == "CPU":
+            if request.param["index_type"] not in [IndexType.IVF_SQ8, IndexType.IVFLAT, IndexType.FLAT]:
+                pytest.skip("Only support index_type: flat/ivf_flat/ivf_sq8")
         else:
-            pytest.skip("not support")
+            pytest.skip("Only support CPU mode")
+        return request.param
 
-    def test_list_id_in_segment_with_index_A(self, connect, binary_collection, get_jaccard_index):
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_list_id_in_segment_with_index_A(self, connect, ip_collection, get_simple_index):
         '''
         target: get vector ids when there is index
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        ids, seg_id = get_segment_id(connect, binary_collection, nb=nb, index_params=get_jaccard_index, vec_type='binary')
-        vector_ids = connect.list_id_in_segment(binary_collection, seg_id)
-        # TODO: 
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        status = connect.create_index(ip_collection, index_type, index_param)
+        assert status.OK()
+        vectors = gen_vector(10, dim)
+        status, ids = connect.insert(ip_collection, vectors)
+        assert status.OK()
+        status = connect.flush([ip_collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(ip_collection)
+        assert status.OK()
+        status, vector_ids = connect.list_id_in_segment(ip_collection, info["partitions"][0]["segments"][0]["name"])
+        # vector_ids should match ids
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
 
-    def test_list_id_in_segment_with_index_B(self, connect, binary_collection, get_jaccard_index):
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_list_id_in_segment_with_index_B(self, connect, ip_collection, get_simple_index):
         '''
         target: get vector ids when there is index and with partition
         method: create partition, add vectors to it and call list_id_in_segment, check if the segment contains vectors
         expected: status ok
         '''
-        connect.create_partition(binary_collection, tag)
-        ids = connect.insert(binary_collection, binary_entities, partition_tag=tag)
-        connect.flush([binary_collection])
-        stats = connect.get_collection_stats(binary_collection)
-        assert stats["partitions"][1]["tag"] == tag
-        vector_ids = connect.list_id_in_segment(binary_collection, stats["partitions"][1]["segments"][0]["id"])
+        status = connect.create_partition(ip_collection, tag)
+        assert status.OK()
+        index_param = get_simple_index["index_param"]
+        index_type = get_simple_index["index_type"]
+        status = connect.create_index(ip_collection, index_type, index_param)
+        assert status.OK()
+        vectors = gen_vector(10, dim)
+        status, ids = connect.insert(ip_collection, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([ip_collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(ip_collection)
+        assert status.OK()
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.list_id_in_segment(ip_collection, info["partitions"][1]["segments"][0]["name"])
         # vector_ids should match ids
-        # TODO
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
 
-    def test_list_id_in_segment_after_delete_vectors(self, connect, binary_collection, get_jaccard_index):
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_list_id_in_segment_after_delete_vectors(self, connect, ip_collection):
         '''
         target: get vector ids after vectors are deleted
         method: add vectors and delete a few, call list_id_in_segment
         expected: status ok, vector_ids decreased after vectors deleted
         '''
-        nb = 2
-        ids, seg_id = get_segment_id(connect, binary_collection, nb=nb, vec_type='binary', index_params=get_jaccard_index)
+        vectors = gen_vector(2, dim)
+        status, ids = connect.insert(ip_collection, vectors)
+        assert status.OK()
         delete_ids = [ids[0]]
-        status = connect.delete_entity_by_id(binary_collection, delete_ids)
-        connect.flush([binary_collection])
-        stats = connect.get_collection_stats(binary_collection)
-        vector_ids = connect.list_id_in_segment(binary_collection, stats["partitions"][0]["segments"][0]["id"])
+        status = connect.delete_entity_by_id(ip_collection, delete_ids)
+        status = connect.flush([ip_collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(ip_collection)
+        assert status.OK()
+        status, vector_ids = connect.list_id_in_segment(ip_collection, info["partitions"][0]["segments"][0]["name"])
+        assert len(vector_ids) == 1
+        assert vector_ids[0] == ids[1]
+
+
+class TestGetVectorIdsJAC:
+    """
+    ******************************************************************
+      The following cases are used to test `list_id_in_segment` function
+    ******************************************************************
+    """
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_list_id_in_segment_without_index_A(self, connect, jac_collection):
+        '''
+        target: get vector ids when there is no index
+        method: call list_id_in_segment and check if the segment contains vectors
+        expected: status ok
+        '''
+        tmp, vectors = gen_binary_vectors(10, dim)
+        status, ids = connect.insert(jac_collection, vectors)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(jac_collection)
+        assert status.OK()
+        status, vector_ids = connect.list_id_in_segment(jac_collection, info["partitions"][0]["segments"][0]["name"])
+        # vector_ids should match ids
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
+
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_list_id_in_segment_without_index_B(self, connect, jac_collection):
+        '''
+        target: get vector ids when there is no index but with partition
+        method: create partition, add vectors to it and call list_id_in_segment, check if the segment contains vectors
+        expected: status ok
+        '''
+        status = connect.create_partition(jac_collection, tag)
+        assert status.OK()
+        tmp, vectors = gen_binary_vectors(10, dim)
+        status, ids = connect.insert(jac_collection, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(jac_collection)
+        assert status.OK()
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.list_id_in_segment(jac_collection, info["partitions"][1]["segments"][0]["name"])
+        # vector_ids should match ids
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_simple_index()
+    )
+    def get_jaccard_index(self, request, connect):
+        logging.getLogger().info(request.param)
+        if request.param["index_type"] == IndexType.IVFLAT or request.param["index_type"] == IndexType.FLAT:
+            return request.param
+        else:
+            pytest.skip("Skip index Temporary")
+
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_list_id_in_segment_with_index_A(self, connect, jac_collection, get_jaccard_index):
+        '''
+        target: get vector ids when there is index
+        method: call list_id_in_segment and check if the segment contains vectors
+        expected: status ok
+        '''
+        index_param = get_jaccard_index["index_param"]
+        index_type = get_jaccard_index["index_type"]
+        status = connect.create_index(jac_collection, index_type, index_param)
+        assert status.OK()
+        tmp, vectors = gen_binary_vectors(10, dim)
+        status, ids = connect.insert(jac_collection, vectors)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(jac_collection)
+        assert status.OK()
+        status, vector_ids = connect.list_id_in_segment(jac_collection, info["partitions"][0]["segments"][0]["name"])
+        # vector_ids should match ids
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
+
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_list_id_in_segment_with_index_B(self, connect, jac_collection, get_jaccard_index):
+        '''
+        target: get vector ids when there is index and with partition
+        method: create partition, add vectors to it and call list_id_in_segment, check if the segment contains vectors
+        expected: status ok
+        '''
+        status = connect.create_partition(jac_collection, tag)
+        assert status.OK()
+        index_param = get_jaccard_index["index_param"]
+        index_type = get_jaccard_index["index_type"]
+        status = connect.create_index(jac_collection, index_type, index_param)
+        assert status.OK()
+        tmp, vectors = gen_binary_vectors(10, dim)
+        status, ids = connect.insert(jac_collection, vectors, partition_tag=tag)
+        assert status.OK()
+        status = connect.flush([jac_collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(jac_collection)
+        assert status.OK()
+        assert info["partitions"][1]["tag"] == tag
+        status, vector_ids = connect.list_id_in_segment(jac_collection, info["partitions"][1]["segments"][0]["name"])
+        # vector_ids should match ids
+        assert len(vector_ids) == 10
+        for i in range(10):
+            assert vector_ids[i] == ids[i]
+
+    @pytest.mark.timeout(GET_TIMEOUT)
+    def test_list_id_in_segment_after_delete_vectors(self, connect, jac_collection):
+        '''
+        target: get vector ids after vectors are deleted
+        method: add vectors and delete a few, call list_id_in_segment
+        expected: status ok, vector_ids decreased after vectors deleted
+        '''
+        tmp, vectors = gen_binary_vectors(2, dim)
+        status, ids = connect.insert(jac_collection, vectors)
+        assert status.OK()
+        delete_ids = [ids[0]]
+        status = connect.delete_entity_by_id(jac_collection, delete_ids)
+        status = connect.flush([jac_collection])
+        assert status.OK()
+        status, info = connect.get_collection_stats(jac_collection)
+        assert status.OK()
+        status, vector_ids = connect.list_id_in_segment(jac_collection, info["partitions"][0]["segments"][0]["name"])
         assert len(vector_ids) == 1
         assert vector_ids[0] == ids[1]

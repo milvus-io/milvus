@@ -973,6 +973,7 @@ static void read_binary_hash_invlists (
         FAISS_THROW_IF_NOT (il.ids.size() == ilsz);
         READVECTOR (il.vecs);
     }
+<<<<<<< HEAD
 }
 
 static void read_binary_multi_hash_map(
@@ -1000,6 +1001,35 @@ static void read_binary_multi_hash_map(
     }
 }
 
+=======
+}
+
+static void read_binary_multi_hash_map(
+        IndexBinaryMultiHash::Map &map,
+        int b, size_t ntotal,
+        IOReader *f)
+{
+    int id_bits;
+    size_t sz;
+    READ1 (id_bits);
+    READ1 (sz);
+    std::vector<uint8_t> buf;
+    READVECTOR (buf);
+    size_t nbit = (b + id_bits) * sz + ntotal * id_bits;
+    FAISS_THROW_IF_NOT (buf.size() == (nbit + 7) / 8);
+    BitstringReader rd (buf.data(), buf.size());
+    map.reserve (sz);
+    for (size_t i = 0; i < sz; i++) {
+        uint64_t hash = rd.read(b);
+        uint64_t ilsz = rd.read(id_bits);
+        auto & il = map[hash];
+        for (size_t j = 0; j < ilsz; j++) {
+            il.push_back (rd.read (id_bits));
+        }
+    }
+}
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 
 IndexBinary *read_index_binary (IOReader *f, int io_flags) {

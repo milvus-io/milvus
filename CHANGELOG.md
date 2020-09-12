@@ -156,6 +156,97 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2410 Logging build index progress
 -   \#2461 Upgrade mishards for milvus 0.9.1
 
+# Milvus 0.10.2 (TBD)
+
+## Bug
+-   \#2890 Fix the index size caculation in cache
+-   \#2952 Fix the result merging of IVF_PQ IP
+-   \#2975 Fix config UT failed
+-   \#3012 If the cache is too small, queries using multiple GPUs will cause to crash
+-   \#3133 Reverse query result in mishards if metric type is IP
+
+## Feature
+
+## Improvement
+-   \#2653 Improve IVF search performance when NQ and nProbe are both large
+-   \#2828 Let Faiss not to compile half float by default
+
+## Task
+
+# Milvus 0.10.1 (2020-07-20)
+
+## Bug
+-   \#2487 Enlarge timeout value for creating collection
+-   \#2487 HotFix release lock failed on NAS
+-   \#2557 Fix random crash of INSERT_DUPLICATE_ID case
+-   \#2578 Result count doesn't match target vectors count
+-   \#2585 Support IVF_PQ IP on GPU
+-   \#2598 Fix Milvus docker image report illegal instruction
+-   \#2617 Fix HNSW and RNSG index files size
+-   \#2637 Suit the range of HNSW parameters
+-   \#2642 Create index failed and server crashed
+-   \#2649 Search parameter of annoy has conflict with document
+-   \#2690 Remove body parser in show-partitions endpoints
+-   \#2692 Milvus hangs during multi-thread concurrent search
+-   \#2739 Fix mishards start failed
+-   \#2752 Milvus formats vectors data to double-precision and return to http client
+-   \#2767 Fix a bug of getting wrong nprobe limitation in knowhere on GPU version
+-   \#2768 After building the index, the number of vectors increases
+-   \#2774 Server down during loading data
+-   \#2776 Fix too many data copies during creating IVF index
+-   \#2813 To implemente RNSG IP
+
+## Feature
+
+## Improvement
+-   \#2932 Upgrade mishards for milvus 0.10.1
+
+## Task
+
+# Milvus 0.10.0 (2020-06-15)
+
+## Bug
+-   \#2367 Fix inconsistent reading and writing when using mishards
+-   \#2368 Make read node detect delete behavior
+-   \#2394 Drop collection timeout if too many partitions created on collection
+-   \#2549 Launch server fail using demo config
+-   \#2564 cache.cache_size range check error
+
+## Feature
+-   \#2363 Update branch version
+-   \#2510 Upgrade Milvus config
+
+## Improvement
+-   \#2381 Upgrade FAISS to 1.6.3
+-   \#2429 Fix Milvus 0.9.1 performance degrade issue
+-   \#2441 Improve Knowhere code coverage
+-   \#2466 Optimize k-selection implemention of faiss gpu version
+-   \#2489 Add exception throw on mysql meta error
+-   \#2495 Add creating lock file failure reason.
+-   \#2516 Improve unit test coverage
+-   \#2548 Upgrade mishards for milvus v0.10.0
+
+## Task
+
+# Milvus 0.9.1 (2020-05-29)
+
+## Bug
+-   \#2366 Reduce SQL execution times for collection contains lot of partitions
+-   \#2378 Duplicate data after server restart
+-   \#2395 Fix large nq cudaMalloc error
+-   \#2399 The nlist set by the user may not take effect
+-   \#2403 MySQL max_idle_time is 10 by default
+-   \#2450 The deleted vectors may be found on GPU
+-   \#2456 openblas library install failed
+
+## Feature
+
+## Improvement
+-   \#2353 Remove log_config from code and scripts
+-   \#2370 Clean compile warning
+-   \#2410 Logging build index progress
+-   \#2461 Upgrade mishards for milvus 0.9.1
+
 # Milvus 0.9.0 (2020-05-15)
 
 ## Bug
@@ -182,7 +273,11 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2231 Use server_config to define hard-delete delay time for segment files
 -   \#2261 Re-define result returned by has_collection if collection in delete state
 -   \#2264 Milvus opened too many files when the metric_config.enable_monitor=true
+<<<<<<< HEAD
 -   \#2266 Server hang when using multi-clients to query different collections
+=======
+-   \#2266 Server hangs when using multi-clients to query different collections
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 -   \#2280 has_partition should return true for `_default`
 
 ## Feature
@@ -219,10 +314,17 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#2252 Upgrade mishards APIs and requirements
 -   \#2256 k-means clustering algorithm use only Euclidean distance metric
 -   \#2300 Upgrade mishrads configuration to version 0.4
+<<<<<<< HEAD
 -   \#2311 Update mishards methods
 -   \#2330 Change url for behavior 'get_entities_by_id'
 -   \#2347 Update http document for v0.9.0
 -   \#2358 Upgrade mishards for v0.9.0
+=======
+-   \#2311 Update mishards methods 
+-   \#2330 Change url for behavior 'get_entities_by_id'
+-   \#2347 Update http document for v0.9.0
+-   \#2358 Upgrade mishards for v0.9.0 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 ## Task
 

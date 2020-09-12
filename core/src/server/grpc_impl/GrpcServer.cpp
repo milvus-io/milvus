@@ -79,7 +79,14 @@ Status
 GrpcServer::StartService() {
     SetThreadName("grpcserv_thread");
 
+<<<<<<< HEAD
     std::string server_address(config.network.bind.address() + ":" + std::to_string(config.network.bind.port()));
+=======
+    STATUS_CHECK(config.GetNetworkConfigBindAddress(address));
+    STATUS_CHECK(config.GetNetworkConfigBindPort(port));
+
+    std::string server_address(address + ":" + port);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     ::grpc::ServerBuilder builder;
     builder.SetOption(std::unique_ptr<::grpc::ServerBuilderOption>(new NoReusePortOption));

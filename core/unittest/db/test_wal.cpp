@@ -115,11 +115,16 @@ class DummyDB : public DBProxy {
     }
 
     Status
+<<<<<<< HEAD
     DeleteEntityByID(const std::string& collection_name,
                      const IDNumbers& entity_ids,
                      idx_t op_id) override {
         delete_count_++;
         WalManager::GetInstance().OperationDone(collection_name, op_id);
+=======
+    AllCollections(std::vector<CollectionSchema>& table_schema_array, bool is_root) override {
+        table_schema_array = tables_;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         return Status::OK();
     }
 
@@ -134,7 +139,55 @@ class DummyDB : public DBProxy {
 
 using DummyDBPtr = std::shared_ptr<DummyDB>;
 
+<<<<<<< HEAD
 } // namespace
+=======
+    Status
+    AllCollections(std::vector<CollectionSchema>& table_schema_array, bool is_root) override {
+        return Status(DB_ERROR, "error");
+    }
+};
+
+}  // namespace meta
+}  // namespace engine
+}  // namespace milvus
+
+
+TEST(WalTest, FILE_HANDLER_TEST) {
+    MakeEmptyTestPath();
+
+    std::string file_name = "1.wal";
+    milvus::engine::wal::MXLogFileHandler file_handler(WAL_GTEST_PATH);
+    file_handler.SetFilePath(WAL_GTEST_PATH);
+    file_handler.SetFileName(file_name);
+    file_handler.SetFileOpenMode("w");
+    ASSERT_FALSE(file_handler.FileExists());
+
+    ASSERT_TRUE(file_handler.OpenFile());
+    ASSERT_EQ(0, file_handler.GetFileSize());
+
+    std::string write_content = "hello, world!\n";
+    ASSERT_TRUE(file_handler.Write(const_cast<char*>(write_content.data()), write_content.size()));
+    ASSERT_TRUE(file_handler.CloseFile());
+
+    file_handler.SetFileOpenMode("r");
+    char* buf = (char*)malloc(write_content.size() + 10);
+    memset(buf, 0, write_content.size() + 10);
+    ASSERT_TRUE(file_handler.Load(buf, 0, write_content.size()));
+    ASSERT_STREQ(buf, write_content.c_str());
+    ASSERT_FALSE(file_handler.Load(buf, write_content.size()));
+    free(buf);
+    ASSERT_TRUE(file_handler.CloseFile());
+    file_handler.DeleteFile();
+
+    file_handler.ReBorn("2", "w");
+    write_content += ", aaaaa";
+    file_handler.Write(const_cast<char*>(write_content.data()), write_content.size());
+    ASSERT_EQ("2", file_handler.GetFileName());
+    ASSERT_TRUE(file_handler.CloseFile());
+    file_handler.DeleteFile();
+}
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 TEST_F(WalTest, WalFileTest) {
     std::string path = "/tmp/milvus_wal/test_file";

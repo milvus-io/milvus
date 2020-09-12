@@ -210,12 +210,15 @@ struct IndexIVF: Index, Level1Quantizer {
                  float *distances, idx_t *labels,
                  ConcurrentBitsetPtr bitset = nullptr) const override;
 
+<<<<<<< HEAD
     /** Similar to search, but does not store codes **/
     void search_without_codes (idx_t n, const float *x, 
                                const uint8_t *arranged_codes, std::vector<size_t> prefix_sum, 
                                bool is_sq8, idx_t k, float *distances, idx_t *labels,
                                ConcurrentBitsetPtr bitset = nullptr);
 
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #if 0
     /** get raw vectors by ids */
     void get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset = nullptr) override;

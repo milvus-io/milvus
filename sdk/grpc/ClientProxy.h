@@ -60,10 +60,14 @@ class ClientProxy : public Connection {
     CreatePartition(const PartitionParam& partition_param) override;
 
     Status
+<<<<<<< HEAD
     DropPartition(const PartitionParam& partition_param) override;
 
     bool
     HasPartition(const std::string& collection_name, const std::string& partition_tag) const override;
+=======
+    GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) override;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     Status
     ListPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;

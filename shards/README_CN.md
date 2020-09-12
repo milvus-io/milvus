@@ -48,7 +48,11 @@ Python 版本为3.6及以上。
 3. 启动 Milvus 服务。
 
    ```shell
+<<<<<<< HEAD
    $ sudo nvidia-docker run --rm -d -p 19530:19530 -v /tmp/milvus/db:/var/lib/milvus/db milvusdb/milvus:0.9.1-gpu-d052920-e04ed5
+=======
+   $ sudo nvidia-docker run --rm -d -p 19530:19530 -v /tmp/milvus/db:/var/lib/milvus/db milvusdb/milvus:0.10.2-gpu-d081520-8a2393
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
    ```
 
 4. 更改目录权限。

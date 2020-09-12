@@ -49,7 +49,10 @@ TEST_P(HNSWTest, HNSW_basic) {
     assert(!xb.empty());
 
     // null faiss index
+<<<<<<< HEAD
     /*
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     {
         ASSERT_ANY_THROW(index_->Serialize());
         ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
@@ -58,7 +61,10 @@ TEST_P(HNSWTest, HNSW_basic) {
         ASSERT_ANY_THROW(index_->Count());
         ASSERT_ANY_THROW(index_->Dim());
     }
+<<<<<<< HEAD
     */
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     index_->Train(base_dataset, conf);
     index_->Add(base_dataset, conf);

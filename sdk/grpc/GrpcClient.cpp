@@ -178,7 +178,11 @@ GrpcClient::Search(const ::milvus::grpc::SearchParam& search_param,
 }
 
 Status
+<<<<<<< HEAD
 GrpcClient::GetCollectionInfo(const std::string& collection_name, ::milvus::grpc::Mapping& grpc_schema) {
+=======
+GrpcClient::GetCollectionInfo(const std::string& collection_name, ::milvus::grpc::CollectionSchema& grpc_schema) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     ClientContext context;
     ::milvus::grpc::CollectionName grpc_collectionname;
     grpc_collectionname.set_collection_name(collection_name);

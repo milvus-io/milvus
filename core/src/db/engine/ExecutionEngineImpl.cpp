@@ -287,8 +287,15 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
     }
     auto result = vec_index->Query(dataset, conf);
 
+<<<<<<< HEAD
     MapAndCopyResult(result, vec_index->GetUids(), nq, topk, context.query_result_->result_distances_.data(),
                      context.query_result_->result_ids_.data());
+=======
+    // here we reset index size by file size,
+    // since some index type(such as SQ8) data size become smaller after serialized
+    index_->UpdateIndexSize();
+    LOG_ENGINE_DEBUG_ << "Finish serialize index file: " << location_ << " size: " << index_->Size();
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     if (hybrid) {
         //        HybridUnset();
@@ -414,6 +421,7 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
             bitset = std::make_shared<ConCurrentBitset>(entity_count_);
             STATUS_CHECK(ProcessTermQuery(bitset, general_query->leaf->term_query, attr_type));
         }
+<<<<<<< HEAD
         if (general_query->leaf->range_query != nullptr) {
             bitset = std::make_shared<ConCurrentBitset>(entity_count_);
             STATUS_CHECK(ProcessRangeQuery(attr_type, bitset, general_query->leaf->range_query));
@@ -422,6 +430,36 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
             // skip vector query
             bitset = std::make_shared<ConCurrentBitset>(entity_count_, 255);
             vector_placeholder = general_query->leaf->vector_placeholder;
+=======
+
+        try {
+            /* Index data is copied to GPU first, then added into GPU cache.
+             * Add lock here to avoid multiple INDEX are copied to one GPU card at same time.
+             * And reserve space to avoid GPU out of memory issue.
+             */
+            LOG_ENGINE_DEBUG_ << "CPU to GPU" << device_id << " start";
+            auto gpu_cache_mgr = cache::GpuCacheMgr::GetInstance(device_id);
+
+            bool gpu_cache_enable = false;
+            STATUS_CHECK(server::Config::GetInstance().GetGpuResourceConfigCacheEnable(gpu_cache_enable));
+
+            /* CopyCpuToGpu() is an asynchronous method.
+             * It should be make sure that the CPU index is always valid.
+             * Therefore, we reserve its shared pointer.
+             */
+            index_reserve_ = index_;
+            if (gpu_cache_enable) {
+                gpu_cache_mgr->Reserve(index_->Size());
+                index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
+                gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
+            } else {
+                index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
+            }
+            LOG_ENGINE_DEBUG_ << "CPU to GPU" << device_id << " finished";
+        } catch (std::exception& e) {
+            LOG_ENGINE_ERROR_ << e.what();
+            return Status(DB_ERROR, e.what());
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         }
     }
     return status;
@@ -575,6 +613,7 @@ ExecutionEngineImpl::IndexedRangeQuery(ConCurrentBitsetPtr& bitset, const DataTy
 }
 
 Status
+<<<<<<< HEAD
 ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, DataType>& attr_type,
                                        ConCurrentBitsetPtr& bitset, const query::RangeQueryPtr& range_query) {
     SegmentPtr segment_ptr;
@@ -595,6 +634,290 @@ ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, Dat
         }
     } catch (std::exception& ex) {
         return Status{SERVER_INVALID_DSL_PARAMETER, ex.what()};
+=======
+ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
+                                     std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
+                                     std::vector<float>& distances, std::vector<int64_t>& labels) {
+    if (bitset == nullptr) {
+        bitset = std::make_shared<faiss::ConcurrentBitset>(vector_count_);
+    }
+
+    if (general_query->leaf == nullptr) {
+        Status status = Status::OK();
+        if (general_query->bin->left_query != nullptr) {
+            status = ExecBinaryQuery(general_query->bin->left_query, bitset, attr_type, nq, topk, distances, labels);
+        }
+        if (general_query->bin->right_query != nullptr) {
+            status = ExecBinaryQuery(general_query->bin->right_query, bitset, attr_type, nq, topk, distances, labels);
+        }
+        return status;
+    } else {
+        if (general_query->leaf->term_query != nullptr) {
+            // process attrs_data
+            auto field_name = general_query->leaf->term_query->field_name;
+            auto type = attr_type.at(field_name);
+            auto size = attr_size_.at(field_name);
+            switch (type) {
+                case DataType::INT8: {
+                    std::vector<int8_t> data;
+                    data.resize(size / sizeof(int8_t));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<int8_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int8_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int8_t));
+
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto query_value : term_value) {
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
+                            }
+                        }
+                    }
+                    break;
+                }
+                case DataType::INT16: {
+                    std::vector<int16_t> data;
+                    data.resize(size / sizeof(int16_t));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
+                    std::vector<int16_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int16_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int16_t));
+
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto query_value : term_value) {
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
+                            }
+                        }
+                    }
+                    break;
+                }
+                case DataType::INT32: {
+                    std::vector<int32_t> data;
+                    data.resize(size / sizeof(int32_t));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<int32_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int32_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int32_t));
+
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto query_value : term_value) {
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
+                            }
+                        }
+                    }
+                    break;
+                }
+                case DataType::INT64: {
+                    std::vector<int64_t> data;
+                    data.resize(size / sizeof(int64_t));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<int64_t> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(int64_t);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int64_t));
+
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto query_value : term_value) {
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
+                            }
+                        }
+                    }
+                    break;
+                }
+                case DataType::FLOAT: {
+                    std::vector<float> data;
+                    data.resize(size / sizeof(float));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<float> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(float);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(int64_t));
+
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto query_value : term_value) {
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
+                            }
+                        }
+                    }
+                    break;
+                }
+                case DataType::DOUBLE: {
+                    std::vector<double> data;
+                    data.resize(size / sizeof(double));
+                    memcpy(data.data(), attr_data_.at(field_name).data(), size);
+
+                    std::vector<double> term_value;
+                    auto term_size =
+                        general_query->leaf->term_query->field_value.size() * (sizeof(int8_t)) / sizeof(double);
+                    term_value.resize(term_size);
+                    memcpy(term_value.data(), general_query->leaf->term_query->field_value.data(),
+                           term_size * sizeof(double));
+
+                    for (uint64_t i = 0; i < data.size(); ++i) {
+                        bool value_in_term = false;
+                        for (auto query_value : term_value) {
+                            if (data[i] == query_value) {
+                                value_in_term = true;
+                                break;
+                            }
+                        }
+                        if (!value_in_term) {
+                            if (!bitset->test(i)) {
+                                bitset->set(i);
+                            }
+                        }
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+            return Status::OK();
+        }
+        if (general_query->leaf->range_query != nullptr) {
+            auto field_name = general_query->leaf->range_query->field_name;
+            auto com_expr = general_query->leaf->range_query->compare_expr;
+            auto type = attr_type.at(field_name);
+            auto size = attr_size_.at(field_name);
+            for (uint64_t j = 0; j < com_expr.size(); ++j) {
+                auto operand = com_expr[j].operand;
+                switch (type) {
+                    case DataType::INT8: {
+                        std::vector<int8_t> data;
+                        data.resize(size / sizeof(int8_t));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
+                        int8_t value = atoi(operand.c_str());
+                        ProcessRangeQuery<int8_t>(data, value, com_expr[j].compare_operator, bitset);
+                        break;
+                    }
+                    case DataType::INT16: {
+                        std::vector<int16_t> data;
+                        data.resize(size / sizeof(int16_t));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
+                        int16_t value = atoi(operand.c_str());
+                        ProcessRangeQuery<int16_t>(data, value, com_expr[j].compare_operator, bitset);
+                        break;
+                    }
+                    case DataType::INT32: {
+                        std::vector<int32_t> data;
+                        data.resize(size / sizeof(int32_t));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
+                        int32_t value = atoi(operand.c_str());
+                        ProcessRangeQuery<int32_t>(data, value, com_expr[j].compare_operator, bitset);
+                        break;
+                    }
+                    case DataType::INT64: {
+                        std::vector<int64_t> data;
+                        data.resize(size / sizeof(int64_t));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
+                        int64_t value = atoi(operand.c_str());
+                        ProcessRangeQuery<int64_t>(data, value, com_expr[j].compare_operator, bitset);
+                        break;
+                    }
+                    case DataType::FLOAT: {
+                        std::vector<float> data;
+                        data.resize(size / sizeof(float));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
+                        std::istringstream iss(operand);
+                        double value;
+                        iss >> value;
+                        ProcessRangeQuery<float>(data, value, com_expr[j].compare_operator, bitset);
+                        break;
+                    }
+                    case DataType::DOUBLE: {
+                        std::vector<double> data;
+                        data.resize(size / sizeof(double));
+                        memcpy(data.data(), attr_data_.at(field_name).data(), size);
+                        std::istringstream iss(operand);
+                        double value;
+                        iss >> value;
+                        ProcessRangeQuery<double>(data, value, com_expr[j].compare_operator, bitset);
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            }
+            return Status::OK();
+        }
+        if (general_query->leaf->vector_query != nullptr) {
+            // Do search
+            faiss::ConcurrentBitsetPtr list;
+            list = index_->GetBlacklist();
+            // Do OR
+            for (int64_t i = 0; i < vector_count_; ++i) {
+                if (list->test(i) || bitset->test(i)) {
+                    bitset->set(i);
+                }
+            }
+            index_->SetBlacklist(bitset);
+            auto vector_query = general_query->leaf->vector_query;
+            topk = vector_query->topk;
+            nq = vector_query->query_vector.float_data.size() / dim_;
+
+            distances.resize(nq * topk);
+            labels.resize(nq * topk);
+
+            return Search(nq, vector_query->query_vector.float_data.data(), topk, vector_query->extra_params,
+                          distances.data(), labels.data());
+        }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     return Status::OK();
 }
@@ -784,10 +1107,19 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     conf[knowhere::Metric::TYPE] = index_info.metric_name_;
     LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
 
+<<<<<<< HEAD
     knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
 #ifdef MILVUS_GPU_VERSION
     if (gpu_enable_) {
         mode = knowhere::IndexMode::MODE_GPU;
+=======
+#if 0
+Status
+ExecutionEngineImpl::GetVectorByID(const int64_t id, float* vector, bool hybrid) {
+    if (index_ == nullptr) {
+        LOG_ENGINE_ERROR_ << "ExecutionEngineImpl: index is null, failed to search";
+        return Status(DB_ERROR, "index is null");
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     if (index_info.index_type_ == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
         auto m = conf[knowhere::IndexParams::m].get<int64_t>();
@@ -798,10 +1130,22 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     if (!adapter->CheckTrain(conf, mode)) {
         throw Exception(DB_ERROR, "Illegal index params");
     }
+<<<<<<< HEAD
     // build index by knowhere
     new_index = CreateVecIndex(index_info.index_type_, mode);
     if (!new_index) {
         throw Exception(DB_ERROR, "Unsupported index type");
+=======
+
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) {
+    if (index_ == nullptr) {
+        LOG_ENGINE_ERROR_ << "ExecutionEngineImpl: index is null, failed to search";
+        return Status(DB_ERROR, "index is null");
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
 
@@ -827,6 +1171,24 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
         return Status(DB_ERROR, msg);
     }
 
+<<<<<<< HEAD
+=======
+    return Status::OK();
+}
+#endif
+
+Status
+ExecutionEngineImpl::Cache() {
+    auto cpu_cache_mgr = milvus::cache::CpuCacheMgr::GetInstance();
+    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
+    cpu_cache_mgr->InsertItem(location_, obj);
+    return Status::OK();
+}
+
+// TODO(linxj): remove.
+Status
+ExecutionEngineImpl::Init() {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #ifdef MILVUS_GPU_VERSION
     /* for GPU index, need copy back to CPU */
     if (new_index->index_mode() == knowhere::IndexMode::MODE_GPU) {

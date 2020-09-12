@@ -62,6 +62,7 @@ FindWalFiles(const std::experimental::filesystem::path& folder,
 WalManager::WalManager() : cleanup_thread_pool_(1, 1) {
 }
 
+<<<<<<< HEAD
 WalManager&
 WalManager::GetInstance() {
     static WalManager s_mgr;
@@ -76,6 +77,60 @@ WalManager::Start(const DBOptions& options) {
     std::experimental::filesystem::path wal_path(options.wal_path_);
     wal_path_ = wal_path.c_str();
     CommonUtil::CreateDirectory(wal_path_);
+=======
+        std::vector<meta::CollectionSchema> collention_schema_array;
+        auto status = meta->AllCollections(collention_schema_array);
+        if (!status.ok()) {
+            return WAL_META_ERROR;
+        }
+
+        if (!collention_schema_array.empty()) {
+            u_int64_t min_flushed_lsn = ~(u_int64_t)0;
+            u_int64_t max_flushed_lsn = 0;
+            auto update_limit_lsn = [&](u_int64_t lsn) {
+                if (min_flushed_lsn > lsn) {
+                    min_flushed_lsn = lsn;
+                }
+                if (max_flushed_lsn < lsn) {
+                    max_flushed_lsn = lsn;
+                }
+            };
+
+            for (auto& col_schema : collention_schema_array) {
+                auto& collection = collections_[col_schema.collection_id_];
+                auto& default_part = collection[""];
+                default_part.flush_lsn = col_schema.flush_lsn_;
+                update_limit_lsn(default_part.flush_lsn);
+
+                std::vector<meta::CollectionSchema> partition_schema_array;
+                status = meta->ShowPartitions(col_schema.collection_id_, partition_schema_array);
+                if (!status.ok()) {
+                    return WAL_META_ERROR;
+                }
+                for (auto& par_schema : partition_schema_array) {
+                    auto& partition = collection[par_schema.partition_tag_];
+                    partition.flush_lsn = par_schema.flush_lsn_;
+                    update_limit_lsn(partition.flush_lsn);
+                }
+            }
+
+            if (applied_lsn < max_flushed_lsn) {
+                // a new WAL folder?
+                applied_lsn = max_flushed_lsn;
+            }
+            if (recovery_start < min_flushed_lsn) {
+                // not flush all yet
+                recovery_start = min_flushed_lsn;
+            }
+
+            for (auto& col : collections_) {
+                for (auto& part : col.second) {
+                    part.second.wal_lsn = applied_lsn;
+                }
+            }
+        }
+    }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     auto status = Init();
     if (!status.ok()) {
@@ -132,8 +187,21 @@ WalManager::RecordOperation(const WalOperationPtr& operation, const DBPtr& db) {
             status = RecordDeleteOperation(op, db);
             break;
         }
+<<<<<<< HEAD
         default:
             break;
+=======
+
+        // background thread has not started.
+        // so, needn't lock here.
+        auto it_col = collections_.find(record.collection_id);
+        if (it_col != collections_.end()) {
+            auto it_part = it_col->second.find(record.partition_tag);
+            if (it_part->second.flush_lsn < record.lsn) {
+                break;
+            }
+        }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     if (!status.ok()) {
@@ -149,6 +217,7 @@ WalManager::OperationDone(const std::string& collection_name, idx_t op_id) {
         return Status::OK();
     }
 
+<<<<<<< HEAD
     bool start_clecnup = false;
     {
         // record max operation id for each collection
@@ -164,6 +233,15 @@ WalManager::OperationDone(const std::string& collection_name, idx_t op_id) {
                 WalFile file;
                 file.OpenFile(path, WalFile::OVER_WRITE);
                 file.Write<idx_t>(&op_id);
+=======
+        // background thread has not started.
+        // so, needn't lock here.
+        auto it_col = collections_.find(record.collection_id);
+        if (it_col != collections_.end()) {
+            auto it_part = it_col->second.find(record.partition_tag);
+            if (it_part->second.flush_lsn < record.lsn) {
+                break;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             }
         }
     }
@@ -205,6 +283,7 @@ WalManager::Recovery(const DBPtr& db) {
                 }
             }
 
+<<<<<<< HEAD
             // id_files arrange id in assendent, we know which file should be read
             for (auto& pair : id_files) {
                 WalFilePtr file = std::make_shared<WalFile>();
@@ -227,6 +306,14 @@ WalManager::Recovery(const DBPtr& db) {
                         PerformOperation(operation, db);
                     }
                 }
+=======
+        std::lock_guard<std::mutex> lck(mutex_);
+        auto it_col = collections_.find(record.collection_id);
+        if (it_col != collections_.end()) {
+            auto it_part = it_col->second.find(record.partition_tag);
+            if (it_part->second.flush_lsn < record.lsn) {
+                break;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             }
         }
     } catch (std::exception& ex) {
@@ -234,7 +321,15 @@ WalManager::Recovery(const DBPtr& db) {
         return Status(DB_ERROR, msg);
     }
 
+<<<<<<< HEAD
     return Status::OK();
+=======
+    if (record.type != MXLogType::None) {
+        LOG_WAL_INFO_ << "record type " << (int32_t)record.type << " collection " << record.collection_id << " lsn "
+                      << record.lsn;
+    }
+    return error_code;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 Status
@@ -299,10 +394,19 @@ WalManager::RecordInsertOperation(const InsertEntityOperationPtr& operation, con
                 file->OpenFile(path, WalFile::APPEND_WRITE);
             }
 
+<<<<<<< HEAD
             // write to wal file
             auto status = WalOperationCodec::WriteInsertOperation(file, operation->partition_name, chunk, op_id);
             if (!status.ok()) {
                 return status;
+=======
+        std::lock_guard<std::mutex> lck(mutex_);
+        auto it_col = collections_.find(record.collection_id);
+        if (it_col != collections_.end()) {
+            auto it_part = it_col->second.find(record.partition_tag);
+            if (it_part->second.flush_lsn < record.lsn) {
+                break;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             }
         }
     } catch (std::exception& ex) {
@@ -318,6 +422,7 @@ WalManager::RecordInsertOperation(const InsertEntityOperationPtr& operation, con
         }
     }
 
+<<<<<<< HEAD
     return Status::OK();
 }
 
@@ -354,11 +459,77 @@ WalManager::RecordDeleteOperation(const DeleteEntityOperationPtr& operation, con
     // delete action to db
     if (db) {
         return db->DeleteEntityByID(operation->collection_name_, operation->entity_ids_, op_id);
+=======
+uint64_t
+WalManager::CreateCollection(const std::string& collection_id) {
+    LOG_WAL_INFO_ << "create collection " << collection_id << " " << last_applied_lsn_;
+    std::lock_guard<std::mutex> lck(mutex_);
+    uint64_t applied_lsn = last_applied_lsn_;
+    collections_[collection_id][""] = {applied_lsn, applied_lsn};
+    return applied_lsn;
+}
+
+uint64_t
+WalManager::CreatePartition(const std::string& collection_id, const std::string& partition_tag) {
+    LOG_WAL_INFO_ << "create collection " << collection_id << " " << partition_tag << " " << last_applied_lsn_;
+    std::lock_guard<std::mutex> lck(mutex_);
+    uint64_t applied_lsn = last_applied_lsn_;
+    collections_[collection_id][partition_tag] = {applied_lsn, applied_lsn};
+    return applied_lsn;
+}
+
+uint64_t
+WalManager::CreateHybridCollection(const std::string& collection_id) {
+    LOG_WAL_INFO_ << "create hybrid collection " << collection_id << " " << last_applied_lsn_;
+    std::lock_guard<std::mutex> lck(mutex_);
+    uint64_t applied_lsn = last_applied_lsn_;
+    collections_[collection_id][""] = {applied_lsn, applied_lsn};
+    return applied_lsn;
+}
+
+void
+WalManager::DropCollection(const std::string& collection_id) {
+    LOG_WAL_INFO_ << "drop collection " << collection_id;
+    std::lock_guard<std::mutex> lck(mutex_);
+    collections_.erase(collection_id);
+}
+
+void
+WalManager::DropPartition(const std::string& collection_id, const std::string& partition_tag) {
+    LOG_WAL_INFO_ << collection_id << " drop partition " << partition_tag;
+    std::lock_guard<std::mutex> lck(mutex_);
+    auto it = collections_.find(collection_id);
+    if (it != collections_.end()) {
+        it->second.erase(partition_tag);
+    }
+}
+
+void
+WalManager::CollectionFlushed(const std::string& collection_id, uint64_t lsn) {
+    std::unique_lock<std::mutex> lck(mutex_);
+    if (collection_id.empty()) {
+        // all collections
+        for (auto& col : collections_) {
+            for (auto& part : col.second) {
+                part.second.flush_lsn = lsn;
+            }
+        }
+
+    } else {
+        // one collection
+        auto it_col = collections_.find(collection_id);
+        if (it_col != collections_.end()) {
+            for (auto& part : it_col->second) {
+                part.second.flush_lsn = lsn;
+            }
+        }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     return Status::OK();
 }
 
+<<<<<<< HEAD
 std::string
 WalManager::ConstructFilePath(const std::string& collection_name, const std::string& file_name) {
     // typically, the wal file path is like: /xxx/milvus/wal/[collection_name]/xxxxxxxxxx
@@ -366,6 +537,89 @@ WalManager::ConstructFilePath(const std::string& collection_name, const std::str
     full_path.append(collection_name);
     std::experimental::filesystem::create_directory(full_path);
     full_path.append(file_name);
+=======
+void
+WalManager::PartitionFlushed(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn) {
+    std::unique_lock<std::mutex> lck(mutex_);
+    auto it_col = collections_.find(collection_id);
+    if (it_col != collections_.end()) {
+        auto it_part = it_col->second.find(partition_tag);
+        if (it_part != it_col->second.end()) {
+            it_part->second.flush_lsn = lsn;
+        }
+    }
+    lck.unlock();
+
+    LOG_WAL_INFO_ << collection_id << "    " << partition_tag << " is flushed by lsn " << lsn;
+}
+
+void
+WalManager::CollectionUpdated(const std::string& collection_id, uint64_t lsn) {
+    std::unique_lock<std::mutex> lck(mutex_);
+    auto it_col = collections_.find(collection_id);
+    if (it_col != collections_.end()) {
+        for (auto& part : it_col->second) {
+            part.second.wal_lsn = lsn;
+        }
+    }
+    lck.unlock();
+}
+
+void
+WalManager::PartitionUpdated(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn) {
+    std::unique_lock<std::mutex> lck(mutex_);
+    auto it_col = collections_.find(collection_id);
+    if (it_col != collections_.end()) {
+        auto it_part = it_col->second.find(partition_tag);
+        if (it_part != it_col->second.end()) {
+            it_part->second.wal_lsn = lsn;
+        }
+    }
+    lck.unlock();
+}
+
+template <typename T>
+bool
+WalManager::Insert(const std::string& collection_id, const std::string& partition_tag, const IDNumbers& vector_ids,
+                   const std::vector<T>& vectors) {
+    MXLogType log_type;
+    if (std::is_same<T, float>::value) {
+        log_type = MXLogType::InsertVector;
+    } else if (std::is_same<T, uint8_t>::value) {
+        log_type = MXLogType::InsertBinary;
+    } else {
+        return false;
+    }
+
+    size_t vector_num = vector_ids.size();
+    if (vector_num == 0) {
+        LOG_WAL_ERROR_ << LogOut("[%s][%ld] The ids is empty.", "insert", 0);
+        return false;
+    }
+    size_t dim = vectors.size() / vector_num;
+    size_t unit_size = dim * sizeof(T) + sizeof(IDNumber);
+    size_t head_size = SizeOfMXLogRecordHeader + collection_id.length() + partition_tag.length();
+
+    MXLogRecord record;
+    record.type = log_type;
+    record.collection_id = collection_id;
+    record.partition_tag = partition_tag;
+
+    uint64_t new_lsn = 0;
+    for (size_t i = 0; i < vector_num; i += record.length) {
+        size_t surplus_space = p_buffer_->SurplusSpace();
+        size_t max_rcd_num = 0;
+        if (surplus_space >= head_size + unit_size) {
+            max_rcd_num = (surplus_space - head_size) / unit_size;
+        } else {
+            max_rcd_num = (mxlog_config_.buffer_size - head_size) / unit_size;
+        }
+        if (max_rcd_num == 0) {
+            LOG_WAL_ERROR_ << LogOut("[%s][%ld]", "insert", 0) << "Wal buffer size is too small "
+                           << mxlog_config_.buffer_size << " unit " << unit_size;
+            return false;
+        }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     std::string path(full_path.c_str());
     return path;
@@ -385,6 +639,7 @@ WalManager::AddCleanupTask(const std::string& collection_name) {
     }
 }
 
+<<<<<<< HEAD
 void
 WalManager::TakeCleanupTask(std::string& collection_name) {
     collection_name = "";
@@ -394,6 +649,15 @@ WalManager::TakeCleanupTask(std::string& collection_name) {
     }
     collection_name = cleanup_tasks_.front();
     cleanup_tasks_.pop_front();
+=======
+    last_applied_lsn_ = new_lsn;
+    PartitionUpdated(collection_id, partition_tag, new_lsn);
+
+    LOG_WAL_INFO_ << LogOut("[%s][%ld]", "insert", 0) << collection_id << " insert in part " << partition_tag
+                  << " with lsn " << new_lsn;
+
+    return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 void
@@ -440,6 +704,7 @@ WalManager::CleanupThread() {
             continue;
         }
 
+<<<<<<< HEAD
         // collection already deleted
         std::experimental::filesystem::path file_path = collection_path;
         file_path.append(WAL_DEL_FILE_NAME);
@@ -454,6 +719,24 @@ WalManager::CleanupThread() {
                 std::lock_guard<std::mutex> lock(file_map_mutex_);
                 file_map_.erase(target_collection);
             }
+=======
+        auto error_code = p_buffer_->AppendEntity(record);
+        if (error_code != WAL_SUCCESS) {
+            p_buffer_->ResetWriteLsn(last_applied_lsn_);
+            return false;
+        }
+        new_lsn = record.lsn;
+    }
+
+    last_applied_lsn_ = new_lsn;
+    PartitionUpdated(collection_id, partition_tag, new_lsn);
+
+    LOG_WAL_INFO_ << LogOut("[%s][%ld]", "insert", 0) << collection_id << " insert in part " << partition_tag
+                  << " with lsn " << new_lsn;
+
+    return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
+}
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
             // remove collection folder
             std::experimental::filesystem::remove_all(collection_path);
@@ -471,6 +754,7 @@ WalManager::CleanupThread() {
             }
         }
 
+<<<<<<< HEAD
         // iterate files
         std::map<idx_t, std::experimental::filesystem::path> wal_files;
         FindWalFiles(collection_path, wal_files);
@@ -504,6 +788,45 @@ WalManager::CleanupThread() {
                 }
 
                 std::experimental::filesystem::remove(pair.second);
+=======
+    last_applied_lsn_ = new_lsn;
+    CollectionUpdated(collection_id, new_lsn);
+
+    LOG_WAL_INFO_ << collection_id << " delete rows by id, lsn " << new_lsn;
+
+    return p_meta_handler_->SetMXLogInternalMeta(new_lsn);
+}
+
+uint64_t
+WalManager::Flush(const std::string& collection_id) {
+    std::lock_guard<std::mutex> lck(mutex_);
+    // At most one flush requirement is waiting at any time.
+    // Otherwise, flush_info_ should be modified to a list.
+    __glibcxx_assert(!flush_info_.IsValid());
+
+    uint64_t lsn = 0;
+    if (collection_id.empty()) {
+        // flush all tables
+        for (auto& col : collections_) {
+            for (auto& part : col.second) {
+                if (part.second.wal_lsn > part.second.flush_lsn) {
+                    lsn = last_applied_lsn_;
+                    break;
+                }
+            }
+        }
+
+    } else {
+        // flush one collection
+        auto it_col = collections_.find(collection_id);
+        if (it_col != collections_.end()) {
+            for (auto& part : it_col->second) {
+                auto wal_lsn = part.second.wal_lsn;
+                auto flush_lsn = part.second.flush_lsn;
+                if (wal_lsn > flush_lsn && wal_lsn > lsn) {
+                    lsn = wal_lsn;
+                }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             }
         }
 

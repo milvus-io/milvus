@@ -23,11 +23,14 @@ class EntityIdsDto : public ODTO {
 
     DTO_FIELD(List<String>, ids);
 
+<<<<<<< HEAD
     DTO_FIELD(String, message);
 
     DTO_FIELD(Int64, code);
 };
 
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #include OATPP_CODEGEN_END(DTO)
 
 using EntityIdsDtoT = oatpp::Object<EntityIdsDto>;

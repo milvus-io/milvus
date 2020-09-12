@@ -107,7 +107,23 @@ CreateCollection3(std::shared_ptr<DB> db, const std::string& collection_name, co
         field_names.push_back(pair.first);
     }
 
+<<<<<<< HEAD
     return db->CreateCollection(context);
+=======
+static const char* COLLECTION_NAME = "test_group";
+static constexpr int64_t COLLECTION_DIM = 256;
+static constexpr int64_t VECTOR_COUNT = 5000;
+static constexpr int64_t INSERT_LOOP = 100;
+static constexpr int64_t SECONDS_EACH_HOUR = 3600;
+static constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
+
+milvus::engine::meta::CollectionSchema
+BuildCollectionSchema() {
+    milvus::engine::meta::CollectionSchema collection_info;
+    collection_info.dimension_ = COLLECTION_DIM;
+    collection_info.collection_id_ = COLLECTION_NAME;
+    return collection_info;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 void
@@ -241,10 +257,68 @@ BuildQueryPtr(const std::string& collection_name, int64_t n, int64_t topk, std::
     general_query->bin->relation = milvus::query::QueryRelation::AND;
 }
 
+<<<<<<< HEAD
 void
 BuildEntities2(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& data_chunk) {
     data_chunk = std::make_shared<milvus::engine::DataChunk>();
     data_chunk->count_ = n;
+=======
+TEST_F(DBTest, DB_TEST) {
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
+    auto stat = db_->CreateCollection(collection_info);
+
+    milvus::engine::meta::CollectionSchema collection_info_get;
+    collection_info_get.collection_id_ = COLLECTION_NAME;
+    stat = db_->DescribeCollection(collection_info_get);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
+
+    uint64_t qb = 5;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    std::thread search([&]() {
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+        int k = 10;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        INIT_TIMER;
+        std::stringstream ss;
+        uint64_t count = 0;
+        uint64_t prev_count = 0;
+        milvus::json json_params = {{"nprobe", 10}};
+
+        for (auto j = 0; j < 10; ++j) {
+            ss.str("");
+            db_->Size(count);
+            prev_count = count;
+            if (count == 0) {
+                continue;
+            }
+
+            START_TIMER;
+
+            std::vector<std::string> tags;
+            stat = db_->Query(dummy_context_, COLLECTION_NAME, tags, k, json_params, qxb, result_ids, result_distances);
+            ss << "Search " << j << " With Size " << count / milvus::engine::MB << " MB";
+            STOP_TIMER(ss.str());
+
+            ASSERT_TRUE(stat.ok());
+            ASSERT_EQ(result_ids.size(), qb * k);
+            for (auto i = 0; i < qb; ++i) {
+                ss.str("");
+                ss << "Result [" << i << "]:";
+                for (auto t = 0; t < k; t++) {
+                    ss << result_ids[i * k + t] << " ";
+                }
+                /* LOG(DEBUG) << ss.str(); */
+            }
+            ASSERT_TRUE(count >= prev_count);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    });
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     milvus::engine::VectorsData vectors;
     vectors.vector_count_ = n;
@@ -266,15 +340,31 @@ BuildEntities2(uint64_t n, uint64_t batch_index, milvus::engine::DataChunkPtr& d
     std::vector<int64_t> value_1;
     value_1.resize(n);
 
+<<<<<<< HEAD
     for (uint64_t i = 0; i < n; ++i) {
         value_1[i] = i;
+=======
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     {
+<<<<<<< HEAD
         milvus::engine::BinaryDataPtr raw = std::make_shared<milvus::engine::BinaryData>();
         data_chunk->fixed_fields_["int64"] = raw;
         raw->data_.resize(value_1.size() * sizeof(int64_t));
         memcpy(raw->data_.data(), value_1.data(), value_1.size() * sizeof(int64_t));
+=======
+        auto options = GetOptions();
+        options.meta_.backend_uri_ = "dummy";
+        ASSERT_ANY_THROW(BuildDB(options));
+
+        options.meta_.backend_uri_ = "mysql://root:123456@127.0.0.1:3306/test";
+        ASSERT_ANY_THROW(BuildDB(options));
+
+        options.meta_.backend_uri_ = "dummy://root:123456@127.0.0.1:3306/test";
+        ASSERT_ANY_THROW(BuildDB(options));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 }
 }  // namespace
@@ -413,6 +503,7 @@ TEST_F(DBTest, VisitorTest) {
         partition_id = kv.first;
     }
 
+<<<<<<< HEAD
     status = Snapshots::GetInstance().GetSnapshot(ss, c1);
     ASSERT_TRUE(status.ok());
 
@@ -424,6 +515,148 @@ TEST_F(DBTest, VisitorTest) {
         std::cout << visitor->ToString() << std::endl;
         return Status::OK();
     };
+=======
+    milvus::engine::CollectionIndex index;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
+    db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
+
+    int64_t prev_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    ASSERT_TRUE(stat.ok());
+    int64_t cur_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
+    ASSERT_TRUE(prev_cache_usage < cur_cache_usage);
+
+    FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
+
+    // create a partition
+    stat = db_->CreatePartition(COLLECTION_NAME, "part0", "0");
+    ASSERT_TRUE(stat.ok());
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    ASSERT_TRUE(stat.ok());
+
+    FIU_ENABLE_FIU("DBImpl.PreloadCollection.null_engine");
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("DBImpl.PreloadCollection.null_engine");
+
+    FIU_ENABLE_FIU("DBImpl.PreloadCollection.exceed_cache");
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("DBImpl.PreloadCollection.exceed_cache");
+
+    FIU_ENABLE_FIU("DBImpl.PreloadCollection.engine_throw_exception");
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("DBImpl.PreloadCollection.engine_throw_exception");
+}
+
+TEST_F(DBTest, SHUTDOWN_TEST) {
+    db_->Stop();
+
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
+    auto stat = db_->CreateCollection(collection_info);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DescribeCollection(collection_info);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->UpdateCollectionFlag(COLLECTION_NAME, 0);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->CreatePartition(COLLECTION_NAME, "part0", "0");
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DropPartition("part0");
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DropPartitionByTag(COLLECTION_NAME, "0");
+    ASSERT_FALSE(stat.ok());
+
+    std::vector<milvus::engine::meta::CollectionSchema> partition_schema_array;
+    stat = db_->ShowPartitions(COLLECTION_NAME, partition_schema_array);
+    ASSERT_FALSE(stat.ok());
+
+    std::vector<milvus::engine::meta::CollectionSchema> collection_infos;
+    stat = db_->AllCollections(collection_infos);
+    ASSERT_EQ(stat.code(), milvus::DB_ERROR);
+
+    bool has_collection = false;
+    stat = db_->HasCollection(collection_info.collection_id_, has_collection);
+    ASSERT_FALSE(stat.ok());
+
+    milvus::engine::VectorsData xb;
+    stat = db_->InsertVectors(collection_info.collection_id_, "", xb);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->Flush();
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DeleteVector(collection_info.collection_id_, 0);
+    ASSERT_FALSE(stat.ok());
+
+    milvus::engine::IDNumbers ids_to_delete{0};
+    stat = db_->DeleteVectors(collection_info.collection_id_, ids_to_delete);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->Compact(dummy_context_, collection_info.collection_id_);
+    ASSERT_FALSE(stat.ok());
+
+    std::vector<milvus::engine::VectorsData> vectors;
+    std::vector<int64_t> id_array = {0};
+    stat = db_->GetVectorsByID(collection_info, id_array, vectors);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->PreloadCollection(dummy_context_, collection_info.collection_id_);
+    ASSERT_FALSE(stat.ok());
+
+    uint64_t row_count = 0;
+    stat = db_->GetCollectionRowCount(collection_info.collection_id_, row_count);
+    ASSERT_FALSE(stat.ok());
+
+    milvus::engine::CollectionIndex index;
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DescribeIndex(collection_info.collection_id_, index);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DropIndex(COLLECTION_NAME);
+    ASSERT_FALSE(stat.ok());
+
+    std::vector<std::string> tags;
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
+    milvus::json json_params = {{"nprobe", 1}};
+    stat = db_->Query(dummy_context_,
+            collection_info.collection_id_, tags, 1, json_params, xb, result_ids, result_distances);
+    ASSERT_FALSE(stat.ok());
+    std::vector<std::string> file_ids;
+    stat = db_->QueryByFileID(dummy_context_,
+                              file_ids,
+                              1,
+                              json_params,
+                              xb,
+                              result_ids,
+                              result_distances);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->Query(dummy_context_,
+                      collection_info.collection_id_,
+                      tags,
+                      1,
+                      json_params,
+                      milvus::engine::VectorsData(),
+                      result_ids,
+                      result_distances);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DropCollection(collection_info.collection_id_);
+    ASSERT_FALSE(stat.ok());
+}
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     auto segment_handler = std::make_shared<SegmentIterator>(ss, executor);
     segment_handler->Iterate();
@@ -469,6 +702,7 @@ TEST_F(DBTest, VisitorTest) {
         }
         ASSERT_EQ(file_num, 1);
 
+<<<<<<< HEAD
         std::cout << visitor->ToString() << std::endl;
         status = op->CommitRowCount(new_segment_row_cnt);
         status = op->Push();
@@ -554,6 +788,70 @@ TEST_F(DBTest, InsertTest) {
             }
             data_chunk->fixed_fields_[field_name] = raw;
         }
+=======
+        db_->Stop();
+        fiu_disable("DBImpl.StartMetricTask.InvalidTotalCache");
+        fiu_disable("SqliteMetaImpl.FilesToMerge.throw_exception");
+    }
+
+    FIU_ENABLE_FIU("DBImpl.StartMetricTask.InvalidTotalCache");
+    db_->Start();
+    db_->Stop();
+    fiu_disable("DBImpl.StartMetricTask.InvalidTotalCache");
+
+    FIU_ENABLE_FIU("options_metric_enable");
+    db_->Start();
+    db_->Stop();
+    fiu_disable("options_metric_enable");
+}
+
+TEST_F(DBTest, BACK_TIMER_THREAD_2) {
+    fiu_init(0);
+    milvus::Status stat;
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
+
+    stat = db_->CreateCollection(collection_info);
+    ASSERT_TRUE(stat.ok());
+
+    // insert some vector to create some collection files
+    int loop = 10;
+    for (auto i = 0; i < loop; ++i) {
+        int64_t nb = VECTOR_COUNT;
+        milvus::engine::VectorsData xb;
+        BuildVectors(nb, i, xb);
+        db_->InsertVectors(COLLECTION_NAME, "", xb);
+        ASSERT_EQ(xb.id_array_.size(), nb);
+    }
+
+    FIU_ENABLE_FIU("SqliteMetaImpl.CreateCollectionFile.throw_exception");
+    db_->Stop();
+    fiu_disable("SqliteMetaImpl.CreateCollectionFile.throw_exception");
+}
+
+TEST_F(DBTest, BACK_TIMER_THREAD_3) {
+    fiu_init(0);
+    milvus::Status stat;
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
+
+    stat = db_->CreateCollection(collection_info);
+    ASSERT_TRUE(stat.ok());
+
+    // insert some vector to create some collection files
+    int loop = 10;
+    for (auto i = 0; i < loop; ++i) {
+        int64_t nb = VECTOR_COUNT;
+        milvus::engine::VectorsData xb;
+        BuildVectors(nb, i, xb);
+        db_->InsertVectors(COLLECTION_NAME, "", xb);
+        ASSERT_EQ(xb.id_array_.size(), nb);
+    }
+
+    FIU_ENABLE_FIU("DBImpl.MergeFiles.Serialize_ThrowException");
+    db_->Start();
+    db_->Stop();
+    fiu_disable("DBImpl.MergeFiles.Serialize_ThrowException");
+}
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
         status = db_->Insert(collection_name, "", data_chunk);
         if (autogen_id == provide_id) {
@@ -562,8 +860,16 @@ TEST_F(DBTest, InsertTest) {
             ASSERT_TRUE(status.ok());
         }
 
+<<<<<<< HEAD
         status = db_->Flush();
         ASSERT_TRUE(status.ok());
+=======
+    FIU_ENABLE_FIU("DBImpl.MergeFiles.Serialize_ErrorStatus");
+    db_->Start();
+    db_->Stop();
+    fiu_disable("DBImpl.MergeFiles.Serialize_ErrorStatus");
+}
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
         int64_t row_count = 0;
         status = db_->CountEntities(collection_name, row_count);
@@ -823,6 +1129,7 @@ TEST_F(DBTest, GetEntityTest) {
         }
     }
 
+<<<<<<< HEAD
     {
         std::vector<std::string> field_names;
         fill_field_names(field_mappings, field_names);
@@ -854,6 +1161,24 @@ TEST_F(DBTest, GetEntityTest) {
             ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->data_ == dataChunkPtr->fixed_fields_[name]->data_);
         }
     }
+=======
+    uint64_t size;
+    db_->Size(size);
+
+    int loop = INSERT_LOOP;
+    for (auto i = 0; i < loop; ++i) {
+        uint64_t nb = 10;
+        milvus::engine::VectorsData xb;
+        BuildVectors(nb, i, xb);
+
+        db_->InsertVectors(COLLECTION_NAME, "", xb);
+    }
+
+    db_->Flush();
+    db_->Size(size);
+    LOG(DEBUG) << "size=" << size;
+    ASSERT_LE(size, 1 * milvus::engine::GB);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 TEST_F(DBTest, CompactTest) {
@@ -873,6 +1198,7 @@ TEST_F(DBTest, CompactTest) {
     milvus::engine::utils::GetIDFromChunk(data_chunk, batch_entity_ids);
     ASSERT_EQ(batch_entity_ids.size(), entity_count);
 
+<<<<<<< HEAD
     auto delete_entity = [&](int64_t from, int64_t to) -> void {
         int64_t delete_count = to - from;
         if (delete_count < 0) {
@@ -914,6 +1240,22 @@ TEST_F(DBTest, CompactTest) {
 
     // validate the left data is correct after deletion
     validate_entity_data();
+=======
+    milvus::engine::IDNumbers vector_ids;
+    stat = db_->InsertVectors(COLLECTION_NAME, "", xb);
+    milvus::engine::CollectionIndex index;
+    stat = db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);
+
+    // create partition, drop collection will drop partition recursively
+    stat = db_->CreatePartition(COLLECTION_NAME, "part0", "0");
+    ASSERT_TRUE(stat.ok());
+
+    // fail drop collection
+    fiu_init(0);
+
+    stat = db_->DropCollection(COLLECTION_NAME);
+    ASSERT_TRUE(stat.ok());
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 //    // delete entities from 700 to 800
 //    int64_t delete_count_2 = 100;
@@ -1077,11 +1419,35 @@ TEST_F(DBTest, StatsTest) {
     std::string ss = json_stats.dump();
     ASSERT_FALSE(ss.empty());
 
+<<<<<<< HEAD
     int64_t row_count = json_stats[milvus::engine::JSON_ROW_COUNT].get<int64_t>();
     ASSERT_EQ(row_count, entity_count * 2);
 
     int64_t data_size = json_stats[milvus::engine::JSON_DATA_SIZE].get<int64_t>();
     ASSERT_GT(data_size, 0);
+=======
+    const int64_t topk = 10;
+    const int64_t nprobe = 10;
+    milvus::json json_params = {{"nprobe", nprobe}};
+    milvus::engine::ResultIds result_ids;
+    milvus::engine::ResultDistances result_distances;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    fiu_init(0);
+    fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
+    db_ = nullptr; // don't use FreeDB(), this case needs keep the meta
+    fiu_disable("DBImpl.ExexWalRecord.return");
+    auto options = GetOptions();
+    BuildDB(options);
+
+    result_ids.clear();
+    result_distances.clear();
+    stat = db_->Query(dummy_context_,
+            collection_info.collection_id_, {}, topk, json_params, qxb, result_ids, result_distances);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(result_ids.size(), 0);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     auto partitions = json_stats[milvus::engine::JSON_PARTITIONS];
     ASSERT_EQ(partitions.size(), 2);
@@ -1100,8 +1466,21 @@ TEST_F(DBTest, StatsTest) {
         data_size = segment[milvus::engine::JSON_DATA_SIZE].get<int64_t>();
         ASSERT_GT(data_size, 0);
 
+<<<<<<< HEAD
         auto files = segment[milvus::engine::JSON_FILES];
         ASSERT_GT(files.size(), 0);
+=======
+    fiu_init(0);
+    fiu_enable("DBImpl.ExexWalRecord.return", 1, nullptr, 0);
+    FreeDB();
+    fiu_disable("DBImpl.ExexWalRecord.return");
+
+    auto options = GetOptions();
+    // delete wal log file so that recovery will failed when start db next time.
+    boost::filesystem::remove(options.mxlog_path_ + "0.wal");
+    ASSERT_ANY_THROW(BuildDB(options));
+}
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
         for (uint64_t k = 0; k < files.size(); ++k) {
             auto file = files[k];
@@ -1115,10 +1494,21 @@ TEST_F(DBTest, StatsTest) {
     }
 }
 
+<<<<<<< HEAD
 TEST_F(DBTest, FetchTest1) {
     std::string collection_name = "STATS_TEST";
     auto status = CreateCollection2(db_, collection_name);
     ASSERT_TRUE(status.ok());
+=======
+TEST_F(DBTest2, GET_VECTOR_NON_EXISTING_COLLECTION) {
+    std::vector<milvus::engine::VectorsData> vectors;
+    std::vector<int64_t> id_array = {0};
+    milvus::engine::meta::CollectionSchema collection_info;
+    collection_info.collection_id_ = "non_existing";
+    auto status = db_->GetVectorsByID(collection_info, id_array, vectors);
+    ASSERT_FALSE(status.ok());
+}
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     std::string partition_name1 = "p1";
     status = db_->CreatePartition(collection_name, partition_name1);
@@ -1141,8 +1531,15 @@ TEST_F(DBTest, FetchTest1) {
             fetch_vectors.push_back(p[i]);
         }
 
+<<<<<<< HEAD
         status = db_->Insert(collection_name, partition_name1, data_chunk);
         ASSERT_TRUE(status.ok());
+=======
+    std::vector<milvus::engine::VectorsData> vectors;
+    std::vector<int64_t> empty_array;
+    stat = db_->GetVectorsByID(collection_info, empty_array, vectors);
+    ASSERT_FALSE(stat.ok());
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
         milvus::engine::utils::GetIDFromChunk(data_chunk, ids_1);
         ASSERT_EQ(ids_1.size(), entity_count);
@@ -1159,13 +1556,21 @@ TEST_F(DBTest, FetchTest1) {
             fetch_vectors.push_back(p[i]);
         }
 
+<<<<<<< HEAD
         status = db_->Insert(collection_name, partition_name2, data_chunk);
         ASSERT_TRUE(status.ok());
+=======
+    stat = db_->GetVectorsByID(collection_info, qxb.id_array_, vectors);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(vectors.size(), qxb.id_array_.size());
+    ASSERT_EQ(vectors[0].float_data_.size(), COLLECTION_DIM);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
         milvus::engine::utils::GetIDFromChunk(data_chunk, ids_2);
         ASSERT_EQ(ids_2.size(), entity_count);
     }
 
+<<<<<<< HEAD
     status = db_->Flush();
     ASSERT_TRUE(status.ok());
 
@@ -1188,6 +1593,58 @@ TEST_F(DBTest, FetchTest1) {
         result_vectors.push_back(p[i]);
     }
     ASSERT_EQ(fetch_vectors, result_vectors);
+=======
+    std::vector<int64_t> invalid_array = {-1, -1};
+    stat = db_->GetVectorsByID(collection_info, empty_array, vectors);
+    ASSERT_TRUE(stat.ok());
+    for (auto& vector : vectors) {
+        ASSERT_EQ(vector.vector_count_, 0);
+        ASSERT_TRUE(vector.float_data_.empty());
+        ASSERT_TRUE(vector.binary_data_.empty());
+    }
+}
+
+TEST_F(DBTest2, GET_VECTOR_BY_ID_INVALID_TEST) {
+    fiu_init(0);
+
+    milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
+    auto stat = db_->CreateCollection(collection_info);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t qb = 1000;
+    milvus::engine::VectorsData qxb;
+    BuildVectors(qb, 0, qxb);
+
+    std::string partition_name = "part_name";
+    std::string partition_tag = "part_tag";
+    stat = db_->CreatePartition(collection_info.collection_id_, partition_name, partition_tag);
+    ASSERT_TRUE(stat.ok());
+
+    std::vector<milvus::engine::VectorsData> vectors;
+    std::vector<int64_t> empty_array;
+    stat = db_->GetVectorsByID(collection_info, empty_array, vectors);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->InsertVectors(collection_info.collection_id_, partition_tag, qxb);
+    ASSERT_TRUE(stat.ok());
+
+    db_->Flush(collection_info.collection_id_);
+
+    fiu_enable("bloom_filter_nullptr", 1, NULL, 0);
+    stat = db_->GetVectorsByID(collection_info, qxb.id_array_, vectors);
+    ASSERT_FALSE(stat.ok());
+    fiu_disable("bloom_filter_nullptr");
+}
+
+TEST_F(DBTest2, GET_VECTOR_IDS_TEST) {
+    milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
+    auto stat = db_->CreateCollection(collection_schema);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t BATCH_COUNT = 1000;
+    milvus::engine::VectorsData vector_1;
+    BuildVectors(BATCH_COUNT, 0, vector_1);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 //    std::string collection_name = "STATS_TEST";
 //    auto status = CreateCollection2(db_, collection_name);
@@ -1516,11 +1973,30 @@ TEST_F(DBTest, LoadTest) {
     status = db_->CreatePartition(collection_name, partition_name);
     ASSERT_TRUE(status.ok());
 
+<<<<<<< HEAD
     // insert 1000 entities into default partition
     // insert 1000 entities into partition 'p1'
     const uint64_t entity_count = 1000;
     milvus::engine::DataChunkPtr data_chunk;
     BuildEntities(entity_count, 0, data_chunk);
+=======
+TEST_F(DBTest2, INSERT_DUPLICATE_ID) {
+    auto options = GetOptions();
+    options.wal_enable_ = false;
+    BuildDB(options);
+
+    milvus::engine::meta::CollectionSchema collection_schema = BuildCollectionSchema();
+    auto stat = db_->CreateCollection(collection_schema);
+    ASSERT_TRUE(stat.ok());
+
+    uint64_t size = 20;
+    milvus::engine::VectorsData vector;
+    BuildVectors(size, 0, vector);
+    vector.id_array_.clear();
+    for (int i = 0; i < size; ++i) {
+        vector.id_array_.emplace_back(0);
+    }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     status = db_->Insert(collection_name, "", data_chunk);
     ASSERT_TRUE(status.ok());
@@ -1540,8 +2016,35 @@ TEST_F(DBTest, LoadTest) {
     status = db_->LoadCollection(dummy_context_, collection_name, fields);
     ASSERT_TRUE(status.ok());
 
+<<<<<<< HEAD
     // 2 segments, 2 fields, at least 4 files loaded
     ASSERT_GE(cache_mgr.ItemCount(), 4);
+=======
+    milvus::engine::CollectionIndex index;
+    // index.metric_type_ = (int)milvus::engine::MetricType::IP;
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFFLAT;
+    stat = db_->CreateIndex(dummy_context_, collection_info.collection_id_, index);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->PreloadCollection(dummy_context_, collection_info.collection_id_);
+    ASSERT_TRUE(stat.ok());
+
+    int topk = 10, nprobe = 10;
+    milvus::json json_params = {{"nprobe", nprobe}};
+
+    for (auto id : ids_to_search) {
+        //        std::cout << "xxxxxxxxxxxxxxxxxxxx " << i << std::endl;
+        std::vector<std::string> tags;
+        milvus::engine::ResultIds result_ids;
+        milvus::engine::ResultDistances result_distances;
+
+        stat = db_->QueryByID(dummy_context_, collection_info.collection_id_, tags, topk, json_params, id, result_ids,
+result_distances);
+        ASSERT_TRUE(stat.ok());
+        ASSERT_EQ(result_ids[0], id);
+        ASSERT_LT(result_distances[0], 1e-4);
+    }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     int64_t total_size = entity_count * (COLLECTION_DIM * sizeof(float) + sizeof(int64_t)) * 2;
     ASSERT_GE(cache_mgr.CacheUsage(), total_size);
@@ -1550,8 +2053,13 @@ TEST_F(DBTest, LoadTest) {
     fields.clear();
     cache_mgr.ClearCache();
 
+<<<<<<< HEAD
     status = db_->LoadCollection(dummy_context_, collection_name, fields);
     ASSERT_TRUE(status.ok());
+=======
+    stat = db_->PreloadCollection(dummy_context_, collection_info.collection_id_);
+    ASSERT_TRUE(stat.ok());
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     // 2 segments, 4 fields, at least 8 files loaded
     ASSERT_GE(cache_mgr.ItemCount(), 8);

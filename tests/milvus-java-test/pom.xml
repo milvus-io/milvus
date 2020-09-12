@@ -116,7 +116,11 @@
         <dependency>
             <groupId>io.milvus</groupId>
             <artifactId>milvus-sdk-java</artifactId>
+<<<<<<< HEAD
             <version>0.9.0-SNAPSHOT</version>
+=======
+            <version>0.8.2</version>
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         </dependency>
 
 <!--        <dependency>-->

@@ -32,6 +32,7 @@ constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 16;
 constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
+<<<<<<< HEAD
 constexpr int64_t ADD_ENTITY_LOOP = 10;
 constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
 constexpr int32_t NLIST = 1024;
@@ -39,6 +40,11 @@ const char* PARTITION_TAG = "part";
 const char* DIMENSION = "dim";
 const char* METRICTYPE = "metric_type";
 const char* INDEXTYPE = "index_type";
+=======
+constexpr int64_t ADD_ENTITY_LOOP = 5;
+constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
+constexpr int32_t NLIST = 16384;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 void
 PrintEntity(const std::string& tag, const milvus::VectorData& entity) {
@@ -226,6 +232,7 @@ ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int
 
 void
 ClientTest::SearchEntitiesByID(const std::string& collection_name, int64_t topk, int64_t nprobe) {
+<<<<<<< HEAD
     //    std::vector<std::string> partition_tags;
     //    milvus::TopKQueryResult topk_query_result;
     //
@@ -257,6 +264,44 @@ ClientTest::SearchEntitiesByID(const std::string& collection_name, int64_t topk,
     //            std::cout << "\t" << one_result.ids[j] << "\t" << one_result.distances[j] << std::endl;
     //        }
     //    }
+=======
+    std::vector<std::string> partition_tags;
+    milvus::TopKQueryResult topk_query_result;
+
+    topk_query_result.clear();
+
+    std::vector<int64_t> id_array;
+    for (auto& pair : search_entity_array_) {
+        id_array.push_back(pair.first);
+    }
+
+    std::vector<milvus::Entity> entities;
+    milvus::Status stat = conn_->GetEntityByID(collection_name, id_array, entities);
+    std::cout << "GetEntityByID function call status: " << stat.message() << std::endl;
+
+    JSON json_params = {{"nprobe", nprobe}};
+    milvus_sdk::TimeRecorder rc("Search");
+    stat = conn_->Search(collection_name,
+                         partition_tags,
+                         entities,
+                         topk,
+                         json_params.dump(),
+                         topk_query_result);
+    std::cout << "Search function call status: " << stat.message() << std::endl;
+
+    if (topk_query_result.size() != id_array.size()) {
+        std::cout << "ERROR! wrong result for query by id" << std::endl;
+        return;
+    }
+
+    for (size_t i = 0; i < id_array.size(); i++) {
+        std::cout << "Entity " << id_array[i] << " top " << topk << " search result:" << std::endl;
+        const milvus::QueryResult& one_result = topk_query_result[i];
+        for (size_t j = 0; j < one_result.ids.size(); j++) {
+            std::cout << "\t" << one_result.ids[j] << "\t" << one_result.distances[j] << std::endl;
+        }
+    }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 void

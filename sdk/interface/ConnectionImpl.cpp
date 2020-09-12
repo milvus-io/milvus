@@ -91,6 +91,7 @@ ConnectionImpl::CreatePartition(const PartitionParam& partition_param) {
 }
 
 Status
+<<<<<<< HEAD
 ConnectionImpl::DropPartition(const PartitionParam& partition_param) {
     return client_proxy_->DropPartition(partition_param);
 }
@@ -98,6 +99,10 @@ ConnectionImpl::DropPartition(const PartitionParam& partition_param) {
 bool
 ConnectionImpl::HasPartition(const std::string& collection_name, const std::string& partition_tag) const {
     return client_proxy_->HasPartition(collection_name, partition_tag);
+=======
+ConnectionImpl::GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_schema) {
+    return client_proxy_->GetCollectionInfo(collection_name, collection_schema);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 Status

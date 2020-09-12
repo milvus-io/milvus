@@ -14,7 +14,11 @@ py==1.8.0
 pyasn1==0.4.7
 pyasn1-modules==0.2.6
 pylint==2.5.0
+<<<<<<< HEAD
 pymilvus==0.2.13
+=======
+pymilvus==0.2.14
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #pymilvus-test==0.3.25
 pyparsing==2.4.0
 pytest==4.6.3

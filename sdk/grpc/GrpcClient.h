@@ -60,7 +60,11 @@ class GrpcClient {
     Search(const grpc::SearchParam& search_param, ::milvus::grpc::QueryResult& topk_query_result);
 
     Status
+<<<<<<< HEAD
     GetCollectionInfo(const std::string& collection_name, grpc::Mapping& grpc_schema);
+=======
+    GetCollectionInfo(const std::string& collection_name, grpc::CollectionSchema& grpc_schema);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     int64_t
     CountEntities(grpc::CollectionName& collection_name, Status& status);

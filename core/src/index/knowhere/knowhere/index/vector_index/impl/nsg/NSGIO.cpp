@@ -41,7 +41,11 @@ read_index(MemoryIOReader& reader) {
     reader(&metric, sizeof(int32_t), 1);
     reader(&ntotal, sizeof(size_t), 1);
     reader(&dimension, sizeof(size_t), 1);
+<<<<<<< HEAD
     auto index = new NsgIndex(dimension, ntotal, static_cast<NsgIndex::Metric_Type>(metric));
+=======
+    auto index = new NsgIndex(dimension, ntotal, (impl::NsgIndex::Metric_Type)metric);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     reader(&index->navigation_point, sizeof(index->navigation_point), 1);
 
     // index->ori_data_ = new float[index->ntotal * index->dimension];

@@ -2,7 +2,11 @@
 @Library('mpl') _
 
 String cron_timezone = "TZ=Asia/Shanghai"
+<<<<<<< HEAD
 String cron_string = BRANCH_NAME == "master" ? "50 3 * * * " : ""
+=======
+String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 pipeline {
     agent none
@@ -28,7 +32,11 @@ pipeline {
         LOWER_BUILD_TYPE = params.BUILD_TYPE.toLowerCase()
         SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
         PIPELINE_NAME = "milvus-ci"
+<<<<<<< HEAD
         HELM_BRANCH = "0.11.0"
+=======
+        HELM_BRANCH = "0.10.1"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     stages {
         stage ('Milvus Build and Unittest') {
@@ -61,12 +69,76 @@ pipeline {
                     }
                 }
                 stages {
+<<<<<<< HEAD
                     stage('Build and Unittest') {
                         steps {
                             container("milvus-${BINARY_VERSION}-build-env") {
                                 MPLModule('Milvus Build')
                                 MPLModule('Unittest')
                                 MPLModule('Package Build')
+=======
+                    stage("Milvus Build and Unittest") {
+                        agent {
+                            kubernetes {
+                                label "${OS_NAME}-${BINARY_VERSION}-build-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                                defaultContainer 'jnlp'
+                                yamlFile "ci/jenkins/pod/milvus-${BINARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
+                            }
+                        }
+
+                        stages {
+                            stage('Build') {
+                                steps {
+                                    container("milvus-${BINARY_VERSION}-build-env") {
+                                        script {
+                                            try{
+                                                load "${env.WORKSPACE}/ci/jenkins/step/build.groovy"
+                                            } catch (Exception e) {
+                                                containerLog "milvus-${BINARY_VERSION}-build-env"
+                                                throw e
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            stage('Unittest') {
+                                steps {
+                                    container("milvus-${BINARY_VERSION}-build-env") {
+                                        script {
+                                            if ("${BINARY_VERSION}" == "gpu") {
+                                                load "${env.WORKSPACE}/ci/jenkins/step/unittest.groovy"
+                                            } else {
+                                                echo "Skip Unittest"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            stage('Code Coverage') {
+                                steps {
+                                    container("milvus-${BINARY_VERSION}-build-env") {
+                                        script {
+                                            if ("${BINARY_VERSION}" == "gpu") {
+                                                load "${env.WORKSPACE}/ci/jenkins/step/coverage.groovy"
+                                            } else {
+                                                echo "Skip Code Coverage"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            stage('Upload Package') {
+                                steps {
+                                    container("milvus-${BINARY_VERSION}-build-env") {
+                                        script {
+                                            load "${env.WORKSPACE}/ci/jenkins/step/package.groovy"
+                                        }
+                                    }
+                                }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
                             }
                         }
                     }
@@ -125,6 +197,7 @@ pipeline {
                         values 'centos7'
                     }
 
+<<<<<<< HEAD
                     axis {
                         name 'CPU_ARCH'
                         values 'amd64'
@@ -166,6 +239,57 @@ pipeline {
                             archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
                             MPLModule('Cleanup Single Node DevTest')
                             MPLModule('Cleanup Mishards DevTest')
+=======
+                    stage('Deploy to Development') {
+                        environment {
+                            FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
+                            FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")
+                            HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
+                            SHARDS_HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-shards-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
+                            DEV_TEST_ARTIFACTS = "_artifacts/${FROMAT_SEMVER}/${FORMAT_OS_NAME}/${BINARY_VERSION}"
+                        }
+
+                        agent {
+                            kubernetes {
+                                label "${OS_NAME}-${BINARY_VERSION}-dev-test-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                                defaultContainer 'jnlp'
+                                yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
+                            }
+                        }
+
+                        stages {
+                            stage('Dev Test') {
+                                steps {
+                                    container('milvus-test-env') {
+                                        script {
+                                            sh "mkdir -p ${env.DEV_TEST_ARTIFACTS}"
+                                            boolean isNightlyTest = isTimeTriggeredBuild()
+                                            if (isNightlyTest) {
+                                                load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
+                                                load "${env.WORKSPACE}/ci/jenkins/step/shardsDevNightlyTest.groovy"
+                                            } else {
+                                                load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        post {
+                            cleanup {
+                                container('milvus-test-env') {
+                                    script {
+                                        archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
+                                        load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
+                                        boolean isNightlyTest = isTimeTriggeredBuild()
+                                        if (isNightlyTest) {
+                                            load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDev.groovy"
+                                        }
+                                    }
+                                }
+                            }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
                         }
                     }
                 }

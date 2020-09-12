@@ -78,9 +78,12 @@ class MySQLConnectionPool : public mysqlpp::ConnectionPool {
     int max_pool_size_;
 
     unsigned int max_idle_time_ = 10;  // 10 seconds
+<<<<<<< HEAD:core/src/db/meta/backend/MySQLConnectionPool.h
 
     std::mutex mutex_;
     std::condition_variable full_;
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:core/src/db/meta/MySQLConnectionPool.h
 };
 
 }  // namespace milvus::engine::meta

@@ -23,6 +23,10 @@ ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/var/lib/milvus/lib"
 
 WORKDIR /var/lib/milvus
 
+<<<<<<< HEAD
 CMD [ "/var/lib/milvus/bin/milvus_server", "-c", "/var/lib/milvus/conf/milvus.yaml" ]
+=======
+CMD [ "/var/lib/milvus/bin/milvus_server", "-c", "/var/lib/milvus/conf/server_config.yaml" ]
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 EXPOSE 19530

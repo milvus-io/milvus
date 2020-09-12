@@ -56,8 +56,12 @@ public class TestInsertEntities {
         assert(res.getResponse().ok());
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
+<<<<<<< HEAD:tests/milvus-java-test/src/main/java/com/TestInsertEntities.java
         // Assert ids and collection row count
         Assert.assertEquals(res.getEntityIds(), entityIds);
+=======
+        // Assert collection row count
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:tests/milvus-java-test/src/main/java/com/TestAddVectors.java
         Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 
@@ -99,6 +103,7 @@ public class TestInsertEntities {
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
+<<<<<<< HEAD:tests/milvus-java-test/src/main/java/com/TestInsertEntities.java
         Response statsResponse = client.getCollectionStats(collectionName);
         if(statsResponse.ok()) {
             JSONArray partitionsJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "partitions");
@@ -107,6 +112,9 @@ public class TestInsertEntities {
                 Assert.assertEquals(obj.get("tag"), tag);
             });
         }
+=======
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:tests/milvus-java-test/src/main/java/com/TestAddVectors.java
     }
 
     // Add vectors into collection, which tag not existed
@@ -131,6 +139,7 @@ public class TestInsertEntities {
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
+<<<<<<< HEAD:tests/milvus-java-test/src/main/java/com/TestInsertEntities.java
         Response statsResponse = client.getCollectionStats(collectionName);
         if(statsResponse.ok()) {
             JSONArray partitionsJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "partitions");
@@ -139,6 +148,9 @@ public class TestInsertEntities {
                 Assert.assertEquals(obj.get("row_count"), nb);
             });
         }
+=======
+        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:tests/milvus-java-test/src/main/java/com/TestAddVectors.java
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
@@ -162,7 +174,10 @@ public class TestInsertEntities {
         Response res_flush = client.flush(collectionName);
         assert(res_flush.ok());
         // Assert collection row count
+<<<<<<< HEAD:tests/milvus-java-test/src/main/java/com/TestInsertEntities.java
         Assert.assertEquals(entityIds, res.getEntityIds());
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:tests/milvus-java-test/src/main/java/com/TestAddVectors.java
         Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
     }
 

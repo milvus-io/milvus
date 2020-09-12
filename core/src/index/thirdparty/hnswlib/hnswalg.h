@@ -75,7 +75,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             throw std::runtime_error("Not enough memory: HierarchicalNSW failed to allocate linklists");
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
         mult_ = 1 / log(1.0 * M_);
-        revSize_ = 1.0 / mult_;
     }
 
     struct CompareByFirst {
@@ -113,7 +112,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     size_t maxM0_;
     size_t ef_construction_;
 
-    double mult_, revSize_;
+    double mult_;
     int maxlevel_;
 
 
@@ -709,7 +708,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         if (linkLists_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
         element_levels_ = std::vector<int>(max_elements);
-        revSize_ = 1.0 / mult_;
         ef_ = 10;
         for (size_t i = 0; i < cur_element_count; i++) {
             label_lookup_[getExternalLabel(i)]=i;
@@ -846,7 +844,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         if (linkLists_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
         element_levels_ = std::vector<int>(max_elements);
-        revSize_ = 1.0 / mult_;
         ef_ = 10;
         for (size_t i = 0; i < cur_element_count; i++) {
             label_lookup_[getExternalLabel(i)]=i;
@@ -1140,6 +1137,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         ret += element_levels_.size() * sizeof(int);
         ret += max_elements_ * size_data_per_element_;
         ret += max_elements_ * sizeof(void*);
+<<<<<<< HEAD
         for (size_t i = 0; i < max_elements_; ++ i) {
             ret += linkLists_[i] ? size_links_per_element_ * element_levels_[i] : 0;
         }
@@ -1147,6 +1145,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
      }
 
     };
+=======
+        for (auto i = 0; i < max_elements_; ++ i) {
+            ret += linkLists_[i] ? size_links_per_element_ * element_levels_[i] : 0;
+        }
+        return ret;
+    }
+};
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 }
 

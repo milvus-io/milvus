@@ -27,6 +27,7 @@ class OffsetBaseIndex {
     explicit OffsetBaseIndex(std::shared_ptr<faiss::Index> index) : index_(std::move(index)) {
     }
 
+<<<<<<< HEAD:core/src/index/knowhere/knowhere/index/vector_offset_index/OffsetBaseIndex.h
     virtual BinarySet
     SerializeImpl(const IndexType& type);
 
@@ -39,6 +40,29 @@ class OffsetBaseIndex {
 
  public:
     std::shared_ptr<faiss::Index> index_ = nullptr;
+=======
+    virtual void
+    OnSearchCombineMaxNqChanged(int64_t nq) {
+        search_combine_nq_ = nq;
+    }
+
+ protected:
+    void
+    AddUseBlasThresholdListener();
+
+    void
+    RemoveUseBlasThresholdListener();
+
+    void
+    AddSearchCombineMaxNqListener();
+
+    void
+    RemoveSearchCombineMaxNqListener();
+
+ protected:
+    int64_t use_blas_threshold_ = std::stoll(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT);
+    int64_t search_combine_nq_ = std::stoll(CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:core/src/config/handler/EngineConfigHandler.h
 };
 
 }  // namespace knowhere

@@ -321,6 +321,7 @@ class Connection {
     CreatePartition(const PartitionParam& partition_param) = 0;
 
     /**
+<<<<<<< HEAD
      * @brief Delete partition method
      *
      * This method is used to delete collection's partition.
@@ -334,6 +335,9 @@ class Connection {
 
     /**
      * @brief Has partition method
+=======
+     * @brief Get collection information
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
      *
      * This method is used to test existence of collection's partition
      *

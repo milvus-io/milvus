@@ -19,6 +19,13 @@ include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 set(FOUND_OPENBLAS "unknown")
+<<<<<<< HEAD
+=======
+add_subdirectory(index)
+if (FAISS_WITH_MKL)
+    add_compile_definitions("WITH_MKL")
+endif ()
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 add_subdirectory(index)
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
@@ -88,10 +95,19 @@ add_executable( milvus_server   ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
 target_link_libraries( milvus_server PRIVATE ${SERVER_LIBS} )
 install( TARGETS milvus_server DESTINATION bin )
 
+<<<<<<< HEAD
 if ( FOUND_OPENBLAS STREQUAL "false" )
     install( FILES
         ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0
         ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0.3
         DESTINATION lib )
+=======
+if (FOUND_OPENBLAS STREQUAL "false")
+    install(FILES
+        ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}
+        ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0
+        ${CMAKE_BINARY_DIR}/src/index/openblas_ep-prefix/src/openblas_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}openblas${CMAKE_SHARED_LIBRARY_SUFFIX}.0.3
+        DESTINATION lib)
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 endif()

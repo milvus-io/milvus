@@ -11,7 +11,11 @@
 
 #include "db/insert/MemManagerImpl.h"
 
+<<<<<<< HEAD
 #include <fiu/fiu-local.h>
+=======
+#include <fiu-local.h>
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #include <thread>
 
 #include "db/Constants.h"
@@ -35,17 +39,30 @@ MemManagerImpl::GetMemByCollection(int64_t collection_id) {
 }
 
 Status
+<<<<<<< HEAD
 MemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id) {
     auto status = ValidateChunk(collection_id, chunk);
     if (!status.ok()) {
         return status;
     }
+=======
+MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                              const float* vectors, uint64_t lsn) {
+    VectorsData vectors_data;
+    vectors_data.vector_count_ = length;
+    vectors_data.float_data_.resize(length * dim);
+    memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(float));
+    vectors_data.id_array_.resize(length);
+    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
+    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     std::unique_lock<std::mutex> lock(mutex_);
     return InsertEntitiesNoLock(collection_id, partition_id, chunk, op_id);
 }
 
 Status
+<<<<<<< HEAD
 MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) {
     if (chunk == nullptr) {
         return Status(DB_ERROR, "Null chunk pointer");
@@ -58,6 +75,19 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
         LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
+=======
+MemManagerImpl::InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                              const uint8_t* vectors, uint64_t lsn) {
+    VectorsData vectors_data;
+    vectors_data.vector_count_ = length;
+    vectors_data.binary_data_.resize(length * dim);
+    memcpy(vectors_data.binary_data_.data(), vectors, length * dim * sizeof(uint8_t));
+    vectors_data.id_array_.resize(length);
+    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
+    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data);
+
+    std::unique_lock<std::mutex> lock(mutex_);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     std::vector<std::string> field_names = ss->GetFieldNames();
     for (auto& name : field_names) {
@@ -71,6 +101,7 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
             continue;
         }
 
+<<<<<<< HEAD
         size_t data_size = iter->second->data_.size();
 
         snapshot::FieldPtr field = ss->GetField(name);
@@ -135,6 +166,35 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
     }
 
     return Status::OK();
+=======
+Status
+MemManagerImpl::InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids,
+                               int64_t dim, const float* vectors,
+                               const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                               const std::unordered_map<std::string, uint64_t>& attr_size,
+                               const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) {
+    VectorsData vectors_data;
+    vectors_data.vector_count_ = length;
+    vectors_data.float_data_.resize(length * dim);
+    memcpy(vectors_data.float_data_.data(), vectors, length * dim * sizeof(float));
+    vectors_data.id_array_.resize(length);
+    memcpy(vectors_data.id_array_.data(), vector_ids, length * sizeof(IDNumber));
+
+    VectorSourcePtr source = std::make_shared<VectorSource>(vectors_data, attr_nbytes, attr_size, attr_data);
+
+    std::unique_lock<std::mutex> lock(mutex_);
+
+    return InsertEntitiesNoLock(collection_id, source, lsn);
+}
+
+Status
+MemManagerImpl::InsertVectorsNoLock(const std::string& collection_id, const VectorSourcePtr& source, uint64_t lsn) {
+    MemTablePtr mem = GetMemByTable(collection_id);
+    mem->SetLSN(lsn);
+
+    auto status = mem->Add(source);
+    return status;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 Status
@@ -160,15 +220,39 @@ MemManagerImpl::DeleteEntities(int64_t collection_id, const std::vector<idx_t>& 
 }
 
 Status
+<<<<<<< HEAD
 MemManagerImpl::Flush(int64_t collection_id) {
+=======
+MemManagerImpl::Flush(const std::string& collection_id) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     ToImmutable(collection_id);
 
+<<<<<<< HEAD
     std::set<int64_t> collection_ids;
     return InternalFlush(collection_ids);
 }
 
 Status
 MemManagerImpl::Flush(std::set<int64_t>& collection_ids) {
+=======
+    std::unique_lock<std::mutex> lock(serialization_mtx_);
+    auto max_lsn = GetMaxLSN(temp_immutable_list);
+    for (auto& mem : temp_immutable_list) {
+        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetTableId();
+        auto status = mem->Serialize(max_lsn, true);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetTableId() << " failed";
+            return status;
+        }
+        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetTableId();
+    }
+
+    return Status::OK();
+}
+
+Status
+MemManagerImpl::Flush(std::set<std::string>& collection_ids) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     ToImmutable();
 
     return InternalFlush(collection_ids);
@@ -183,16 +267,29 @@ MemManagerImpl::InternalFlush(std::set<int64_t>& collection_ids) {
     }
 
     std::unique_lock<std::mutex> lock(serialization_mtx_);
+<<<<<<< HEAD
     for (auto& mem : temp_immutable_list) {
         int64_t collection_id = mem->GetCollectionId();
         LOG_ENGINE_DEBUG_ << "Flushing collection: " << collection_id;
         auto status = mem->Serialize();
+=======
+    collection_ids.clear();
+    auto max_lsn = GetMaxLSN(temp_immutable_list);
+    for (auto& mem : temp_immutable_list) {
+        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetTableId();
+        auto status = mem->Serialize(max_lsn, true);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Flush collection " << collection_id << " failed";
             return status;
         }
+<<<<<<< HEAD
         LOG_ENGINE_DEBUG_ << "Flushed collection: " << collection_id;
         collection_ids.insert(collection_id);
+=======
+        collection_ids.insert(mem->GetTableId());
+        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetTableId();
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     return Status::OK();

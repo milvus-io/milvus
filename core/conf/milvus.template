@@ -24,9 +24,15 @@ cluster:
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # General Config       | Description                                                | Type       | Default         |
+<<<<<<< HEAD:core/conf/milvus.template
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # timezone             | Use UTC-x or UTC+x to specify a time zone.                 | Timezone   | UTC+8           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+=======
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# timezone             | Use UTC-x or UTC+x to specify a time zone.                 | Timezone   | UTC+8           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:core/conf/server_config.template
 # meta_uri             | URI for metadata storage, using SQLite (for single server  | URI        | sqlite://:@:/   |
 #                      | Milvus) or MySQL (for distributed cluster Milvus).         |            |                 |
 #                      | Format: dialect://username:password@host:port/database     |            |                 |
@@ -70,6 +76,7 @@ storage:
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # WAL Config           | Description                                                | Type       | Default         |
+<<<<<<< HEAD:core/conf/milvus.template
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # enable               | Whether to enable write-ahead logging (WAL) in Milvus.     | Boolean    | true            |
 #                      | If WAL is enabled, Milvus writes all data changes to log   |            |                 |
@@ -80,6 +87,34 @@ storage:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 wal:
   enable: true
+=======
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# enable               | Whether to enable write-ahead logging (WAL) in Milvus.     | Boolean    | true            |
+#                      | If WAL is enabled, Milvus writes all data changes to log   |            |                 |
+#                      | files in advance before implementing data changes. WAL     |            |                 |
+#                      | ensures the atomicity and durability for Milvus operations.|            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# recovery_error_ignore| Whether to ignore logs with errors that happens during WAL | Boolean    | false           |
+#                      | recovery. If true, when Milvus restarts for recovery and   |            |                 |
+#                      | there are errors in WAL log files, log files with errors   |            |                 |
+#                      | are ignored. If false, Milvus does not restart when there  |            |                 |
+#                      | are errors in WAL log files.                               |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# buffer_size          | Sum total of the read buffer and the write buffer in Bytes.| String     | 256MB           |
+#                      | buffer_size must be in range [64MB, 4096MB].               |            |                 |
+#                      | If the value you specified is out of range, Milvus         |            |                 |
+#                      | automatically uses the boundary value closest to the       |            |                 |
+#                      | specified value. It is recommended you set buffer_size to  |            |                 |
+#                      | a value greater than the inserted data size of a single    |            |                 |
+#                      | insert operation for better performance.                   |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# path                 | Location of WAL log files.                                 | String     |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+wal:
+  enable: true
+  recovery_error_ignore: false
+  buffer_size: 256MB
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:core/conf/server_config.template
   path: @MILVUS_DB_PATH@/wal
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -105,9 +140,15 @@ cache:
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # GPU Config           | Description                                                | Type       | Default         |
+<<<<<<< HEAD:core/conf/milvus.template
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # enable               | Use GPU devices or not.                                    | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+=======
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# enable               | Use GPU devices or not.                                    | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:core/conf/server_config.template
 # cache_size           | The size of GPU memory per card used for cache.            | String     | 1GB             |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # gpu_search_threshold | A Milvus performance tuning parameter. This value will be  | Integer    | 1000            |
@@ -116,7 +157,9 @@ cache:
 #                      | If nq >= gpu_search_threshold, the search computation will |            |                 |
 #                      | be executed on GPUs only;                                  |            |                 |
 #                      | if nq < gpu_search_threshold, the search computation will  |            |                 |
-#                      | be executed on both CPUs and GPUs.                         |            |                 |
+#                      | be executed on CPUs only.                                  |            |                 |
+#                      | The SQ8H index is special, if nq < gpu_search_threshold,   |            |                 |
+#                      | the search will be executed on both CPUs and GPUs.         |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # search_devices       | The list of GPU devices used for search computation.       | DeviceList | gpu0            |
 #                      | Must be in format gpux.                                    |            |                 |

@@ -42,7 +42,11 @@ GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
         auto device_index =
             new faiss::gpu::GpuIndexIVFFlat(gpu_res->faiss_res.get(), dim, nlist, metric_type, idx_config);
+<<<<<<< HEAD
         device_index->train(rows, reinterpret_cast<const float*>(p_data));
+=======
+        device_index->train(rows, (float*)p_data);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
         index_.reset(device_index);
         res_ = gpu_res;
@@ -150,8 +154,12 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
         int64_t dim = device_index->d;
         for (int64_t i = 0; i < n; i += block_size) {
             int64_t search_size = (n - i > block_size) ? block_size : (n - i);
+<<<<<<< HEAD
             device_index->search(search_size, reinterpret_cast<const float*>(data) + i * dim, k, distances + i * k,
                                  labels + i * k, bitset_);
+=======
+            device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k, bitset_);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         }
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");

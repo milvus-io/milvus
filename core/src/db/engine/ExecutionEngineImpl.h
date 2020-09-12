@@ -52,11 +52,20 @@ class ExecutionEngineImpl : public ExecutionEngine {
     CreateStructuredIndex(const engine::DataType field_type, engine::BinaryDataPtr& raw_data,
                           knowhere::IndexPtr& index_ptr);
 
+#if 0
     Status
+<<<<<<< HEAD
     LoadForSearch(const query::QueryPtr& query_ptr);
 
     Status
     Load(const TargetFields& field_names);
+=======
+    GetVectorByID(const int64_t id, float* vector, bool hybrid) override;
+
+    Status
+    GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) override;
+#endif
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     Status
     ExecBinaryQuery(const query::GeneralQueryPtr& general_query, faiss::ConcurrentBitsetPtr& bitset,
@@ -88,6 +97,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
                        knowhere::VecIndexPtr& new_index);
 
  private:
+<<<<<<< HEAD
     segment::SegmentReaderPtr segment_reader_;
     TargetFields target_fields_;
     ExecutionEngineContext context_;
@@ -96,6 +106,40 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     int64_t gpu_num_ = 0;
     bool gpu_enable_ = false;
+=======
+    knowhere::VecIndexPtr
+    CreatetVecIndex(EngineType type);
+
+    knowhere::VecIndexPtr
+    Load(const std::string& location);
+
+    void
+    HybridLoad() const;
+
+    void
+    HybridUnset() const;
+
+ protected:
+    knowhere::VecIndexPtr index_ = nullptr;
+#ifdef MILVUS_GPU_VERSION
+    knowhere::VecIndexPtr index_reserve_ = nullptr;  // reserve the cpu index before copying it to gpu
+#endif
+    std::string location_;
+    int64_t dim_;
+    EngineType index_type_;
+    MetricType metric_type_;
+
+    std::unordered_map<std::string, DataType> attr_types_;
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
+    std::unordered_map<std::string, size_t> attr_size_;
+    query::BinaryQueryPtr binary_query_;
+    int64_t vector_count_;
+
+    milvus::json index_params_;
+    int64_t gpu_num_ = 0;
+
+    bool gpu_cache_enable_ = false;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 };
 
 }  // namespace engine

@@ -82,7 +82,24 @@ MilvusService::Stub::Stub(const std::shared_ptr< ::grpc::ChannelInterface>& chan
   , rpcmethod_ReloadSegments_(MilvusService_method_names[23], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   , rpcmethod_Flush_(MilvusService_method_names[24], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   , rpcmethod_Compact_(MilvusService_method_names[25], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+<<<<<<< HEAD
   , rpcmethod_SearchPB_(MilvusService_method_names[26], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+=======
+  , rpcmethod_CreateHybridCollection_(MilvusService_method_names[26], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_HasHybridCollection_(MilvusService_method_names[27], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_DropHybridCollection_(MilvusService_method_names[28], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_DescribeHybridCollection_(MilvusService_method_names[29], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_CountHybridCollection_(MilvusService_method_names[30], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_ShowHybridCollections_(MilvusService_method_names[31], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_ShowHybridCollectionInfo_(MilvusService_method_names[32], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_PreloadHybridCollection_(MilvusService_method_names[33], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_InsertEntity_(MilvusService_method_names[34], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_HybridSearch_(MilvusService_method_names[35], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_HybridSearchInSegments_(MilvusService_method_names[36], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_GetEntityByID_(MilvusService_method_names[37], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_GetEntityIDs_(MilvusService_method_names[38], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_DeleteEntitiesByID_(MilvusService_method_names[39], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   {}
 
 ::grpc::Status MilvusService::Stub::CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::milvus::grpc::Status* response) {
@@ -962,18 +979,93 @@ MilvusService::Service::Service() {
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::ReLoadSegmentsParam, ::milvus::grpc::Status>(
           std::mem_fn(&MilvusService::Service::ReloadSegments), this)));
+<<<<<<< HEAD
+=======
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       MilvusService_method_names[24],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::FlushParam, ::milvus::grpc::Status>(
           std::mem_fn(&MilvusService::Service::Flush), this)));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       MilvusService_method_names[25],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::FlushParam, ::milvus::grpc::Status>(
+          std::mem_fn(&MilvusService::Service::Flush), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[26],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+<<<<<<< HEAD
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(
           std::mem_fn(&MilvusService::Service::Compact), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       MilvusService_method_names[26],
+=======
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::Mapping, ::milvus::grpc::Status>(
+          std::mem_fn(&MilvusService::Service::CreateHybridCollection), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[27],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::CollectionName, ::milvus::grpc::BoolReply>(
+          std::mem_fn(&MilvusService::Service::HasHybridCollection), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[28],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(
+          std::mem_fn(&MilvusService::Service::DropHybridCollection), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[29],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::CollectionName, ::milvus::grpc::Mapping>(
+          std::mem_fn(&MilvusService::Service::DescribeHybridCollection), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[30],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionRowCount>(
+          std::mem_fn(&MilvusService::Service::CountHybridCollection), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[31],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::Command, ::milvus::grpc::MappingList>(
+          std::mem_fn(&MilvusService::Service::ShowHybridCollections), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[32],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionInfo>(
+          std::mem_fn(&MilvusService::Service::ShowHybridCollectionInfo), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[33],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(
+          std::mem_fn(&MilvusService::Service::PreloadHybridCollection), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[34],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HInsertParam, ::milvus::grpc::HEntityIDs>(
+          std::mem_fn(&MilvusService::Service::InsertEntity), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[35],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HSearchParam, ::milvus::grpc::TopKQueryResult>(
+          std::mem_fn(&MilvusService::Service::HybridSearch), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[36],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HSearchInSegmentsParam, ::milvus::grpc::TopKQueryResult>(
+          std::mem_fn(&MilvusService::Service::HybridSearchInSegments), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[37],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HEntityIdentity, ::milvus::grpc::HEntity>(
+          std::mem_fn(&MilvusService::Service::GetEntityByID), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[38],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::HGetEntityIDsParam, ::milvus::grpc::HEntityIDs>(
+          std::mem_fn(&MilvusService::Service::GetEntityIDs), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      MilvusService_method_names[39],
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::SearchParamPB, ::milvus::grpc::QueryResult>(
           std::mem_fn(&MilvusService::Service::SearchPB), this)));
@@ -1144,6 +1236,23 @@ MilvusService::Service::~Service() {
 }
 
 ::grpc::Status MilvusService::Service::ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request, ::milvus::grpc::Status* response) {
+<<<<<<< HEAD
+=======
+  (void) context;
+  (void) request;
+  (void) response;
+  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+}
+
+::grpc::Status MilvusService::Service::Flush(::grpc::ServerContext* context, const ::milvus::grpc::FlushParam* request, ::milvus::grpc::Status* response) {
+  (void) context;
+  (void) request;
+  (void) response;
+  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+}
+
+::grpc::Status MilvusService::Service::Compact(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   (void) context;
   (void) request;
   (void) response;

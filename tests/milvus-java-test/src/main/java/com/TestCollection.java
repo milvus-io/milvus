@@ -81,23 +81,38 @@ public class TestCollection {
     }
 
     @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
+<<<<<<< HEAD
     public void testShowCollections(MilvusClient client, String collectionName){
         Integer collectionNum = 10;
         ListCollectionsResponse res = null;
         for (int i = 0; i < collectionNum; ++i) {
+=======
+    public void test_show_tables(MilvusClient client, String collectionName){
+        Integer tableNum = 10;
+        ListCollectionsResponse res = null;
+        for (int i = 0; i < tableNum; ++i) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             String collectionNameNew = collectionName+"_"+Integer.toString(i);
             CollectionMapping collectionSchema = new CollectionMapping.Builder(collectionNameNew)
                     .withFields(Utils.genDefaultFields(dimension,false))
                     .withParamsInJson(String.format("{\"segment_row_count\": %s}",segmentRowCount))
                     .build();
+<<<<<<< HEAD
             client.createCollection(collectionSchema);
+=======
+            client.createCollection(tableSchema);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             List<String> collectionNames = client.listCollections().getCollectionNames();
             Assert.assertTrue(collectionNames.contains(collectionNameNew));
         }
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+<<<<<<< HEAD
     public void testShowCollectionsWithoutConnect(MilvusClient client, String collectionName){
+=======
+    public void test_show_tables_without_connect(MilvusClient client, String collectionName){
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         ListCollectionsResponse res = client.listCollections();
         assert(!res.getResponse().ok());
     }
@@ -127,7 +142,11 @@ public class TestCollection {
 
     // TODO
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+<<<<<<< HEAD
     public void testDescribeCollection(MilvusClient client, String collectionName) {
+=======
+    public void test_describe_table(MilvusClient client, String collectionName) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         GetCollectionInfoResponse res = client.getCollectionInfo(collectionName);
         assert(res.getResponse().ok());
         CollectionMapping collectionSchema = res.getCollectionMapping().get();
@@ -148,7 +167,11 @@ public class TestCollection {
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+<<<<<<< HEAD
     public void testDescribeCollectionWithoutConnect(MilvusClient client, String collectionName) {
+=======
+    public void test_describe_table_without_connect(MilvusClient client, String collectionName) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         GetCollectionInfoResponse res = client.getCollectionInfo(collectionName);
         assert(!res.getResponse().ok());
     }

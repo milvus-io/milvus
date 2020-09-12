@@ -9,7 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+<<<<<<< HEAD:core/src/utils/SignalHandler.cpp
 #include "utils/SignalHandler.h"
+=======
+#include "utils/SignalUtil.h"
+#include "src/server/Server.h"
+#include "src/server/init/InstanceLockCheck.h"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:core/src/utils/SignalUtil.cpp
 #include "utils/Log.h"
 
 #include <execinfo.h>
@@ -20,8 +26,14 @@ namespace milvus {
 signal_func_ptr signal_routine_func = nullptr;
 
 void
+<<<<<<< HEAD:core/src/utils/SignalHandler.cpp
 HandleSignal(int signum) {
     int32_t exit_code = 1; /* 0: normal exit; 1: exception */
+=======
+SignalUtil::HandleSignal(int signum) {
+    InstanceLockCheck::Release();
+    LOG_SERVER_INFO_ << "Release lock!" << signum;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:core/src/utils/SignalUtil.cpp
     switch (signum) {
         case SIGINT:
         case SIGUSR2:

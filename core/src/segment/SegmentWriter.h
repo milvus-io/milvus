@@ -40,7 +40,15 @@ class SegmentWriter {
     AddChunk(const engine::DataChunkPtr& chunk_ptr);
 
     Status
+<<<<<<< HEAD
     AddChunk(const engine::DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
+=======
+    AddVectors(const std::string& name, const uint8_t* data, uint64_t size, const std::vector<doc_id_t>& uids);
+
+    Status
+    AddAttrs(const std::string& name, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+             const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, const std::vector<doc_id_t>& uids);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     Status
     CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr);

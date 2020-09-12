@@ -31,7 +31,10 @@ namespace server {
 namespace grpc {
 
 const char* EXTRA_PARAM_KEY = "params";
+<<<<<<< HEAD
 const size_t MAXIMUM_FIELD_NUM = 64;
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 ::milvus::grpc::ErrorCode
 ErrorMap(ErrorCode code) {
@@ -889,7 +892,17 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
 
     CopyDataChunkToEntity(data_chunk, field_mappings, valid_size, response);
 
+<<<<<<< HEAD
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
+=======
+    LOG_SERVER_DEBUG_C << "row num = " << result.row_num_ << ", id list length = " << result.id_list_.size()
+                       << ", distance list length = " << result.distance_list_.size();
+
+    // step 5: construct and return result
+    ConstructResults(result, response);
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
@@ -1171,7 +1184,52 @@ GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context, const ::milvus::g
 GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
                                       ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
+<<<<<<< HEAD
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
+=======
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+
+    Status status = request_handler_.PreloadCollection(GetContext(context), request->collection_name());
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
+                                   ::milvus::grpc::Status* response) {
+    CHECK_NULLPTR_RETURN(request);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+
+    std::vector<std::string> file_ids;
+    for (size_t i = 0; i < request->segment_id_array_size(); i++) {
+        file_ids.push_back(request->segment_id_array(i));
+    }
+
+    Status status = request_handler_.ReLoadSegments(GetContext(context), request->collection_name(), file_ids);
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+    SET_RESPONSE(response, status, context);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+GrpcRequestHandler::DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+                                  ::milvus::grpc::IndexParam* response) {
+    CHECK_NULLPTR_RETURN(request);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+
+    IndexParam param;
+    Status status = request_handler_.DescribeIndex(GetContext(context), request->collection_name(), param);
+    response->set_collection_name(param.collection_name_);
+    response->set_index_type(param.index_type_);
+    ::milvus::grpc::KeyValuePair* kv = response->add_extra_params();
+    kv->set_key(EXTRA_PARAM_KEY);
+    kv->set_value(param.extra_params_);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     Status status = req_handler_.LoadCollection(GetContext(context), request->collection_name());
 
@@ -1287,6 +1345,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     //    CopyRowRecords(request->entity().vector_data(0).value(), request->entity_id_array(), vectors);
 
     CHECK_NULLPTR_RETURN(request);
+<<<<<<< HEAD
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     engine::IDNumbers vector_ids;
@@ -1296,6 +1355,22 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
             auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "id can not be negative number"};
             SET_RESPONSE(response->mutable_status(), status, context);
             return ::grpc::Status::OK;
+=======
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+
+    std::vector<std::pair<std::string, engine::meta::hybrid::DataType>> field_types;
+    std::vector<std::pair<std::string, uint64_t>> vector_dimensions;
+    std::vector<std::pair<std::string, std::string>> field_params;
+    for (int i = 0; i < request->fields_size(); ++i) {
+        if (request->fields(i).type().has_vector_param()) {
+            auto vector_dimension =
+                std::make_pair(request->fields(i).name(), request->fields(i).type().vector_param().dimension());
+            vector_dimensions.emplace_back(vector_dimension);
+        } else {
+            auto type = std::make_pair(request->fields(i).name(),
+                                       (engine::meta::hybrid::DataType)request->fields(i).type().data_type());
+            field_types.emplace_back(type);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         }
     }
 
@@ -1387,9 +1462,33 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         memcpy(response->mutable_entity_id_array()->mutable_data(), pair->second.data(), pair->second.size());
     }
 
+<<<<<<< HEAD
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
+=======
+::grpc::Status
+GrpcRequestHandler::DescribeHybridCollection(::grpc::ServerContext* context,
+                                             const ::milvus::grpc::CollectionName* request,
+                                             ::milvus::grpc::Mapping* response) {
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
+    std::unordered_map<std::string, engine::meta::hybrid::DataType> field_types;
+    Status status =
+        request_handler_.DescribeHybridCollection(GetContext(context), request->collection_name(), field_types);
+
+    response->mutable_status()->set_error_code((milvus::grpc::ErrorCode)status.code());
+    response->mutable_status()->set_reason(status.message());
+    response->set_collection_name(request->collection_name());
+    auto field_it = field_types.begin();
+    for (; field_it != field_types.end(); field_it++) {
+        auto field = response->add_fields();
+        field->set_name(field_it->first);
+        field->mutable_type()->set_data_type((milvus::grpc::DataType)field_it->second);
+    }
+
+    CHECK_NULLPTR_RETURN(request);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     return ::grpc::Status::OK;
 }
 
@@ -1408,6 +1507,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
 
     Status status;
 
+<<<<<<< HEAD
     if (!query::ValidateBinaryQuery(general_query->bin)) {
         status = Status{SERVER_INVALID_BINARY_QUERY, "Generate wrong binary query tree"};
         SET_RESPONSE(response->mutable_status(), status, context)
@@ -1418,6 +1518,21 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
     partition_list.resize(request->partition_tag_array_size());
     for (uint64_t i = 0; i < request->partition_tag_array_size(); ++i) {
         partition_list[i] = request->partition_tag_array(i);
+=======
+    std::vector<std::string> field_names;
+    auto field_size = request->entities().field_names_size();
+    field_names.resize(field_size - 1);
+    for (int i = 0; i < field_size - 1; ++i) {
+        field_names[i] = request->entities().field_names(i);
+    }
+
+    auto vector_size = request->entities().result_values_size();
+    for (int i = 0; i < vector_size; ++i) {
+        engine::VectorsData vectors;
+        CopyRowRecords(request->entities().result_values(i).vector_value().value(), request->entity_id_array(),
+                       vectors);
+        vector_datas.insert(std::make_pair(request->entities().field_names(field_size - 1), vectors));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     milvus::json json_params;
@@ -1451,6 +1566,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
     return ::grpc::Status::OK;
 }
 
+<<<<<<< HEAD
 #if 0
 Status
 ParseTermQuery(const milvus::json& term_json, std::unordered_map<std::string, engine::DataType> field_type,
@@ -1651,6 +1767,39 @@ GrpcRequestHandler::ProcessBooleanQueryJson(const milvus::json& query_json, quer
                     STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name));
                     if (!field_name.empty()) {
                         query_ptr->index_fields.insert(field_name);
+=======
+void
+DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr& boolean_clause) {
+    if (general_query.has_boolean_query()) {
+        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
+        for (int i = 0; i < general_query.boolean_query().general_query_size(); ++i) {
+            if (general_query.boolean_query().general_query(i).has_boolean_query()) {
+                query::BooleanQueryPtr query = std::make_shared<query::BooleanQuery>();
+                DeSerialization(general_query.boolean_query().general_query(i), query);
+                boolean_clause->AddBooleanQuery(query);
+            } else {
+                auto leaf_query = std::make_shared<query::LeafQuery>();
+                auto query = general_query.boolean_query().general_query(i);
+                if (query.has_term_query()) {
+                    query::TermQueryPtr term_query = std::make_shared<query::TermQuery>();
+                    term_query->field_name = query.term_query().field_name();
+                    term_query->boost = query.term_query().boost();
+                    auto size = query.term_query().values().size();
+                    term_query->field_value.resize(size);
+                    memcpy(term_query->field_value.data(), query.term_query().values().data(), size);
+                    leaf_query->term_query = term_query;
+                    boolean_clause->AddLeafQuery(leaf_query);
+                }
+                if (query.has_range_query()) {
+                    query::RangeQueryPtr range_query = std::make_shared<query::RangeQuery>();
+                    range_query->field_name = query.range_query().field_name();
+                    range_query->boost = query.range_query().boost();
+                    range_query->compare_expr.resize(query.range_query().operand_size());
+                    for (int j = 0; j < query.range_query().operand_size(); ++j) {
+                        range_query->compare_expr[j].compare_operator =
+                            query::CompareOperator(query.range_query().operand(j).operator_());
+                        range_query->compare_expr[j].operand = query.range_query().operand(j).operand();
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
                     }
                 }
             }

@@ -26,6 +26,46 @@ namespace milvus {
 namespace fs = boost::filesystem;
 
 bool
+<<<<<<< HEAD
+=======
+CommonUtil::GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem) {
+    struct sysinfo info;
+    int ret = sysinfo(&info);
+    total_mem = info.totalram;
+    free_mem = info.freeram;
+
+    return ret == 0;  // succeed 0, failed -1
+}
+
+bool
+CommonUtil::GetSysCgroupMemLimit(int64_t& limit_in_bytes) {
+    try {
+        std::ifstream file("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+        file >> limit_in_bytes;
+    } catch (std::exception& ex) {
+        std::string msg =
+            "Failed to read /sys/fs/cgroup/memory/memory.limit_in_bytes, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
+        return 0;
+    }
+}
+
+bool
+CommonUtil::GetSystemAvailableThreads(int64_t& thread_count) {
+    // threadCnt = std::thread::hardware_concurrency();
+    thread_count = sysconf(_SC_NPROCESSORS_CONF);
+    thread_count *= THREAD_MULTIPLY_CPU;
+    fiu_do_on("CommonUtil.GetSystemAvailableThreads.zero_thread", thread_count = 0);
+
+    if (thread_count == 0) {
+        thread_count = 8;
+    }
+
+    return true;
+}
+
+bool
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 CommonUtil::IsDirectoryExist(const std::string& path) {
     DIR* dp = nullptr;
     if ((dp = opendir(path.c_str())) == nullptr) {

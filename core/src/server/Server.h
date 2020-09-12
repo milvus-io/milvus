@@ -57,7 +57,10 @@ class Server {
     int pid_fd_ = -1;
     std::string pid_filename_;
     std::string config_filename_;
+<<<<<<< HEAD
     // ConfigMgrPtr config_mgr_;
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 };  // Server
 
 }  // namespace milvus::server

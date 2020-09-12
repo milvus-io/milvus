@@ -18,7 +18,7 @@
 
 #include "grpc-gen/gen-milvus/milvus.grpc.pb.h"
 
-#define MILVUS_SDK_VERSION "0.9.0";
+#define MILVUS_SDK_VERSION "0.10.0";
 
 namespace milvus {
 
@@ -552,6 +552,7 @@ ClientProxy::GetCollectionStats(const std::string& collection_name, std::string&
 }
 
 Status
+<<<<<<< HEAD
 ClientProxy::CountEntities(const std::string& collection_name, int64_t& row_count) {
     try {
         Status status;
@@ -566,6 +567,9 @@ ClientProxy::CountEntities(const std::string& collection_name, int64_t& row_coun
 
 Status
 ClientProxy::CreatePartition(const PartitionParam& partition_param) {
+=======
+ClientProxy::GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     try {
         ::milvus::grpc::PartitionParam grpc_partition_param;
         grpc_partition_param.set_collection_name(partition_param.collection_name);

@@ -52,6 +52,7 @@ MergeTask::Execute() {
         return status;
     }
 
+<<<<<<< HEAD
     // create segment raw files (placeholder)
     auto names = snapshot_->GetFieldNames();
     for (auto& name : names) {
@@ -68,6 +69,32 @@ MergeTask::Execute() {
             std::string err_msg = "MergeTask create segment failed: " + status.ToString();
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
+=======
+    // step 2: merge files
+    meta::SegmentsSchema updated;
+
+    std::string new_segment_dir;
+    utils::GetParentPath(collection_file.location_, new_segment_dir);
+    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
+
+    // attention: here is a copy, not reference, since files_holder.UnmarkFile will change the array internal
+    std::string info = "Merge task files size info:";
+    for (auto& file : files_) {
+        info += std::to_string(file.file_size_);
+        info += ", ";
+
+        server::CollectMergeFilesMetrics metrics;
+        std::string segment_dir_to_merge;
+        utils::GetParentPath(file.location_, segment_dir_to_merge);
+        segment_writer_ptr->Merge(segment_dir_to_merge, collection_file.file_id_);
+
+        auto file_schema = file;
+        file_schema.file_type_ = meta::SegmentSchema::TO_DELETE;
+        updated.push_back(file_schema);
+        int64_t size = segment_writer_ptr->Size();
+        if (size >= file_schema.index_file_size_) {
+            break;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         }
     }
 
@@ -107,6 +134,7 @@ MergeTask::Execute() {
     for (auto& id : segments_) {
         auto seg = snapshot_->GetResource<snapshot::Segment>(id);
 
+<<<<<<< HEAD
         auto read_visitor = SegmentVisitor::Build(snapshot_, id);
         segment::SegmentReaderPtr segment_reader =
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
@@ -116,6 +144,17 @@ MergeTask::Execute() {
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
+=======
+    // step 4: update collection files state
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
+    // else set file type to RAW, no need to build index
+    if (!utils::IsRawIndexType(collection_file.engine_type_)) {
+        collection_file.file_type_ = (segment_writer_ptr->Size() >= (size_t)(collection_file.index_file_size_))
+                                         ? meta::SegmentSchema::TO_INDEX
+                                         : meta::SegmentSchema::RAW;
+    } else {
+        collection_file.file_type_ = meta::SegmentSchema::RAW;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     status = segment_writer->Serialize();

@@ -62,6 +62,29 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     return ret_ds;
 }
 
+<<<<<<< HEAD
+int64_t
+BinaryIDMAP::Count() {
+=======
+#if 0
+DatasetPtr
+BinaryIDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->ntotal;
+}
+
+int64_t
+BinaryIDMAP::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->d;
+}
+#endif
+
 int64_t
 BinaryIDMAP::Count() {
     if (!index_) {
@@ -137,8 +160,35 @@ BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) 
         new_ids[i] = i;
     }
 
+<<<<<<< HEAD
     index_->add_with_ids(rows, reinterpret_cast<const uint8_t*>(p_data), new_ids.data());
+=======
+    index_->add_with_ids(rows, (uint8_t*)p_data, new_ids.data());
 }
+
+#if 0
+DatasetPtr
+BinaryIDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+
+    //    GETBINARYTENSOR(dataset_ptr)
+    // auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset_ptr->Get<int64_t>(meta::DIM);
+
+    size_t p_x_size = sizeof(uint8_t) * elems;
+    auto p_x = (uint8_t*)malloc(p_x_size);
+
+    index_->get_vector_by_id(1, p_data, p_x, bitset_);
+
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->Set(meta::TENSOR, p_x);
+    return ret_ds;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+}
+#endif
 
 void
 BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,

@@ -88,8 +88,22 @@ public class MainClass {
 
     @DataProvider(name="Collection")
     public Object[][] provideCollection() throws ConnectFailedException, InterruptedException {
+<<<<<<< HEAD
         Object[][] collection = genCollection(false,true);
         return collection;
+=======
+        Object[][] collections = new Object[2][2];
+        MetricType[] metricTypes = { MetricType.L2, MetricType.IP };
+        for (int i = 0; i < metricTypes.length; ++i) {
+            String collectionName = metricTypes[i].toString()+"_"+RandomStringUtils.randomAlphabetic(10);
+            // Generate connection instance
+            MilvusClient client = new MilvusGrpcClient();
+            ConnectParam connectParam = new ConnectParam.Builder()
+                    .withHost(host)
+                    .withPort(port)
+                    .build();
+            client.connect(connectParam);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 //            List<String> tableNames = client.listCollections().getCollectionNames();
 //            for (int j = 0; j < tableNames.size(); ++j
 //                 ) {
@@ -105,6 +119,7 @@ public class MainClass {
 
     @DataProvider(name="BinaryCollection")
     public Object[][] provideBinaryCollection() throws ConnectFailedException, InterruptedException {
+<<<<<<< HEAD
         Object[][] binaryCollection = genCollection(true,true);
         return binaryCollection;
     }
@@ -113,6 +128,37 @@ public class MainClass {
     public Object[][] provideBinaryIdCollection() throws ConnectFailedException, InterruptedException {
         Object[][] binaryIdCollection = genCollection(true,false);
         return binaryIdCollection;
+=======
+        Object[][] collections = new Object[3][2];
+        MetricType[] metricTypes = { MetricType.JACCARD, MetricType.HAMMING, MetricType.TANIMOTO };
+        for (int i = 0; i < metricTypes.length; ++i) {
+            String collectionName = metricTypes[i].toString()+"_"+RandomStringUtils.randomAlphabetic(10);
+            // Generate connection instance
+            MilvusClient client = new MilvusGrpcClient();
+            ConnectParam connectParam = new ConnectParam.Builder()
+                    .withHost(host)
+                    .withPort(port)
+                    .build();
+            client.connect(connectParam);
+//            List<String> tableNames = client.listCollections().getCollectionNames();
+//            for (int j = 0; j < tableNames.size(); ++j
+//            ) {
+//                client.dropCollection(tableNames.get(j));
+//            }
+//            Thread.currentThread().sleep(2000);
+            CollectionMapping cm = new CollectionMapping.Builder(collectionName, dimension)
+                    .withIndexFileSize(index_file_size)
+                    .withMetricType(metricTypes[i])
+                    .build();
+            Response res = client.createCollection(cm);
+            if (!res.ok()) {
+                System.out.println(res.getMessage());
+                throw new SkipException("Collection created failed");
+            }
+            collections[i] = new Object[]{client, collectionName};
+        }
+        return collections;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     @AfterSuite
@@ -163,11 +209,19 @@ public class MainClass {
 //        classes.add(new XmlClass("com.TestCompact"));
 //        classes.add(new XmlClass("com.TestSearchVectors"));
         classes.add(new XmlClass("com.TestCollection"));
+<<<<<<< HEAD
 //        classes.add(new XmlClass("com.TestCollectionCount"));
 //        classes.add(new XmlClass("com.TestFlush"));
 //        classes.add(new XmlClass("com.TestPartition"));
 //        classes.add(new XmlClass("com.TestGetVectorByID"));
 //        classes.add(new XmlClass("com.TestCollectionInfo"));
+=======
+        classes.add(new XmlClass("com.TestCollectionCount"));
+        classes.add(new XmlClass("com.TestFlush"));
+        classes.add(new XmlClass("com.TestPartition"));
+        classes.add(new XmlClass("com.TestGetVectorByID"));
+        classes.add(new XmlClass("com.TestCollectionInfo"));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 //        classes.add(new XmlClass("com.TestSearchByIds"));
 
         test.setXmlClasses(classes) ;

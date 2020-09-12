@@ -10,7 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/merge/MergeManagerImpl.h"
+<<<<<<< HEAD
 #include "db/merge/MergeLayerStrategy.h"
+=======
+#include "db/merge/MergeAdaptiveStrategy.h"
+#include "db/merge/MergeLayeredStrategy.h"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #include "db/merge/MergeSimpleStrategy.h"
 #include "db/merge/MergeTask.h"
 #include "db/snapshot/Snapshots.h"
@@ -23,7 +28,13 @@
 namespace milvus {
 namespace engine {
 
+<<<<<<< HEAD
 MergeManagerImpl::MergeManagerImpl(const DBOptions& options) : options_(options) {
+=======
+MergeManagerImpl::MergeManagerImpl(const meta::MetaPtr& meta_ptr, const DBOptions& options, MergeStrategyType type)
+    : meta_ptr_(meta_ptr), options_(options), strategy_type_(type) {
+    UseStrategy(type);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 Status
@@ -37,12 +48,17 @@ MergeManagerImpl::CreateStrategy(MergeStrategyType type, MergeStrategyPtr& strat
             strategy = std::make_shared<MergeLayerStrategy>();
             break;
         }
+        case MergeStrategyType::ADAPTIVE: {
+            strategy_ = std::make_shared<MergeAdaptiveStrategy>();
+            break;
+        }
         default: {
             std::string msg = "Unsupported merge strategy type: " + std::to_string(static_cast<int32_t>(type));
             LOG_ENGINE_ERROR_ << msg;
             return Status(DB_ERROR, msg);
         }
     }
+    strategy_type_ = type;
 
     return Status::OK();
 }

@@ -194,9 +194,15 @@ class WebRequestHandler {
     StatusDtoT
     CreatePartition(const OString& collection_name, const PartitionRequestDtoT& param);
 
+<<<<<<< HEAD
     StatusDtoT
     ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
                    PartitionListDtoT& partition_list_dto);
+=======
+    StatusDto::ObjectWrapper
+    ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
+                   PartitionListDto::ObjectWrapper& partition_list_dto);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     StatusDtoT
     DropPartition(const OString& collection_name, const OString& body);
@@ -222,7 +228,11 @@ class WebRequestHandler {
     StatusDtoT
     GetEntity(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
+<<<<<<< HEAD
     StatusDtoT
+=======
+    StatusDto::ObjectWrapper
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     GetVector(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
     StatusDtoT

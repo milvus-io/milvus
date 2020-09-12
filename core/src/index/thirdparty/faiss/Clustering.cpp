@@ -259,6 +259,7 @@ int split_clusters (size_t d, size_t k, size_t n,
     return nsplit;
 
 }
+<<<<<<< HEAD
 };
 
 ClusteringType clustering_type = ClusteringType::K_MEANS;
@@ -368,6 +369,13 @@ void Clustering::kmeans_plus_plus_algorithm(std::vector<int>& centroids_index, i
         centroids_index[i] = left;
     }
 }   
+=======
+
+
+
+};
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 void Clustering::train_encoded (idx_t nx, const uint8_t *x_in,
                                 const Index * codec, Index & index,
@@ -489,6 +497,7 @@ void Clustering::train_encoded (idx_t nx, const uint8_t *x_in,
             printf("Outer iteration %d / %d\n", redo, nredo);
         }
 
+<<<<<<< HEAD
         {
             int64_t random_seed = seed + 1 + redo * 15486557L;
             std::vector<int> centroids_index(nx);
@@ -516,6 +525,25 @@ void Clustering::train_encoded (idx_t nx, const uint8_t *x_in,
         }
 
         post_process_centroids();
+=======
+        // initialize (remaining) centroids with random points from the dataset
+        centroids.resize (d * k);
+        std::vector<int> perm (nx);
+
+        rand_perm (perm.data(), nx, seed + 1 + redo * 15486557L);
+
+        if (!codec) {
+            for (int i = n_input_centroids; i < k ; i++) {
+                memcpy (&centroids[i * d], x + perm[i] * line_size, line_size);
+            }
+        } else {
+            for (int i = n_input_centroids; i < k ; i++) {
+                codec->sa_decode (1, x + perm[i] * line_size, &centroids[i * d]);
+            }
+        }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+
+        // prepare the index
 
         // prepare the index
 
@@ -559,10 +587,17 @@ void Clustering::train_encoded (idx_t nx, const uint8_t *x_in,
             for (int j = 0; j < nx; j++) {
                 err += dis[j];
             }
+<<<<<<< HEAD
 
             // update the centroids
             std::vector<float> hassign (k);
 
+=======
+
+            // update the centroids
+            std::vector<float> hassign (k);
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             size_t k_frozen = frozen_centroids ? n_input_centroids : 0;
             compute_centroids (
                   d, k, nx, k_frozen,

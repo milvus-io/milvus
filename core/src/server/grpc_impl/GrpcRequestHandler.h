@@ -288,6 +288,11 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                       ::milvus::grpc::Status* response) override;
 
     // *
+    ::grpc::Status
+    ReloadSegments(::grpc::ServerContext* context, const ::milvus::grpc::ReLoadSegmentsParam* request,
+                   ::milvus::grpc::Status* response) override;
+
+    // *
     // @brief This method is used to flush buffer into storage.
     //
     // @param FlushParam, flush parameters
@@ -313,9 +318,40 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     SearchPB(::grpc::ServerContext* context, const ::milvus::grpc::SearchParamPB* request,
              ::milvus::grpc::QueryResult* response) override;
 
+<<<<<<< HEAD
     void
     RegisterRequestHandler(const ReqHandler& handler) {
         req_handler_ = handler;
+=======
+    ::grpc::Status
+    HybridSearch(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParam* request,
+                 ::milvus::grpc::TopKQueryResult* response) override;
+    //
+    //    ::grpc::Status
+    //    HybridSearchInSegments(::grpc::ServerContext* context,
+    //                           const ::milvus::
+    //                           grpc::HSearchInSegmentsParam* request,
+    //                           ::milvus::grpc::HQueryResult* response) override;
+    //
+    //    ::grpc::Status
+    //    GetEntityByID(::grpc::ServerContext* context,
+    //                  const ::milvus::grpc::HEntityIdentity* request,
+    //                  ::milvus::grpc::HEntity* response) override;
+    //
+    //    ::grpc::Status
+    //    GetEntityIDs(::grpc::ServerContext* context,
+    //                 const ::milvus::grpc::HGetEntityIDsParam* request,
+    //                 ::milvus::grpc::HEntityIDs* response) override;
+    //
+    //    ::grpc::Status
+    //    DeleteEntitiesByID(::grpc::ServerContext* context,
+    //                       const ::milvus::grpc::HDeleteByIDParam* request,
+    //                       ::milvus::grpc::Status* response) override;
+
+    void
+    RegisterRequestHandler(const RequestHandler& handler) {
+        request_handler_ = handler;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     Status

@@ -20,6 +20,7 @@ namespace engine {
 
 class ScriptReplay {
  public:
+<<<<<<< HEAD:core/src/db/transcript/ScriptReplay.h
     ScriptReplay() = default;
 
     Status
@@ -29,6 +30,20 @@ class ScriptReplay {
     Status
     PerformAction(const DBPtr& db, const std::string& str_action);
 };
+=======
+    static Status
+    Check(const std::string& path);
+
+    static void
+    Release();
+
+    static InstanceLockCheck*
+    GetInstance();
+
+ public:
+    std::string lk_path;
+};  // InstanceLockCheck
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:core/src/server/init/InstanceLockCheck.h
 
 }  // namespace engine
 }  // namespace milvus

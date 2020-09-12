@@ -24,6 +24,7 @@
 namespace milvus {
 namespace knowhere {
 
+<<<<<<< HEAD
 static const int64_t MIN_NLIST = 1;
 static const int64_t MAX_NLIST = 1LL << 20;
 static const int64_t MIN_NPROBE = 1;
@@ -35,6 +36,14 @@ static const int64_t DEFAULT_MAX_ROWS = 50000000;
 static const int64_t NGT_MIN_EDGE_SIZE = 1;
 static const int64_t NGT_MAX_EDGE_SIZE = 200;
 static const std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
+=======
+#define DEFAULT_MAX_DIM 32768
+#define DEFAULT_MIN_DIM 1
+#define DEFAULT_MAX_K 16384
+#define DEFAULT_MIN_K 1
+#define DEFAULT_MIN_ROWS 1  // minimum size for build index
+#define DEFAULT_MAX_ROWS 50000000
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 #define CheckIntByRange(key, min, max)                                                                   \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() > max || \
@@ -98,8 +107,13 @@ IVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     // CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
 
     // auto tune params
+<<<<<<< HEAD
     auto nq = oricfg[knowhere::meta::ROWS].get<int64_t>();
     auto nlist = oricfg[knowhere::IndexParams::nlist].get<int64_t>();
+=======
+    int64_t nq = oricfg[knowhere::meta::ROWS].get<int64_t>();
+    int64_t nlist = oricfg[knowhere::IndexParams::nlist].get<int64_t>();
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     oricfg[knowhere::IndexParams::nlist] = MatchNlist(nq, nlist);
 
     // Best Practice
@@ -115,10 +129,19 @@ IVFConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMod
     int64_t max_nprobe = MAX_NPROBE;
 #ifdef MILVUS_GPU_VERSION
     if (mode == IndexMode::MODE_GPU) {
+<<<<<<< HEAD
         max_nprobe = faiss::gpu::getMaxKSelection();
     }
 #endif
     CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, max_nprobe);
+=======
+#ifdef MILVUS_GPU_VERSION
+        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, faiss::gpu::getMaxKSelection());
+#endif
+    } else {
+        CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
+    }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
@@ -133,7 +156,14 @@ IVFSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
+<<<<<<< HEAD
     const int64_t DEFAULT_NBITS = 8;
+=======
+    static int64_t DEFAULT_NBITS = 8;
+    static int64_t MAX_NLIST = 999999;
+    static int64_t MIN_NLIST = 1;
+    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     oricfg[knowhere::IndexParams::nbits] = DEFAULT_NBITS;
 
@@ -148,8 +178,12 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     // auto tune params
     oricfg[knowhere::IndexParams::nlist] =
         MatchNlist(oricfg[knowhere::meta::ROWS].get<int64_t>(), oricfg[knowhere::IndexParams::nlist].get<int64_t>());
+<<<<<<< HEAD
     auto m = oricfg[knowhere::IndexParams::m].get<int64_t>();
     auto dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
+=======
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     // Best Practice
     // static int64_t MIN_POINTS_PER_CENTROID = 40;
     // static int64_t MAX_POINTS_PER_CENTROID = 256;

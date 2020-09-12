@@ -69,6 +69,7 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
         stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
     }
 
+<<<<<<< HEAD
     if (!stat.ok()) {
         Status s;
         if (stat.ToString().find("out of memory") != std::string::npos) {
@@ -77,6 +78,28 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
         } else {
             error_msg = "Failed to load to_index file: " + type_str;
             s = Status(SERVER_UNEXPECTED_ERROR, error_msg);
+=======
+        std::string location = file_->location_;
+        std::shared_ptr<engine::ExecutionEngine> index;
+
+        // step 1: create collection file
+        engine::meta::SegmentSchema table_file;
+        table_file.collection_id_ = file_->collection_id_;
+        table_file.segment_id_ = file_->file_id_;
+        table_file.date_ = file_->date_;
+        table_file.file_type_ = engine::meta::SegmentSchema::NEW_INDEX;
+
+        engine::meta::MetaPtr meta_ptr = build_index_job->meta();
+        Status status = meta_ptr->CreateCollectionFile(table_file);
+
+        fiu_do_on("XBuildIndexTask.Execute.create_table_success", status = Status::OK());
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << "Failed to create collection file: " << status.ToString();
+            build_index_job->BuildIndexDone(to_index_id_);
+            build_index_job->GetStatus() = status;
+            to_index_engine_ = nullptr;
+            return;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         }
 
         LOG_ENGINE_ERROR_ << s.message();

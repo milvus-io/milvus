@@ -77,6 +77,7 @@ SegmentWriter::AddChunk(const engine::DataChunkPtr& chunk_ptr, int64_t from, int
 }
 
 Status
+<<<<<<< HEAD
 SegmentWriter::Serialize() {
     // write fields raw data
     STATUS_CHECK(WriteFields());
@@ -87,6 +88,39 @@ SegmentWriter::Serialize() {
     // write UID's bloom filter
     STATUS_CHECK(WriteBloomFilter());
 
+=======
+SegmentWriter::AddVectors(const std::string& name, const uint8_t* data, uint64_t size,
+                          const std::vector<doc_id_t>& uids) {
+    segment_ptr_->vectors_ptr_->AddData(data, size);
+    segment_ptr_->vectors_ptr_->AddUids(uids);
+    segment_ptr_->vectors_ptr_->SetName(name);
+
+    return Status::OK();
+}
+
+Status
+SegmentWriter::AddAttrs(const std::string& name, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                        const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data,
+                        const std::vector<doc_id_t>& uids) {
+    auto attr_data_it = attr_data.begin();
+    auto attrs = segment_ptr_->attrs_ptr_->attrs;
+    for (; attr_data_it != attr_data.end(); ++attr_data_it) {
+        AttrPtr attr = std::make_shared<Attr>(attr_data_it->second, attr_nbytes.at(attr_data_it->first), uids,
+                                              attr_data_it->first);
+        segment_ptr_->attrs_ptr_->attrs.insert(std::make_pair(attr_data_it->first, attr));
+
+        //        if (attrs.find(attr_data_it->first) != attrs.end()) {
+        //            segment_ptr_->attrs_ptr_->attrs.at(attr_data_it->first)
+        //                ->AddAttr(attr_data_it->second, attr_nbytes.at(attr_data_it->first));
+        //            segment_ptr_->attrs_ptr_->attrs.at(attr_data_it->first)->AddUids(uids);
+        //        } else {
+        //            AttrPtr attr = std::make_shared<Attr>(attr_data_it->second, attr_nbytes.at(attr_data_it->first),
+        //            uids,
+        //                                                  attr_data_it->first);
+        //            segment_ptr_->attrs_ptr_->attrs.insert(std::make_pair(attr_data_it->first, attr));
+        //        }
+    }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     return Status::OK();
 }
 
@@ -451,6 +485,38 @@ SegmentWriter::GetSegmentID(int64_t& id) {
             return Status::OK();
         }
     }
+<<<<<<< HEAD
+=======
+    SegmentPtr segment_to_merge;
+    segment_reader_to_merge.GetSegment(segment_to_merge);
+    // auto& uids = segment_to_merge->vectors_ptr_->GetUids();
+
+    recorder.RecordSection("Loading segment");
+
+    if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
+        auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
+
+        // Erase from raw data
+        segment_to_merge->vectors_ptr_->Erase(offsets_to_delete);
+    }
+
+    recorder.RecordSection("erase");
+
+    AddVectors(name, segment_to_merge->vectors_ptr_->GetData(), segment_to_merge->vectors_ptr_->GetUids());
+
+    auto rows = segment_to_merge->vectors_ptr_->GetCount();
+    recorder.RecordSection("Adding " + std::to_string(rows) + " vectors and uids");
+
+    std::unordered_map<std::string, uint64_t> attr_nbytes;
+    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
+    auto attr_it = segment_to_merge->attrs_ptr_->attrs.begin();
+    for (; attr_it != segment_to_merge->attrs_ptr_->attrs.end(); attr_it++) {
+        attr_nbytes.insert(std::make_pair(attr_it->first, attr_it->second->GetNbytes()));
+        attr_data.insert(std::make_pair(attr_it->first, attr_it->second->GetData()));
+
+        if (segment_to_merge->deleted_docs_ptr_ != nullptr) {
+            auto offsets_to_delete = segment_to_merge->deleted_docs_ptr_->GetDeletedDocs();
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     return Status(DB_ERROR, "SegmentWriter::GetSegmentID: null pointer");
 }

@@ -100,6 +100,7 @@ struct Clustering: ClusteringParameters {
     virtual void train (idx_t n, const float * x, faiss::Index & index,
                         const float *x_weights = nullptr);
 
+<<<<<<< HEAD
     /**
      * @brief Kmeans algorithm
      * 
@@ -118,6 +119,8 @@ struct Clustering: ClusteringParameters {
     void kmeans_plus_plus_algorithm(std::vector<int>& centroids_index, int64_t random_seed,
                                     size_t n_input_centroids, size_t d, size_t k,
                                     idx_t nx, const uint8_t *x_in);
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     /** run with encoded vectors
      *

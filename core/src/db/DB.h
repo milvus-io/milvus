@@ -51,7 +51,15 @@ class DB {
     CreateCollection(const snapshot::CreateCollectionContext& context) = 0;
 
     virtual Status
+<<<<<<< HEAD
     DropCollection(const std::string& collection_name) = 0;
+=======
+    PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+                      bool force = false) = 0;
+
+    virtual Status
+    ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) = 0;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     virtual Status
     HasCollection(const std::string& collection_name, bool& has_or_not) = 0;
@@ -82,8 +90,34 @@ class DB {
     ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) = 0;
 
     virtual Status
+<<<<<<< HEAD
     CreateIndex(const server::ContextPtr& context, const std::string& collection_name, const std::string& field_name,
                 const CollectionIndex& index) = 0;
+=======
+    Flush(const std::string& collection_id) = 0;
+
+    virtual Status
+    Flush() = 0;
+
+    virtual Status
+    Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+            double threshold = 0.0) = 0;
+
+    virtual Status
+    GetVectorsByID(const engine::meta::CollectionSchema& collection, const IDNumbers& id_array,
+                   std::vector<engine::VectorsData>& vectors) = 0;
+
+    virtual Status
+    GetVectorIDs(const std::string& collection_id, const std::string& segment_id, IDNumbers& vector_ids) = 0;
+
+    //    virtual Status
+    //    Merge(const std::set<std::string>& table_ids) = 0;
+
+    virtual Status
+    QueryByIDs(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
+               const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
+               const IDNumbers& id_array, ResultIds& result_ids, ResultDistances& result_distances) = 0;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     virtual Status
     DropIndex(const std::string& collection_name, const std::string& field_name = "") = 0;

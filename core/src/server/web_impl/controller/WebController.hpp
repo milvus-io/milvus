@@ -496,7 +496,11 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_DEFAULT_CORS(ShowPartitions)
 
     ENDPOINT("GET", "/collections/{collection_name}/partitions", ShowPartitions, PATH(String, collection_name),
+<<<<<<< HEAD
              QUERIES(QueryParams, query_params)) {
+=======
+             QUERIES(const QueryParams&, query_params)) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "GET \'/collections/" + collection_name->std_str() +
                         "/partitions\'");
         tr.RecordSection("Received request.");
@@ -509,7 +513,11 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         std::shared_ptr<OutgoingResponse> response;
         auto status_dto = handler.ShowPartitions(collection_name, query_params, partition_list_dto);
+<<<<<<< HEAD
         switch (*(status_dto->code)) {
+=======
+        switch (status_dto->code->getValue()) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_200, partition_list_dto);
                 break;
@@ -600,6 +608,7 @@ class WebController : public oatpp::web::server::api::ApiController {
      *
      * GetSegmentVector
      */
+<<<<<<< HEAD
     ENDPOINT("GET", "/collections/{collection_name}/segments/{segment_name}/{info}", GetSegmentInfo,
              PATH(String, collection_name), PATH(String, segment_name), PATH(String, info),
              QUERIES(QueryParams, query_params)) {
@@ -609,6 +618,13 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto handler = WebRequestHandler();
         String response;
         auto status_dto = handler.GetSegmentInfo(collection_name, segment_name, info, query_params, response);
+=======
+    ENDPOINT("GET", "/collections/{collection_name}/vectors", GetVectors,
+             PATH(String, collection_name), QUERIES(const QueryParams&, query_params)) {
+        auto handler = WebRequestHandler();
+        String response;
+        auto status_dto = handler.GetVector(collection_name, query_params, response);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
         switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:

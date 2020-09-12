@@ -872,10 +872,16 @@ NsgIndex::Search(const float* query, float* data, const unsigned& nq, const unsi
         for (auto node : resset[i]) {
             if (pos >= k) {
                 break;  // already top k
+<<<<<<< HEAD
             }
             if (!bitset || !bitset->test(node.id)) {
                 ids[i * k + pos] = ids_[node.id];
                 dist[i * k + pos] = is_ip ? -node.distance : node.distance;
+=======
+            if (!bitset || !bitset->test((faiss::ConcurrentBitset::id_type_t)resset[i][j].id)) {
+                ids[i * k + pos] = ids_[resset[i][j].id];
+                dist[i * k + pos] = is_ip ? -resset[i][j].distance : resset[i][j].distance;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
                 ++pos;
             }
         }
@@ -900,11 +906,19 @@ NsgIndex::GetSize() {
     ret += ntotal * dimension * sizeof(float);
     ret += ntotal * sizeof(int64_t);
     ret += sizeof(*distance_);
+<<<<<<< HEAD
     for (auto& v : nsg) {
         ret += v.size() * sizeof(node_t);
     }
     for (auto& v : knng) {
         ret += v.size() * sizeof(node_t);
+=======
+    for (auto i = 0; i < nsg.size(); ++i) {
+        ret += nsg[i].size() * sizeof(node_t);
+    }
+    for (auto i = 0; i < knng.size(); ++i) {
+        ret += knng[i].size() * sizeof(node_t);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     return ret;
 }

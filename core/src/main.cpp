@@ -119,6 +119,7 @@ main(int argc, char* argv[]) {
     }
 
     /* Handle Signal */
+<<<<<<< HEAD
     milvus::signal_routine_func = [](int32_t exit_code) {
         milvus::server::Server::GetInstance().Stop();
         exit(exit_code);
@@ -137,6 +138,14 @@ main(int argc, char* argv[]) {
         std::cerr << "Load config(" << config_filename << ") failed: " << cs.message << std::endl;
         goto FAIL;
     }
+=======
+    signal(SIGHUP, milvus::server::SignalUtil::HandleSignal);
+    signal(SIGINT, milvus::server::SignalUtil::HandleSignal);
+    signal(SIGUSR1, milvus::server::SignalUtil::HandleSignal);
+    signal(SIGSEGV, milvus::server::SignalUtil::HandleSignal);
+    signal(SIGUSR2, milvus::server::SignalUtil::HandleSignal);
+    signal(SIGTERM, milvus::server::SignalUtil::HandleSignal);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     server.Init(start_daemonized, pid_filename, config_filename);
 

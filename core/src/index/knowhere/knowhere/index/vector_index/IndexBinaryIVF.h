@@ -62,14 +62,33 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     DatasetPtr
     Query(const DatasetPtr& dataset_ptr, const Config& config) override;
 
+<<<<<<< HEAD
+=======
+#if 0
+    DatasetPtr
+    QueryById(const DatasetPtr& dataset_ptr, const Config& config) override;
+#endif
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     int64_t
     Count() override;
 
     int64_t
     Dim() override;
+<<<<<<< HEAD
 
     void
     UpdateIndexSize() override;
+=======
+
+    void
+    UpdateIndexSize() override;
+
+#if 0
+    DatasetPtr
+    GetVectorById(const DatasetPtr& dataset_ptr, const Config& config);
+#endif
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>

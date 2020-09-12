@@ -22,7 +22,14 @@ namespace web {
 
 void
 WebServer::Start() {
+<<<<<<< HEAD
     if (config.network.http.enable() && nullptr == thread_ptr_) {
+=======
+    auto& config = Config::GetInstance();
+    bool enable = true;
+    config.GetNetworkConfigHTTPEnable(enable);
+    if (enable && nullptr == thread_ptr_) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         thread_ptr_ = std::make_shared<std::thread>(&WebServer::StartService, this);
     }
 }
@@ -42,6 +49,13 @@ WebServer::StartService() {
     SetThreadName("webserv_thread");
     oatpp::base::Environment::init();
 
+<<<<<<< HEAD
+=======
+    Config& config = Config::GetInstance();
+    std::string port;
+    STATUS_CHECK(config.GetNetworkConfigHTTPPort(port));
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     {
         AppComponent components = AppComponent(config.network.http.port());
 

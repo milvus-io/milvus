@@ -36,10 +36,26 @@ class MemManagerImpl : public MemManager {
     explicit MemManagerImpl(const DBOptions& options) : options_(options) {
     }
 
+<<<<<<< HEAD
     ~MemManagerImpl() = default;
 
     Status
     InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id) override;
+=======
+    Status
+    InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const float* vectors, uint64_t lsn) override;
+
+    Status
+    InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                  const uint8_t* vectors, uint64_t lsn) override;
+
+    Status
+    InsertEntities(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
+                   const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
+                   const std::unordered_map<std::string, uint64_t>& attr_size,
+                   const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) override;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     Status
     DeleteEntities(int64_t collection_id, const std::vector<idx_t>& entity_ids, idx_t op_id) override;
@@ -48,10 +64,20 @@ class MemManagerImpl : public MemManager {
     Flush(int64_t collection_id) override;
 
     Status
+<<<<<<< HEAD
     Flush(std::set<int64_t>& collection_ids) override;
 
     Status
     EraseMem(int64_t collection_id) override;
+=======
+    Flush(const std::string& collection_id) override;
+
+    Status
+    Flush(std::set<std::string>& collection_ids) override;
+
+    //    Status
+    //    Serialize(std::set<std::string>& table_ids) override;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     Status
     EraseMem(int64_t collection_id, int64_t partition_id) override;

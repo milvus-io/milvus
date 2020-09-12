@@ -17,9 +17,14 @@
 
 #include <experimental/filesystem>
 
+<<<<<<< HEAD
 #include <fiu/fiu-local.h>
 
 #include "log/Log.h"
+=======
+#include <fiu-local.h>
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #include "storage/disk/DiskOperation.h"
 #include "utils/Exception.h"
 
@@ -31,11 +36,18 @@ DiskOperation::DiskOperation(const std::string& dir_path) : dir_path_(dir_path) 
 
 void
 DiskOperation::CreateDirectory() {
+<<<<<<< HEAD
     bool is_dir = std::experimental::filesystem::is_directory(dir_path_);
     fiu_do_on("DiskOperation.CreateDirectory.is_directory", is_dir = false);
     if (!is_dir) {
         /* create directories recursively */
         auto ret = std::experimental::filesystem::create_directories(dir_path_);
+=======
+    bool is_dir = boost::filesystem::is_directory(dir_path_);
+    fiu_do_on("DiskOperation.CreateDirectory.is_directory", is_dir = false);
+    if (!is_dir) {
+        auto ret = boost::filesystem::create_directory(dir_path_);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         fiu_do_on("DiskOperation.CreateDirectory.create_directory", ret = false);
         if (!ret) {
             THROW_ERROR(SERVER_CANNOT_CREATE_FOLDER, "Failed to create directory: " + dir_path_);

@@ -9,6 +9,7 @@ from utils import *
 
 
 dim = 128
+<<<<<<< HEAD
 segment_row_count = 5000
 collection_id = "partition"
 nprobe = 1
@@ -22,6 +23,13 @@ entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 default_fields = gen_default_fields()
+=======
+index_file_size = 10
+collection_id = "test_partition"
+nprobe = 1
+tag = "1970-01-01"
+TIMEOUT = 120
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 
 class TestCreateBase:
@@ -39,11 +47,16 @@ class TestCreateBase:
         '''
         connect.create_partition(collection, tag)
 
+<<<<<<< HEAD
     @pytest.mark.level(2)
+=======
+    @pytest.mark.level(3)
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     def test_create_partition_limit(self, connect, collection, args):
         '''
         target: test create partitions, check status returned
         method: call function: create_partition for 4097 times
+<<<<<<< HEAD
         expected: exception raised
         '''
         threads_num = 16
@@ -66,6 +79,19 @@ class TestCreateBase:
         tag_tmp = gen_unique_str()
         with pytest.raises(Exception) as e:
             connect.create_partition(collection, tag_tmp)
+=======
+        expected: status not ok
+        '''
+        if args["handler"] == "HTTP":
+            pytest.skip("skip in http mode")
+
+        for i in range(4096):
+            tag_tmp = gen_unique_str()
+            status = connect.create_partition(collection, tag_tmp)
+            assert status.OK()
+        status = connect.create_partition(collection, tag)
+        assert not status.OK()
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     def test_create_partition_repeat(self, connect, collection):
         '''
@@ -111,7 +137,11 @@ class TestCreateBase:
         assert tag_name in tag_list
         assert "_default" in tag_list
 
+<<<<<<< HEAD
     def test_create_partition_insert_default(self, connect, id_collection):
+=======
+    def test_create_partition_insert_default(self, connect, collection):
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         '''
         target: test create partition, and insert vectors, check status returned
         method: call function: create_partition

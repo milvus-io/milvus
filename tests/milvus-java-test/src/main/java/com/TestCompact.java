@@ -23,10 +23,13 @@ public class TestCompact {
         CompactParam compactParam = new CompactParam.Builder(collectionName).build();
         Response res_compact = client.compact(compactParam);
         assert(res_compact.ok());
+<<<<<<< HEAD
         Response statsResponse = client.getCollectionStats(collectionName);
         assert (statsResponse.ok());
         JSONObject jsonObject = JSONObject.parseObject(statsResponse.getMessage());
         Assert.assertEquals(jsonObject.getIntValue("data_size"), 0);
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), 0);
     }
 
@@ -43,10 +46,13 @@ public class TestCompact {
         CompactParam compactParam = new CompactParam.Builder(collectionName).build();
         Response res_compact = client.compact(compactParam);
         assert(res_compact.ok());
+<<<<<<< HEAD
         Response statsResponse = client.getCollectionStats(collectionName);
         assert (statsResponse.ok());
         JSONObject jsonObject = JSONObject.parseObject(statsResponse.getMessage());
         Assert.assertEquals(jsonObject.getIntValue("data_size"), 0);
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), 0);
     }
 

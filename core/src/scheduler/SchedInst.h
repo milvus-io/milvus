@@ -100,9 +100,18 @@ class OptimizerInst {
 #ifdef MILVUS_GPU_VERSION
                 bool enable_gpu = config.gpu.enable();
                 if (enable_gpu) {
+<<<<<<< HEAD
                     std::vector<int64_t> build_gpus = ParseGPUDevices(config.gpu.build_index_devices());
                     std::vector<int64_t> search_gpus = ParseGPUDevices(config.gpu.search_devices());
                     int64_t gpu_search_threshold = config.gpu.gpu_search_threshold();
+=======
+                    std::vector<int64_t> build_gpus;
+                    std::vector<int64_t> search_gpus;
+                    int64_t gpu_search_threshold;
+                    config.GetGpuResourceConfigBuildIndexResources(build_gpus);
+                    config.GetGpuResourceConfigSearchResources(search_gpus);
+                    config.GetGpuResourceConfigGpuSearchThreshold(gpu_search_threshold);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
                     std::string build_msg = "Build index gpu:";
                     for (auto build_id : build_gpus) {
                         build_msg.append(" gpu" + std::to_string(build_id));

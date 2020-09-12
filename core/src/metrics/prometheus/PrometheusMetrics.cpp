@@ -31,9 +31,16 @@ PrometheusMetrics::Init() {
         }
 
         // Following should be read from config file.
+<<<<<<< HEAD
         int64_t server_port = config.network.bind.port();
         int64_t push_port = config.metric.port();
         std::string push_address = config.metric.address();
+=======
+        std::string server_port, push_port, push_address;
+        STATUS_CHECK(config.GetNetworkConfigBindPort(server_port));
+        STATUS_CHECK(config.GetMetricConfigPort(push_port));
+        STATUS_CHECK(config.GetMetricConfigAddress(push_address));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
         const std::string uri = std::string("/metrics");
         // const std::size_t num_threads = 2;
@@ -232,8 +239,13 @@ PrometheusMetrics::CPUTemperature() {
     std::vector<float> CPU_temperatures = server::SystemInfo::GetInstance().CPUTemperature();
 
     float avg_cpu_temp = 0;
+<<<<<<< HEAD
     for (float CPU_temperature : CPU_temperatures) {
         avg_cpu_temp += CPU_temperature;
+=======
+    for (size_t i = 0; i < CPU_temperatures.size(); ++i) {
+        avg_cpu_temp += CPU_temperatures[i];
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     avg_cpu_temp /= CPU_temperatures.size();
 

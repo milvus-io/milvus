@@ -44,7 +44,11 @@ using Graph = std::vector<std::vector<node_t>>;
 class NsgIndex {
  public:
     enum Metric_Type {
+<<<<<<< HEAD
         Metric_Type_L2 = 0,
+=======
+        Metric_Type_L2,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         Metric_Type_IP,
     };
 
@@ -85,6 +89,9 @@ class NsgIndex {
     void
     Search(const float* query, float* data, const unsigned& nq, const unsigned& dim, const unsigned& k, float* dist,
            int64_t* ids, SearchParams& params, faiss::ConcurrentBitsetPtr bitset = nullptr);
+
+    int64_t
+    GetSize();
 
     int64_t
     GetSize();

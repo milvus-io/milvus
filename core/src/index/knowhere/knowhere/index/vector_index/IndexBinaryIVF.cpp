@@ -74,6 +74,45 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
+<<<<<<< HEAD
+int64_t
+BinaryIVF::Count() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+=======
+#if 0
+DatasetPtr
+BinaryIVF::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    return index_->ntotal;
+}
+
+int64_t
+BinaryIVF::Dim() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    return index_->d;
+}
+
+void
+BinaryIVF::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    auto bin_ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
+    auto nb = bin_ivf_index->invlists->compute_ntotal();
+    auto nlist = bin_ivf_index->nlist;
+    auto code_size = bin_ivf_index->code_size;
+
+    // binary ivf codes, ids and quantizer
+    index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
+}
+#endif
+
 int64_t
 BinaryIVF::Count() {
     if (!index_) {
@@ -117,6 +156,38 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     index_ = index;
 }
 
+<<<<<<< HEAD
+=======
+#if 0
+DatasetPtr
+BinaryIVF::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    // GETBINARYTENSOR(dataset_ptr)
+    // auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
+    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
+    auto elems = dataset_ptr->Get<int64_t>(meta::DIM);
+
+    try {
+        size_t p_x_size = sizeof(uint8_t) * elems;
+        auto p_x = (uint8_t*)malloc(p_x_size);
+
+        index_->get_vector_by_id(1, p_data, p_x, bitset_);
+
+        auto ret_ds = std::make_shared<Dataset>();
+        ret_ds->Set(meta::TENSOR, p_x);
+        return ret_ds;
+    } catch (faiss::FaissException& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
+}
+#endif
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 std::shared_ptr<faiss::IVFSearchParameters>
 BinaryIVF::GenParams(const Config& config) {
     auto params = std::make_shared<faiss::IVFSearchParameters>();

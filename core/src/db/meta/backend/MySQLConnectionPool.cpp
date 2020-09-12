@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+<<<<<<< HEAD:core/src/db/meta/backend/MySQLConnectionPool.cpp
 #include "db/meta/backend/MySQLConnectionPool.h"
 
 #include <thread>
@@ -17,6 +18,12 @@
 
 #include "utils/Log.h"
 
+=======
+#include "db/meta/MySQLConnectionPool.h"
+#include <fiu-local.h>
+#include <thread>
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:core/src/db/meta/MySQLConnectionPool.cpp
 namespace milvus::engine::meta {
 
 // Do a simple form of in-use connection limiting: wait to return
@@ -26,10 +33,15 @@ namespace milvus::engine::meta {
 // we keep our own count; ConnectionPool::size() isn't the same!
 mysqlpp::Connection*
 MySQLConnectionPool::grab() {
+<<<<<<< HEAD:core/src/db/meta/backend/MySQLConnectionPool.cpp
     {
         std::unique_lock<std::mutex> lock(mutex_);
         full_.wait(lock, [this] { return conns_in_use_ < max_pool_size_; });
         ++conns_in_use_;
+=======
+    while (conns_in_use_ > max_pool_size_) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda:core/src/db/meta/MySQLConnectionPool.cpp
     }
     full_.notify_one();
     return mysqlpp::ConnectionPool::grab();
