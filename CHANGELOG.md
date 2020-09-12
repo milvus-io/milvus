@@ -41,6 +41,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3514 Search failed with regex tag name
 -   \#3533 Scheduler/Selector needs to judge the index type
 -   \#3621 Fix crash where getting octets information
+-   \#3626 Server crashed during search with index pq on dataset: sift-50m
 -   \#3652 Proto of C++ sdk is different from milvus server
 -   \#3668 Docker exit without any logs
 -   \#3672 0.11.0 docker image is 200M larger due to the un-expected installation of openblas
