@@ -37,6 +37,9 @@ Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss,
       uid_(UID++),
       status_(SS_OPERATION_PENDING, "Operation Pending"),
       type_(type) {
+    if (prev_ss_ && context_.lsn == 0) {
+        context_.lsn = prev_ss_->GetMaxLsn();
+    }
 }
 
 std::string
