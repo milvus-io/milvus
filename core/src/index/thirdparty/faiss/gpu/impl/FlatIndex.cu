@@ -194,6 +194,83 @@ FlatIndex::query(Tensor<float, 2, true>& input,
 #endif
 }
 
+void
+FlatIndex::query(Tensor<float, 2, true>& input,
+                 int k,
+                 faiss::MetricType metric,
+                 float metricArg,
+                 Tensor<float, 2, true>& outDistances,
+                 Tensor<int, 2, true>& outIndices,
+                 float* outDis_h,
+                 int* outInd_h,
+                 int i,
+                 int curTile,
+                 int nprobe,
+                 bool exactDistance,
+                 Tensor<uint8_t, 1, true>& bitset) {
+  auto stream = resources_->getDefaultStreamCurrentDevice();
+  auto& mem = resources_->getMemoryManagerCurrentDevice();
+
+#ifdef FAISS_USE_FLOAT16  
+  if (useFloat16_) {
+    // We need to convert the input to float16 for comparison to ourselves
+    auto inputHalf =
+      convertTensor<float, half, 2>(resources_, stream, input);
+
+    query(inputHalf, bitset, k, metric, metricArg,
+          outDistances, outIndices, exactDistance);
+
+  } else {
+    printf("Running into bfKnn!...Booooohh~\n");
+    bfKnnOnDevice(resources_,
+                  getCurrentDevice(),
+                  stream,
+                  storeTransposed_ ? vectorsTransposed_ : vectors_,
+                  !storeTransposed_, // is vectors row major?
+                  &norms_,
+                  input,
+                  true, // input is row major
+                  k,
+                  metric,
+                  metricArg,
+                  outDistances,
+                  outIndices,
+
+                  outDis_h,
+                  outInd_h,
+                  i,
+                  curTile,
+                  nprobe,
+                  !exactDistance,
+                  bitset);
+  }
+  #else
+    printf("Running into bfKnn!...Booooohh~\n");
+    bfKnnOnDevice(resources_,
+                    getCurrentDevice(),
+                    stream,
+                    storeTransposed_ ? vectorsTransposed_ : vectors_,
+                    !storeTransposed_, // is vectors row major?
+                    &norms_,
+                    input,
+                    true, // input is row major
+                    k,
+                    metric,
+                    metricArg,
+                    outDistances,
+                    outIndices,
+
+                    outDis_h,
+                    outInd_h,
+                    i,
+                    curTile,
+                    nprobe,
+                    !exactDistance,
+                    bitset);
+  #endif
+}
+
+
 #ifdef FAISS_USE_FLOAT16
 void
 FlatIndex::query(Tensor<half, 2, true>& input,
@@ -386,3 +463,4 @@ FlatIndex::reset() {
 }
 
 } }
+
