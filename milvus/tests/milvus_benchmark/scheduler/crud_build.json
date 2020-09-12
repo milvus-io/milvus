@@ -1,0 +1,12 @@
+[
+    {
+        "server": "poseidon",
+        "suite_params": [
+            {
+                "suite": "070_gpu_build.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    }
+]
+

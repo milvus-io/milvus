@@ -1,0 +1,74 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: mishards-ro-servers
+  namespace: mishards
+spec:
+  type: ClusterIP
+  selector:
+    app: mishards
+    tier: ro-servers
+  ports:
+  - protocol: TCP
+    port: 19530
+    targetPort: 19530
+
+---
+
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: mishards-ro-servers
+  namespace: mishards
+spec:
+  serviceName: "mishards-ro-servers"
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: mishards
+        tier: ro-servers
+    spec:
+      terminationGracePeriodSeconds: 11
+      containers:
+      - name: mishards-ro-server
+        image: milvusdb/milvus:0.8.0-gpu-d041520-464400
+        imagePullPolicy: Always
+        ports:
+          - containerPort: 19530
+        resources:
+          limits:
+            memory: "8Gi"
+            cpu: "6.0"
+          requests:
+            memory: "8Gi"
+        volumeMounts:
+        - name: mishards-db-disk
+          mountPath: /var/milvus
+          subPath: dbdata
+        - name: mishards-roserver-configmap
+          mountPath: /var/lib/milvus/conf/server_config.yaml
+          subPath: config.yml
+        - name: mishards-roserver-configmap
+          mountPath: /var/lib/milvus/conf/log_config.conf
+          subPath: log.conf
+        - name: mishards-log-disk
+          mountPath: /var/lib/milvus/logs
+          subPath: rolog
+      # imagePullSecrets:
+      #   - name: regcred
+      # tolerations:
+      #   - key: "worker"
+      #     operator: "Equal"
+      #     value: "performance"
+      #     effect: "NoSchedule"
+      volumes:
+      - name: mishards-roserver-configmap
+        configMap:
+            name: mishards-roserver-configmap
+      - name: mishards-db-disk
+        persistentVolumeClaim:
+            claimName: mishards-db-disk
+      - name: mishards-log-disk
+        persistentVolumeClaim:
+            claimName: mishards-log-disk

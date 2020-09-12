@@ -1,0 +1,10 @@
+random_data
+benchmark_logs/
+db/
+logs/
+*idmap*.txt
+__pycache__/
+venv
+.idea
+
+suites/

@@ -1,0 +1,11 @@
+[
+    {
+        "server": "eros",
+        "suite_params": [
+            {
+                "suite": "080_gpu_search_id.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    }
+]

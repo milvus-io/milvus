@@ -1,0 +1,11 @@
+[
+    {
+        "server": "poseidon",
+        "suite_params": [
+            {
+                "suite": "cpu_accuracy_ann_crud_debug.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]
