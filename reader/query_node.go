@@ -204,17 +204,17 @@ func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOr
 		}
 	}
 
-	return msgPb.Status{ErrorCode: 0}
+	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
 func (node *QueryNode) WriterDelete() msgPb.Status {
 	// TODO: set timeout
 	for {
 		var ids, timestamps, segmentIDs = node.GetKey2Segments()
-		for i := 0; i <= len(ids); i++ {
-			id := ids[i]
-			timestamp := timestamps[i]
-			segmentID := segmentIDs[i]
+		for i := 0; i <= len(*ids); i++ {
+			id := (*ids)[i]
+			timestamp := (*timestamps)[i]
+			segmentID := (*segmentIDs)[i]
 			for _, r := range node.deletePreprocessData.deleteRecords {
 				if r.timestamp == timestamp && r.entityID == id {
 					r.segmentID = segmentID
@@ -223,7 +223,7 @@ func (node *QueryNode) WriterDelete() msgPb.Status {
 			}
 		}
 		if <- node.deletePreprocessData.count == 0 {
-			return msgPb.Status{ErrorCode: 0}
+			return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 		}
 	}
 }
@@ -261,7 +261,7 @@ func (node *QueryNode) PreInsertAndDelete() msgPb.Status {
 		node.deleteData.deleteOffset[segmentID] = offset
 	}
 
-	return msgPb.Status{ErrorCode: 0}
+	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
 func (node *QueryNode) DoInsertAndDelete() msgPb.Status {
@@ -280,7 +280,7 @@ func (node *QueryNode) DoInsertAndDelete() msgPb.Status {
 	}
 
 	wg.Wait()
-	return msgPb.Status{ErrorCode: 0}
+	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
 func (node *QueryNode) DoInsert(segmentID int64, records *[][]byte, wg *sync.WaitGroup) msgPb.Status {
@@ -301,7 +301,7 @@ func (node *QueryNode) DoInsert(segmentID int64, records *[][]byte, wg *sync.Wai
 	}
 
 	wg.Done()
-	return msgPb.Status{ErrorCode: 0}
+	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
 func (node *QueryNode) DoDelete(segmentID int64, deleteIDs *[]int64, deleteTimestamps *[]uint64, wg *sync.WaitGroup) msgPb.Status {
@@ -320,7 +320,7 @@ func (node *QueryNode) DoDelete(segmentID int64, deleteIDs *[]int64, deleteTimes
 	}
 
 	wg.Done()
-	return msgPb.Status{ErrorCode: 0}
+	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
 func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
@@ -383,15 +383,15 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 			return resultsTmp[i].ResultDistance < resultsTmp[j].ResultDistance
 		})
 		resultsTmp = resultsTmp[:TopK]
-		var results SearchResult
+		var results msgPb.QueryResult
 		for _, res := range resultsTmp {
-			results.ResultIds = append(results.ResultIds, res.ResultId)
-			results.ResultDistances = append(results.ResultDistances, res.ResultDistance)
+			results.Entities.Ids = append(results.Entities.Ids, res.ResultId)
+			results.Distances = append(results.Distances, res.ResultDistance)
 		}
 
 		// 3. publish result to pulsar
-		publishSearchResult(&results, clientId)
+		node.PublishSearchResult(&results, clientId)
 	}
 
-	return msgPb.Status{ErrorCode: 0}
+	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }

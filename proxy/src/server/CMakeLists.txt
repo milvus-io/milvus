@@ -13,10 +13,6 @@
 
 set( GRPC_SERVICE_FILES ${MILVUS_ENGINE_SRC}/grpc/message.grpc.pb.cc
                         ${MILVUS_ENGINE_SRC}/grpc/message.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/hello.grpc.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/hello.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/master.grpc.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/master.pb.cc
                         )
 
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server                   SERVER_SERVICE_FILES )

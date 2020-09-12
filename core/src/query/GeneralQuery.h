@@ -121,9 +121,14 @@ namespace query {
 //     std::set<std::string> index_fields;
 //     std::unordered_map<std::string, std::string> metric_types;
 // };
+
 struct Query{
-    // TODO
+    int64_t num_queries; //
+    int topK; // topK of queries
+    std::string field_name; // must be fakevec, whose data_type must be VEC_FLOAT(DIM)
+    std::vector<float> query_raw_data; // must be size of num_queries * DIM
 };
+
 using QueryPtr = std::shared_ptr<Query>;
 
 }  // namespace query

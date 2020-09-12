@@ -1,26 +1,36 @@
 syntax = "proto3";
 
-package master;
+package masterpb;
 
-// The greeting service definition.
-service Greeter {
-  // receive a grpc_server address and set to etcd.
-  rpc ReportAddress (Request) returns (Reply) {}
+option go_package="master";
 
-  // send a grpc_server address to client
-  rpc GetAddress (EmptyRequest) returns (Request) {}
+import "message.proto";
+
+message Collection {
+  uint64 id=1;
+  string name=2;
+  milvus.grpc.Schema schema=3;
+  uint64 create_time=4;
+  repeated uint64 segment_ids=5;
+  repeated string partition_tags=6;
 }
 
-// The request message containing the user's name.
-message Request {
-  string address = 1;
+message Segment {
+  uint64 segment_id=1;
+  uint64 collection_id =2;
+  string partition_tag=3;
+  int32 channel_start=4;
+  int32 channel_end=5;
+  uint64 open_timestamp=6;
+  uint64 close_timestamp=7;
 }
 
-message EmptyRequest {
-
+message SegmentStat {
+  uint64 segment_id=1;
+  uint64 memory_size=2;
+  float memory_rate=3;
 }
 
-// The response message containing the greetings
-message Reply {
-  bool status = 1;
+service Master {
+  rpc CreateCollection(milvus.grpc.Mapping) returns (milvus.grpc.Status){}
 }

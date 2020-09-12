@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/SearchReq.h"
+#include "server/MessageWrapper.h"
 // #include "db/Utils.h"
 #include "server/ValidationUtil.h"
 #include "utils/CommonUtil.h"
@@ -28,25 +29,38 @@
 namespace milvus {
 namespace server {
 
-SearchReq::SearchReq(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
-                      engine::QueryResultPtr& result)
+SearchReq::SearchReq(const ContextPtr& context, const ::milvus::grpc::SearchParam *request,
+                     ::milvus::grpc::QueryResult *result)
     : BaseReq(context, ReqType::kSearch),
-      query_ptr_(query_ptr),
-      json_params_(json_params),
+      request_(request),
       result_(result) {
 }
 
 BaseReqPtr
-SearchReq::Create(const ContextPtr& context, const query::QueryPtr& query_ptr, const milvus::json& json_params,
-                  engine::QueryResultPtr& result) {
-    return std::shared_ptr<BaseReq>(new SearchReq(context, query_ptr, json_params, result));
+SearchReq::Create(const ContextPtr& context, const ::milvus::grpc::SearchParam *request,
+                  ::milvus::grpc::QueryResult *response) {
+
+    return std::shared_ptr<BaseReq>(new SearchReq(context, request, response));
 }
 
 Status
 SearchReq::OnExecute() {
+    auto message_wrapper = milvus::server::MessageWrapper::GetInstance();
+    message_wrapper.Init();
+    auto client = message_wrapper.MessageClient();
 
+    int64_t query_id;
+    milvus::grpc::SearchParam request;
 
-    return Status::OK();
+    auto send_status = client->SendQueryMessage(*request_, timestamp_, query_id);
+
+    if (!send_status.ok()){
+        return send_status;
+    }
+
+    Status status = client->GetQueryResult(query_id, *result_);
+
+    return status;
 }
 
 }  // namespace server

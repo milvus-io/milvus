@@ -25,7 +25,6 @@ add_subdirectory( db ) # target milvus_engine
 add_subdirectory( log )
 add_subdirectory( server )
 add_subdirectory( message_client )
-add_subdirectory( etcd_watcher )
 
 set(link_lib
 	milvus_engine

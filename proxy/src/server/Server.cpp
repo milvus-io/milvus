@@ -24,6 +24,7 @@
 // #include "scheduler/SchedInst.h"
 #include "server/grpc_impl/GrpcServer.h"
 #include "server/init/CpuChecker.h"
+#include "server/init/Directory.h"
 // #include "server/init/GpuChecker.h"
 #include "server/init/StorageChecker.h"
 #include "src/version.h"
@@ -146,7 +147,7 @@ Server::Start() {
         tracing_config_path.empty() ? tracing::TracerUtil::InitGlobal()
                                     : tracing::TracerUtil::InitGlobal(tracing_config_path);
 
-        auto time_zone = config.general.timezone();
+        auto time_zone = config.timezone();
 
         if (time_zone.length() == 3) {
             time_zone = "CUT";
@@ -169,6 +170,8 @@ Server::Start() {
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         STATUS_CHECK(LogMgr::InitLog(config.logs.trace.enable(), config.logs.level(), config.logs.path(),
                                      config.logs.max_log_file_size(), config.logs.log_rotate_num()));
+
+        STATUS_CHECK(Directory::Initialize(config.logs.path()));
 
         // print version information
         LOG_SERVER_INFO_ << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME;

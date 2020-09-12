@@ -81,9 +81,9 @@ func (s *Segment) SegmentPreInsert(numOfRecords int) int64 {
 	long int
 	PreInsert(CSegmentBase c_segment, long int size);
 	*/
-	var offset = C.PreInsert(C.long(int64(numOfRecords)))
+	var offset = C.PreInsert(s.SegmentPtr, C.long(int64(numOfRecords)))
 
-	return offset
+	return int64(offset)
 }
 
 func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
@@ -91,9 +91,9 @@ func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
 	long int
 	PreDelete(CSegmentBase c_segment, long int size);
 	*/
-	var offset = C.PreDelete(C.long(int64(numOfRecords)))
+	var offset = C.PreDelete(s.SegmentPtr, C.long(int64(numOfRecords)))
 
-	return offset
+	return int64(offset)
 }
 
 func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]uint64, records *[][]byte) error {
@@ -116,7 +116,7 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 
 	var cOffset = C.long(offset)
 	var cNumOfRows = C.long(len(*entityIDs))
-	var cEntityIdsPtr = (*C.ulong)(&(*entityIDs)[0])
+	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
 	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
 	var cSizeofPerRow = C.int(len((*records)[0]))
 	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
@@ -148,7 +148,7 @@ func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]
 	*/
 	var cOffset = C.long(offset)
 	var cSize = C.long(len(*entityIDs))
-	var cEntityIdsPtr = (*C.ulong)(&(*entityIDs)[0])
+	var cEntityIdsPtr = (*C.long)(&(*entityIDs)[0])
 	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
 
 	var status = C.Delete(s.SegmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)

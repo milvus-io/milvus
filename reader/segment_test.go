@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestConstructorAndDestructor(t *testing.T) {
-	// 1. Construct node, collection, and segment
+func TestSegment_ConstructorAndDestructor(t *testing.T) {
+	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection("collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
@@ -20,7 +20,7 @@ func TestConstructorAndDestructor(t *testing.T) {
 }
 
 func TestSegment_SegmentInsert(t *testing.T) {
-	// 1. Construct node, collection, and segment
+	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection("collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
@@ -61,7 +61,7 @@ func TestSegment_SegmentInsert(t *testing.T) {
 }
 
 func TestSegment_SegmentDelete(t *testing.T) {
-	// 1. Construct node, collection, and segment
+	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection("collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
@@ -86,7 +86,7 @@ func TestSegment_SegmentDelete(t *testing.T) {
 }
 
 func TestSegment_SegmentSearch(t *testing.T) {
-	// 1. Construct node, collection, and segment
+	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection("collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
@@ -132,7 +132,7 @@ func TestSegment_SegmentSearch(t *testing.T) {
 }
 
 func TestSegment_SegmentPreInsert(t *testing.T) {
-	// 1. Construct node, collection, and segment
+	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection("collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
@@ -149,7 +149,7 @@ func TestSegment_SegmentPreInsert(t *testing.T) {
 }
 
 func TestSegment_SegmentPreDelete(t *testing.T) {
-	// 1. Construct node, collection, and segment
+	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection("collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
@@ -168,7 +168,7 @@ func TestSegment_SegmentPreDelete(t *testing.T) {
 //  Segment util functions test
 ////////////////////////////////////////////////////////////////////////////
 func TestSegment_GetStatus(t *testing.T) {
-	// 1. Construct node, collection, and segment
+	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection("collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
@@ -185,7 +185,7 @@ func TestSegment_GetStatus(t *testing.T) {
 }
 
 func TestSegment_Close(t *testing.T) {
-	// 1. Construct node, collection, and segment
+	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection("collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
@@ -202,7 +202,7 @@ func TestSegment_Close(t *testing.T) {
 }
 
 func TestSegment_GetRowCount(t *testing.T) {
-	// 1. Construct node, collection, and segment
+	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection("collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")
@@ -247,7 +247,7 @@ func TestSegment_GetRowCount(t *testing.T) {
 }
 
 func TestSegment_GetDeletedCount(t *testing.T) {
-	// 1. Construct node, collection, and segment
+	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection("collection0", "fake schema")
 	var partition = collection.NewPartition("partition0")

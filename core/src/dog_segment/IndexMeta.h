@@ -3,7 +3,7 @@
 //#include <shared_mutex>
 //
 //#include "SegmentDefs.h"
-//#include "knowhere/index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 //
 #include <memory>
 class IndexMeta;

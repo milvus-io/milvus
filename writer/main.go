@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/czs007/suvlim/conf"
 	"github.com/czs007/suvlim/storage/pkg"
-	"github.com/czs007/suvlim/storage/pkg/types"
 	"github.com/czs007/suvlim/writer/message_client"
 	"github.com/czs007/suvlim/writer/write_node"
 	"log"
@@ -16,14 +16,13 @@ func main() {
 
 	mc := message_client.MessageClient{}
 	mc.InitClient("pulsar://localhost:6650")
-	//mc.InitClient("pulsar://192.168.2.18:6650")
 	//TODO::close client / consumer/ producer
 	//mc.Close()
 
 	go mc.ReceiveMessage()
 	wg := sync.WaitGroup{}
 	ctx := context.Background()
-	kv, err := storage.NewStore(ctx, types.MinIODriver)
+	kv, err := storage.NewStore(ctx, conf.Config.Storage.Driver)
 	// if err != nil, should retry link
 	if err != nil {
 		log.Fatal(err)

@@ -1,4 +1,4 @@
-// #include "IndexMeta.h"
+#include "IndexMeta.h"
 // #include <mutex>
 // #include <cassert>
 // namespace milvus::dog_segment {
