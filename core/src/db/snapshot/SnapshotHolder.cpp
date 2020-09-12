@@ -140,7 +140,8 @@ SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
             emsg << "SnapshotHolder::Add: Specified collection " << collection_id_;
             return Status(SS_NOT_ACTIVE_ERROR, emsg.str());
         }
-        ss->RegisterOnNoRefCB(std::bind(&Snapshot::UnRefAll, ss));
+        // TODO(cqx): Do not use std::bind which cause ss destruct problem with 1 reference count.
+        // ss->RegisterOnNoRefCB(std::bind(&Snapshot::UnRefAll, std::ref(ss)));
         ss->Ref();
 
         if (min_id_ > id) {
